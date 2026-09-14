@@ -116,6 +116,9 @@ export interface QueueItem {
   rejectChips: string[]
   replyDraft: string | null
   replyStatus: string | null
+  /** The person's Discord profile picture (Discord's CDN only), shown
+   *  beside what they wrote. */
+  replyAvatar: string | null
   /** Email/Discord: who the reply draft goes to (from the proposal's
    *  `reply` block, written at intake by the Secretary). */
   replyTo: string | null
@@ -305,6 +308,21 @@ function snapshotLogo(fields: Record<string, unknown> | null): string | null {
   return null
 }
 
+/** Only a picture on Discord's own CDN is shown as someone's avatar: the
+ *  proposal is written by the Mac-side bots, but the page must never be
+ *  handed an arbitrary image URL. */
+function discordCdnUrl(url: string | null): string | null {
+  if (!url) return null
+  try {
+    const u = new URL(url)
+    return u.protocol === 'https:' && u.hostname === 'cdn.discordapp.com'
+      ? u.href
+      : null
+  } catch {
+    return null
+  }
+}
+
 function rowToItem(
   row: {
     id: string
@@ -323,6 +341,7 @@ function rowToItem(
   let summary: string | null = null
   let appliesTo: string | null = null
   let replyTo: string | null = null
+  let replyAvatar: string | null = null
   if (isRecord(proposal)) {
     changes = toChanges(proposal.changes)
     diff = str(proposal.diff)
@@ -334,6 +353,7 @@ function rowToItem(
       const to = str(proposal.reply.to)
       const who = str(proposal.reply.name)
       replyTo = to ? (who ? `${who} <${to}>` : to) : null
+      replyAvatar = discordCdnUrl(str(proposal.reply.avatar))
     }
     if (isRecord(proposal.fields)) {
       fields = proposal.fields
@@ -375,6 +395,7 @@ function rowToItem(
     replyDraft: str(f[F.replyDraft]),
     replyStatus: str(f[F.replyStatus]),
     replyTo,
+    replyAvatar,
     rejectReason: str(f[F.rejectReason]),
     note: str(f[F.note]),
     edits: isRecord(edits) ? edits : null,

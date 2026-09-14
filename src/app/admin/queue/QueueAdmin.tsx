@@ -69,6 +69,7 @@ const ICON = {
   stars: '/images/icons/stars.svg',
   undo: '/images/icons/reset.svg',
   external: '/images/icons/link-out.svg',
+  copy: '/images/icons/copy.svg',
   table: '/images/icons/table.svg',
   arrow: '/images/icons/arrow-right.svg',
   timer: '/images/icons/timer.svg',
@@ -548,27 +549,10 @@ function wantsDraft(item: QueueItem): boolean {
   )
 }
 
-/** A Discord request that has been accepted and whose reply is still to be
- *  sent: the page posts it through the agent only when Bryce clicks Send. */
-function wantsSend(item: QueueItem): boolean {
-  return (
-    item.source === 'Discord' &&
-    Boolean(item.replyDraft) &&
-    (item.status === 'Accepted' || item.status === 'Applied') &&
-    item.replyStatus !== 'Sent'
-  )
-}
-
 function replyLabel(item: QueueItem): string {
   if (!item.replyDraft) return ''
-  if (item.source === 'Discord') {
-    if (item.replyStatus === 'Sent') return 'Reply sent on Discord'
-    if (item.replyStatus === 'Failed') return 'Send failed'
-    if (item.status === 'Applied' || item.status === 'Accepted') {
-      return 'Reply not sent yet'
-    }
-    return ''
-  }
+  // A Discord reply is copied and sent by hand: nothing to report here.
+  if (item.source === 'Discord') return ''
   if (item.replyStatus === 'Saved') return 'Draft saved in Gmail'
   if (item.replyStatus === 'Sent') return 'Reply sent'
   if (item.replyStatus === 'Failed') return 'Draft failed'
@@ -624,7 +608,7 @@ interface Toast {
 }
 
 /** What the page tells the Mac agent to do after an accept. */
-type AgentAction = 'gmail_draft' | 'discord_send'
+type AgentAction = 'gmail_draft'
 
 interface AgentResult {
   ok: boolean
@@ -675,8 +659,6 @@ async function callAgent(
 
 const WORKER_NOTE = 'the Mac saves the reply draft within five minutes'
 const OFFLINE_SUB = `Mac agent not reachable · ${WORKER_NOTE}`
-const OFFLINE_SEND =
-  'Mac agent not reachable – copy the draft and paste it in Discord yourself'
 
 type Action = 'accept' | 'reject' | 'revise' | 'undo'
 
@@ -1079,60 +1061,6 @@ export default function QueueAdmin({
     [agent]
   )
 
-  // A Discord request's reply goes out only on a click: the agent posts it
-  // through the bridge as Bryce. The worker never sends, so with the agent
-  // offline the draft is there to copy.
-  const sendReply = useCallback(
-    async (item: QueueItem) => {
-      if (!canEdit || !wantsSend(item)) return
-      setDraft(item.id, { busy: true, error: null })
-      const res = agent
-        ? await callAgent(agent, '/act', {
-            id: item.id,
-            action: 'discord_send',
-          })
-        : { ok: false, offline: true, replyStatus: null, detail: '' }
-      if (agent) setAgentOnline(!res.offline)
-      const status = res.replyStatus
-      if (status) {
-        setItems(prev =>
-          prev
-            ? prev.map(i =>
-                i.id === item.id
-                  ? {
-                      ...i,
-                      replyStatus: status,
-                      error: res.ok ? null : res.detail,
-                    }
-                  : i
-              )
-            : prev
-        )
-      }
-      setDraft(item.id, {
-        busy: false,
-        error: res.ok
-          ? null
-          : res.offline
-            ? OFFLINE_SEND
-            : `Send failed: ${res.detail}`,
-      })
-      setToast(prev =>
-        prev && prev.item.id === item.id
-          ? {
-              ...prev,
-              sub: res.ok
-                ? res.detail || 'Sent on Discord'
-                : res.offline
-                  ? OFFLINE_SEND
-                  : `Send failed: ${res.detail}`,
-            }
-          : prev
-      )
-    },
-    [agent, canEdit, setDraft]
-  )
-
   const act = useCallback(
     async (
       item: QueueItem,
@@ -1174,7 +1102,6 @@ export default function QueueAdmin({
         })
         if (action === 'accept' || action === 'reject') {
           const draftPending = action === 'accept' && wantsDraft(updated)
-          const sendPending = action === 'accept' && wantsSend(updated)
           setUndoable(updated)
           setToast({
             item: updated,
@@ -1186,8 +1113,8 @@ export default function QueueAdmin({
               ? agent
                 ? 'Saving the reply draft in Gmail…'
                 : `Reply draft: ${WORKER_NOTE}`
-              : sendPending
-                ? 'Reply ready · Send posts it on Discord as you'
+              : updated.source === 'Discord' && updated.replyDraft
+                ? 'Reply drafted · copy it and send it yourself on Discord'
                 : undefined,
           })
           // Auto-advance to the next open item.
@@ -1209,13 +1136,6 @@ export default function QueueAdmin({
       }
     },
     [ordered.flat, select, setDraft, drafts, agent, saveReply, canEdit]
-  )
-
-  /** The last decision as it is in the list now (the toast and `undoable`
-   *  hold the snapshot from the moment of the decision). */
-  const lastDecided = useMemo(
-    () => (undoable && items?.find(i => i.id === undoable.id)) ?? undoable,
-    [items, undoable]
   )
 
   useEffect(() => {
@@ -1345,16 +1265,6 @@ export default function QueueAdmin({
             void act(undoable, 'undo')
           }
           break
-        case 's':
-          if (
-            lastDecided &&
-            wantsSend(lastDecided) &&
-            !draft(lastDecided.id).busy
-          ) {
-            e.preventDefault()
-            void sendReply(lastDecided)
-          }
-          break
         case '?':
           e.preventDefault()
           setShowHelp(v => !v)
@@ -1370,18 +1280,7 @@ export default function QueueAdmin({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    selected,
-    drafts,
-    move,
-    act,
-    undoable,
-    lastDecided,
-    sendReply,
-    showHelp,
-    setDraft,
-    live,
-  ])
+  }, [selected, drafts, move, act, undoable, showHelp, setDraft, live])
 
   const waiting = ordered.open
   const doneToday = ordered.done.length
@@ -1527,7 +1426,6 @@ export default function QueueAdmin({
                 busyFor={id => draft(id).busy}
                 errorFor={id => draft(id).error}
                 onUndo={canEdit ? item => void act(item, 'undo') : null}
-                onSend={canEdit ? item => void sendReply(item) : null}
               />
             ) : selected ? (
               <Detail
@@ -1540,7 +1438,6 @@ export default function QueueAdmin({
                 setD={patch => setDraft(selected.id, patch)}
                 act={(action, extra) => void act(selected, action, extra)}
                 agentOnline={agent ? agentOnline : null}
-                onSend={canEdit ? () => void sendReply(selected) : null}
                 readOnly={!canEdit}
               />
             ) : (
@@ -1584,17 +1481,22 @@ export default function QueueAdmin({
               {toast.sub && <span>{toast.sub}</span>}
             </span>
           </span>
-          {canEdit && lastDecided && wantsSend(lastDecided) && (
-            <button
-              className={styles.toastUndo}
-              disabled={draft(lastDecided.id).busy}
-              onClick={() => void sendReply(lastDecided)}
-            >
-              <Icon src={ICON.discord} size={12} className={styles.undoIcon} />
-              {draft(lastDecided.id).busy ? 'Sending…' : 'Send reply'}{' '}
-              <kbd>S</kbd>
-            </button>
-          )}
+          {toast.item.source === 'Discord' &&
+            toast.item.replyDraft &&
+            toast.item.status !== 'Rejected' && (
+              <>
+                <CopyReply
+                  text={toast.item.replyDraft}
+                  className={styles.toastUndo}
+                />
+                {toast.item.sourceLink && (
+                  <OpenOnDiscord
+                    href={toast.item.sourceLink}
+                    className={styles.toastUndo}
+                  />
+                )}
+              </>
+            )}
           <button
             className={styles.toastUndo}
             disabled={draft(toast.item.id).busy}
@@ -1634,10 +1536,6 @@ export default function QueueAdmin({
                 <kbd>U</kbd>
               </dt>
               <dd>undo the last decision</dd>
-              <dt>
-                <kbd>S</kbd>
-              </dt>
-              <dd>send the last accepted Discord request its reply</dd>
               <dt>
                 <kbd>Esc</kbd>
               </dt>
@@ -1735,7 +1633,6 @@ function Detail({
   setD,
   act,
   agentOnline,
-  onSend,
   readOnly,
 }: {
   item: QueueItem
@@ -1746,8 +1643,6 @@ function Detail({
   act: (action: Action, extra?: Record<string, unknown>) => void
   /** null: no agent configured; true/false: whether it answered a ping. */
   agentOnline: boolean | null
-  /** Posts an accepted Discord request's reply; null for a view-only session. */
-  onSend: (() => void) | null
   /** A view-only session: no editing, no deciding. */
   readOnly: boolean
 }) {
@@ -1791,8 +1686,90 @@ function Detail({
           )}
         </div>
       ) : (
-        <blockquote className={styles.quote}>{item.sourceExcerpt}</blockquote>
+        <div className={styles.said}>
+          {item.replyAvatar && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              className={styles.avatar}
+              src={item.replyAvatar}
+              alt=""
+              referrerPolicy="no-referrer"
+            />
+          )}
+          <blockquote className={styles.quote}>{item.sourceExcerpt}</blockquote>
+        </div>
       )}
+    </section>
+  ) : null
+
+  // The reply draft sits beside what they wrote (an exchange), or under the
+  // card row when a Change shows its card.
+  const replyBlock = item.replyDraft ? (
+    <section className={styles.block}>
+      <h3 className={styles.h3}>
+        Reply draft{item.replyTo ? ` to ${item.replyTo}` : ''}
+      </h3>
+      {d.editingReply ? (
+        <textarea
+          ref={fitToText}
+          onInput={e => fitToText(e.currentTarget)}
+          className={`${styles.input} ${styles.replyInput}`}
+          rows={Math.min(
+            14,
+            Math.max(4, item.replyDraft.split('\n').length + 1)
+          )}
+          autoFocus
+          defaultValue={d.reply ?? item.replyDraft}
+          onKeyDown={e => {
+            if (e.key === 'Escape') {
+              e.preventDefault()
+              setD({ editingReply: false })
+            }
+          }}
+          onBlur={e => setD({ editingReply: false, reply: e.target.value })}
+        />
+      ) : (
+        <ReplyDraft
+          text={d.reply ?? item.replyDraft}
+          edited={d.reply !== null && d.reply !== item.replyDraft}
+          canEdit={!revising && isOpen(item)}
+          onEdit={() => setD({ editingReply: true })}
+        />
+      )}
+      {item.source === 'Discord' && (
+        <div className={styles.buttons}>
+          <CopyReply text={d.reply ?? item.replyDraft} />
+          {item.sourceLink && <OpenOnDiscord href={item.sourceLink} />}
+        </div>
+      )}
+      <p className={styles.note}>
+        {item.source === 'Discord' ? (
+          'Nothing is sent from here: copy the reply, open the conversation and press send yourself.'
+        ) : item.replyStatus === 'Saved' ? (
+          <>
+            Saved in Gmail as a draft
+            {item.sourceLink && (
+              <>
+                {' · '}
+                <a href={item.sourceLink} target="_blank" rel="noreferrer">
+                  open the thread
+                </a>
+              </>
+            )}
+            . Nothing was sent.
+          </>
+        ) : item.replyStatus === 'Failed' ? (
+          `The draft could not be saved${item.error ? `: ${item.error}` : '.'}`
+        ) : isOpen(item) ? (
+          agentOnline ? (
+            `${acceptLabel(item)} saves this as a Gmail draft at once. Nothing is sent.`
+          ) : (
+            `${acceptLabel(item)} saves this as a Gmail draft (${WORKER_NOTE}). Nothing is sent.`
+          )
+        ) : (
+          replyLabel(item)
+        )}
+      </p>
     </section>
   ) : null
 
@@ -1879,7 +1856,17 @@ function Detail({
           </div>
         )}
 
-        {!hasCard && excerptBlock}
+        {/* A request and its reply side by side, so the two read as one
+            exchange (Bryce, 14 Sept 2026). */}
+        {!hasCard &&
+          (excerptBlock && replyBlock ? (
+            <div className={styles.exchange}>
+              {excerptBlock}
+              {replyBlock}
+            </div>
+          ) : (
+            excerptBlock
+          ))}
 
         {/* Edits typed on the page, in the field's own shape. */}
         {item.type === 'Add' &&
@@ -1992,115 +1979,7 @@ function Detail({
           </section>
         )}
 
-        {item.replyDraft && (
-          <section className={styles.block}>
-            <h3 className={styles.h3}>
-              Reply draft{item.replyTo ? ` to ${item.replyTo}` : ''}
-            </h3>
-            {d.editingReply ? (
-              <textarea
-                ref={fitToText}
-                onInput={e => fitToText(e.currentTarget)}
-                className={`${styles.input} ${styles.replyInput}`}
-                rows={Math.min(
-                  14,
-                  Math.max(4, item.replyDraft.split('\n').length + 1)
-                )}
-                autoFocus
-                defaultValue={d.reply ?? item.replyDraft}
-                onKeyDown={e => {
-                  if (e.key === 'Escape') {
-                    e.preventDefault()
-                    setD({ editingReply: false })
-                  }
-                }}
-                onBlur={e =>
-                  setD({ editingReply: false, reply: e.target.value })
-                }
-              />
-            ) : (
-              <ReplyDraft
-                text={d.reply ?? item.replyDraft}
-                edited={d.reply !== null && d.reply !== item.replyDraft}
-                canEdit={!revising && isOpen(item)}
-                onEdit={() => setD({ editingReply: true })}
-              />
-            )}
-            {wantsSend(item) && onSend && (
-              <div className={styles.buttons}>
-                <button
-                  className={`${styles.button} ${styles.primary}`}
-                  disabled={d.busy}
-                  onClick={onSend}
-                >
-                  <Icon src={ICON.discord} size={12} />
-                  {d.busy ? 'Sending…' : 'Send on Discord'} <kbd>S</kbd>
-                </button>
-              </div>
-            )}
-            <p className={styles.note}>
-              {item.source === 'Discord' ? (
-                item.replyStatus === 'Sent' ? (
-                  <>
-                    Sent on Discord as you
-                    {item.sourceLink && (
-                      <>
-                        {' · '}
-                        <a
-                          href={item.sourceLink}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          open the conversation
-                        </a>
-                      </>
-                    )}
-                    .
-                  </>
-                ) : item.replyStatus === 'Failed' ? (
-                  `The reply could not be sent${item.error ? `: ${item.error}` : '.'}`
-                ) : wantsSend(item) ? (
-                  agentOnline === false ? (
-                    OFFLINE_SEND
-                  ) : (
-                    'Posts this as you, through the bridge, the moment you click.'
-                  )
-                ) : isOpen(item) ? (
-                  `${acceptLabel(item)} keeps this draft; a Send button then posts it on Discord as you, through the bridge. Nothing goes out until you click it.`
-                ) : (
-                  replyLabel(item)
-                )
-              ) : item.replyStatus === 'Saved' ? (
-                <>
-                  Saved in Gmail as a draft
-                  {item.sourceLink && (
-                    <>
-                      {' · '}
-                      <a
-                        href={item.sourceLink}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        open the thread
-                      </a>
-                    </>
-                  )}
-                  . Nothing was sent.
-                </>
-              ) : item.replyStatus === 'Failed' ? (
-                `The draft could not be saved${item.error ? `: ${item.error}` : '.'}`
-              ) : isOpen(item) ? (
-                agentOnline ? (
-                  `${acceptLabel(item)} saves this as a Gmail draft at once. Nothing is sent.`
-                ) : (
-                  `${acceptLabel(item)} saves this as a Gmail draft (${WORKER_NOTE}). Nothing is sent.`
-                )
-              ) : (
-                replyLabel(item)
-              )}
-            </p>
-          </section>
-        )}
+        {(hasCard || !excerptBlock) && replyBlock}
 
         {(item.error || d.error) && (
           <p className={styles.error}>{d.error ?? item.error}</p>
@@ -2735,6 +2614,47 @@ function EditableValue({
 }
 
 /** The reply draft as a block: click anywhere on it to edit. */
+/** Copies the reply so it can be pasted into Discord: replies from the
+ *  Queue are drafts, never sent (Bryce, 14 Sept 2026). */
+function CopyReply({ text, className }: { text: string; className?: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      className={className ?? styles.ghost}
+      onClick={() => {
+        void navigator.clipboard.writeText(text).then(() => {
+          setCopied(true)
+          setTimeout(() => setCopied(false), 2000)
+        })
+      }}
+    >
+      <Icon src={ICON.copy} size={16} />
+      {copied ? 'Copied' : 'Copy reply'}
+    </button>
+  )
+}
+
+/** The conversation the request came from, in Discord. */
+function OpenOnDiscord({
+  href,
+  className,
+}: {
+  href: string
+  className?: string
+}) {
+  return (
+    <a
+      className={className ?? styles.ghost}
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+    >
+      <Icon src={ICON.external} size={16} />
+      Open on Discord
+    </a>
+  )
+}
+
 function ReplyDraft({
   text,
   edited,
@@ -2775,15 +2695,12 @@ function DoneList({
   busyFor,
   errorFor,
   onUndo,
-  onSend,
 }: {
   items: QueueItem[]
   busyFor: (id: string) => boolean
   errorFor: (id: string) => string | null
   /** Null for a view-only session: decisions are shown, not undone. */
   onUndo: ((item: QueueItem) => void) | null
-  /** Posts an accepted Discord request's reply; null when view-only. */
-  onSend: ((item: QueueItem) => void) | null
 }) {
   return (
     <div className={styles.detailInner}>
@@ -2837,16 +2754,16 @@ function DoneList({
               {errorFor(item.id) && (
                 <span className={styles.error}>{errorFor(item.id)}</span>
               )}
-              {onSend && wantsSend(item) && (
-                <button
-                  className={`${styles.button} ${styles.primary}`}
-                  disabled={busyFor(item.id)}
-                  onClick={() => onSend(item)}
-                >
-                  <Icon src={ICON.discord} size={12} />
-                  {busyFor(item.id) ? 'Sending…' : 'Send reply'}
-                </button>
-              )}
+              {item.source === 'Discord' &&
+                item.replyDraft &&
+                item.status !== 'Rejected' && (
+                  <>
+                    <CopyReply text={item.replyDraft} />
+                    {item.sourceLink && (
+                      <OpenOnDiscord href={item.sourceLink} />
+                    )}
+                  </>
+                )}
               {onUndo && (
                 <button
                   className={styles.ghost}

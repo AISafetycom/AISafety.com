@@ -593,6 +593,43 @@
   border-radius: 0 6px 6px 0;
 }
 
+/* Who wrote it: their Discord picture beside the quote. */
+.said {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.said .quote {
+  flex: 1;
+  min-width: 0;
+}
+
+.avatar {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  margin-top: 6px;
+  background: var(--q-panel);
+}
+
+/* A request and its reply side by side, so the two read as one exchange
+   (Bryce, 14 Sept 2026); one column when the detail column is narrow. */
+.exchange {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+
+@container (max-width: 719px) {
+  .exchange {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .fields {
   display: grid;
   gap: 10px;
