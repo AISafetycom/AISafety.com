@@ -6,8 +6,10 @@
        (the rows only, no logo lookup, so the list lands in about a second;
        the page then asks /api/admin/queue/logos for the pictures)
   GET  /api/admin/queue?target=<tbl>/<rec>     → { fields, schema } (live)
-  POST /api/admin/queue  body { id, action, edits?, reason?, note?, replyDraft? } → { item }
-       action: accept | reject | revise | undo
+  POST /api/admin/queue  body { id, action, edits?, reason?, replyDraft? } → { item }
+       action: accept | reject | edit | undo
+       (edit keeps the page's pending edits, and the reply draft as
+       edited, on the row – nothing more)
 
   `agent` is { port, token } for the local agent on the owner's Mac (null
   when QUEUE_AGENT_SECRET is not set): the page calls it after an accept so
@@ -30,8 +32,8 @@ import {
   listQueue,
   QueueError,
   rejectItem,
-  reviseItem,
   sanitiseEdits,
+  saveEdits,
   undoItem,
 } from '@/lib/admin/queue'
 
@@ -90,7 +92,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-const ACTIONS = new Set(['accept', 'reject', 'revise', 'undo'])
+const ACTIONS = new Set(['accept', 'reject', 'edit', 'undo'])
 
 export async function POST(req: NextRequest) {
   const auth = await ensureAuth(true)
@@ -119,8 +121,13 @@ export async function POST(req: NextRequest) {
       )
     } else if (action === 'reject') {
       await rejectItem(item, typeof body.reason === 'string' ? body.reason : '')
-    } else if (action === 'revise') {
-      await reviseItem(item, typeof body.note === 'string' ? body.note : '')
+    } else if (action === 'edit') {
+      await saveEdits(
+        item,
+        sanitiseEdits(body.edits),
+        typeof body.replyDraft === 'string' ? body.replyDraft : undefined
+      )
+      return json({ item: await getQueueItem(id) })
     } else {
       await undoItem(item)
     }

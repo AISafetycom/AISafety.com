@@ -1138,15 +1138,28 @@ export async function rejectItem(
   await patchQueueRow(item.id, fields)
 }
 
-export async function reviseItem(item: QueueItem, note: string): Promise<void> {
+/** The page's pending edits, kept on the row so they are still there after
+ *  a reload (and for the chat, which reads them). They reach the live base
+ *  only through acceptItem. Since 14 Sept 2026 this is also how a change
+ *  asked of Fable in the chat lands: it proposes, the admin applies, the
+ *  edits sit here until Accept. (It replaced the "Note to Claude" round
+ *  trip through the Mac worker.) */
+export async function saveEdits(
+  item: QueueItem,
+  edits: Record<string, unknown>,
+  replyDraft?: string
+): Promise<void> {
   requireOpen(item)
-  const text = note.trim()
-  if (!text) throw new QueueError('Say what should change.')
-  await patchQueueRow(item.id, {
-    [F.status]: 'Revising',
-    [F.note]: text.slice(0, 2000),
-    [F.error]: null,
-  })
+  const fields: Record<string, unknown> = {
+    [F.edits]: Object.keys(edits).length ? JSON.stringify(edits) : null,
+  }
+  // The reply draft as edited on the page (the chat can rewrite it) is
+  // kept on the row too; only for items that carry one, and it stays a
+  // draft – the Mac saves it in Gmail or Bryce pastes it, never sends it.
+  if (replyDraft !== undefined && item.replyDraft !== null) {
+    fields[F.replyDraft] = replyDraft.trim().slice(0, 5000)
+  }
+  await patchQueueRow(item.id, fields)
 }
 
 export async function undoItem(item: QueueItem): Promise<void> {

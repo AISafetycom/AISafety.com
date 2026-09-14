@@ -358,8 +358,8 @@
 /* Fable's reasons sit beside the item (as the review comment does in
    Airtable's sidebar), so nothing has to be scrolled to. */
 .detailTwoCol {
-  max-width: 1160px;
-  grid-template-columns: minmax(0, 760px) minmax(260px, 340px);
+  max-width: 1240px;
+  grid-template-columns: minmax(0, 760px) minmax(300px, 420px);
   column-gap: 40px;
   align-items: start;
 }
@@ -373,6 +373,7 @@
 }
 
 .detailAside {
+  --aside-bg: var(--q-panel);
   position: sticky;
   top: 0;
   display: grid;
@@ -381,23 +382,27 @@
   border: 1px solid var(--q-border);
   border-top: 5px solid var(--q-border-strong);
   border-radius: 8px;
-  background: var(--q-panel);
+  background: var(--aside-bg);
+  /* The chat below the verdict can run long: the panel scrolls on its
+     own, the box to type in stays at its foot. */
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
 }
 
 /* The verdict colours the whole panel: teal go, amber unsure, red no. */
 .detailAside.yes {
+  --aside-bg: var(--q-accent-soft);
   border-top-color: var(--q-accent);
-  background: var(--q-accent-soft);
 }
 
 .detailAside.maybe {
+  --aside-bg: var(--q-warn-soft);
   border-top-color: var(--q-warn);
-  background: var(--q-warn-soft);
 }
 
 .detailAside.no {
+  --aside-bg: var(--q-danger-soft);
   border-top-color: var(--q-danger);
-  background: var(--q-danger-soft);
 }
 
 .verdictHead {
@@ -1536,4 +1541,324 @@ select.input {
   .arrow {
     transform: rotate(90deg);
   }
+}
+
+/* ── Chat with Fable (phase 5, 14 Sept 2026) ─────────────────────────────
+   Under the verdict: the thread, then the box to type in, which sticks to
+   the foot of the panel while the thread scrolls. */
+.chat {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.chatThread {
+  display: grid;
+  gap: 14px;
+  padding-top: 4px;
+  border-top: 1px solid var(--q-border);
+}
+
+.chatMsg {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chatWho {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--q-muted);
+}
+
+.chatYou {
+  padding: 8px 10px;
+  border: 1px solid var(--q-border);
+  border-radius: 10px;
+  background: var(--q-panel);
+  color: var(--q-text);
+  font-size: 13.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chatFable {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--q-text);
+  overflow-wrap: anywhere;
+}
+
+.chatFable p {
+  margin: 0 0 8px;
+}
+
+.chatFable ul {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+
+.chatFable li {
+  margin: 2px 0;
+}
+
+.chatFable code {
+  font-size: 12.5px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--q-panel);
+  border: 1px solid var(--q-border);
+}
+
+.chatHead {
+  font-weight: 600;
+}
+
+.chatPre {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--q-panel);
+  border: 1px solid var(--q-border);
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chatTool {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--q-muted);
+}
+
+.chatTool::before {
+  content: '·';
+  margin-right: 6px;
+}
+
+.chatError {
+  margin: 0;
+  font-size: 13px;
+  color: var(--q-danger);
+}
+
+.chatEdits {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--q-border-strong);
+  border-radius: 8px;
+  background: var(--q-panel);
+}
+
+.chatEditRow {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.chatInputRow {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  gap: 6px;
+  margin: 0 -18px -16px;
+  padding: 10px 18px 14px;
+  background: var(--aside-bg);
+  border-top: 1px solid var(--q-border);
+}
+
+.chatInput {
+  width: 100%;
+  min-height: 36px;
+  max-height: 180px;
+  padding: 8px 10px;
+  border: 1px solid var(--q-border-strong);
+  border-radius: 8px;
+  background: var(--q-panel);
+  color: var(--q-text);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.4;
+  resize: none;
+}
+
+.chatInput:focus {
+  outline: 2px solid var(--q-accent);
+  outline-offset: 1px;
+  border-color: transparent;
+}
+
+.chatInput:disabled {
+  opacity: 0.6;
+}
+
+.chatHint {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11.5px;
+  color: var(--q-muted);
+}
+
+.chatLink {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--q-muted);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.chatLink:hover {
+  color: var(--q-text);
+}
+
+.chatCaret {
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--q-accent);
+  animation: chatBlink 1s steps(2, start) infinite;
+}
+
+@keyframes chatBlink {
+  to {
+    visibility: hidden;
+  }
+}
+
+/* One line that changes while Fable answers: what it is doing now. */
+.chatStatus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: var(--q-muted);
+}
+
+.chatStatus::before {
+  content: '';
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--q-accent);
+  animation: chatPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes chatPulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Reply to a passage: the button by a selection, the quote on the message. */
+.chatReplyBtn {
+  position: fixed;
+  z-index: 20;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--q-border-strong);
+  border-radius: 14px;
+  background: var(--q-panel);
+  color: var(--q-text);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.chatReplyBtn:hover {
+  border-color: var(--q-accent);
+  color: var(--q-accent);
+}
+
+.chatQuoteChip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px 6px 10px;
+  border-left: 3px solid var(--q-accent);
+  border-radius: 6px;
+  background: var(--q-panel);
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--q-text-2);
+}
+
+.chatQuoteText {
+  flex: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chatQuoteX {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: -2px -2px 0 0;
+  border: 0;
+  border-radius: 11px;
+  background: none;
+  color: var(--q-muted);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chatQuoteX:hover {
+  background: var(--q-border);
+  color: var(--q-text);
+}
+
+.chatQuoteBlock {
+  margin: 0 0 6px;
+  padding: 2px 0 2px 10px;
+  border-left: 3px solid var(--q-accent);
+  color: var(--q-text-2);
+  font-size: 12.5px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.chatCardFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.chatCardFoot .chatTool {
+  margin: 0;
+}
+
+.chatCardFoot .chatTool::before {
+  content: '✓';
 }

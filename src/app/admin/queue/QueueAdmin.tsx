@@ -11,6 +11,7 @@ import type {
 } from '@/lib/admin/queue'
 import Icon from '@/components/Icon'
 import SitePreview, { prefetchPreview, seedPreviews } from './SitePreview'
+import Chat from './Chat'
 import styles from './queue.module.css'
 
 // The Queue is a triage tool Bryce sits in for long stretches, so it has its
@@ -415,6 +416,26 @@ function coerceEdits(
   return out
 }
 
+/** The row's saved edits in the shape the page's editors hold: text, a
+ *  list as one comma-separated string. */
+function editsAsText(edits: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(edits)) {
+    if (v === null || v === undefined) out[k] = ''
+    else if (typeof v === 'string') out[k] = v
+    else if (Array.isArray(v)) {
+      out[k] = v
+        .map(x =>
+          x && typeof x === 'object' && 'url' in (x as object)
+            ? String((x as { url: unknown }).url)
+            : String(x)
+        )
+        .join(', ')
+    } else out[k] = String(v)
+  }
+  return out
+}
+
 function isOpen(item: QueueItem): boolean {
   return (
     item.status === 'Pending' ||
@@ -575,12 +596,11 @@ function doneLabel(item: QueueItem): string {
 }
 
 interface Draft {
-  mode: 'idle' | 'reject' | 'note'
+  mode: 'idle' | 'reject'
   edits: Record<string, string>
   editing: string | null
   chip: string | null
   other: string
-  note: string
   /** The reply draft as edited on the page (null = as written at intake). */
   reply: string | null
   editingReply: boolean
@@ -594,7 +614,6 @@ const FRESH: Draft = {
   editing: null,
   chip: null,
   other: '',
-  note: '',
   reply: null,
   editingReply: false,
   busy: false,
@@ -617,6 +636,8 @@ interface AgentResult {
   offline: boolean
   replyStatus: string | null
   detail: string
+  /** /ping: the agent can hold a conversation about an item (chat.py). */
+  chat: boolean
 }
 
 const AGENT_TIMEOUT_MS = 15000
@@ -644,15 +665,23 @@ async function callAgent(
       replyStatus?: string
       detail?: string
       error?: string
+      chat?: boolean
     }
     return {
       ok: Boolean(data.ok),
       offline: false,
       replyStatus: data.replyStatus ?? null,
       detail: data.detail ?? data.error ?? '',
+      chat: Boolean(data.chat),
     }
   } catch {
-    return { ok: false, offline: true, replyStatus: null, detail: '' }
+    return {
+      ok: false,
+      offline: true,
+      replyStatus: null,
+      detail: '',
+      chat: false,
+    }
   } finally {
     clearTimeout(timer)
   }
@@ -661,7 +690,7 @@ async function callAgent(
 const WORKER_NOTE = 'the Mac saves the reply draft within five minutes'
 const OFFLINE_SUB = `Mac agent not reachable · ${WORKER_NOTE}`
 
-type Action = 'accept' | 'reject' | 'revise' | 'undo'
+type Action = 'accept' | 'reject' | 'undo'
 
 export default function QueueAdmin({
   canEdit,
@@ -685,6 +714,10 @@ export default function QueueAdmin({
   // accepted; the Mac worker is the fallback.
   const [agent, setAgent] = useState<AgentInfo | null>(null)
   const [agentOnline, setAgentOnline] = useState<boolean | null>(null)
+  // The agent answered the ping and can chat: the conversation panel shows.
+  const [agentChat, setAgentChat] = useState(false)
+  // Bumped by the F key so the chat box takes focus.
+  const [chatFocus, setChatFocus] = useState(0)
   const wantedRef = useRef<string | null>(null)
   // The focused item's record as it is in Airtable now, plus the table's
   // field list, so empty fields (a missing logo) show as empty. By item id.
@@ -874,7 +907,9 @@ export default function QueueAdmin({
     }
     let cancelled = false
     void callAgent(agent, '/ping').then(res => {
-      if (!cancelled) setAgentOnline(res.ok)
+      if (cancelled) return
+      setAgentOnline(res.ok)
+      setAgentChat(res.ok && res.chat)
     })
     return () => {
       cancelled = true
@@ -1001,9 +1036,47 @@ export default function QueueAdmin({
     []
   )
 
-  const draft = (id: string): Draft => drafts[id] ?? FRESH
+  // A fresh draft starts from the edits saved on the row, so what was
+  // applied (by hand or from the chat) is still there after a reload.
+  const draft = (id: string): Draft => {
+    const d = drafts[id]
+    if (d) return d
+    const item = items?.find(i => i.id === id)
+    if (!item || !item.edits || !isOpen(item)) return FRESH
+    return { ...FRESH, edits: editsAsText(item.edits) }
+  }
+  // Edits and the reply draft as edited are kept on the row a moment after
+  // they change (one save per item, the last one wins), so they are still
+  // there after a reload. The live base is untouched until Accept.
+  const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const draftsRef = useRef(drafts)
+  draftsRef.current = drafts
+  const itemsRef = useRef(items)
+  itemsRef.current = items
   const setDraft = useCallback((id: string, patch: Partial<Draft>) => {
     setDrafts(prev => ({ ...prev, [id]: { ...(prev[id] ?? FRESH), ...patch } }))
+    if (!patch.edits && patch.reply === undefined) return
+    const merged = { ...(draftsRef.current[id] ?? FRESH), ...patch }
+    const row = itemsRef.current?.find(i => i.id === id)
+    const body: Record<string, unknown> = {
+      id,
+      action: 'edit',
+      edits: merged.edits,
+    }
+    if (patch.reply !== undefined && row?.replyDraft !== null) {
+      // Back to "as it came" means the row's own draft is saved again.
+      body.replyDraft = merged.reply ?? row?.replyDraft ?? ''
+    }
+    clearTimeout(saveTimers.current[id])
+    saveTimers.current[id] = setTimeout(() => {
+      void fetch(API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).catch(() => {
+        // best effort: the edits are still on the page and go with Accept
+      })
+    }, 800)
   }, [])
 
   const select = useCallback((id: string) => {
@@ -1234,17 +1307,10 @@ export default function QueueAdmin({
             setDraft(item.id, { mode: 'reject' })
           }
           break
-        case 'n':
-          if (
-            canEdit &&
-            item &&
-            isOpen(item) &&
-            item.status !== 'Revising' &&
-            item.type !== 'Rule' &&
-            d.mode !== 'note'
-          ) {
+        case 'f':
+          if (canEdit && item && agentChat) {
             e.preventDefault()
-            setDraft(item.id, { mode: 'note' })
+            setChatFocus(n => n + 1)
           }
           break
         case '1':
@@ -1273,7 +1339,7 @@ export default function QueueAdmin({
         case 'Escape':
           if (showHelp) setShowHelp(false)
           else if (item && d.mode !== 'idle') {
-            setDraft(item.id, { mode: 'idle', chip: null, other: '', note: '' })
+            setDraft(item.id, { mode: 'idle', chip: null, other: '' })
           }
           break
       }
@@ -1281,7 +1347,17 @@ export default function QueueAdmin({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, drafts, move, act, undoable, showHelp, setDraft, live])
+  }, [
+    selected,
+    drafts,
+    move,
+    act,
+    undoable,
+    showHelp,
+    setDraft,
+    live,
+    agentChat,
+  ])
 
   const waiting = ordered.open
   const doneToday = ordered.done.length
@@ -1439,6 +1515,8 @@ export default function QueueAdmin({
                 setD={patch => setDraft(selected.id, patch)}
                 act={(action, extra) => void act(selected, action, extra)}
                 agentOnline={agent ? agentOnline : null}
+                chatAgent={canEdit && agentChat ? agent : null}
+                chatFocus={chatFocus}
                 readOnly={!canEdit}
               />
             ) : (
@@ -1530,9 +1608,9 @@ export default function QueueAdmin({
                 rejects at once; or type one and press <kbd>Enter</kbd>
               </dd>
               <dt>
-                <kbd>N</kbd>
+                <kbd>F</kbd>
               </dt>
-              <dd>ask Claude to change it</dd>
+              <dd>talk to Fable about the item, or tell it what to change</dd>
               <dt>
                 <kbd>U</kbd>
               </dt>
@@ -1634,6 +1712,8 @@ function Detail({
   setD,
   act,
   agentOnline,
+  chatAgent,
+  chatFocus,
   readOnly,
 }: {
   item: QueueItem
@@ -1644,6 +1724,9 @@ function Detail({
   act: (action: Action, extra?: Record<string, unknown>) => void
   /** null: no agent configured; true/false: whether it answered a ping. */
   agentOnline: boolean | null
+  /** The Mac agent, when it is up and can chat; null hides the panel. */
+  chatAgent: AgentInfo | null
+  chatFocus: number
   /** A view-only session: no editing, no deciding. */
   readOnly: boolean
 }) {
@@ -1700,11 +1783,17 @@ function Detail({
     <section className={styles.block}>
       <h3 className={styles.h3}>
         Reply draft{item.replyTo ? ` to ${item.replyTo}` : ''}
+        {item.source === 'Discord' &&
+          d.reply !== null &&
+          d.reply !== item.replyDraft && (
+            <em className={styles.edited}>edited</em>
+          )}
       </h3>
       {item.source === 'Discord' ? (
-        // A Discord reply is not edited here: one click puts it on the
-        // clipboard, and Bryce pastes it in Discord (14 Sept 2026).
-        <CopyBox text={item.replyDraft} />
+        // A Discord reply is not typed over here: one click puts it on the
+        // clipboard, and Bryce pastes it in Discord (14 Sept 2026). The
+        // chat can rewrite it, though.
+        <CopyBox text={d.reply ?? item.replyDraft} />
       ) : d.editingReply ? (
         <textarea
           ref={fitToText}
@@ -1763,9 +1852,14 @@ function Detail({
     </section>
   ) : null
 
+  // The side panel: the verdict with its reasons, and under it the chat
+  // with Fable (when the Mac agent is up), which is there for every item.
+  const hasVerdict = Boolean(item.verdict) || item.reasons.length > 0
+  const showAside = hasVerdict || chatAgent !== null
+
   return (
     <div
-      className={`${styles.detailInner} ${item.verdict || item.reasons.length > 0 ? styles.detailTwoCol : ''}`}
+      className={`${styles.detailInner} ${showAside ? styles.detailTwoCol : ''}`}
     >
       <div className={styles.detailMain}>
         <div className={styles.detailHead}>
@@ -1976,8 +2070,11 @@ function Detail({
         )}
       </div>
 
-      {(item.verdict || item.reasons.length > 0) && (
-        <aside className={`${styles.detailAside} ${verdictClass(item)}`}>
+      {showAside && (
+        <aside
+          className={`${styles.detailAside} ${hasVerdict ? verdictClass(item) : ''}`}
+          data-chat-scroll
+        >
           {item.verdict && (
             <div className={styles.verdictHead}>
               <span className={styles.verdictKicker}>Fable says</span>
@@ -1993,6 +2090,22 @@ function Detail({
                 <li key={i}>{r}</li>
               ))}
             </ul>
+          )}
+          {chatAgent && (
+            <Chat
+              key={item.id}
+              item={item}
+              agent={chatAgent}
+              edits={d.edits}
+              reply={d.reply ?? item.replyDraft}
+              canEditField={k =>
+                !HOUSEKEEPING.test(k) &&
+                !COMPUTED_TYPES.has(types.get(k)?.type ?? '')
+              }
+              onSetEdits={edits => setD({ edits })}
+              onSetReply={text => setD({ reply: text })}
+              focusTick={chatFocus}
+            />
           )}
         </aside>
       )}
@@ -2056,36 +2169,6 @@ function Detail({
               </button>
             </div>
           </div>
-        ) : d.mode === 'note' ? (
-          <div className={styles.panel}>
-            <textarea
-              ref={fitToText}
-              onInput={e => fitToText(e.currentTarget)}
-              className={styles.input}
-              rows={3}
-              autoFocus
-              value={d.note}
-              placeholder="What should change? e.g. use the org’s full name, shorten the description"
-              onChange={e => setD({ note: e.target.value })}
-            />
-            <div className={styles.buttons}>
-              <button
-                className={styles.button}
-                disabled={d.busy || !d.note.trim()}
-                onClick={() => act('revise', { note: d.note })}
-              >
-                <Icon src={ICON.stars} size={12} />
-                {d.busy ? 'Sending…' : 'Send to Claude'}
-              </button>
-              <button
-                className={styles.ghost}
-                disabled={d.busy}
-                onClick={() => setD({ mode: 'idle', note: '' })}
-              >
-                Cancel <kbd>Esc</kbd>
-              </button>
-            </div>
-          </div>
         ) : (
           <div className={styles.buttons}>
             <button
@@ -2107,16 +2190,6 @@ function Detail({
               <Icon src={ICON.x} size={12} />
               Reject <kbd>R</kbd>
             </button>
-            {item.type !== 'Rule' && (
-              <button
-                className={styles.ghost}
-                disabled={d.busy}
-                onClick={() => setD({ mode: 'note' })}
-              >
-                <Icon src={ICON.stars} size={12} />
-                Ask Claude to change it <kbd>N</kbd>
-              </button>
-            )}
             {editCount > 0 && (
               <span className={styles.note}>
                 {editCount === 1 ? '1 edit goes' : `${editCount} edits go`} with
