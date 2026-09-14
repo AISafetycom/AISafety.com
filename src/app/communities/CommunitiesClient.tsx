@@ -28,7 +28,7 @@ const platformOptions = [
   'WhatsApp',
   'Other',
 ]
-const activityOptions = ['Very active', 'Active', 'Semi-active', 'Inactive']
+const activityOptions = ['Active', 'Semi-active', 'Inactive']
 const focusOptions = ['Main focus is AI safety', 'Partial focus on AI safety']
 
 // No search box on this page, so every community passes the base filter.

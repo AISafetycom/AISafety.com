@@ -35,23 +35,11 @@ const experienceOptions = [
   'Senior (10+ years experience)',
 ]
 
-// The 80k !Role type field mixes two independent things, so we split it into
-// two filters: how much time the role takes (Commitment) and what kind of
-// position it is (Type).
-const commitmentOptions = ['Full-time', 'Part-time']
-
-// "Regular role" is the default: a job with none of the special tokens below.
-// Fellowship / Funding / Course / Volunteering listings never reach the site
-// (the Airtable view excludes them), so the only non-regular kinds left here
-// are internships and the catch-all "Other".
-const typeOptions = ['Regular role', 'Internship', 'Other']
-
-// Tokens that make a role something other than a "Regular role".
-const SPECIAL_ROLE_TOKENS = ['Internship', 'Other']
-
-// Type tokens shown on the card — the special ones only, so a regular role
-// shows no Type row.
-const DISPLAY_TYPE_TOKENS = typeOptions.filter(t => t !== 'Regular role')
+// The 80k !Role type field is a multi-select ("Full-time, Internship"), so a
+// job matches every option among its tokens. Fellowship / Funding / Course /
+// Volunteering / Other listings never reach the site (the Airtable view
+// excludes them), which leaves these three.
+const roleTypeOptions = ['Full-time', 'Part-time', 'Internship']
 
 const roleTokens = (job: Job) =>
   job.roleType
@@ -182,8 +170,7 @@ const allPass = () => true
 export default function JobsClient({ jobs }: JobsClientProps) {
   const [selectedSkills, setSelectedSkills] = useState<string[]>([])
   const [selectedExperience, setSelectedExperience] = useState<string[]>([])
-  const [selectedCommitment, setSelectedCommitment] = useState<string[]>([])
-  const [selectedTypes, setSelectedTypes] = useState<string[]>([])
+  const [selectedRoles, setSelectedRoles] = useState<string[]>([])
   const [selectedWorkLocation, setSelectedWorkLocation] = useState<string[]>([])
   const [selectedCountries, setSelectedCountries] = useState<string[]>([])
   const [selectedDegrees, setSelectedDegrees] = useState<string[]>([])
@@ -235,16 +222,9 @@ export default function JobsClient({ jobs }: JobsClientProps) {
             .map(e => e.trim())
             .includes(value),
       },
-      commitment: {
-        selected: selectedCommitment,
+      role: {
+        selected: selectedRoles,
         matches: (job: Job, value: string) => roleTokens(job).includes(value),
-      },
-      type: {
-        selected: selectedTypes,
-        matches: (job: Job, value: string) =>
-          value === 'Regular role'
-            ? !roleTokens(job).some(t => SPECIAL_ROLE_TOKENS.includes(t))
-            : roleTokens(job).includes(value),
       },
       workLocation: {
         selected: selectedWorkLocation,
@@ -265,8 +245,7 @@ export default function JobsClient({ jobs }: JobsClientProps) {
   }, [
     selectedSkills,
     selectedExperience,
-    selectedCommitment,
-    selectedTypes,
+    selectedRoles,
     selectedWorkLocation,
     selectedCountries,
     selectedDegrees,
@@ -298,22 +277,12 @@ export default function JobsClient({ jobs }: JobsClientProps) {
     [jobs, groups]
   )
 
-  const commitmentCounts = useMemo(
+  const roleCounts = useMemo(
     () =>
       optionCounts(
-        filterItems(jobs, allPass, groups, 'commitment'),
-        commitmentOptions,
-        groups.commitment.matches
-      ),
-    [jobs, groups]
-  )
-
-  const typeCounts = useMemo(
-    () =>
-      optionCounts(
-        filterItems(jobs, allPass, groups, 'type'),
-        typeOptions,
-        groups.type.matches
+        filterItems(jobs, allPass, groups, 'role'),
+        roleTypeOptions,
+        groups.role.matches
       ),
     [jobs, groups]
   )
@@ -373,8 +342,7 @@ export default function JobsClient({ jobs }: JobsClientProps) {
     const state: Record<string, unknown> = {}
     if (selectedSkills.length) state.skills = selectedSkills
     if (selectedExperience.length) state.experience = selectedExperience
-    if (selectedCommitment.length) state.commitment = selectedCommitment
-    if (selectedTypes.length) state.roleType = selectedTypes
+    if (selectedRoles.length) state.roleType = selectedRoles
     if (selectedWorkLocation.length) state.workLocation = selectedWorkLocation
     if (selectedCountries.length) state.countries = selectedCountries
     if (selectedDegrees.length) state.requiredDegree = selectedDegrees
@@ -386,8 +354,7 @@ export default function JobsClient({ jobs }: JobsClientProps) {
   }, [
     selectedSkills,
     selectedExperience,
-    selectedCommitment,
-    selectedTypes,
+    selectedRoles,
     selectedWorkLocation,
     selectedCountries,
     selectedDegrees,
@@ -396,8 +363,8 @@ export default function JobsClient({ jobs }: JobsClientProps) {
   return (
     <>
       {/* Ordered by real filter usage (Skill set > Minimum experience >
-          Role type > Work location > Location > Required degree). The old
-          "Role type" is now split into Commitment + Type, which take its slot. */}
+          Role type > Work location > Location > Required degree). "Role type"
+          is labelled Type on screen and keeps logging as "Role type". */}
       <FilterBar count={filteredJobs.length} noun="job">
         <FilterDropdown
           trackingPage="Jobs"
@@ -421,23 +388,12 @@ export default function JobsClient({ jobs }: JobsClientProps) {
         />
         <FilterDropdown
           trackingPage="Jobs"
-          title="Commitment"
-          icon="/images/icons/timer.svg"
-          options={commitmentOptions}
-          selected={selectedCommitment}
-          counts={commitmentCounts}
-          onToggle={v =>
-            toggleFilter(v, selectedCommitment, setSelectedCommitment)
-          }
-        />
-        <FilterDropdown
-          trackingPage="Jobs"
           title="Type"
-          icon="/images/icons/person-alt.svg"
-          options={typeOptions}
-          selected={selectedTypes}
-          counts={typeCounts}
-          onToggle={v => toggleFilter(v, selectedTypes, setSelectedTypes)}
+          icon="/images/icons/timer.svg"
+          options={roleTypeOptions}
+          selected={selectedRoles}
+          counts={roleCounts}
+          onToggle={v => toggleFilter(v, selectedRoles, setSelectedRoles)}
         />
         <FilterDropdown
           trackingPage="Jobs"
@@ -482,14 +438,15 @@ export default function JobsClient({ jobs }: JobsClientProps) {
                 )
               : null
             const tokens = roleTokens(job)
-            const commitmentValue = tokens
-              .filter(t => commitmentOptions.includes(t))
+            const roleTypeValue = tokens
+              .filter(t => roleTypeOptions.includes(t))
               .join(' · ')
-            // Special types only; empty for a regular role, which then shows
-            // no Type row.
-            const typeValue = tokens
-              .filter(t => DISPLAY_TYPE_TOKENS.includes(t))
-              .join(' · ')
+            // Part-time gets the half timer, like the training page; full-time
+            // and internships (typically full-time) get the full one.
+            const roleTypeIcon =
+              tokens.includes('Part-time') && !tokens.includes('Full-time')
+                ? '/images/icons/timer-half.svg'
+                : '/images/icons/timer.svg'
             return (
               <ListingCard
                 key={job.id}
@@ -547,26 +504,8 @@ export default function JobsClient({ jobs }: JobsClientProps) {
                         },
                       ]
                     : []),
-                  ...(commitmentValue
-                    ? [
-                        {
-                          // Part-time gets the half timer, like the training
-                          // page; anything including full-time gets the full one.
-                          icon:
-                            commitmentValue === 'Part-time'
-                              ? '/images/icons/timer-half.svg'
-                              : '/images/icons/timer.svg',
-                          value: commitmentValue,
-                        },
-                      ]
-                    : []),
-                  ...(typeValue
-                    ? [
-                        {
-                          icon: '/images/icons/person-alt.svg',
-                          value: typeValue,
-                        },
-                      ]
+                  ...(roleTypeValue
+                    ? [{ icon: roleTypeIcon, value: roleTypeValue }]
                     : []),
                   // Compensation last so its presence/absence never shifts the
                   // rows above it.
