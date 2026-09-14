@@ -116,9 +116,11 @@ export interface QueueItem {
   rejectChips: string[]
   replyDraft: string | null
   replyStatus: string | null
-  /** The person's Discord profile picture (Discord's CDN only), shown
-   *  beside what they wrote. */
-  replyAvatar: string | null
+  /** Who wrote a Discord request, laid out like a chat message on the
+   *  page: name, handle, when (ISO), how it reached the owner (DM, reply
+   *  to you, mentions you), where (a channel and server, DMs excepted) and
+   *  their picture (Discord's CDN only). */
+  saidBy: SaidBy | null
   /** Email/Discord: who the reply draft goes to (from the proposal's
    *  `reply` block, written at intake by the Secretary). */
   replyTo: string | null
@@ -308,6 +310,15 @@ function snapshotLogo(fields: Record<string, unknown> | null): string | null {
   return null
 }
 
+export interface SaidBy {
+  name: string
+  handle: string | null
+  when: string | null
+  how: string | null
+  where: string | null
+  avatar: string | null
+}
+
 /** Only a picture on Discord's own CDN is shown as someone's avatar: the
  *  proposal is written by the Mac-side bots, but the page must never be
  *  handed an arbitrary image URL. */
@@ -341,7 +352,7 @@ function rowToItem(
   let summary: string | null = null
   let appliesTo: string | null = null
   let replyTo: string | null = null
-  let replyAvatar: string | null = null
+  let saidBy: SaidBy | null = null
   if (isRecord(proposal)) {
     changes = toChanges(proposal.changes)
     diff = str(proposal.diff)
@@ -353,7 +364,21 @@ function rowToItem(
       const to = str(proposal.reply.to)
       const who = str(proposal.reply.name)
       replyTo = to ? (who ? `${who} <${to}>` : to) : null
-      replyAvatar = discordCdnUrl(str(proposal.reply.avatar))
+      if (proposal.reply.platform === 'discord' && who) {
+        const how = str(proposal.reply.how)
+        saidBy = {
+          name: who,
+          handle: to,
+          when: str(proposal.reply.when),
+          how,
+          // a DM's "where" is just the DM again
+          where:
+            how === 'DM' || how === 'group DM'
+              ? null
+              : str(proposal.reply.where),
+          avatar: discordCdnUrl(str(proposal.reply.avatar)),
+        }
+      }
     }
     if (isRecord(proposal.fields)) {
       fields = proposal.fields
@@ -395,7 +420,7 @@ function rowToItem(
     replyDraft: str(f[F.replyDraft]),
     replyStatus: str(f[F.replyStatus]),
     replyTo,
-    replyAvatar,
+    saidBy,
     rejectReason: str(f[F.rejectReason]),
     note: str(f[F.note]),
     edits: isRecord(edits) ? edits : null,

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
+import type { SaidBy } from '@/lib/admin/queue'
 import type {
   AgentInfo,
   FieldInfo,
@@ -1685,19 +1686,10 @@ function Detail({
             </details>
           )}
         </div>
+      ) : item.saidBy ? (
+        <Said by={item.saidBy} text={item.sourceExcerpt} />
       ) : (
-        <div className={styles.said}>
-          {item.replyAvatar && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              className={styles.avatar}
-              src={item.replyAvatar}
-              alt=""
-              referrerPolicy="no-referrer"
-            />
-          )}
-          <blockquote className={styles.quote}>{item.sourceExcerpt}</blockquote>
-        </div>
+        <blockquote className={styles.quote}>{item.sourceExcerpt}</blockquote>
       )}
     </section>
   ) : null
@@ -1709,7 +1701,11 @@ function Detail({
       <h3 className={styles.h3}>
         Reply draft{item.replyTo ? ` to ${item.replyTo}` : ''}
       </h3>
-      {d.editingReply ? (
+      {item.source === 'Discord' ? (
+        // A Discord reply is not edited here: one click puts it on the
+        // clipboard, and Bryce pastes it in Discord (14 Sept 2026).
+        <CopyBox text={item.replyDraft} />
+      ) : d.editingReply ? (
         <textarea
           ref={fitToText}
           onInput={e => fitToText(e.currentTarget)}
@@ -1736,40 +1732,34 @@ function Detail({
           onEdit={() => setD({ editingReply: true })}
         />
       )}
-      {item.source === 'Discord' && (
-        <div className={styles.buttons}>
-          <CopyReply text={d.reply ?? item.replyDraft} />
-          {item.sourceLink && <OpenOnDiscord href={item.sourceLink} />}
-        </div>
-      )}
-      <p className={styles.note}>
-        {item.source === 'Discord' ? (
-          'Nothing is sent from here: copy the reply, open the conversation and press send yourself.'
-        ) : item.replyStatus === 'Saved' ? (
-          <>
-            Saved in Gmail as a draft
-            {item.sourceLink && (
-              <>
-                {' · '}
-                <a href={item.sourceLink} target="_blank" rel="noreferrer">
-                  open the thread
-                </a>
-              </>
-            )}
-            . Nothing was sent.
-          </>
-        ) : item.replyStatus === 'Failed' ? (
-          `The draft could not be saved${item.error ? `: ${item.error}` : '.'}`
-        ) : isOpen(item) ? (
-          agentOnline ? (
-            `${acceptLabel(item)} saves this as a Gmail draft at once. Nothing is sent.`
+      {item.source !== 'Discord' && (
+        <p className={styles.note}>
+          {item.replyStatus === 'Saved' ? (
+            <>
+              Saved in Gmail as a draft
+              {item.sourceLink && (
+                <>
+                  {' · '}
+                  <a href={item.sourceLink} target="_blank" rel="noreferrer">
+                    open the thread
+                  </a>
+                </>
+              )}
+              . Nothing was sent.
+            </>
+          ) : item.replyStatus === 'Failed' ? (
+            `The draft could not be saved${item.error ? `: ${item.error}` : '.'}`
+          ) : isOpen(item) ? (
+            agentOnline ? (
+              `${acceptLabel(item)} saves this as a Gmail draft at once. Nothing is sent.`
+            ) : (
+              `${acceptLabel(item)} saves this as a Gmail draft (${WORKER_NOTE}). Nothing is sent.`
+            )
           ) : (
-            `${acceptLabel(item)} saves this as a Gmail draft (${WORKER_NOTE}). Nothing is sent.`
-          )
-        ) : (
-          replyLabel(item)
-        )}
-      </p>
+            replyLabel(item)
+          )}
+        </p>
+      )}
     </section>
   ) : null
 
@@ -2614,6 +2604,121 @@ function EditableValue({
 }
 
 /** The reply draft as a block: click anywhere on it to edit. */
+const LINK_RE = /https?:\/\/[^\s<>)\]]+/g
+
+/** Text with its links clickable. */
+function linkify(text: string): React.ReactNode[] {
+  const out: React.ReactNode[] = []
+  let last = 0
+  for (const m of text.matchAll(LINK_RE)) {
+    const i = m.index ?? 0
+    if (i > last) out.push(text.slice(last, i))
+    out.push(
+      <a key={i} href={m[0]} target="_blank" rel="noreferrer">
+        {m[0]}
+      </a>
+    )
+    last = i + m[0].length
+  }
+  if (last < text.length) out.push(text.slice(last))
+  return out
+}
+
+/** "12 September 2026, 04:12" in the viewer's own time. */
+function whenLabel(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const day = d.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  })
+  const time = d.toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+  return `${day}, ${time}`
+}
+
+// Older Discord rows carry the attribution as a first line of the excerpt
+// ("veronica (@veronica0548) on Discord, 12 September 2026, 04:12 (DM):");
+// the page lays the same facts out itself, so that line goes.
+const OLD_HEADER_RE = /^[^\n]* on Discord, [^\n]*:\n/
+
+/** A Discord message as a chat message: picture, name, handle, when, then
+ *  the words, with links clickable. */
+function Said({ by, text }: { by: SaidBy; text: string }) {
+  const body = text.replace(OLD_HEADER_RE, '').trim()
+  const meta = [
+    by.when ? whenLabel(by.when) : null,
+    by.how && by.how !== 'DM' ? by.how : null,
+    by.where,
+  ].filter(Boolean)
+  return (
+    <div className={styles.said}>
+      {by.avatar ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          className={styles.avatar}
+          src={by.avatar}
+          alt=""
+          referrerPolicy="no-referrer"
+        />
+      ) : (
+        <span className={`${styles.avatar} ${styles.avatarEmpty}`} />
+      )}
+      <div className={styles.message}>
+        <div className={styles.messageHead}>
+          <span className={styles.messageName}>{by.name}</span>
+          {by.handle && (
+            <span className={styles.messageHandle}>{by.handle}</span>
+          )}
+          {meta.length > 0 && (
+            <span className={styles.messageWhen}>{meta.join(' · ')}</span>
+          )}
+        </div>
+        <div className={styles.messageBody}>{linkify(body)}</div>
+      </div>
+    </div>
+  )
+}
+
+/** The reply as a box that copies itself on a click: no buttons, no editing
+ *  here (Bryce, 14 Sept 2026) – click, then paste it in Discord. */
+function CopyBox({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = () => {
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+  return (
+    <pre
+      className={`${styles.draft} ${styles.draftEditable} ${styles.draftCopy}`}
+      role="button"
+      tabIndex={0}
+      title="Click to copy"
+      onClick={copy}
+      onKeyDown={e => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          copy()
+        }
+      }}
+    >
+      {text}
+      <span className={styles.draftHint}>
+        {copied ? (
+          <em className={styles.edited}>Copied</em>
+        ) : (
+          <Icon src={ICON.copy} size={16} />
+        )}
+      </span>
+    </pre>
+  )
+}
+
 /** Copies the reply so it can be pasted into Discord: replies from the
  *  Queue are drafts, never sent (Bryce, 14 Sept 2026). */
 function CopyReply({ text, className }: { text: string; className?: string }) {
