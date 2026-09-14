@@ -3,6 +3,8 @@
   grant (canReviewQueue).
 
   GET  /api/admin/queue                        → { items, agent }
+       (the rows only, no logo lookup, so the list lands in about a second;
+       the page then asks /api/admin/queue/logos for the pictures)
   GET  /api/admin/queue?target=<tbl>/<rec>     → { fields, schema } (live)
   POST /api/admin/queue  body { id, action, edits?, reason?, note?, replyDraft? } → { item }
        action: accept | reject | revise | undo

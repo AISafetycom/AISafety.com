@@ -502,6 +502,17 @@
   /* logos are drawn for the site's dark cards */
   background: #1c3334;
   padding: 2px;
+  /* most logos arrive a moment after the list: ease them in */
+  animation: logoIn 0.25s ease-out;
+}
+
+@keyframes logoIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .rowLogoEmpty {

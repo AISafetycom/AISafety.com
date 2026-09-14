@@ -429,6 +429,33 @@ function proposedEdits(item: QueueItem): Record<string, unknown> {
     : {}
 }
 
+/** The list arrives without most logos so it lands at once; this asks for
+ *  the pictures of the rows that came without one (the site's catalog,
+ *  then the records themselves for unpublished targets) and answers with
+ *  a URL by target record. Best effort: no logo is not worth an error. */
+async function loadLogos(items: QueueItem[]): Promise<Record<string, string>> {
+  const seen = new Set<string>()
+  const targets: { table: string; record: string }[] = []
+  for (const i of items) {
+    if (i.logo || !i.targetTable || !i.targetRecord) continue
+    if (seen.has(i.targetRecord)) continue
+    seen.add(i.targetRecord)
+    targets.push({ table: i.targetTable, record: i.targetRecord })
+  }
+  if (!targets.length) return {}
+  try {
+    const res = await fetch(`${API}/logos`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targets }),
+    })
+    const data = (await res.json()) as { logos?: Record<string, string> }
+    return res.ok && data.logos ? data.logos : {}
+  } catch {
+    return {}
+  }
+}
+
 /** Build every open item's card in one request and hold them ready, so
  *  opening an item never waits on Airtable. Best effort. */
 async function preloadCards(items: QueueItem[]): Promise<void> {
@@ -764,6 +791,20 @@ export default function QueueAdmin({
       }
       setItems(data.items)
       setAgent(data.agent ?? null)
+      // The list is on screen now; the pictures and the cards follow in
+      // the background, each filled in as it arrives.
+      void loadLogos(data.items).then(logos => {
+        if (!Object.keys(logos).length) return
+        setItems(prev =>
+          prev
+            ? prev.map(i =>
+                !i.logo && i.targetRecord && logos[i.targetRecord]
+                  ? { ...i, logo: logos[i.targetRecord] }
+                  : i
+              )
+            : prev
+        )
+      })
       void preloadCards(data.items)
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e))
@@ -1045,7 +1086,9 @@ export default function QueueAdmin({
         if (!res.ok || !data.item) {
           throw new Error(data.error ?? `HTTP ${res.status}`)
         }
-        const updated = data.item
+        // The decision comes back without a logo lookup (kept quick); the
+        // picture already on the page stays.
+        const updated = { ...data.item, logo: data.item.logo ?? item.logo }
         setItems(prev =>
           prev ? prev.map(i => (i.id === updated.id ? updated : i)) : prev
         )
