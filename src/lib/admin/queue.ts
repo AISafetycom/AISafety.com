@@ -390,27 +390,47 @@ const LIST_FORMULA =
   "OR({Status}='Pending',{Status}='Revising',{Status}='Accepted',{Status}='Failed'," +
   "AND(OR({Status}='Applied',{Status}='Rejected'),IS_AFTER({Decided at},DATEADD(NOW(),-1,'day'))))"
 
+/** The rows, and nothing else: one paginated read of the Queue table, so
+ *  the page has its list in about a second. A logo here comes only from
+ *  the proposal snapshot; the rest arrive through queueLogos() once the
+ *  list is on screen, because those need the site's catalog (every table,
+ *  seconds when its cache is cold, which every accept makes it) and a read
+ *  per table for unpublished targets. */
 export async function listQueue(): Promise<QueueItem[]> {
   const params = new URLSearchParams()
   params.set('returnFieldsByFieldId', 'true')
   params.set('filterByFormula', LIST_FORMULA)
-  const [rows, logos] = await Promise.all([
-    listAll<RawFields>(QUEUE_TABLE_ID, params),
-    catalogLogos(),
-  ])
-  const items = rows.map(r => rowToItem(r, logos))
-  // Unpublished targets (Comb's Adds) are not in the catalog and their
-  // snapshots carry no attachments: read those logos in a few batched calls.
-  const missing = items.filter(i => !i.logo && i.targetTable && i.targetRecord)
-  if (missing.length) {
-    const more = await targetLogos(
-      missing.map(i => ({ table: i.targetTable!, record: i.targetRecord! }))
-    )
-    for (const i of missing) {
-      i.logo = more.get(i.targetRecord!) ?? null
+  const rows = await listAll<RawFields>(QUEUE_TABLE_ID, params)
+  return rows.map(r => rowToItem(r))
+}
+
+/** Logo URL by target record for the rows that came without one: the
+ *  site's catalog for published listings, then one batched read per table
+ *  for the rest (Comb's unpublished Adds). Records without a picture are
+ *  left out. Never throws: a missing logo is not worth an error. */
+export async function queueLogos(
+  targets: { table: string; record: string }[]
+): Promise<Record<string, string>> {
+  const out: Record<string, string> = {}
+  // record → table, deduplicated
+  const wanted = new Map<string, string>()
+  for (const t of targets) {
+    if (TABLE_ID_RE.test(t.table) && isRecordId(t.record)) {
+      wanted.set(t.record, t.table)
     }
   }
-  return items
+  if (!wanted.size) return out
+  const catalog = await catalogLogos()
+  const rest: { table: string; record: string }[] = []
+  for (const [record, table] of wanted) {
+    const url = catalog.get(record)
+    if (url) out[record] = url
+    else rest.push({ table, record })
+  }
+  if (rest.length) {
+    for (const [record, url] of await targetLogos(rest)) out[record] = url
+  }
+  return out
 }
 
 export async function getQueueItem(id: string): Promise<QueueItem | null> {
@@ -425,13 +445,14 @@ export async function getQueueItem(id: string): Promise<QueueItem | null> {
       502
     )
   }
+  // No logo lookup here (it can cost a catalog build): the page keeps the
+  // picture it already shows when a decision comes back.
   return rowToItem(
     (await res.json()) as {
       id: string
       createdTime: string
       fields: RawFields
-    },
-    await catalogLogos()
+    }
   )
 }
 
