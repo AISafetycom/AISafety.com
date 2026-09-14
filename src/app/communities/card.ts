@@ -1,5 +1,6 @@
 import type { CardProps } from '@/components/ListingCard'
 import type { Community } from '@/lib/data/communities'
+import { activityIcon } from './activity-icon'
 
 // The ListingCard props for one community, exactly as the /communities grid
 // renders it. Plain TS (no JSX) so the page's client component and the admin
@@ -18,7 +19,7 @@ export function communityCardProps(community: Community): CardProps {
       ...(community.activityLevel
         ? [
             {
-              icon: '/images/icons/activity.svg',
+              icon: activityIcon(community.activityLevel),
               value: community.activityLevel,
             },
           ]

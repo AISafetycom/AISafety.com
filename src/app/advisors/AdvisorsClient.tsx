@@ -1,80 +1,54 @@
 'use client'
 
-import { useState, useMemo, useRef, useLayoutEffect, useCallback } from 'react'
-import FilterGroup from '@/components/FilterGroup'
-import FilterSidebar from '@/components/FilterSidebar'
+import { useState, useMemo, useRef, useLayoutEffect } from 'react'
+import FilterBar from '@/components/FilterBar'
+import FilterDropdown from '@/components/FilterDropdown'
+import ListingCard from '@/components/ListingCard'
+import { advisorCardProps } from './card'
 import ContributeButtons from '@/components/ContributeButtons'
-import SearchBar from '@/components/SearchBar'
 import { Advisor } from '@/lib/data/advisors'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
 import { placementsById } from '@/lib/placements'
-import AdvisorCard from './AdvisorCard'
 
 interface AdvisorsClientProps {
   advisors: Advisor[]
 }
 
 const focusOptions = ['Career/contribution', 'Other']
-const statusOptions = ['Active', 'Inactive']
+
+const allPass = () => true
 
 export default function AdvisorsClient({ advisors }: AdvisorsClientProps) {
-  const [searchQuery, setSearchQuery] = useState('')
-  const [selectedFocus, setSelectedFocus] = useState<string[]>([])
-  const [selectedStatus, setSelectedStatus] = useState<string[]>(['Active'])
+  const [focusFilters, setFocusFilters] = useState<string[]>([])
 
   // Each advisor's slot in the full page order, stamped onto a click so the
   // dashboard can tie clicks to page position even after later reordering.
   const placements = useMemo(() => placementsById(advisors), [advisors])
 
-  const searchPass = useCallback(
-    (advisor: Advisor) => {
-      if (!searchQuery) return true
-      const query = searchQuery.toLowerCase()
-      return (
-        advisor.name.toLowerCase().includes(query) ||
-        advisor.description.toLowerCase().includes(query)
-      )
-    },
-    [searchQuery]
-  )
-
   const groups = useMemo(
     () => ({
       focus: {
-        selected: selectedFocus,
+        selected: focusFilters,
         matches: (advisor: Advisor, value: string) => advisor.focus === value,
       },
-      status: {
-        selected: selectedStatus,
-        matches: (advisor: Advisor, value: string) => advisor.status === value,
-      },
     }),
-    [selectedFocus, selectedStatus]
+    [focusFilters]
   )
 
   const filteredAdvisors = useMemo(
-    () => filterItems(advisors, searchPass, groups),
-    [advisors, searchPass, groups]
+    () => filterItems(advisors, allPass, groups),
+    [advisors, groups]
   )
 
-  const focusCounts = useMemo(
-    () =>
-      optionCounts(
-        filterItems(advisors, searchPass, groups, 'focus'),
+  const filterCounts = useMemo(
+    () => ({
+      focus: optionCounts(
+        filterItems(advisors, allPass, groups, 'focus'),
         focusOptions,
         groups.focus.matches
       ),
-    [advisors, searchPass, groups]
-  )
-
-  const statusCounts = useMemo(
-    () =>
-      optionCounts(
-        filterItems(advisors, searchPass, groups, 'status'),
-        statusOptions,
-        groups.status.matches
-      ),
-    [advisors, searchPass, groups]
+    }),
+    [advisors, groups]
   )
 
   const savedScrollY = useRef<number | null>(null)
@@ -85,11 +59,11 @@ export default function AdvisorsClient({ advisors }: AdvisorsClientProps) {
     setter: (v: string[]) => void
   ) => {
     savedScrollY.current = window.scrollY
-    if (current.includes(value)) {
-      setter(current.filter(v => v !== value))
-    } else {
-      setter([...current, value])
-    }
+    setter(
+      current.includes(value)
+        ? current.filter(v => v !== value)
+        : [...current, value]
+    )
   }
 
   useLayoutEffect(() => {
@@ -100,63 +74,52 @@ export default function AdvisorsClient({ advisors }: AdvisorsClientProps) {
   }, [filteredAdvisors])
 
   return (
-    <div className="flex gap-56px">
-      <div className="width-9-col">
-        <div className="padding-bottom-40px">
-          <SearchBar
-            value={searchQuery}
-            onChange={setSearchQuery}
-            placeholder="Search advisors by name or description"
-          />
-        </div>
+    <>
+      <FilterBar count={filteredAdvisors.length} noun="advisor">
+        <FilterDropdown
+          trackingPage="Advisors"
+          title="Focus"
+          icon="/images/icons/target.svg"
+          options={focusOptions}
+          selected={focusFilters}
+          counts={filterCounts.focus}
+          onToggle={v => toggleFilter(v, focusFilters, setFocusFilters)}
+        />
+      </FilterBar>
 
-        <div className="collection-list padding-bottom-40px">
+      <div className="flex gap-56px">
+        <div className="collection-list padding-bottom-40px width-9-col">
           {filteredAdvisors.map(advisor => (
-            <AdvisorCard
+            <ListingCard
               key={advisor.id}
-              advisor={advisor}
+              {...advisorCardProps(advisor)}
+              trackingPage="Advisors"
+              listingId={advisor.id}
               placement={placements.get(advisor.id)}
+              trackingSource="cards"
             />
           ))}
           {filteredAdvisors.length === 0 && (
             <p className="paragraph-small color-teal-300">Nothing found.</p>
           )}
         </div>
-      </div>
 
-      <div className="hide-mobile width-3-col">
-        <FilterSidebar>
-          <FilterGroup
+        <div className="hide-mobile width-3-col">
+          <ContributeButtons
             trackingPage="Advisors"
-            title="Focus"
-            options={focusOptions}
-            selected={selectedFocus}
-            counts={focusCounts}
-            onToggle={v => toggleFilter(v, selectedFocus, setSelectedFocus)}
+            suggestEntryUrl="https://airtable.com/appF8XfZUGXtfi40E/pagTw6PRaIHUHh8ty/form"
+            suggestCorrectionUrl="https://airtable.com/appF8XfZUGXtfi40E/pagndDvdya1DSqoxN/form"
+            noun="advisor"
+            airtableUrl="https://airtable.com/appF8XfZUGXtfi40E/shr3u6yIAwM9Hi2fL"
+            extraLinks={[
+              {
+                label: 'Review an advisor',
+                url: 'https://airtable.com/appF8XfZUGXtfi40E/pagPIJgReOkrd1kEU/form',
+              },
+            ]}
           />
-          <FilterGroup
-            trackingPage="Advisors"
-            title="Status"
-            options={statusOptions}
-            selected={selectedStatus}
-            counts={statusCounts}
-            onToggle={v => toggleFilter(v, selectedStatus, setSelectedStatus)}
-          />
-        </FilterSidebar>
-        <ContributeButtons
-          trackingPage="Advisors"
-          suggestEntryUrl="https://airtable.com/appF8XfZUGXtfi40E/pagTw6PRaIHUHh8ty/form"
-          suggestCorrectionUrl="https://airtable.com/appF8XfZUGXtfi40E/pagndDvdya1DSqoxN/form"
-          noun="advisor"
-          airtableUrl="https://airtable.com/appF8XfZUGXtfi40E/shr3u6yIAwM9Hi2fL"
-          extraLinks={[
-            {
-              label: 'Review an advisor',
-              url: 'https://airtable.com/appF8XfZUGXtfi40E/pagPIJgReOkrd1kEU/form',
-            },
-          ]}
-        />
+        </div>
       </div>
-    </div>
+    </>
   )
 }

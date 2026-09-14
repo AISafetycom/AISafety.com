@@ -22,6 +22,10 @@ export interface ListingCardProps {
   /** External link. Omit for a static, non-clickable card (e.g. projects). */
   href?: string
   name: string
+  /** Overrides the name the click is tracked under, so a card can show a short
+   *  title but keep a stable, unambiguous analytics name (e.g. jobs track as
+   *  'Research Engineer – Anthropic'). Defaults to `name`. */
+  trackingName?: string
   description: string
   logo?: string | null
   /** Pills shown above the logo (e.g. a category or type). */
@@ -30,6 +34,9 @@ export interface ListingCardProps {
   titleMeta?: ListingCardMeta[]
   /** Metadata rows shown at the bottom of the card. */
   meta: ListingCardMeta[]
+  /** Small, icon-less note pinned below the meta rows with a gap (e.g. a
+   *  job's "Posted:" date). */
+  footnote?: string
   trackingPage: string
   /** Airtable record id, stamped onto the click event. */
   listingId?: string
@@ -67,11 +74,13 @@ function MetaRows({ rows }: { rows: ListingCardMeta[] }) {
 export default function ListingCard({
   href,
   name,
+  trackingName,
   description,
   logo,
   pills,
   titleMeta,
   meta,
+  footnote,
   trackingPage,
   listingId,
   placement,
@@ -128,6 +137,12 @@ export default function ListingCard({
       </p>
 
       <MetaRows rows={meta} />
+
+      {footnote && (
+        <p className="paragraph-xs color-teal-500 padding-top-16px">
+          {footnote}
+        </p>
+      )}
     </>
   )
 
@@ -150,7 +165,7 @@ export default function ListingCard({
       onClick={() =>
         trackListingClick(
           trackingPage,
-          name,
+          trackingName ?? name,
           href,
           listingId,
           placement,

@@ -29,36 +29,6 @@ const resources = [
     field: 'fldqYJa5li27kVOUW', // Long name
     adjust: -4, // Grid view includes 4 category header rows that aren't displayed on the site
   },
-  {
-    path: '/jobs',
-    tableId: 'tblyLelYCQjP6w3nV',
-    viewId: 'viwBfn9CIUVqQHUy6',
-    field: 'fldDVJcmd66eF3E7c', // !Title
-  },
-  {
-    path: '/media-channels',
-    tableId: 'tblCTOMzyH3vILL5I',
-    viewId: 'viwT8KTwupcVyGKLZ',
-    field: 'fldsju0ew5KYrY3Qa', // Name
-  },
-  {
-    path: '/advisors',
-    tableId: 'tblf3KKYnmgcjVGhD',
-    viewId: 'viwIdRmaCar2Y6gPi',
-    field: 'fldDCHQmcF8HLOz5S', // Name
-  },
-  {
-    path: '/projects',
-    tableId: 'tblHT29QNgMYKB8iW',
-    viewId: 'viwVgPN3hgpGa8dRE',
-    field: 'fldtfqsPSKc5ubNs4', // Project Name
-  },
-  {
-    path: '/founders',
-    tableId: 'tbl59Ye8oxvPjoVJv',
-    viewId: 'viwzMBhPBk1GpQXnn',
-    field: 'fldylwo2fwYtfMqM8', // Name
-  },
 ]
 
 type Counts = Partial<Record<string, number>>
@@ -160,6 +130,11 @@ async function readAllCounts(): Promise<Counts> {
   // Derive redesigned pages' counts from the same data the page renders, so the
   // nav badge always matches the on-page total exactly.
   counts['/communities'] = (await getCommunities()).length
+  counts['/jobs'] = (await getJobs()).length
+  counts['/media-channels'] = (await getMediaChannels()).length
+  counts['/advisors'] = (await getAdvisors()).length
+  counts['/projects'] = (await getProjects()).length
+  counts['/founders'] = (await getFounderResources()).length
   counts['/self-study'] = (await getCourses()).length
   counts['/events'] = (await getEvents()).length
   // Both program sets the page lists: upcoming + recurring.

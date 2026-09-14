@@ -10,10 +10,10 @@ import {
 } from '@/app/training/card'
 import { courseCardProps } from '@/app/self-study/card'
 import { funderCardProps } from '@/app/funding/card'
-import AdvisorCard from '@/app/advisors/AdvisorCard'
-import FounderResourceCard from '@/app/founders/FounderResourceCard'
-import MediaChannelCard from '@/app/media-channels/MediaChannelCard'
-import ProjectCard from '@/app/projects/ProjectCard'
+import { advisorCardProps } from '@/app/advisors/card'
+import { founderResourceCardProps } from '@/app/founders/card'
+import { mediaChannelCardProps } from '@/app/media-channels/card'
+import { projectCardProps } from '@/app/projects/card'
 import MapOrgCard from '@/app/map/MapOrgCard'
 import type { Community } from '@/lib/data/communities'
 import type { EventListing } from '@/lib/data/events'
@@ -173,13 +173,13 @@ function Card({ kind, listing }: { kind: PreviewKind; listing: unknown }) {
     case 'funder':
       return listingCard(funderCardProps(listing as Funder))
     case 'advisor':
-      return <AdvisorCard advisor={listing as Advisor} />
+      return listingCard(advisorCardProps(listing as Advisor))
     case 'founder':
-      return <FounderResourceCard resource={listing as FounderResource} />
+      return listingCard(founderResourceCardProps(listing as FounderResource))
     case 'mediaChannel':
-      return <MediaChannelCard channel={listing as MediaChannel} />
+      return listingCard(mediaChannelCardProps(listing as MediaChannel))
     case 'project':
-      return <ProjectCard project={listing as Project} />
+      return listingCard(projectCardProps(listing as Project))
     case 'mapOrg':
       return <MapOrgCard org={listing as MapOrg} />
   }

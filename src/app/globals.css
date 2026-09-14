@@ -239,6 +239,9 @@ label {
 .color-teal-400 {
   color: var(--teal-400);
 }
+.color-teal-500 {
+  color: var(--teal-500);
+}
 .color-teal {
   color: var(--bright-teal-500);
 }
