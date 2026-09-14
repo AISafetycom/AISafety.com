@@ -3,6 +3,10 @@ import { fetchLastUpdated } from '@/lib/data/last-updated'
 import PageHeader from '@/components/PageHeader'
 import { getEvents } from '@/lib/data/events'
 import EventsClient from './EventsClient'
+import { pageMetadata } from '@/lib/page-metadata'
+import { SITE_PAGES } from '@/lib/site-pages'
+
+export const metadata = pageMetadata(SITE_PAGES.events)
 
 export default async function EventsPage() {
   const [events, lastUpdated] = await Promise.all([

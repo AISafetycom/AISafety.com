@@ -16,12 +16,16 @@ interface Props {
   tabs?: AdminTab[]
   brand?: string
   brandHref?: string
+  /** Name of the signed-in person (or the password role), shown by Sign out
+   *  so it is always clear whose session this is. */
+  signedInAs?: string
 }
 
 export default function AdminHeader({
   tabs,
   brand = 'AISafety.com Admin',
   brandHref = '/admin/chatbot/playground',
+  signedInAs,
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
@@ -62,9 +66,23 @@ export default function AdminHeader({
           })}
         </nav>
         <div className={styles.adminHeaderRight}>
-          <Link href="/" className={styles.adminBackLink}>
-            ← Back to site
-          </Link>
+          <a
+            href="https://aisafety.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className={styles.adminBackLink}
+          >
+            Launch site
+          </a>
+          {signedInAs && (
+            <>
+              <span className={styles.adminNavDivider} aria-hidden="true" />
+              <span className={styles.adminSignedInAs}>
+                <span className={styles.adminSignedInLabel}>Signed in as</span>
+                {signedInAs}
+              </span>
+            </>
+          )}
           <button
             type="button"
             className={styles.adminLogoutButton}

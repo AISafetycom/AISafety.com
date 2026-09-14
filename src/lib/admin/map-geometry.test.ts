@@ -45,7 +45,12 @@ describe('map-geometry mirrors src/app/map/D3Map.tsx', () => {
     expect(literal('GRID_SIZE')).toBe('MAP_WIDTH / 60')
     expect(literal('BASE_LOGO_SIZE')).toBe(String(BASE_LOGO_SIZE))
     expect(Number(literal('LOGO_GLOBAL_SCALE'))).toBe(LOGO_GLOBAL_SCALE)
-    expect(d3MapSource).toContain(`'${BACKGROUND_IMAGE_URL}'`)
+    // The background URL is the one value D3Map imports instead of defining.
+    expect(d3MapSource).toContain(
+      "import { MAP_BACKGROUND_URL } from '@/lib/map-images'"
+    )
+    expect(d3MapSource).toContain(".attr('xlink:href', MAP_BACKGROUND_URL)")
+    expect(BACKGROUND_IMAGE_URL).toBe('/images/map-1.5.1.svg')
   })
 
   it('offsets (public map: /2 horizontally, /20 vertically)', () => {

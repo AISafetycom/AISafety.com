@@ -2,13 +2,10 @@ import { fetchLastUpdated } from '@/lib/data/last-updated'
 import PageHeader from '@/components/PageHeader'
 import JobsClient from './JobsClient'
 import { getJobs } from '@/lib/data/jobs'
+import { pageMetadata } from '@/lib/page-metadata'
+import { SITE_PAGES } from '@/lib/site-pages'
 
-export const metadata = {
-  title: 'Jobs – AISafety.com',
-  description:
-    "AI safety career opportunities. Many roles don't require technical skills.",
-  alternates: { canonical: '/jobs' },
-}
+export const metadata = pageMetadata(SITE_PAGES.jobs)
 
 export default async function JobsPage() {
   const [jobs, lastUpdated] = await Promise.all([

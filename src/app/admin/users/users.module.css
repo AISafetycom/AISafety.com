@@ -1,0 +1,233 @@
+/* Admin admin: who can sign in and which tabs they get. Same utilitarian look
+   as the other sections (admin.module.css); only what that file lacks. */
+
+.people {
+  display: grid;
+  gap: 12px;
+}
+
+.card {
+  padding: 14px 16px;
+  background-color: var(--teal-900);
+  border: 1px solid var(--teal-800);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.cardWho {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.cardName {
+  font-weight: 600;
+  color: var(--white);
+}
+
+.cardEmail {
+  color: var(--teal-300);
+}
+
+.cardPending {
+  color: var(--teal-400);
+  font-style: italic;
+}
+
+.cardMeta {
+  font-size: 12px;
+  color: var(--teal-400);
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border: 1px solid var(--teal-700);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--teal-300);
+}
+
+.badgeYou {
+  border-color: transparent;
+  background-color: var(--teal-800);
+  color: var(--bright-teal-300);
+}
+
+/* One pill per tab. Pills for tabs that can change the live site carry a
+   second, smaller "can edit" tick after a divider. */
+.picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+}
+
+.pick {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--teal-800);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--teal-300);
+  user-select: none;
+}
+
+.pickOn {
+  border-color: var(--bright-teal-500);
+  color: var(--white);
+}
+
+.pickDisabled {
+  opacity: 0.7;
+}
+
+.pickTab,
+.pickEdit {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+}
+
+.pickTab {
+  padding: 5px 10px 5px 8px;
+}
+
+/* Amber, like the "this edits the live site" boxes on the pages it unlocks. */
+.pickEdit {
+  padding: 5px 10px 5px 8px;
+  border-left: 1px solid var(--teal-800);
+  font-size: 11px;
+  color: #f5b942;
+  opacity: 0.6;
+}
+
+.pickOn .pickEdit {
+  border-left-color: var(--teal-700);
+  opacity: 0.85;
+}
+
+.pickEdit:has(input:checked) {
+  opacity: 1;
+  background-color: rgba(245, 185, 66, 0.12);
+  border-radius: 0 999px 999px 0;
+}
+
+.pick .pickEdit input {
+  accent-color: #f5b942;
+}
+
+.pickDisabled .pickTab,
+.pickDisabled .pickEdit {
+  cursor: default;
+}
+
+.pick input {
+  accent-color: var(--bright-teal-300);
+  margin: 0;
+  cursor: pointer;
+}
+
+.pick input:disabled {
+  cursor: default;
+}
+
+.addButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 14px;
+}
+
+.rowActions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.linkButton {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--teal-300);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.linkButton:hover:not(:disabled) {
+  color: var(--white);
+}
+
+.linkButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.danger {
+  color: #ff8b8b;
+}
+
+.confirmInline {
+  color: #ff8b8b;
+}
+
+.form {
+  display: grid;
+  gap: 12px;
+}
+
+.emailField {
+  max-width: 420px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fieldLabel {
+  font-size: 11px;
+  color: var(--teal-400);
+}
+
+.formActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.notice {
+  font-size: 12px;
+  color: var(--teal-300);
+}
+
+.noticeError {
+  font-size: 12px;
+  color: #ff6b6b;
+}
+
+.noticeOk {
+  font-size: 12px;
+  color: var(--bright-teal-300);
+}

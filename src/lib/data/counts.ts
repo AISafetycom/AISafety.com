@@ -1,3 +1,4 @@
+import { headers } from 'next/headers'
 import { fetchAirtableRecords } from './airtable'
 import { isPreviewRequest } from '@/lib/preview'
 import { getAdvisors } from './advisors'
@@ -30,23 +31,25 @@ const resources = [
   },
 ]
 
-// Preview-mode requests can't be served from any Next.js data cache (Draft
-// Mode disables caching for the whole request), so without this memo every
-// preview page view would redo all sixteen serialized Airtable reads below —
-// seconds of waiting for nav badges the admin isn't checking. Held in process
-// memory (one server bundle in production, so it is shared across pages) and
-// never consulted outside preview mode, where the normal caches apply.
-let previewCountsMemo: {
-  at: number
-  counts: Partial<Record<string, number>>
-} | null = null
-const PREVIEW_COUNTS_TTL_MS = 10 * 60_000
+type Counts = Partial<Record<string, number>>
 
-// Serialized to avoid hitting Airtable's 5 req/sec rate limit.
+// Preview-mode requests can't be served from any Next.js data cache (Draft
+// Mode disables caching for the whole request), and the two dozen Airtable
+// reads below — paced to Airtable's rate limit — took the first preview page
+// on a fresh server instance ten seconds, for nav badges the admin isn't
+// checking. So in preview the badges come from the public site's own numbers
+// instead: this deployment's prebuilt /api/counts, fetched without cookies
+// (no Draft Mode, so it is served from cache) and costing no Airtable reads.
+// They are exactly what visitors see, and a rebuild refreshes them a couple
+// of minutes after any edit. Remembered briefly in process memory so the
+// requests one page view fans out into (its segments, the nav prefetches
+// after every refresh, a second tab) share one fetch; the memo holds the
+// fetch itself, so concurrent callers never each start their own.
+let previewCountsMemo: { at: number; counts: Promise<Counts> } | null = null
+const PREVIEW_COUNTS_MEMO_MS = 60_000
+
 // Called at build time (static generation) so latency doesn't matter.
-export async function fetchAllCounts(): Promise<
-  Partial<Record<string, number>>
-> {
+export async function fetchAllCounts(): Promise<Counts> {
   // Contributor mode: derive every count from the same public data the pages
   // render, so each badge matches its page. The Airtable view counts below
   // aren't available without credentials.
@@ -69,16 +72,52 @@ export async function fetchAllCounts(): Promise<
     }
   }
 
-  const preview = await isPreviewRequest()
+  if (!(await isPreviewRequest())) return readAllCounts()
+
+  const now = Date.now()
   if (
-    preview &&
     previewCountsMemo &&
-    Date.now() - previewCountsMemo.at < PREVIEW_COUNTS_TTL_MS
+    now - previewCountsMemo.at < PREVIEW_COUNTS_MEMO_MS
   ) {
     return previewCountsMemo.counts
   }
+  const counts = readPublicCounts().catch(error => {
+    // A deployment whose public URL isn't reachable from here (a protected
+    // branch preview answering 401, say) falls back to reading Airtable live.
+    console.warn(`Public counts unavailable (${error}); reading Airtable live`)
+    return readAllCounts()
+  })
+  previewCountsMemo = { at: now, counts }
+  counts.catch(() => {
+    if (previewCountsMemo?.counts === counts) previewCountsMemo = null
+  })
+  return counts
+}
 
-  const counts: Partial<Record<string, number>> = {}
+// The public site's counts, from this deployment's own /api/counts. Built
+// from the request's host so it works on any deployment and on `next start`.
+async function readPublicCounts(): Promise<Counts> {
+  const requestHeaders = await headers()
+  const host =
+    requestHeaders.get('x-forwarded-host') ?? requestHeaders.get('host')
+  if (!host) throw new Error('request has no host header')
+  const proto =
+    requestHeaders.get('x-forwarded-proto') ??
+    (host.startsWith('localhost') ? 'http' : 'https')
+  const response = await fetch(`${proto}://${host}/api/counts`, {
+    cache: 'no-store',
+  })
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  const body = (await response.json()) as unknown
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error('unexpected /api/counts response')
+  }
+  return body as Counts
+}
+
+// Serialized to avoid hitting Airtable's 5 req/sec rate limit.
+async function readAllCounts(): Promise<Counts> {
+  const counts: Counts = {}
   for (const r of resources) {
     const raw = await fetchAirtableRecords({
       tableId: r.tableId,
@@ -102,9 +141,5 @@ export async function fetchAllCounts(): Promise<
   counts['/training'] =
     (await getTrainingPrograms()).length + (await getRecurringPrograms()).length
   counts['/funding'] = (await getFunders()).length
-
-  if (preview) {
-    previewCountsMemo = { at: Date.now(), counts }
-  }
   return counts
 }

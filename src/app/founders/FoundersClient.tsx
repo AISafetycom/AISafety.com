@@ -4,6 +4,7 @@ import { useState, useMemo, useRef, useLayoutEffect } from 'react'
 import FilterBar from '@/components/FilterBar'
 import FilterDropdown from '@/components/FilterDropdown'
 import ListingCard from '@/components/ListingCard'
+import { founderResourceCardProps } from './card'
 import ContributeButtons from '@/components/ContributeButtons'
 import { FounderResource } from '@/lib/data/founders'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
@@ -100,15 +101,7 @@ export default function FoundersClient({ resources }: FoundersClientProps) {
           {filteredResources.map(resource => (
             <ListingCard
               key={resource.id}
-              href={resource.website !== '#' ? resource.website : undefined}
-              name={resource.name}
-              description={resource.description}
-              logo={resource.image}
-              meta={
-                resource.type
-                  ? [{ icon: '/images/icons/tag.svg', value: resource.type }]
-                  : []
-              }
+              {...founderResourceCardProps(resource)}
               trackingPage="Founders"
               listingId={resource.id}
               placement={placements.get(resource.id)}

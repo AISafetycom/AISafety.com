@@ -442,7 +442,6 @@ export default function JobsClient({ jobs }: JobsClientProps) {
         <FilterDropdown
           trackingPage="Jobs"
           title="Remote or on-site"
-          trackingTitle="Work location"
           icon="/images/icons/computer.svg"
           options={workLocationOptions}
           selected={selectedWorkLocation}

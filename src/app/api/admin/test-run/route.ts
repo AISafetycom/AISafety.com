@@ -1,13 +1,13 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { NextRequest } from 'next/server'
-import { canViewChatbot } from '@/lib/admin/auth'
+import { canViewPlayground } from '@/lib/admin/auth'
 import { getCatalog } from '@/lib/assistant/catalog'
 import {
   PAGES_BLOCK,
   buildContextLine,
   type RequestContext,
 } from '@/lib/assistant/prompt'
-import { DEFAULT_MODEL_ID } from '@/lib/assistant/models'
+import { DEFAULT_MODEL_ID, isKnownModelId } from '@/lib/assistant/models'
 import { getDonationGuideText } from '@/lib/assistant/donation-guide'
 import { getPageLastUpdatedDates } from '@/lib/assistant/page-dates'
 import {
@@ -22,7 +22,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
-  if (!(await canViewChatbot())) {
+  if (!(await canViewPlayground())) {
     return new Response(JSON.stringify({ error: 'unauthorized' }), {
       status: 401,
       headers: { 'Content-Type': 'application/json' },
@@ -59,8 +59,9 @@ export async function POST(req: NextRequest) {
       headers: { 'Content-Type': 'application/json' },
     })
   }
+  // Only ids from the model list reach the API and the system prompt.
   const model =
-    typeof body.model === 'string' && body.model.length > 0
+    typeof body.model === 'string' && isKnownModelId(body.model)
       ? body.model
       : DEFAULT_MODEL_ID
 

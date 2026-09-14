@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This is a Next.js website migration project following modern React/TypeScript best practices. The codebase emphasizes maintainability and simplicity over premature optimization.
+This is the Next.js codebase behind aisafety.com (migrated from Webflow in 2026; the migration is finished). It follows modern React/TypeScript best practices. The codebase emphasizes maintainability and simplicity over premature optimization.
 
 ## Development Philosophy
 

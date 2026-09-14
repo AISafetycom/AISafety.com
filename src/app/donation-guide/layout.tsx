@@ -1,17 +1,7 @@
-import type { Metadata } from 'next'
+import { pageMetadata } from '@/lib/page-metadata'
+import { SITE_PAGES } from '@/lib/site-pages'
 
-export const metadata: Metadata = {
-  title: 'Donation guide – AISafety.com',
-  description:
-    'A short guide on how to donate most effectively to the AI safety field.',
-  alternates: { canonical: '/donation-guide' },
-  openGraph: {
-    title: 'Donation guide – AISafety.com',
-    description:
-      'A short guide on how to donate most effectively to the AI safety field.',
-    images: [{ url: '/images/link-preview.png' }],
-  },
-}
+export const metadata = pageMetadata(SITE_PAGES.donationGuide)
 
 export default function DonationGuideLayout({
   children,

@@ -3,13 +3,10 @@ import PageHeader from '@/components/PageHeader'
 import FeaturedCard from '@/components/FeaturedCard'
 import ProjectsClient from './ProjectsClient'
 import { getProjects } from '@/lib/data/projects'
+import { pageMetadata } from '@/lib/page-metadata'
+import { SITE_PAGES } from '@/lib/site-pages'
 
-export const metadata = {
-  title: 'Volunteer Projects – AISafety.com',
-  description:
-    'Initiatives seeking your volunteer help, focused on supporting and improving the AI safety field.',
-  alternates: { canonical: '/projects' },
-}
+export const metadata = pageMetadata(SITE_PAGES.projects)
 
 export default async function ProjectsPage() {
   const [projects, lastUpdated] = await Promise.all([

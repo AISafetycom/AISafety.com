@@ -4,6 +4,7 @@ import { useState, useMemo, useRef, useLayoutEffect } from 'react'
 import FilterBar from '@/components/FilterBar'
 import FilterDropdown from '@/components/FilterDropdown'
 import ListingCard from '@/components/ListingCard'
+import { projectCardProps } from './card'
 import ContributeButtons from '@/components/ContributeButtons'
 import { Project } from '@/lib/data/projects'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
@@ -86,22 +87,7 @@ export default function ProjectsClient({ projects }: ProjectsClientProps) {
           {filteredProjects.map(project => (
             <ListingCard
               key={project.id}
-              name={project.name}
-              description={project.description}
-              meta={[
-                ...(project.contact
-                  ? [
-                      {
-                        icon: '/images/icons/person.svg',
-                        value: project.contact,
-                      },
-                    ]
-                  : []),
-                ...(project.email
-                  ? [{ icon: '/images/icons/mail.svg', value: project.email }]
-                  : []),
-                { icon: '/images/icons/activity.svg', value: project.status },
-              ]}
+              {...projectCardProps(project)}
               trackingPage="Projects"
             />
           ))}

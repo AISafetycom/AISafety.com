@@ -49,7 +49,8 @@ AIRTABLE_BASE_ID=your_base_id
 
 ```bash
 npm run dev          # Start dev server
-npm run build        # Production build
+npm run build        # Production build (runs the tests first)
+npm test             # Unit tests
 npm run lint         # Run linting
 npm run format       # Format code
 npm run type-check   # Type check
@@ -87,8 +88,8 @@ CORS open, data licensed CC-BY-4.0. Human docs at `/developers`; spec at
 ## Documentation
 
 - [Data API](./docs/api.md)
-- [Project Overview](./docs/project-overview.md)
 - [Architecture](./docs/architecture.md)
 - [Development Guide](./docs/development-guide.md)
 - [CSS Guidelines](./docs/css-guidelines.md)
-- [CLAUDE.md](./docs/claude.md) — For AI (humans don't read)
+- [CLAUDE.md](./CLAUDE.md) — how the codebase works and its conventions (written for Claude Code, useful for humans too)
+- [Development philosophy](./docs/claude.md)

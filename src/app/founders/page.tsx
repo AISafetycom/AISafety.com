@@ -3,13 +3,10 @@ import PageHeader from '@/components/PageHeader'
 import FeaturedCard from '@/components/FeaturedCard'
 import FoundersClient from './FoundersClient'
 import { getFounderResources } from '@/lib/data/founders'
+import { pageMetadata } from '@/lib/page-metadata'
+import { SITE_PAGES } from '@/lib/site-pages'
 
-export const metadata = {
-  title: 'Founder Toolkit – AISafety.com',
-  description:
-    'Resources for starting and growing an AI safety organization, including incubators, fiscal sponsors, VCs, and practical tools.',
-  alternates: { canonical: '/founders' },
-}
+export const metadata = pageMetadata(SITE_PAGES.founders)
 
 export default async function FoundersPage() {
   const [resources, lastUpdated] = await Promise.all([

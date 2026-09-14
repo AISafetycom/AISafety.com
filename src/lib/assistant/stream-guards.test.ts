@@ -146,6 +146,10 @@ function fakeClient(script: ScriptedGeneration[]): {
         calls.push(JSON.parse(JSON.stringify(params.messages)))
         const gen = script.shift()
         if (!gen) throw new Error('fake client script exhausted')
+        // Copy the fields out: TypeScript does not carry the guard above into
+        // a hoisted function* declaration, so `gen` would still be possibly
+        // undefined inside it.
+        const { text, stopReason } = gen
         async function* events() {
           yield {
             type: 'message_start',
@@ -159,16 +163,16 @@ function fakeClient(script: ScriptedGeneration[]): {
           }
           yield { type: 'content_block_start', content_block: { type: 'text' } }
           // Stream in small chunks so the marker hold-back gate is exercised.
-          for (let i = 0; i < gen.text.length; i += 7) {
+          for (let i = 0; i < text.length; i += 7) {
             yield {
               type: 'content_block_delta',
-              delta: { type: 'text_delta', text: gen.text.slice(i, i + 7) },
+              delta: { type: 'text_delta', text: text.slice(i, i + 7) },
             }
           }
           yield { type: 'content_block_stop' }
           yield {
             type: 'message_delta',
-            delta: { stop_reason: gen.stopReason },
+            delta: { stop_reason: stopReason },
           }
         }
         const iterable = events() as AsyncGenerator & {

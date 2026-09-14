@@ -1,0 +1,2888 @@
+'use client'
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import Image from 'next/image'
+import type { SaidBy } from '@/lib/admin/queue'
+import type {
+  AgentInfo,
+  FieldInfo,
+  PreviewKind,
+  QueueItem,
+} from '@/lib/admin/queue'
+import Icon from '@/components/Icon'
+import SitePreview, { prefetchPreview, seedPreviews } from './SitePreview'
+import styles from './queue.module.css'
+
+// The Queue is a triage tool Bryce sits in for long stretches, so it has its
+// own look (see queue.module.css) rather than the admin's teal card stack:
+// a list of items on the left, one item in focus on the right, keyboard
+// shortcuts, auto-advance after every decision and an undo toast. Nothing
+// here changes the site until Accept is clicked; the API refuses anything
+// already decided.
+
+const API = '/api/admin/queue'
+const UPLOAD_API = '/api/admin/queue/upload'
+
+// The list shows one kind of work at a time (additions to judge whole,
+// changes to judge as a diff, or rules for the bots), grouped by where each
+// item came from. Bryce, 11 Sept 2026: "to be in the headspace for one of
+// those all at once".
+type Section = 'requests' | 'broom' | 'rules' | 'comb'
+const SECTIONS: Section[] = ['requests', 'broom', 'rules', 'comb']
+type Kind = 'additions' | 'changes' | 'rules'
+const KINDS: { key: Kind; label: string; title: string }[] = [
+  {
+    key: 'additions',
+    label: 'Additions',
+    title: 'New listings to publish or reject',
+  },
+  {
+    key: 'changes',
+    label: 'Changes',
+    title: 'Proposed changes to existing listings',
+  },
+  {
+    key: 'rules',
+    label: 'Rules',
+    title: 'Changes to the bots\u2019 rulebooks',
+  },
+]
+const SECTION_LABEL: Record<Section, string> = {
+  requests: 'Requests',
+  broom: 'Broom',
+  rules: 'Rules',
+  comb: 'Comb',
+}
+
+// Library icons (public/images/icons), rendered through the site's <Icon>.
+const ICON = {
+  requests: '/images/icons/speech-bubble.svg',
+  mail: '/images/icons/mail.svg',
+  discord: '/images/icons/discord.svg',
+  form: '/images/icons/clipboard.svg',
+  broom: '/images/icons/flag.svg',
+  comb: '/images/icons/magnifying-glass.svg',
+  rule: '/images/icons/book.svg',
+  check: '/images/icons/check.svg',
+  x: '/images/icons/x.svg',
+  question: '/images/icons/question-mark.svg',
+  plus: '/images/icons/plus.svg',
+  stars: '/images/icons/stars.svg',
+  undo: '/images/icons/reset.svg',
+  external: '/images/icons/link-out.svg',
+  copy: '/images/icons/copy.svg',
+  table: '/images/icons/table.svg',
+  arrow: '/images/icons/arrow-right.svg',
+  timer: '/images/icons/timer.svg',
+  download: '/images/icons/download.svg',
+  done: '/images/icons/check-in-circle.svg',
+  pencil: '/images/icons/pencil-small.svg',
+  chevron: '/images/icons/chevron-down.svg',
+} as const
+
+function sourceIcon(item: QueueItem): string {
+  if (item.type === 'Rule' || item.source === 'Teach') return ICON.rule
+  switch (item.source) {
+    case 'Email':
+      return ICON.mail
+    case 'Discord':
+      return ICON.discord
+    case 'Form':
+      return ICON.form
+    case 'Broom':
+      return ICON.broom
+    default:
+      return ICON.comb
+  }
+}
+
+function verdictIcon(item: QueueItem): string {
+  if (item.verdict === 'Publish' || item.verdict === 'Fix') return ICON.check
+  if (item.verdict === 'Unsure') return ICON.question
+  return ICON.x
+}
+
+/** The host of a link, lower-case, or '' when it is not an http(s) URL.
+ *  Icons and labels are picked by exact host, never by substring, so a
+ *  link to "airtable.com.example" is just an outside link. */
+function hostOf(url: string): string {
+  try {
+    const u = new URL(url)
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return ''
+    return u.hostname.toLowerCase()
+  } catch {
+    return ''
+  }
+}
+
+function onHost(url: string, host: string): boolean {
+  const h = hostOf(url)
+  return h === host || h.endsWith(`.${host}`)
+}
+
+function linkIcon(url: string): string {
+  if (onHost(url, 'airtable.com')) return ICON.table
+  if (onHost(url, 'discord.com')) return ICON.discord
+  if (hostOf(url) === 'mail.google.com') return ICON.mail
+  return ICON.external
+}
+
+type Theme = 'light' | 'dark'
+const THEME_KEY = 'aisafety-admin-queue:theme'
+const COLLAPSED_KEY = 'aisafety-admin-queue:collapsed'
+const KIND_KEY = 'aisafety-admin-queue:kind'
+
+function sectionOf(item: QueueItem): Section {
+  if (item.type === 'Rule' || item.source === 'Teach') return 'rules'
+  if (item.source === 'Broom') return 'broom'
+  if (item.source === 'Comb') return 'comb'
+  return 'requests'
+}
+
+/** Which of the Additions / Changes / Rules views an item belongs to. */
+function kindOf(item: QueueItem): Kind {
+  if (item.type === 'Rule' || item.source === 'Teach') return 'rules'
+  return item.type === 'Add' ? 'additions' : 'changes'
+}
+
+function verdictRank(v: QueueItem['verdict']): number {
+  switch (v) {
+    case 'Publish':
+    case 'Fix':
+      return 0
+    case 'Unsure':
+    case null:
+      return 1
+    default:
+      return 2
+  }
+}
+
+/** Sizes a text box to what is typed in it, on open and on every keystroke,
+ *  so a long description is never hidden behind a scrollbar. */
+function fitToText(el: HTMLTextAreaElement | null) {
+  if (!el) return
+  el.style.height = 'auto'
+  // scrollHeight leaves out the border; offset - client is exactly that.
+  el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`
+}
+
+/** A Change row's title is written as "Record name: what was found"; the
+ *  page shows the name in its own place and the finding as the heading.
+ *  Rows that carry `name` in the proposal use it; older ones split the
+ *  title at the first ": ". */
+function splitTitle(item: QueueItem): { name: string | null; heading: string } {
+  if (item.type !== 'Change') return { name: null, heading: item.title }
+  if (item.name && item.title.startsWith(item.name + ': ')) {
+    return { name: item.name, heading: item.title.slice(item.name.length + 2) }
+  }
+  const at = item.title.indexOf(': ')
+  if (at > 0 && at < 120) {
+    return { name: item.title.slice(0, at), heading: item.title.slice(at + 2) }
+  }
+  return { name: item.name, heading: item.title }
+}
+
+/** Broom writes its finding as a one-paragraph summary followed by the
+ *  evidence; the summary is what gets read, the rest is there when needed. */
+function splitExcerpt(text: string): { lead: string; detail: string | null } {
+  const m = /\n\s*\n/.exec(text)
+  if (!m) return { lead: text.trim(), detail: null }
+  return {
+    lead: text.slice(0, m.index).trim(),
+    detail: text.slice(m.index + m[0].length).trim() || null,
+  }
+}
+
+/** The record id in the address bar, if it names one. */
+function hashId(): string | null {
+  return /^#(rec[A-Za-z0-9]{14})$/.exec(window.location.hash)?.[1] ?? null
+}
+
+function ago(iso: string | null): string {
+  if (!iso) return ''
+  const ms = Date.now() - new Date(iso).getTime()
+  if (!Number.isFinite(ms)) return ''
+  const m = Math.round(ms / 60000)
+  if (m < 2) return 'just now'
+  if (m < 60) return `${m} min ago`
+  const h = Math.round(m / 60)
+  if (h < 36) return `${h} h ago`
+  return `${Math.round(h / 24)} days ago`
+}
+
+function show(v: unknown): string {
+  if (v === null || v === undefined || v === '') return '—'
+  if (typeof v === 'string') return v
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No'
+  if (typeof v === 'number') return String(v)
+  if (Array.isArray(v)) return v.map(show).join(', ')
+  return JSON.stringify(v)
+}
+
+/** An attachment value as the queue sees it: Airtable's own shape (an
+ *  object or list with `url`), the site's snapshot (a list of URLs), or
+ *  Broom's proposal (`{url, filename}`). The old side of a change often
+ *  carries only `{id, filename}`, which is why `pictureOf` also takes the
+ *  record's live field. */
+function pictureUrl(v: unknown): string | null {
+  if (Array.isArray(v)) return v.length ? pictureUrl(v[0]) : null
+  if (typeof v === 'string') return IMAGE_URL.test(v) ? v : null
+  if (v && typeof v === 'object' && 'url' in v) {
+    const url = (v as { url: unknown }).url
+    return typeof url === 'string' ? url : null
+  }
+  return null
+}
+
+function looksLikeAttachment(v: unknown): boolean {
+  if (Array.isArray(v)) return v.length > 0 && v.every(looksLikeAttachment)
+  return Boolean(
+    v && typeof v === 'object' && ('url' in v || 'filename' in v || 'id' in v)
+  )
+}
+
+function fileNameOf(v: unknown): string | null {
+  if (Array.isArray(v)) return v.length ? fileNameOf(v[0]) : null
+  if (v && typeof v === 'object' && 'filename' in v) {
+    const f = (v as { filename: unknown }).filename
+    return typeof f === 'string' ? f : null
+  }
+  if (typeof v === 'string') {
+    try {
+      return decodeURIComponent(new URL(v).pathname.split('/').pop() ?? '')
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+/** The picture behind one side of a change to a logo or image field: the
+ *  value's own URL, else (for the old side, whose snapshot has none) the
+ *  record's live field. Null when the value is not a picture at all. */
+function pictureOf(
+  v: unknown,
+  liveValue: unknown
+): { url: string | null; name: string | null } | null {
+  if (!looksLikeAttachment(v) && !pictureUrl(v)) return null
+  return {
+    url: pictureUrl(v) ?? pictureUrl(liveValue),
+    name: fileNameOf(v) ?? fileNameOf(liveValue),
+  }
+}
+
+/** Saves a picture under its file name. A host that refuses a cross-site
+ *  read cannot be fetched from here, so the picture opens in a tab instead
+ *  (a plain download link is ignored by browsers for another site). */
+async function downloadPicture(url: string, name: string | null) {
+  try {
+    const res = await fetch(url, { mode: 'cors' })
+    if (!res.ok) throw new Error(String(res.status))
+    const href = URL.createObjectURL(await res.blob())
+    const a = document.createElement('a')
+    a.href = href
+    a.download = name ?? 'image'
+    document.body.append(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(href), 1000)
+  } catch {
+    window.open(url, '_blank', 'noopener')
+  }
+}
+
+function fileSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`
+}
+
+/** One side of a change to an image field: the picture with a download
+ *  button on hover, then its file name, then its size in pixels and bytes
+ *  (the bytes only when the host lets the page read the file). A missing
+ *  picture (an expired link) shows the name only. */
+function Picture({ url, name }: { url: string | null; name: string | null }) {
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
+  const [bytes, setBytes] = useState<number | null>(null)
+  // Keyed by URL where it is used, so a new picture is a fresh component.
+  useEffect(() => {
+    if (!url) return
+    let cancelled = false
+    fetch(url, { mode: 'cors' })
+      .then(r => (r.ok ? r.blob() : null))
+      .then(b => {
+        if (!cancelled && b) setBytes(b.size)
+      })
+      .catch(() => {
+        // the host does not allow a cross-site read: no byte count
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [url])
+  const meta = [
+    dims ? `${dims.w} × ${dims.h}` : null,
+    bytes !== null ? fileSize(bytes) : null,
+  ].filter(Boolean)
+  return (
+    <span className={styles.picture}>
+      <span className={styles.pictureFrame}>
+        {url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            className={styles.pictureImg}
+            src={url}
+            alt=""
+            onLoad={e => {
+              const el = e.currentTarget
+              if (el.naturalWidth) {
+                setDims({ w: el.naturalWidth, h: el.naturalHeight })
+              }
+            }}
+          />
+        ) : (
+          <span className={`${styles.pictureImg} ${styles.pictureEmpty}`} />
+        )}
+        {url && (
+          <button
+            type="button"
+            className={styles.pictureDownload}
+            title={`Download ${name ?? 'the picture'}`}
+            aria-label={`Download ${name ?? 'the picture'}`}
+            onClick={() => void downloadPicture(url, name)}
+          >
+            <Icon src={ICON.download} size={12} />
+          </button>
+        )}
+      </span>
+      {name && <span className={styles.pictureName}>{name}</span>}
+      {meta.length > 0 && (
+        <span className={styles.pictureMeta}>{meta.join(' · ')}</span>
+      )}
+    </span>
+  )
+}
+
+const NAME_KEYS = /\b(name|title)\b|^organi[sz]ation$/i
+const URL_KEYS = /^(url|website|link|join link|apply link|application link)$/i
+const DESC_KEYS = /description/i
+
+function linkLabel(url: string): string {
+  if (hostOf(url) === 'mail.google.com') return 'Open email'
+  if (onHost(url, 'discord.com')) return 'Open Discord'
+  if (onHost(url, 'airtable.com')) return 'Open in Airtable'
+  return 'Open source'
+}
+
+/** Text, numbers, lists of text and empty fields can be typed into. Lists
+ *  are edited as comma-separated text. Attachments and checkboxes cannot. */
+function isEditable(v: unknown): boolean {
+  return (
+    typeof v === 'string' ||
+    typeof v === 'number' ||
+    v === null ||
+    v === undefined ||
+    (Array.isArray(v) && v.every(x => typeof x === 'string'))
+  )
+}
+
+/** Turn what was typed back into the shape Airtable expects for that field:
+ *  a list stays a list, a number stays a number, empty clears the field. */
+function coerceEdits(
+  edits: Record<string, string>,
+  original: Record<string, unknown>,
+  types: Map<string, FieldInfo> = new Map()
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [k, text] of Object.entries(edits)) {
+    const was = original[k]
+    const t = text.trim()
+    const type = types.get(k)?.type
+    if (type === 'checkbox') out[k] = t === 'true'
+    else if (t === '') out[k] = null
+    else if (type === 'multipleSelects' || Array.isArray(was)) {
+      out[k] = t
+        .split(',')
+        .map(x => x.trim())
+        .filter(Boolean)
+    } else if (
+      (type === 'number' || typeof was === 'number') &&
+      !Number.isNaN(Number(t))
+    ) {
+      out[k] = Number(t)
+    } else out[k] = text
+  }
+  return out
+}
+
+function isOpen(item: QueueItem): boolean {
+  return (
+    item.status === 'Pending' ||
+    item.status === 'Revising' ||
+    item.status === 'Failed'
+  )
+}
+
+/** The edits a card preview is built with before the admin touches
+ *  anything: a Change shows its proposed values, an Add shows the record. */
+function proposedEdits(item: QueueItem): Record<string, unknown> {
+  return item.type === 'Change'
+    ? Object.fromEntries(item.changes.map(c => [c.field, c.to]))
+    : {}
+}
+
+/** The list arrives without most logos so it lands at once; this asks for
+ *  the pictures of the rows that came without one (the site's catalog,
+ *  then the records themselves for unpublished targets) and answers with
+ *  a URL by target record. Best effort: no logo is not worth an error. */
+async function loadLogos(items: QueueItem[]): Promise<Record<string, string>> {
+  const seen = new Set<string>()
+  const targets: { table: string; record: string }[] = []
+  for (const i of items) {
+    if (i.logo || !i.targetTable || !i.targetRecord) continue
+    if (seen.has(i.targetRecord)) continue
+    seen.add(i.targetRecord)
+    targets.push({ table: i.targetTable, record: i.targetRecord })
+  }
+  if (!targets.length) return {}
+  try {
+    const res = await fetch(`${API}/logos`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targets }),
+    })
+    const data = (await res.json()) as { logos?: Record<string, string> }
+    return res.ok && data.logos ? data.logos : {}
+  } catch {
+    return {}
+  }
+}
+
+/** Build every open item's card in one request and hold them ready, so
+ *  opening an item never waits on Airtable. Best effort. */
+async function preloadCards(items: QueueItem[]): Promise<void> {
+  const targets = items
+    .filter(
+      i =>
+        isOpen(i) &&
+        (i.type === 'Add' || i.type === 'Change') &&
+        i.targetTable &&
+        i.targetRecord
+    )
+    .map(i => ({
+      table: i.targetTable as string,
+      record: i.targetRecord as string,
+      edits: proposedEdits(i),
+    }))
+  if (!targets.length) return
+  try {
+    const res = await fetch(`${API}/previews`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targets }),
+    })
+    const data = (await res.json()) as {
+      previews?: Record<string, { kind: PreviewKind | null; listing?: unknown }>
+    }
+    if (!res.ok || !data.previews) return
+    seedPreviews(
+      targets.map(t => ({
+        ...t,
+        preview: data.previews?.[`${t.table}/${t.record}`] ?? { kind: null },
+      }))
+    )
+  } catch {
+    // the single-card route still works
+  }
+}
+
+/** The toast shows for nine seconds; U undoes the last decision for five
+ *  minutes after it, toast or no toast (Bryce, 11 Sept 2026). */
+const TOAST_MS = 9000
+/** The slide down at the end, part of TOAST_MS. Matches the CSS. */
+const TOAST_OUT_MS = 220
+const UNDO_MS = 5 * 60 * 1000
+
+// Recurring programs live under /training's "recurring" view.
+const RECURRING_TABLE = 'tblEEIbj6dW5oS4cX'
+
+/** The page as shown on the row and the detail: recurring programs sit in
+ *  /training's own "recurring" view, so they say so. */
+function pageLabel(item: QueueItem): string | null {
+  if (!item.page) return null
+  return item.targetTable === RECURRING_TABLE
+    ? `${item.page} (recurring)`
+    : item.page
+}
+
+/** The live page, landing on this record's card (every site card carries
+ *  its record id as an anchor; ScrollToHash finds it once rendered). */
+function livePageUrl(item: QueueItem): string {
+  const view = item.targetTable === RECURRING_TABLE ? '?view=recurring' : ''
+  const hash = item.targetRecord ? `#${item.targetRecord}` : ''
+  return `https://aisafety.com${item.page ?? ''}${view}${hash}`
+}
+
+function acceptLabel(item: QueueItem): string {
+  if (item.type === 'Add') return 'Publish'
+  if (item.type === 'Change') {
+    return item.changes.length ? 'Apply change' : 'Accept flag'
+  }
+  return 'Apply rule'
+}
+
+function verdictWord(item: QueueItem): string {
+  if (item.verdict === 'Publish') return 'Publish it'
+  if (item.verdict === "Don't publish") return "Don't publish"
+  if (item.verdict === 'Fix') return 'Fix it'
+  if (item.verdict === 'Dismiss') return 'Dismiss the flag'
+  if (item.verdict === 'Unsure') return 'Unsure'
+  return item.verdict ?? ''
+}
+
+/** An emailed request whose reply draft still has to reach Gmail. */
+function wantsDraft(item: QueueItem): boolean {
+  return (
+    Boolean(item.replyDraft) &&
+    (item.source === 'Email' || item.source === 'Form') &&
+    item.replyStatus !== 'Saved' &&
+    item.replyStatus !== 'Sent'
+  )
+}
+
+function replyLabel(item: QueueItem): string {
+  if (!item.replyDraft) return ''
+  // A Discord reply is copied and sent by hand: nothing to report here.
+  if (item.source === 'Discord') return ''
+  if (item.replyStatus === 'Saved') return 'Draft saved in Gmail'
+  if (item.replyStatus === 'Sent') return 'Reply sent'
+  if (item.replyStatus === 'Failed') return 'Draft failed'
+  if (item.status === 'Applied' || item.status === 'Accepted') {
+    return 'Draft on its way to Gmail'
+  }
+  return ''
+}
+
+function doneLabel(item: QueueItem): string {
+  if (item.status === 'Rejected') return 'Rejected'
+  if (item.status === 'Accepted') return 'Accepted'
+  if (item.type === 'Add') return 'Published'
+  if (item.type === 'Change') {
+    const n = item.changes.length
+    return `Changed ${n} field${n === 1 ? '' : 's'}`
+  }
+  return 'Applied'
+}
+
+interface Draft {
+  mode: 'idle' | 'reject' | 'note'
+  edits: Record<string, string>
+  editing: string | null
+  chip: string | null
+  other: string
+  note: string
+  /** The reply draft as edited on the page (null = as written at intake). */
+  reply: string | null
+  editingReply: boolean
+  busy: boolean
+  error: string | null
+}
+
+const FRESH: Draft = {
+  mode: 'idle',
+  edits: {},
+  editing: null,
+  chip: null,
+  other: '',
+  note: '',
+  reply: null,
+  editingReply: false,
+  busy: false,
+  error: null,
+}
+
+interface Toast {
+  item: QueueItem
+  text: string
+  /** A second line that fills in later: what happened to the reply draft. */
+  sub?: string
+}
+
+/** What the page tells the Mac agent to do after an accept. */
+type AgentAction = 'gmail_draft'
+
+interface AgentResult {
+  ok: boolean
+  /** The agent could not be reached at all (not running, or blocked). */
+  offline: boolean
+  replyStatus: string | null
+  detail: string
+}
+
+const AGENT_TIMEOUT_MS = 15000
+
+/** Call the local agent on the owner's Mac (~/Queue/agent.py). It listens
+ *  on loopback only and checks the token the site minted, so the call is
+ *  harmless from anywhere but this page in this browser. */
+async function callAgent(
+  agent: AgentInfo,
+  path: '/ping' | '/act',
+  body?: { id: string; action: AgentAction }
+): Promise<AgentResult> {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), AGENT_TIMEOUT_MS)
+  try {
+    const res = await fetch(`http://127.0.0.1:${agent.port}${path}`, {
+      method: body ? 'POST' : 'GET',
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify({ ...body, token: agent.token }) : undefined,
+      cache: 'no-store',
+      signal: ctrl.signal,
+    })
+    const data = (await res.json()) as {
+      ok?: boolean
+      replyStatus?: string
+      detail?: string
+      error?: string
+    }
+    return {
+      ok: Boolean(data.ok),
+      offline: false,
+      replyStatus: data.replyStatus ?? null,
+      detail: data.detail ?? data.error ?? '',
+    }
+  } catch {
+    return { ok: false, offline: true, replyStatus: null, detail: '' }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+const WORKER_NOTE = 'the Mac saves the reply draft within five minutes'
+const OFFLINE_SUB = `Mac agent not reachable · ${WORKER_NOTE}`
+
+type Action = 'accept' | 'reject' | 'revise' | 'undo'
+
+export default function QueueAdmin({
+  canEdit,
+}: {
+  /** False for a view-only grant: the same queue with nothing to click that
+   *  would decide anything. The API refuses those writes regardless. */
+  canEdit: boolean
+}) {
+  const [items, setItems] = useState<QueueItem[] | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [drafts, setDrafts] = useState<Record<string, Draft>>({})
+  const [toast, setToast] = useState<Toast | null>(null)
+  // True for the last moments of a toast, while it slides back down.
+  const [toastLeaving, setToastLeaving] = useState(false)
+  // The last decision, kept for U after the toast has gone.
+  const [undoable, setUndoable] = useState<QueueItem | null>(null)
+  // The local agent on the owner's Mac: its port + a token from the API
+  // (null when the secret is not configured), and whether it answered a
+  // ping. Reply drafts go through it the moment an emailed request is
+  // accepted; the Mac worker is the fallback.
+  const [agent, setAgent] = useState<AgentInfo | null>(null)
+  const [agentOnline, setAgentOnline] = useState<boolean | null>(null)
+  const wantedRef = useRef<string | null>(null)
+  // The focused item's record as it is in Airtable now, plus the table's
+  // field list, so empty fields (a missing logo) show as empty. By item id.
+  const [live, setLive] = useState<
+    Record<string, { fields: Record<string, unknown>; schema: FieldInfo[] }>
+  >({})
+  const [showDone, setShowDone] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
+  const [theme, setTheme] = useState<Theme>('light')
+  const [kind, setKind] = useState<Kind>('additions')
+  const [collapsed, setCollapsed] = useState<Record<Section, boolean>>({
+    requests: false,
+    broom: false,
+    rules: false,
+    comb: false,
+  })
+  const listRef = useRef<HTMLDivElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const detailRef = useRef<HTMLDivElement>(null)
+
+  // The page never scrolls as a whole: the queue fills the viewport below the
+  // admin header and the list and the detail pane scroll on their own, so
+  // the header, the top bar and the list stay put and nothing slides under
+  // the header. The header's height depends on the window width, so it is
+  // measured rather than assumed.
+  useEffect(() => {
+    const fit = () => {
+      const el = rootRef.current
+      if (!el) return
+      const top = el.getBoundingClientRect().top + window.scrollY
+      el.style.height = `${Math.max(320, window.innerHeight - top)}px`
+    }
+    fit()
+    window.addEventListener('resize', fit)
+    const ro =
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fit) : null
+    ro?.observe(document.body)
+    return () => {
+      window.removeEventListener('resize', fit)
+      ro?.disconnect()
+    }
+  }, [])
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(THEME_KEY)
+      if (saved === 'dark' || saved === 'light') setTheme(saved)
+      const folded = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '{}')
+      if (folded && typeof folded === 'object') {
+        setCollapsed(prev => {
+          const next = { ...prev }
+          for (const key of SECTIONS) next[key] = folded[key] === true
+          return next
+        })
+      }
+      const k = localStorage.getItem(KIND_KEY)
+      if (k === 'additions' || k === 'changes' || k === 'rules') setKind(k)
+    } catch {
+      // storage refused: stay on the defaults
+    }
+  }, [])
+
+  const toggleGroup = (section: Section) => {
+    setCollapsed(prev => {
+      const next = { ...prev, [section]: !prev[section] }
+      try {
+        localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next))
+      } catch {
+        // ignore
+      }
+      return next
+    })
+  }
+
+  const chooseKind = (next: Kind) => {
+    setKind(next)
+    // An item from the other view must not stay in focus: let the
+    // focus-keeping effect pick the first item of this one.
+    if (selected && kindOf(selected) !== next) setSelectedId(null)
+    try {
+      localStorage.setItem(KIND_KEY, next)
+    } catch {
+      // ignore
+    }
+  }
+
+  const toggleTheme = () => {
+    const next: Theme = theme === 'light' ? 'dark' : 'light'
+    setTheme(next)
+    try {
+      localStorage.setItem(THEME_KEY, next)
+    } catch {
+      // ignore
+    }
+  }
+
+  const load = useCallback(async () => {
+    setLoadError(null)
+    try {
+      const res = await fetch(API, { cache: 'no-store' })
+      const data = (await res.json()) as {
+        items?: QueueItem[]
+        agent?: AgentInfo | null
+        error?: string
+      }
+      if (!res.ok || !data.items) {
+        throw new Error(data.error ?? `HTTP ${res.status}`)
+      }
+      setItems(data.items)
+      setAgent(data.agent ?? null)
+      // The list is on screen now; the pictures and the cards follow in
+      // the background, each filled in as it arrives.
+      void loadLogos(data.items).then(logos => {
+        if (!Object.keys(logos).length) return
+        setItems(prev =>
+          prev
+            ? prev.map(i =>
+                !i.logo && i.targetRecord && logos[i.targetRecord]
+                  ? { ...i, logo: logos[i.targetRecord] }
+                  : i
+              )
+            : prev
+        )
+      })
+      void preloadCards(data.items)
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+
+  useEffect(() => {
+    wantedRef.current = hashId()
+    void load()
+  }, [load])
+
+  // A "#rec…" in the address (the Secretary note's "Queued:" link, or one
+  // Bryce copied from his own address bar) opens that item; one already
+  // decided shows in the done list. The same happens when the hash changes
+  // while the page is open.
+  useEffect(() => {
+    if (!items || !wantedRef.current) return
+    const id = wantedRef.current
+    const hit = items.find(i => i.id === id)
+    if (!hit) {
+      wantedRef.current = null
+      return
+    }
+    setSelectedId(id)
+    if (!isOpen(hit)) setShowDone(true)
+    // The list shows one kind at a time; the linked item's kind wins.
+    else setKind(kindOf(hit))
+    // The focus-keeping effect below runs in this same pass, before the
+    // selection above has landed; it clears the ref and stands aside.
+  }, [items])
+
+  useEffect(() => {
+    const onHash = () => {
+      const id = hashId()
+      if (!id) return
+      wantedRef.current = id
+      // Re-run the effect above with the items already loaded.
+      setItems(prev => (prev ? [...prev] : prev))
+    }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+
+  // The address bar follows the item in focus, so a link to one specific
+  // suggestion can be copied and sent. Replaced, not pushed: W/Q through
+  // the list must not fill the back button.
+  useEffect(() => {
+    if (!items) return
+    const want = selectedId && !showDone ? `#${selectedId}` : ''
+    if (window.location.hash === want) return
+    if (!want && !window.location.hash) return
+    window.history.replaceState(
+      null,
+      '',
+      window.location.pathname + window.location.search + want
+    )
+  }, [items, selectedId, showDone])
+
+  useEffect(() => {
+    if (!agent) {
+      setAgentOnline(null)
+      return
+    }
+    let cancelled = false
+    void callAgent(agent, '/ping').then(res => {
+      if (!cancelled) setAgentOnline(res.ok)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [agent])
+
+  // One flat, ordered list of open items: requests, Broom, rules, then Comb
+  // with Fable's Publish verdicts first. Keyboard navigation walks it.
+  const ordered = useMemo(() => {
+    const groups: Record<Section, QueueItem[]> = {
+      requests: [],
+      broom: [],
+      rules: [],
+      comb: [],
+    }
+    const done: QueueItem[] = []
+    const perKind: Record<Kind, number> = {
+      additions: 0,
+      changes: 0,
+      rules: 0,
+    }
+    let open = 0
+    for (const item of items ?? []) {
+      if (!isOpen(item)) {
+        done.push(item)
+        continue
+      }
+      open++
+      const k = kindOf(item)
+      perKind[k]++
+      if (k === kind) groups[sectionOf(item)].push(item)
+    }
+    const newest = (a: QueueItem, b: QueueItem) =>
+      a.createdAt < b.createdAt ? 1 : -1
+    const byVerdict = (a: QueueItem, b: QueueItem) =>
+      verdictRank(a.verdict) - verdictRank(b.verdict) || newest(a, b)
+    groups.requests.sort(newest)
+    groups.broom.sort(byVerdict)
+    groups.rules.sort(newest)
+    groups.comb.sort(byVerdict)
+    done.sort((a, b) => ((a.decidedAt ?? '') < (b.decidedAt ?? '') ? 1 : -1))
+    const flat = SECTIONS.filter(s => !collapsed[s]).flatMap(s => groups[s])
+    return { groups, done, flat, open, perKind }
+  }, [items, collapsed, kind])
+
+  const selected = useMemo(() => {
+    if (!items) return null
+    return items.find(i => i.id === selectedId) ?? null
+  }, [items, selectedId])
+
+  // Keep something in focus: the first open item, or the next one after a
+  // decision.
+  useEffect(() => {
+    if (!items) return
+    if (wantedRef.current) {
+      wantedRef.current = null
+      return
+    }
+    if (selectedId && ordered.flat.some(i => i.id === selectedId)) return
+    if (selected && isOpen(selected)) return
+    if (selected && !isOpen(selected) && showDone) return
+    setSelectedId(ordered.flat[0]?.id ?? null)
+  }, [items, ordered.flat, selectedId, selected, showDone])
+
+  // The card of the item after this one is fetched now, so J/auto-advance
+  // shows it at once.
+  useEffect(() => {
+    if (!selected) return
+    const flat = ordered.flat
+    const next = flat[flat.findIndex(i => i.id === selected.id) + 1]
+    if (!next?.targetTable || !next.targetRecord) return
+    if (next.type !== 'Add' && next.type !== 'Change') return
+    prefetchPreview(next.targetTable, next.targetRecord, proposedEdits(next))
+  }, [selected, ordered.flat])
+
+  useEffect(() => {
+    if (!selected) return
+    // Additions always; a Change only when it swaps a picture, whose old
+    // side is snapshotted without a link (the live read supplies one).
+    const wantsLive =
+      selected.type === 'Add' ||
+      (selected.type === 'Change' &&
+        selected.changes.some(c => looksLikeAttachment(c.from)))
+    if (!wantsLive) return
+    if (!selected.targetTable || !selected.targetRecord) return
+    if (live[selected.id]) return
+    const id = selected.id
+    const target = `${selected.targetTable}/${selected.targetRecord}`
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(`${API}?target=${encodeURIComponent(target)}`, {
+          cache: 'no-store',
+        })
+        const data = (await res.json()) as {
+          fields?: Record<string, unknown>
+          schema?: FieldInfo[]
+        }
+        if (!cancelled && res.ok && data.fields) {
+          const fields = data.fields
+          const schema = data.schema ?? []
+          setLive(prev => ({ ...prev, [id]: { fields, schema } }))
+        }
+      } catch {
+        // the snapshot stays
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [selected, live])
+
+  const setLiveField = useCallback(
+    (id: string, field: string, value: unknown) => {
+      setLive(prev => {
+        const cur = prev[id]
+        if (!cur) return prev
+        return {
+          ...prev,
+          [id]: { ...cur, fields: { ...cur.fields, [field]: value } },
+        }
+      })
+    },
+    []
+  )
+
+  const draft = (id: string): Draft => drafts[id] ?? FRESH
+  const setDraft = useCallback((id: string, patch: Partial<Draft>) => {
+    setDrafts(prev => ({ ...prev, [id]: { ...(prev[id] ?? FRESH), ...patch } }))
+  }, [])
+
+  const select = useCallback((id: string) => {
+    setSelectedId(id)
+    setShowDone(false)
+    if (detailRef.current) detailRef.current.scrollTop = 0
+    const row = listRef.current?.querySelector<HTMLElement>(`[data-id="${id}"]`)
+    row?.scrollIntoView({ block: 'nearest' })
+  }, [])
+
+  const move = useCallback(
+    (delta: number) => {
+      const flat = ordered.flat
+      if (flat.length === 0) return
+      const i = flat.findIndex(x => x.id === selectedId)
+      const next = flat[Math.min(flat.length - 1, Math.max(0, i + delta))]
+      if (next) select(next.id)
+    },
+    [ordered.flat, selectedId, select]
+  )
+
+  // After an accept: have the Mac agent save the reply draft in Gmail now,
+  // and tell the toast and the row how it went. If the agent is not
+  // reachable the worker does it within five minutes.
+  const saveReply = useCallback(
+    async (item: QueueItem) => {
+      const res = agent
+        ? await callAgent(agent, '/act', { id: item.id, action: 'gmail_draft' })
+        : { ok: false, offline: true, replyStatus: null, detail: '' }
+      if (agent) setAgentOnline(!res.offline)
+      const sub = res.ok
+        ? res.detail || 'Draft saved in Gmail'
+        : res.offline
+          ? OFFLINE_SUB
+          : `Reply draft failed: ${res.detail}`
+      if (res.replyStatus) {
+        const status = res.replyStatus
+        setItems(prev =>
+          prev
+            ? prev.map(i =>
+                i.id === item.id
+                  ? {
+                      ...i,
+                      replyStatus: status,
+                      error: res.ok ? null : res.detail,
+                    }
+                  : i
+              )
+            : prev
+        )
+      }
+      setToast(prev =>
+        prev && prev.item.id === item.id ? { ...prev, sub } : prev
+      )
+    },
+    [agent]
+  )
+
+  const act = useCallback(
+    async (
+      item: QueueItem,
+      action: Action,
+      extra: Record<string, unknown> = {}
+    ) => {
+      if (!canEdit) return
+      setDraft(item.id, { busy: true, error: null })
+      // The reply draft as it reads on the page goes with the accept, so
+      // what reaches Gmail is what was approved.
+      const reply = drafts[item.id]?.reply ?? null
+      const replyDraft =
+        action === 'accept' && reply !== null ? { replyDraft: reply } : {}
+      try {
+        const res = await fetch(API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: item.id,
+            action,
+            ...replyDraft,
+            ...extra,
+          }),
+        })
+        const data = (await res.json()) as { item?: QueueItem; error?: string }
+        if (!res.ok || !data.item) {
+          throw new Error(data.error ?? `HTTP ${res.status}`)
+        }
+        // The decision comes back without a logo lookup (kept quick); the
+        // picture already on the page stays.
+        const updated = { ...data.item, logo: data.item.logo ?? item.logo }
+        setItems(prev =>
+          prev ? prev.map(i => (i.id === updated.id ? updated : i)) : prev
+        )
+        setDrafts(prev => {
+          const next = { ...prev }
+          delete next[item.id]
+          return next
+        })
+        if (action === 'accept' || action === 'reject') {
+          const draftPending = action === 'accept' && wantsDraft(updated)
+          setUndoable(updated)
+          setToast({
+            item: updated,
+            text:
+              action === 'reject'
+                ? `Rejected · ${updated.rejectReason ?? ''}`
+                : doneLabel(updated),
+            sub: draftPending
+              ? agent
+                ? 'Saving the reply draft in Gmail…'
+                : `Reply draft: ${WORKER_NOTE}`
+              : updated.source === 'Discord' && updated.replyDraft
+                ? 'Reply drafted · copy it and send it yourself on Discord'
+                : undefined,
+          })
+          // Auto-advance to the next open item.
+          const flat = ordered.flat
+          const i = flat.findIndex(x => x.id === item.id)
+          const next = flat[i + 1] ?? flat[i - 1]
+          if (next) select(next.id)
+          if (draftPending) void saveReply(updated)
+        } else if (action === 'undo') {
+          setToast(null)
+          setUndoable(null)
+          select(updated.id)
+        }
+      } catch (e) {
+        setDraft(item.id, {
+          busy: false,
+          error: e instanceof Error ? e.message : String(e),
+        })
+      }
+    },
+    [ordered.flat, select, setDraft, drafts, agent, saveReply, canEdit]
+  )
+
+  useEffect(() => {
+    if (!toast) return
+    const leave = setTimeout(
+      () => setToastLeaving(true),
+      TOAST_MS - TOAST_OUT_MS
+    )
+    const gone = setTimeout(() => {
+      setToast(null)
+      setToastLeaving(false)
+    }, TOAST_MS)
+    return () => {
+      clearTimeout(leave)
+      clearTimeout(gone)
+      setToastLeaving(false)
+    }
+  }, [toast])
+
+  useEffect(() => {
+    if (!undoable) return
+    const t = setTimeout(() => setUndoable(null), UNDO_MS)
+    return () => clearTimeout(t)
+  }, [undoable])
+
+  // Keyboard: W/Q or arrows move, A/Enter accept, R reject, N note, U undo,
+  // ? help, Esc cancel. Ignored while typing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null
+      const typing =
+        t &&
+        (t.tagName === 'INPUT' ||
+          t.tagName === 'TEXTAREA' ||
+          t.isContentEditable)
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (typing) {
+        if (e.key === 'Escape') (t as HTMLElement).blur()
+        return
+      }
+      const item = selected
+      const d = item ? draft(item.id) : FRESH
+      switch (e.key) {
+        case 'w':
+        case 'ArrowDown':
+          e.preventDefault()
+          move(1)
+          break
+        case 'q':
+        case 'ArrowUp':
+          e.preventDefault()
+          move(-1)
+          break
+        case 'a':
+        case 'Enter':
+          // Only A accepts (Bryce, 11 Sept 2026: Enter is too easy to hit);
+          // Enter still confirms a reject once a reason is picked.
+          if (
+            e.key === 'a' &&
+            item &&
+            isOpen(item) &&
+            item.status !== 'Revising' &&
+            d.mode === 'idle' &&
+            !d.busy
+          ) {
+            e.preventDefault()
+            void act(item, 'accept', {
+              edits: coerceEdits(
+                d.edits,
+                item.type === 'Change'
+                  ? Object.fromEntries(item.changes.map(c => [c.field, c.to]))
+                  : (live[item.id]?.fields ?? item.fields ?? {}),
+                new Map((live[item.id]?.schema ?? []).map(f => [f.name, f]))
+              ),
+            })
+          } else if (
+            item &&
+            d.mode === 'reject' &&
+            (d.chip || d.other.trim() || item.type === 'Rule') &&
+            !d.busy
+          ) {
+            e.preventDefault()
+            void act(item, 'reject', { reason: d.chip ?? d.other.trim() })
+          }
+          break
+        case 'r':
+          if (
+            canEdit &&
+            item &&
+            isOpen(item) &&
+            item.status !== 'Revising' &&
+            d.mode !== 'reject'
+          ) {
+            e.preventDefault()
+            setDraft(item.id, { mode: 'reject' })
+          }
+          break
+        case 'n':
+          if (
+            canEdit &&
+            item &&
+            isOpen(item) &&
+            item.status !== 'Revising' &&
+            item.type !== 'Rule' &&
+            d.mode !== 'note'
+          ) {
+            e.preventDefault()
+            setDraft(item.id, { mode: 'note' })
+          }
+          break
+        case '1':
+        case '2':
+        case '3':
+          if (item && d.mode === 'reject' && !d.busy) {
+            const chip = item.rejectChips[Number(e.key) - 1]
+            if (chip) {
+              // the number picks the reason and rejects in one go
+              e.preventDefault()
+              setDraft(item.id, { chip })
+              void act(item, 'reject', { reason: chip })
+            }
+          }
+          break
+        case 'u':
+          if (undoable && !draft(undoable.id).busy) {
+            e.preventDefault()
+            void act(undoable, 'undo')
+          }
+          break
+        case '?':
+          e.preventDefault()
+          setShowHelp(v => !v)
+          break
+        case 'Escape':
+          if (showHelp) setShowHelp(false)
+          else if (item && d.mode !== 'idle') {
+            setDraft(item.id, { mode: 'idle', chip: null, other: '', note: '' })
+          }
+          break
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, drafts, move, act, undoable, showHelp, setDraft, live])
+
+  const waiting = ordered.open
+  const doneToday = ordered.done.length
+  const total = waiting + doneToday
+
+  return (
+    <div
+      ref={rootRef}
+      className={`${styles.queue} ${theme === 'dark' ? styles.dark : ''}`}
+    >
+      <div className={styles.top}>
+        <div className={styles.topLeft}>
+          <h1 className={styles.h1}>Queue</h1>
+          <span className={styles.topMeta}>
+            {items === null
+              ? 'Loading…'
+              : waiting === 0
+                ? 'Nothing waiting'
+                : `${waiting} waiting`}
+            {doneToday > 0 && (
+              <>
+                {' · '}
+                <button
+                  className={`${styles.linkButton} ${showDone ? styles.linkButtonOn : ''}`}
+                  onClick={() => setShowDone(v => !v)}
+                >
+                  {doneToday} done today
+                </button>
+              </>
+            )}
+          </span>
+          <span
+            className={styles.segmented}
+            role="group"
+            aria-label="Which kind of item to show"
+          >
+            {KINDS.map(k => (
+              <button
+                key={k.key}
+                className={kind === k.key ? styles.segOn : ''}
+                onClick={() => chooseKind(k.key)}
+                title={k.title}
+              >
+                {k.label}
+                <span className={styles.segCount}>
+                  {ordered.perKind[k.key]}
+                </span>
+              </button>
+            ))}
+          </span>
+        </div>
+        <div className={styles.topRight}>
+          {agent && (
+            <span
+              className={`${styles.agentDot} ${agentOnline ? styles.agentOn : agentOnline === false ? styles.agentOff : ''}`}
+              title={
+                agentOnline
+                  ? 'The agent on your Mac is running: reply drafts reach Gmail the moment you accept.'
+                  : agentOnline === false
+                    ? 'The agent on your Mac is not answering: the worker saves reply drafts within five minutes.'
+                    : 'Checking the agent on your Mac…'
+              }
+            >
+              Mac
+            </span>
+          )}
+          <button
+            className={styles.ghost}
+            onClick={() => setShowHelp(v => !v)}
+            title="Keyboard shortcuts (?)"
+          >
+            <Icon src={ICON.question} />
+          </button>
+          <button className={styles.ghost} onClick={toggleTheme}>
+            {theme === 'light' ? 'Dark' : 'Light'}
+          </button>
+        </div>
+        {total > 0 && (
+          <div className={styles.progress} aria-hidden>
+            <div
+              className={styles.progressBar}
+              style={{ width: `${Math.round((doneToday / total) * 100)}%` }}
+            />
+          </div>
+        )}
+      </div>
+
+      {loadError && (
+        <p className={styles.error}>
+          Couldn&rsquo;t load the queue: {loadError}{' '}
+          <button className={styles.linkButton} onClick={() => void load()}>
+            Try again
+          </button>
+        </p>
+      )}
+
+      {items && (
+        <div className={styles.split}>
+          <div className={styles.list} ref={listRef}>
+            {SECTIONS.map(section => {
+              const list = ordered.groups[section]
+              if (
+                list.length === 0 &&
+                (section !== 'requests' || kind === 'rules')
+              )
+                return null
+              return (
+                <div key={section} className={styles.group}>
+                  <button
+                    className={styles.groupHead}
+                    onClick={() => toggleGroup(section)}
+                    aria-expanded={!collapsed[section]}
+                  >
+                    {SECTION_LABEL[section]}
+                    <span className={styles.groupCount}>{list.length}</span>
+                    <span
+                      className={`${styles.groupChevron} ${collapsed[section] ? styles.groupChevronClosed : ''}`}
+                    >
+                      <Icon src={ICON.chevron} size={12} />
+                    </span>
+                  </button>
+                  {collapsed[section] ? null : list.length === 0 ? (
+                    <div className={styles.groupEmpty}>Nothing waiting</div>
+                  ) : (
+                    list.map(item => (
+                      <Row
+                        key={item.id}
+                        item={item}
+                        active={item.id === selectedId && !showDone}
+                        onClick={() => select(item.id)}
+                      />
+                    ))
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          <div className={styles.detail} ref={detailRef}>
+            {showDone ? (
+              <DoneList
+                items={ordered.done}
+                busyFor={id => draft(id).busy}
+                errorFor={id => draft(id).error}
+                onUndo={canEdit ? item => void act(item, 'undo') : null}
+              />
+            ) : selected ? (
+              <Detail
+                item={selected}
+                live={live[selected.id] ?? null}
+                onImage={(field, urls) =>
+                  setLiveField(selected.id, field, urls)
+                }
+                d={draft(selected.id)}
+                setD={patch => setDraft(selected.id, patch)}
+                act={(action, extra) => void act(selected, action, extra)}
+                agentOnline={agent ? agentOnline : null}
+                readOnly={!canEdit}
+              />
+            ) : (
+              <div className={styles.emptyDetail}>
+                {waiting === 0 ? 'All clear.' : 'Pick an item on the left.'}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        // Laid out like a list row (logo, name, the muted line) with a
+        // bold tick or cross in front, so the eye reads it the same way.
+        <div
+          key={toast.item.id}
+          className={`${styles.toast} ${toastLeaving ? styles.toastLeaving : ''}`}
+          role="status"
+        >
+          <span
+            className={`${styles.toastMark} ${toast.item.status === 'Rejected' ? styles.toastMarkNo : ''}`}
+          >
+            <Icon
+              src={toast.item.status === 'Rejected' ? ICON.x : ICON.check}
+              size={16}
+            />
+          </span>
+          {toast.item.logo ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img className={styles.rowLogo} src={toast.item.logo} alt="" />
+          ) : (
+            <span className={`${styles.rowLogo} ${styles.rowLogoEmpty}`} />
+          )}
+          <span className={styles.toastBody}>
+            <span className={styles.rowTitle}>
+              {splitTitle(toast.item).name ?? toast.item.title}
+            </span>
+            <span className={styles.rowMeta}>
+              <span>{toast.text}</span>
+              {toast.item.page && <span>{toast.item.page}</span>}
+              {toast.sub && <span>{toast.sub}</span>}
+            </span>
+          </span>
+          {toast.item.source === 'Discord' &&
+            toast.item.replyDraft &&
+            toast.item.status !== 'Rejected' && (
+              <>
+                <CopyReply
+                  text={toast.item.replyDraft}
+                  className={styles.toastUndo}
+                />
+                {toast.item.sourceLink && (
+                  <OpenOnDiscord
+                    href={toast.item.sourceLink}
+                    className={styles.toastUndo}
+                  />
+                )}
+              </>
+            )}
+          <button
+            className={styles.toastUndo}
+            disabled={draft(toast.item.id).busy}
+            onClick={() => void act(toast.item, 'undo')}
+          >
+            <Icon src={ICON.undo} size={12} className={styles.undoIcon} />
+            Undo <kbd>U</kbd>
+          </button>
+        </div>
+      )}
+
+      {showHelp && (
+        <div className={styles.help} onClick={() => setShowHelp(false)}>
+          <div className={styles.helpCard} onClick={e => e.stopPropagation()}>
+            <div className={styles.helpTitle}>Keyboard</div>
+            <dl className={styles.helpList}>
+              <dt>
+                <kbd>W</kbd> <kbd>Q</kbd>
+              </dt>
+              <dd>next / previous item</dd>
+              <dt>
+                <kbd>A</kbd>
+              </dt>
+              <dd>accept</dd>
+              <dt>
+                <kbd>R</kbd>
+              </dt>
+              <dd>
+                reject, then <kbd>1</kbd>–<kbd>3</kbd> picks a reason and
+                rejects at once; or type one and press <kbd>Enter</kbd>
+              </dd>
+              <dt>
+                <kbd>N</kbd>
+              </dt>
+              <dd>ask Claude to change it</dd>
+              <dt>
+                <kbd>U</kbd>
+              </dt>
+              <dd>undo the last decision</dd>
+              <dt>
+                <kbd>Esc</kbd>
+              </dt>
+              <dd>cancel</dd>
+            </dl>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Row({
+  item,
+  active,
+  onClick,
+}: {
+  item: QueueItem
+  active: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      data-id={item.id}
+      className={`${styles.row} ${active ? styles.rowActive : ''}`}
+      onClick={onClick}
+    >
+      {item.logo ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          className={styles.rowLogo}
+          src={item.logo}
+          alt=""
+          onError={e => {
+            // an expired link: show the plain box rather than a broken image
+            const img = e.currentTarget
+            img.replaceWith(
+              Object.assign(document.createElement('span'), {
+                className: `${styles.rowLogo} ${styles.rowLogoEmpty}`,
+              })
+            )
+          }}
+        />
+      ) : (
+        <span
+          className={`${styles.rowLogo} ${styles.rowLogoEmpty} ${dotClass(item)}`}
+        >
+          <Icon src={sourceIcon(item)} />
+        </span>
+      )}
+      <span className={styles.rowBody}>
+        <span className={styles.rowTitle}>
+          {splitTitle(item).name ?? item.title}
+        </span>
+        <span className={styles.rowMeta}>
+          {item.source !== 'Comb' && <span>{item.source}</span>}
+          {item.page && <span>{pageLabel(item)}</span>}
+          {item.verdict && (
+            <span className={`${styles.withIcon} ${verdictClass(item)}`}>
+              <Icon src={verdictIcon(item)} size={12} />
+              {item.verdict}
+            </span>
+          )}
+          {item.status === 'Revising' && (
+            <span className={styles.withIcon}>
+              <Icon src={ICON.timer} size={12} />
+              revising
+            </span>
+          )}
+        </span>
+      </span>
+    </button>
+  )
+}
+
+function dotClass(item: QueueItem): string {
+  if (item.source === 'Email' || item.source === 'Form') return styles.dotEmail
+  if (item.source === 'Discord') return styles.dotDiscord
+  if (item.source === 'Broom') return styles.dotBroom
+  if (item.type === 'Rule') return styles.dotRule
+  return styles.dotComb
+}
+
+function verdictClass(item: QueueItem): string {
+  if (item.verdict === 'Publish' || item.verdict === 'Fix') return styles.yes
+  if (item.verdict === 'Unsure') return styles.maybe
+  return styles.no
+}
+
+function Detail({
+  item,
+  live,
+  onImage,
+  d,
+  setD,
+  act,
+  agentOnline,
+  readOnly,
+}: {
+  item: QueueItem
+  live: { fields: Record<string, unknown>; schema: FieldInfo[] } | null
+  onImage: (field: string, urls: string[]) => void
+  d: Draft
+  setD: (patch: Partial<Draft>) => void
+  act: (action: Action, extra?: Record<string, unknown>) => void
+  /** null: no agent configured; true/false: whether it answered a ping. */
+  agentOnline: boolean | null
+  /** A view-only session: no editing, no deciding. */
+  readOnly: boolean
+}) {
+  // Nothing on the item can be touched while Claude is revising it, and a
+  // view-only session can never touch it.
+  const revising = item.status === 'Revising' || readOnly
+  const nothingToApply = item.type === 'Change' && item.changes.length === 0
+  const reason = d.chip ?? d.other.trim()
+  const editCount = Object.keys(d.edits).length
+  const original: Record<string, unknown> =
+    item.type === 'Change'
+      ? Object.fromEntries(item.changes.map(c => [c.field, c.to]))
+      : (live?.fields ?? item.fields ?? {})
+  const types = new Map((live?.schema ?? []).map(f => [f.name, f]))
+  const editsToSave = () => coerceEdits(d.edits, original, types)
+
+  const hasCard =
+    item.type === 'Change' && Boolean(item.targetTable && item.targetRecord)
+  const showsCard =
+    hasCard ||
+    (item.type === 'Add' && Boolean(item.targetTable && item.targetRecord))
+  const excerptBlock = item.sourceExcerpt ? (
+    <section className={styles.block}>
+      <h3 className={styles.h3}>
+        {item.source === 'Broom' ? 'What Broom found' : 'What they wrote'}
+      </h3>
+      {item.source === 'Broom' ? (
+        <div className={styles.finding}>
+          <p className={styles.findingLead}>
+            {splitExcerpt(item.sourceExcerpt).lead}
+          </p>
+          {splitExcerpt(item.sourceExcerpt).detail && (
+            // Broom's evidence, folded away: the summary is what gets
+            // read (Bryce, 11 Sept 2026); the rest is there on a click.
+            <details className={styles.findingMore}>
+              <summary>Details</summary>
+              <p className={styles.findingDetail}>
+                {splitExcerpt(item.sourceExcerpt).detail}
+              </p>
+            </details>
+          )}
+        </div>
+      ) : item.saidBy ? (
+        <Said by={item.saidBy} text={item.sourceExcerpt} />
+      ) : (
+        <blockquote className={styles.quote}>{item.sourceExcerpt}</blockquote>
+      )}
+    </section>
+  ) : null
+
+  // The reply draft sits beside what they wrote (an exchange), or under the
+  // card row when a Change shows its card.
+  const replyBlock = item.replyDraft ? (
+    <section className={styles.block}>
+      <h3 className={styles.h3}>
+        Reply draft{item.replyTo ? ` to ${item.replyTo}` : ''}
+      </h3>
+      {item.source === 'Discord' ? (
+        // A Discord reply is not edited here: one click puts it on the
+        // clipboard, and Bryce pastes it in Discord (14 Sept 2026).
+        <CopyBox text={item.replyDraft} />
+      ) : d.editingReply ? (
+        <textarea
+          ref={fitToText}
+          onInput={e => fitToText(e.currentTarget)}
+          className={`${styles.input} ${styles.replyInput}`}
+          rows={Math.min(
+            14,
+            Math.max(4, item.replyDraft.split('\n').length + 1)
+          )}
+          autoFocus
+          defaultValue={d.reply ?? item.replyDraft}
+          onKeyDown={e => {
+            if (e.key === 'Escape') {
+              e.preventDefault()
+              setD({ editingReply: false })
+            }
+          }}
+          onBlur={e => setD({ editingReply: false, reply: e.target.value })}
+        />
+      ) : (
+        <ReplyDraft
+          text={d.reply ?? item.replyDraft}
+          edited={d.reply !== null && d.reply !== item.replyDraft}
+          canEdit={!revising && isOpen(item)}
+          onEdit={() => setD({ editingReply: true })}
+        />
+      )}
+      {item.source !== 'Discord' && (
+        <p className={styles.note}>
+          {item.replyStatus === 'Saved' ? (
+            <>
+              Saved in Gmail as a draft
+              {item.sourceLink && (
+                <>
+                  {' · '}
+                  <a href={item.sourceLink} target="_blank" rel="noreferrer">
+                    open the thread
+                  </a>
+                </>
+              )}
+              . Nothing was sent.
+            </>
+          ) : item.replyStatus === 'Failed' ? (
+            `The draft could not be saved${item.error ? `: ${item.error}` : '.'}`
+          ) : isOpen(item) ? (
+            agentOnline ? (
+              `${acceptLabel(item)} saves this as a Gmail draft at once. Nothing is sent.`
+            ) : (
+              `${acceptLabel(item)} saves this as a Gmail draft (${WORKER_NOTE}). Nothing is sent.`
+            )
+          ) : (
+            replyLabel(item)
+          )}
+        </p>
+      )}
+    </section>
+  ) : null
+
+  return (
+    <div
+      className={`${styles.detailInner} ${item.verdict || item.reasons.length > 0 ? styles.detailTwoCol : ''}`}
+    >
+      <div className={styles.detailMain}>
+        <div className={styles.detailHead}>
+          <div className={styles.pills}>
+            <span className={`${styles.pill} ${dotClass(item)}`}>
+              <Icon src={sourceIcon(item)} size={12} />
+              {item.source}
+            </span>
+            {/* The verdict heads the panel on the right, so it is not
+                repeated here. */}
+            {item.page && (
+              // The live page, landing on this record's card (every card
+              // carries its record id as an anchor) so the change can be
+              // checked on the site.
+              <a
+                className={styles.pageTag}
+                href={livePageUrl(item)}
+                target="_blank"
+                rel="noreferrer"
+                title="Opens the live card and copies the listing's name"
+                onClick={() => {
+                  // The name goes to the clipboard on the way, ready to
+                  // paste into the site search or Airtable.
+                  navigator.clipboard
+                    ?.writeText(splitTitle(item).name ?? item.title)
+                    .catch(() => {})
+                }}
+              >
+                {pageLabel(item)}
+              </a>
+            )}
+            <span className={styles.when}>{ago(item.createdAt)}</span>
+            <div className={styles.links}>
+              {item.sourceLink && (
+                <a
+                  href={item.sourceLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={styles.withIcon}
+                >
+                  <Icon src={linkIcon(item.sourceLink)} size={12} />
+                  {linkLabel(item.sourceLink)}
+                </a>
+              )}
+              {item.url && (
+                <a
+                  href={item.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={styles.withIcon}
+                >
+                  <Icon src={ICON.external} size={12} />
+                  {item.url.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+                </a>
+              )}
+            </div>
+          </div>
+          {/* With a card on show the heading only repeats what Broom found
+              (or the record's name), so it is left out. */}
+          {!showsCard && (
+            <h2 className={styles.title}>{splitTitle(item).heading}</h2>
+          )}
+        </div>
+
+        {/* The record as the site shows it, with the proposed change laid
+            over it, so the effect of Accept is visible. */}
+        {hasCard && (
+          <div className={styles.cardRow}>
+            <SitePreview
+              table={item.targetTable ?? ''}
+              record={item.targetRecord ?? ''}
+              edits={{
+                ...Object.fromEntries(item.changes.map(c => [c.field, c.to])),
+                ...editsToSave(),
+              }}
+            />
+            <div className={styles.cardRowText}>{excerptBlock}</div>
+          </div>
+        )}
+
+        {/* A request and its reply side by side, so the two read as one
+            exchange (Bryce, 14 Sept 2026). */}
+        {!hasCard &&
+          (excerptBlock && replyBlock ? (
+            <div className={styles.exchange}>
+              {excerptBlock}
+              {replyBlock}
+            </div>
+          ) : (
+            excerptBlock
+          ))}
+
+        {/* Edits typed on the page, in the field's own shape. */}
+        {item.type === 'Add' &&
+          item.targetTable &&
+          item.targetRecord &&
+          (live || item.fields) && (
+            <>
+              <SitePreview
+                table={item.targetTable ?? ''}
+                record={item.targetRecord ?? ''}
+                edits={editsToSave()}
+              />
+              <Fields
+                item={item}
+                fields={live?.fields ?? item.fields ?? {}}
+                schema={live?.schema ?? []}
+                onImage={onImage}
+                d={d}
+                setD={setD}
+                readOnly={readOnly}
+              />
+            </>
+          )}
+
+        {item.type === 'Change' &&
+          (nothingToApply ? (
+            <p className={styles.note}>
+              No field change proposed. Accept keeps the flag in Airtable for
+              you to handle; Reject clears it; or ask Claude for a change.
+            </p>
+          ) : (
+            <div className={styles.diff}>
+              {item.changes.map(c => (
+                <div key={c.field} className={styles.diffRow}>
+                  <span className={styles.label}>{c.field}</span>
+                  <span className={styles.from}>
+                    {(() => {
+                      const pic = pictureOf(c.from, live?.fields[c.field])
+                      return pic ? (
+                        <Picture key={pic.url ?? ''} {...pic} />
+                      ) : (
+                        show(c.from)
+                      )
+                    })()}
+                  </span>
+                  <span className={styles.arrow}>
+                    <Icon src={ICON.arrow} size={12} />
+                  </span>
+                  <span className={styles.to}>
+                    {(() => {
+                      // A proposed picture is shown, not its JSON, and
+                      // is not typed over: it is taken or refused whole.
+                      if (c.field in d.edits || d.editing === c.field) {
+                        return null
+                      }
+                      const pic = pictureOf(c.to, null)
+                      return pic ? (
+                        <Picture key={pic.url ?? ''} {...pic} />
+                      ) : null
+                    })() ??
+                      (d.editing === c.field ? (
+                        <textarea
+                          ref={fitToText}
+                          onInput={e => fitToText(e.currentTarget)}
+                          className={styles.input}
+                          rows={2}
+                          autoFocus
+                          defaultValue={d.edits[c.field] ?? show(c.to)}
+                          onKeyDown={e => {
+                            if (e.key === 'Escape') {
+                              e.preventDefault()
+                              setD({ editing: null })
+                            }
+                          }}
+                          onBlur={e => {
+                            // Closing the box without changing anything is
+                            // not an edit.
+                            const text = e.target.value
+                            const edits = { ...d.edits }
+                            if (text === show(c.to)) delete edits[c.field]
+                            else edits[c.field] = text
+                            setD({ editing: null, edits })
+                          }}
+                        />
+                      ) : (
+                        <EditableValue
+                          text={
+                            c.field in d.edits ? d.edits[c.field] : show(c.to)
+                          }
+                          edited={c.field in d.edits}
+                          canEdit={!revising}
+                          onEdit={() => setD({ editing: c.field })}
+                        />
+                      ))}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ))}
+
+        {item.type === 'Rule' && (
+          <section className={styles.block}>
+            <h3 className={styles.h3}>What changes for the bots</h3>
+            <p className={styles.summary}>
+              {item.summary ?? 'No summary was written for this rule.'}
+            </p>
+            {item.appliesTo && (
+              <p className={styles.note}>Applies to: {item.appliesTo}</p>
+            )}
+          </section>
+        )}
+
+        {(hasCard || !excerptBlock) && replyBlock}
+
+        {(item.error || d.error) && (
+          <p className={styles.error}>{d.error ?? item.error}</p>
+        )}
+      </div>
+
+      {(item.verdict || item.reasons.length > 0) && (
+        <aside className={`${styles.detailAside} ${verdictClass(item)}`}>
+          {item.verdict && (
+            <div className={styles.verdictHead}>
+              <span className={styles.verdictKicker}>Fable says</span>
+              <span className={`${styles.verdictBig} ${styles.withIcon}`}>
+                <Icon src={verdictIcon(item)} size={16} />
+                {verdictWord(item)}
+              </span>
+            </div>
+          )}
+          {item.reasons.length > 0 && (
+            <ul className={styles.reasons}>
+              {item.reasons.map((r, i) => (
+                <li key={i}>{r}</li>
+              ))}
+            </ul>
+          )}
+        </aside>
+      )}
+
+      <div className={styles.actions}>
+        {readOnly ? (
+          <p className={styles.note}>
+            View only: accepting, rejecting and editing stay with people who can
+            edit the Queue.
+          </p>
+        ) : revising ? (
+          <p className={`${styles.note} ${styles.withIcon}`}>
+            <Icon src={ICON.timer} size={12} />
+            Claude is revising this{item.note ? ` (“${item.note}”)` : ''}.
+          </p>
+        ) : d.mode === 'reject' ? (
+          <div className={styles.panel}>
+            <div className={styles.chips}>
+              {item.rejectChips.map((chip, i) => (
+                // Picking a reason IS the rejection: no Confirm step after
+                // it (Bryce, 11 Sept 2026). Confirm stays for a typed
+                // reason and for rules, which need none.
+                <button
+                  key={chip}
+                  className={`${styles.chip} ${d.chip === chip ? styles.chipOn : ''}`}
+                  disabled={d.busy}
+                  onClick={() => {
+                    setD({ chip })
+                    act('reject', { reason: chip })
+                  }}
+                >
+                  <kbd>{i + 1}</kbd>
+                  <span>{chip}</span>
+                </button>
+              ))}
+              <input
+                className={`${styles.input} ${styles.other}`}
+                placeholder="Other reason…"
+                value={d.other}
+                onChange={e => setD({ other: e.target.value, chip: null })}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && reason) act('reject', { reason })
+                }}
+              />
+            </div>
+            <div className={styles.buttons}>
+              <button
+                className={`${styles.button} ${styles.danger}`}
+                disabled={d.busy || (!reason && item.type !== 'Rule')}
+                onClick={() => act('reject', { reason })}
+              >
+                <Icon src={ICON.x} size={12} />
+                {d.busy ? 'Rejecting…' : 'Confirm reject'} <kbd>↵</kbd>
+              </button>
+              <button
+                className={styles.ghost}
+                disabled={d.busy}
+                onClick={() => setD({ mode: 'idle', chip: null, other: '' })}
+              >
+                Cancel <kbd>Esc</kbd>
+              </button>
+            </div>
+          </div>
+        ) : d.mode === 'note' ? (
+          <div className={styles.panel}>
+            <textarea
+              ref={fitToText}
+              onInput={e => fitToText(e.currentTarget)}
+              className={styles.input}
+              rows={3}
+              autoFocus
+              value={d.note}
+              placeholder="What should change? e.g. use the org’s full name, shorten the description"
+              onChange={e => setD({ note: e.target.value })}
+            />
+            <div className={styles.buttons}>
+              <button
+                className={styles.button}
+                disabled={d.busy || !d.note.trim()}
+                onClick={() => act('revise', { note: d.note })}
+              >
+                <Icon src={ICON.stars} size={12} />
+                {d.busy ? 'Sending…' : 'Send to Claude'}
+              </button>
+              <button
+                className={styles.ghost}
+                disabled={d.busy}
+                onClick={() => setD({ mode: 'idle', note: '' })}
+              >
+                Cancel <kbd>Esc</kbd>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className={styles.buttons}>
+            <button
+              className={`${styles.button} ${styles.primary}`}
+              disabled={d.busy}
+              onClick={() => act('accept', { edits: editsToSave() })}
+            >
+              <Icon
+                src={item.type === 'Add' ? ICON.plus : ICON.check}
+                size={12}
+              />
+              {d.busy ? 'Applying…' : acceptLabel(item)} <kbd>A</kbd>
+            </button>
+            <button
+              className={`${styles.button} ${styles.danger}`}
+              disabled={d.busy}
+              onClick={() => setD({ mode: 'reject' })}
+            >
+              <Icon src={ICON.x} size={12} />
+              Reject <kbd>R</kbd>
+            </button>
+            {item.type !== 'Rule' && (
+              <button
+                className={styles.ghost}
+                disabled={d.busy}
+                onClick={() => setD({ mode: 'note' })}
+              >
+                <Icon src={ICON.stars} size={12} />
+                Ask Claude to change it <kbd>N</kbd>
+              </button>
+            )}
+            {editCount > 0 && (
+              <span className={styles.note}>
+                {editCount === 1 ? '1 edit goes' : `${editCount} edits go`} with
+                it
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+const IMAGE_URL =
+  /\.(png|jpe?g|webp|gif|svg)(\?|$)|airtableusercontent\.com|blob\.vercel-storage\.com/i
+
+function isImageList(v: unknown): v is string[] {
+  return (
+    Array.isArray(v) &&
+    v.length > 0 &&
+    v.every(x => typeof x === 'string' && IMAGE_URL.test(x))
+  )
+}
+
+// Fields nobody edits from here: Airtable's own bookkeeping by name, and
+// any column Airtable computes (formulas, lookups, counts, timestamps) by
+// type. Left out of the list (Bryce, 11 Sept 2026: "only the fields I may
+// plausibly want to edit").
+const HOUSEKEEPING =
+  /^(created|date added|last modified|created time|record id|submitter's email)$/i
+const COMPUTED_TYPES = new Set([
+  'formula',
+  'rollup',
+  'lookup',
+  'multipleLookupValues',
+  'count',
+  'autoNumber',
+  'createdTime',
+  'lastModifiedTime',
+  'createdBy',
+  'lastModifiedBy',
+  'button',
+])
+
+function Fields({
+  item,
+  fields,
+  schema,
+  onImage,
+  d,
+  setD,
+  readOnly,
+}: {
+  item: QueueItem
+  fields: Record<string, unknown>
+  schema: FieldInfo[]
+  onImage: (field: string, urls: string[]) => void
+  d: Draft
+  setD: (patch: Partial<Draft>) => void
+  readOnly: boolean
+}) {
+  // With the table's field list we show every column, empty ones included,
+  // in the table's order (name, link and description first); without it,
+  // only what the snapshot carries.
+  const types = new Map(schema.map(f => [f.name, f.type]))
+  const infos = new Map(schema.map(f => [f.name, f]))
+  const all: Record<string, unknown> = {}
+  if (schema.length) {
+    for (const f of schema) all[f.name] = fields[f.name] ?? null
+    for (const [k, v] of Object.entries(fields)) if (!(k in all)) all[k] = v
+  } else {
+    Object.assign(all, fields)
+  }
+  const entries = Object.entries(all)
+  const pick = (re: RegExp) => entries.filter(([k]) => re.test(k))
+  const main = [...pick(NAME_KEYS), ...pick(URL_KEYS), ...pick(DESC_KEYS)]
+  const seen = new Set(main.map(([k]) => k))
+  const editable = ([k]: [string, unknown]) =>
+    !HOUSEKEEPING.test(k) && !COMPUTED_TYPES.has(types.get(k) ?? '')
+  const rest = entries.filter(e => !seen.has(e[0]) && editable(e))
+  const revising = item.status === 'Revising' || readOnly
+  const row = ([k, v]: [string, unknown]) => {
+    const info = infos.get(k)
+    const isAttachment = types.get(k) === 'multipleAttachments'
+    const empty =
+      v === null ||
+      v === undefined ||
+      v === '' ||
+      (Array.isArray(v) && v.length === 0)
+    const edited = k in d.edits
+    const value = edited ? d.edits[k] : show(v)
+    const isUrl = typeof v === 'string' && /^https?:\/\//.test(v) && !edited
+    return (
+      <div key={k} className={styles.fieldRow}>
+        <span className={styles.label}>{k}</span>
+        <span className={styles.value}>
+          {d.editing === k ? (
+            <FieldEditor
+              info={info}
+              value={empty && !edited ? '' : value}
+              onSave={text => {
+                // Saving what was already there is not an edit.
+                const same = text === (empty ? '' : show(v))
+                const edits = { ...d.edits }
+                if (same) delete edits[k]
+                else edits[k] = text
+                setD({ editing: null, edits })
+              }}
+              onCancel={() => setD({ editing: null })}
+            />
+          ) : isAttachment || isImageList(v) ? (
+            <ImageSlot
+              itemId={item.id}
+              field={k}
+              urls={isImageList(v) ? v : []}
+              canUpload={isAttachment && !revising}
+              onDone={urls => onImage(k, urls)}
+            />
+          ) : info?.type === 'checkbox' ? (
+            <label className={styles.check}>
+              <input
+                type="checkbox"
+                checked={edited ? d.edits[k] === 'true' : v === true}
+                disabled={revising}
+                onChange={e =>
+                  setD({
+                    edits: {
+                      ...d.edits,
+                      [k]: e.target.checked ? 'true' : 'false',
+                    },
+                  })
+                }
+              />
+              {(edited ? d.edits[k] === 'true' : v === true) ? 'Yes' : 'No'}
+              {edited && <em className={styles.edited}>edited</em>}
+            </label>
+          ) : empty && !edited ? (
+            <EditableValue
+              text="—"
+              muted
+              edited={false}
+              canEdit={!revising}
+              onEdit={() => setD({ editing: k })}
+            />
+          ) : (
+            <EditableValue
+              text={value}
+              href={isUrl ? (v as string) : undefined}
+              edited={edited}
+              canEdit={!revising && isEditable(v) && !isAttachment}
+              onEdit={() => setD({ editing: k })}
+            />
+          )}
+        </span>
+      </div>
+    )
+  }
+  return (
+    <div className={styles.fields}>
+      {main.map(row)}
+      {rest.length > 0 && (
+        <div className={styles.fieldsRest}>{rest.map(row)}</div>
+      )}
+    </div>
+  )
+}
+
+/** The pictures in an attachment field, and a drop target: drag an image in
+ *  or click to choose one, and it goes onto the record right away. */
+function ImageSlot({
+  itemId,
+  field,
+  urls,
+  canUpload,
+  onDone,
+}: {
+  itemId: string
+  field: string
+  urls: string[]
+  canUpload: boolean
+  onDone: (urls: string[]) => void
+}) {
+  const [over, setOver] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const send = async (file: File) => {
+    setError(null)
+    if (!file.type.startsWith('image/')) {
+      setError('That is not an image.')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Over 5 MB.')
+      return
+    }
+    setBusy(true)
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader()
+        r.onload = () => {
+          const s = String(r.result)
+          resolve(s.slice(s.indexOf(',') + 1))
+        }
+        r.onerror = () => reject(new Error('Could not read the file.'))
+        r.readAsDataURL(file)
+      })
+      const res = await fetch(UPLOAD_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: itemId,
+          field,
+          filename: file.name,
+          contentType: file.type,
+          data: base64,
+        }),
+      })
+      const data = (await res.json()) as { urls?: string[]; error?: string }
+      if (!res.ok || !data.urls)
+        throw new Error(data.error ?? `HTTP ${res.status}`)
+      onDone(data.urls)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // The whole slot — picture included — takes a drop; the new picture
+  // replaces the old one. The box is also a button for the file picker.
+  const dragProps = canUpload
+    ? {
+        onDragOver: (e: React.DragEvent) => {
+          e.preventDefault()
+          setOver(true)
+        },
+        onDragLeave: () => setOver(false),
+        onDrop: (e: React.DragEvent) => {
+          e.preventDefault()
+          setOver(false)
+          const file = e.dataTransfer.files[0]
+          if (file) void send(file)
+        },
+      }
+    : {}
+
+  return (
+    <span
+      className={`${styles.imageSlot} ${over ? styles.imageSlotOver : ''}`}
+      title={
+        canUpload ? 'Drop an image anywhere here to replace it' : undefined
+      }
+      {...dragProps}
+    >
+      {urls.map(src => (
+        <span key={src} className={styles.thumbWrap}>
+          <Image
+            src={src}
+            alt=""
+            width={56}
+            height={56}
+            unoptimized
+            className={styles.thumb}
+          />
+          {over && <span className={styles.thumbOverlay}>Replace</span>}
+        </span>
+      ))}
+      {canUpload && (
+        <span
+          className={`${styles.dropZone} ${over ? styles.dropZoneOver : ''} ${
+            urls.length ? styles.dropZoneSmall : ''
+          }`}
+          role="button"
+          tabIndex={0}
+          title="Drop an image here, or click to choose one"
+          onClick={() => inputRef.current?.click()}
+          onKeyDown={e => {
+            if (e.key === 'Enter') inputRef.current?.click()
+          }}
+        >
+          {busy ? 'Uploading…' : urls.length ? 'Replace' : 'Drop image'}
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={e => {
+              const file = e.target.files?.[0]
+              if (file) void send(file)
+              e.target.value = ''
+            }}
+          />
+        </span>
+      )}
+      {!canUpload && urls.length === 0 && (
+        <span className={styles.noImage}>none</span>
+      )}
+      {error && <span className={styles.noticeInline}>{error}</span>}
+    </span>
+  )
+}
+
+/** The right control for a field's Airtable type: a dropdown of the
+ *  field's own options, toggle chips for a multi-select, a date or number
+ *  input, else a text box. Values travel as text (lists comma-joined) and
+ *  coerceEdits turns them back into the field's shape. */
+function FieldEditor({
+  info,
+  value,
+  onSave,
+  onCancel,
+}: {
+  info: FieldInfo | undefined
+  value: string
+  onSave: (text: string) => void
+  onCancel: () => void
+}) {
+  const type = info?.type
+  const choices = info?.choices ?? []
+  const [picked, setPicked] = useState<string[]>(() =>
+    value
+      .split(',')
+      .map(x => x.trim())
+      .filter(Boolean)
+  )
+  // The editor settles exactly once: a select saves on change and must not
+  // save again when it loses focus as it closes, and a blur that follows
+  // Escape is not a save.
+  const settled = useRef(false)
+  const save = (text: string) => {
+    if (settled.current) return
+    settled.current = true
+    onSave(text)
+  }
+  const cancel = () => {
+    if (settled.current) return
+    settled.current = true
+    onCancel()
+  }
+  const esc = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      cancel()
+    }
+  }
+  if (type === 'singleSelect' && choices.length) {
+    return (
+      <select
+        className={styles.input}
+        autoFocus
+        defaultValue={value}
+        onKeyDown={esc}
+        onChange={e => save(e.target.value)}
+        onBlur={e => save(e.target.value)}
+      >
+        <option value="">—</option>
+        {choices.map(c => (
+          <option key={c} value={c}>
+            {c}
+          </option>
+        ))}
+      </select>
+    )
+  }
+  if (type === 'multipleSelects' && choices.length) {
+    return (
+      <span className={styles.panel} onKeyDown={esc}>
+        <span className={styles.chips}>
+          {choices.map(c => {
+            const on = picked.includes(c)
+            return (
+              <button
+                key={c}
+                className={`${styles.chip} ${on ? styles.chipOn : ''}`}
+                onClick={() =>
+                  setPicked(on ? picked.filter(x => x !== c) : [...picked, c])
+                }
+              >
+                {c}
+              </button>
+            )
+          })}
+        </span>
+        <span className={styles.buttons}>
+          <button
+            className={styles.button}
+            autoFocus
+            onClick={() => save(picked.join(', '))}
+          >
+            Done
+          </button>
+          <button className={styles.ghost} onClick={cancel}>
+            Cancel <kbd>Esc</kbd>
+          </button>
+        </span>
+      </span>
+    )
+  }
+  if (
+    type === 'date' ||
+    type === 'number' ||
+    type === 'url' ||
+    type === 'email'
+  ) {
+    return (
+      <input
+        className={styles.input}
+        type={type === 'date' ? 'date' : type === 'number' ? 'number' : 'text'}
+        autoFocus
+        defaultValue={value}
+        onKeyDown={e => {
+          esc(e)
+          if (e.key === 'Enter') save((e.target as HTMLInputElement).value)
+        }}
+        onBlur={e => save(e.target.value)}
+      />
+    )
+  }
+  return (
+    <textarea
+      ref={fitToText}
+      onInput={e => fitToText(e.currentTarget)}
+      className={styles.input}
+      rows={value.length > 120 ? 5 : 2}
+      autoFocus
+      defaultValue={value}
+      onKeyDown={esc}
+      onBlur={e => save(e.target.value)}
+    />
+  )
+}
+
+/** A value you can click to edit: a visible pencil, a hover tint, and a link
+ *  that still opens when it is one. */
+function EditableValue({
+  text,
+  href,
+  edited,
+  canEdit,
+  muted,
+  onEdit,
+}: {
+  text: string
+  href?: string
+  edited: boolean
+  canEdit: boolean
+  muted?: boolean
+  onEdit: () => void
+}) {
+  const body = href ? (
+    <a href={href} target="_blank" rel="noreferrer">
+      {text}
+    </a>
+  ) : (
+    <span className={muted ? styles.empty : undefined}>{text}</span>
+  )
+  if (!canEdit) return body
+  return (
+    <span
+      className={styles.editable}
+      role="button"
+      tabIndex={0}
+      title="Click to edit"
+      onClick={e => {
+        // A click on the link itself opens the link; anywhere else edits.
+        if ((e.target as HTMLElement).tagName === 'A') return
+        onEdit()
+      }}
+      onKeyDown={e => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          onEdit()
+        }
+      }}
+    >
+      {body}
+      {edited && <em className={styles.edited}>edited</em>}
+      <span className={styles.editHint}>
+        <Icon src={ICON.pencil} size={12} />
+      </span>
+    </span>
+  )
+}
+
+/** The reply draft as a block: click anywhere on it to edit. */
+const LINK_RE = /https?:\/\/[^\s<>)\]]+/g
+
+/** Text with its links clickable. */
+function linkify(text: string): React.ReactNode[] {
+  const out: React.ReactNode[] = []
+  let last = 0
+  for (const m of text.matchAll(LINK_RE)) {
+    const i = m.index ?? 0
+    if (i > last) out.push(text.slice(last, i))
+    out.push(
+      <a key={i} href={m[0]} target="_blank" rel="noreferrer">
+        {m[0]}
+      </a>
+    )
+    last = i + m[0].length
+  }
+  if (last < text.length) out.push(text.slice(last))
+  return out
+}
+
+/** "12 September 2026, 04:12" in the viewer's own time. */
+function whenLabel(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const day = d.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  })
+  const time = d.toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+  return `${day}, ${time}`
+}
+
+// Older Discord rows carry the attribution as a first line of the excerpt
+// ("veronica (@veronica0548) on Discord, 12 September 2026, 04:12 (DM):");
+// the page lays the same facts out itself, so that line goes.
+const OLD_HEADER_RE = /^[^\n]* on Discord, [^\n]*:\n/
+
+/** A Discord message as a chat message: picture, name, handle, when, then
+ *  the words, with links clickable. */
+function Said({ by, text }: { by: SaidBy; text: string }) {
+  const body = text.replace(OLD_HEADER_RE, '').trim()
+  const meta = [
+    by.when ? whenLabel(by.when) : null,
+    by.how && by.how !== 'DM' ? by.how : null,
+    by.where,
+  ].filter(Boolean)
+  return (
+    <div className={styles.said}>
+      {by.avatar ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          className={styles.avatar}
+          src={by.avatar}
+          alt=""
+          referrerPolicy="no-referrer"
+        />
+      ) : (
+        <span className={`${styles.avatar} ${styles.avatarEmpty}`} />
+      )}
+      <div className={styles.message}>
+        <div className={styles.messageHead}>
+          <span className={styles.messageName}>{by.name}</span>
+          {by.handle && (
+            <span className={styles.messageHandle}>{by.handle}</span>
+          )}
+          {meta.length > 0 && (
+            <span className={styles.messageWhen}>{meta.join(' · ')}</span>
+          )}
+        </div>
+        <div className={styles.messageBody}>{linkify(body)}</div>
+      </div>
+    </div>
+  )
+}
+
+/** The reply as a box that copies itself on a click: no buttons, no editing
+ *  here (Bryce, 14 Sept 2026) – click, then paste it in Discord. */
+function CopyBox({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = () => {
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+  return (
+    <pre
+      className={`${styles.draft} ${styles.draftEditable} ${styles.draftCopy}`}
+      role="button"
+      tabIndex={0}
+      title="Click to copy"
+      onClick={copy}
+      onKeyDown={e => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          copy()
+        }
+      }}
+    >
+      {text}
+      <span className={styles.draftHint}>
+        {copied ? (
+          <em className={styles.edited}>Copied</em>
+        ) : (
+          <Icon src={ICON.copy} size={16} />
+        )}
+      </span>
+    </pre>
+  )
+}
+
+/** Copies the reply so it can be pasted into Discord: replies from the
+ *  Queue are drafts, never sent (Bryce, 14 Sept 2026). */
+function CopyReply({ text, className }: { text: string; className?: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      className={className ?? styles.ghost}
+      onClick={() => {
+        void navigator.clipboard.writeText(text).then(() => {
+          setCopied(true)
+          setTimeout(() => setCopied(false), 2000)
+        })
+      }}
+    >
+      <Icon src={ICON.copy} size={16} />
+      {copied ? 'Copied' : 'Copy reply'}
+    </button>
+  )
+}
+
+/** The conversation the request came from, in Discord. */
+function OpenOnDiscord({
+  href,
+  className,
+}: {
+  href: string
+  className?: string
+}) {
+  return (
+    <a
+      className={className ?? styles.ghost}
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+    >
+      <Icon src={ICON.external} size={16} />
+      Open on Discord
+    </a>
+  )
+}
+
+function ReplyDraft({
+  text,
+  edited,
+  canEdit,
+  onEdit,
+}: {
+  text: string
+  edited: boolean
+  canEdit: boolean
+  onEdit: () => void
+}) {
+  if (!canEdit) return <pre className={styles.draft}>{text}</pre>
+  return (
+    <pre
+      className={`${styles.draft} ${styles.draftEditable}`}
+      role="button"
+      tabIndex={0}
+      title="Click to edit"
+      onClick={onEdit}
+      onKeyDown={e => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          onEdit()
+        }
+      }}
+    >
+      {text}
+      <span className={styles.draftHint}>
+        {edited && <em className={styles.edited}>edited</em>}
+        <Icon src={ICON.pencil} size={12} />
+      </span>
+    </pre>
+  )
+}
+
+function DoneList({
+  items,
+  busyFor,
+  errorFor,
+  onUndo,
+}: {
+  items: QueueItem[]
+  busyFor: (id: string) => boolean
+  errorFor: (id: string) => string | null
+  /** Null for a view-only session: decisions are shown, not undone. */
+  onUndo: ((item: QueueItem) => void) | null
+}) {
+  return (
+    <div className={styles.detailInner}>
+      <h2 className={`${styles.title} ${styles.withIcon}`}>
+        <span className={styles.yes}>
+          <Icon src={ICON.done} />
+        </span>
+        Done today
+      </h2>
+      <p className={styles.note}>
+        Published listings and field changes reach the site within about three
+        minutes.
+      </p>
+      <div className={styles.doneList}>
+        {items.map(item => (
+          <div key={item.id} className={styles.doneRow}>
+            {item.logo ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img className={styles.rowLogo} src={item.logo} alt="" />
+            ) : (
+              <span
+                className={`${styles.rowLogo} ${styles.rowLogoEmpty} ${dotClass(item)}`}
+              >
+                <Icon src={sourceIcon(item)} />
+              </span>
+            )}
+            <span className={styles.rowBody}>
+              <span className={styles.rowTitle}>
+                {splitTitle(item).name ?? item.title}
+              </span>
+              <span className={styles.rowMeta}>
+                {item.source !== 'Comb' && <span>{item.source}</span>}
+                {item.page && <span>{pageLabel(item)}</span>}
+                <span
+                  className={`${styles.withIcon} ${item.status === 'Rejected' ? styles.no : styles.yes}`}
+                >
+                  <Icon
+                    src={item.status === 'Rejected' ? ICON.x : ICON.check}
+                    size={12}
+                  />
+                  {doneLabel(item)}
+                </span>
+                {item.rejectReason && <span>{item.rejectReason}</span>}
+                {item.status !== 'Rejected' && replyLabel(item) && (
+                  <span>{replyLabel(item)}</span>
+                )}
+                <span>{ago(item.decidedAt)}</span>
+              </span>
+            </span>
+            <span className={styles.doneActions}>
+              {errorFor(item.id) && (
+                <span className={styles.error}>{errorFor(item.id)}</span>
+              )}
+              {item.source === 'Discord' &&
+                item.replyDraft &&
+                item.status !== 'Rejected' && (
+                  <>
+                    <CopyReply text={item.replyDraft} />
+                    {item.sourceLink && (
+                      <OpenOnDiscord href={item.sourceLink} />
+                    )}
+                  </>
+                )}
+              {onUndo && (
+                <button
+                  className={styles.ghost}
+                  disabled={busyFor(item.id)}
+                  onClick={() => onUndo(item)}
+                >
+                  <Icon src={ICON.undo} size={12} />
+                  {busyFor(item.id) ? 'Undoing…' : 'Undo'}
+                </button>
+              )}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}

@@ -48,6 +48,7 @@ export default function Footer() {
                 href="https://airtable.com/appF8XfZUGXtfi40E/pageXZp18w3Sqm1Z7/form"
                 section="Help us out"
                 label="Give anonymous feedback"
+                airtablePrefillField="Page"
               />
               <FooterLink
                 href="https://www.every.org/alignment-ecosystem-development#/donate/card"

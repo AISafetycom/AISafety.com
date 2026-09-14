@@ -6,7 +6,9 @@ import './globals.css'
 import LayoutShell from '@/components/LayoutShell'
 import MatomoRouteTracker from '@/components/MatomoRouteTracker'
 import PreviewBanner from '@/components/PreviewBanner'
+import ScrollToHash from '@/components/ScrollToHash'
 import { fetchAllCounts } from '@/lib/data/counts'
+import { isPreviewRequest } from '@/lib/preview'
 
 const inter = Inter({
   subsets: ['latin'],
@@ -28,18 +30,15 @@ export const metadata: Metadata = {
     apple: '/images/webclip.png',
   },
   openGraph: {
-    title: 'AISafety.com',
-    description:
-      'The hub for AI existential safety, providing resources to help you learn about and help mitigate the risks from advanced AI.',
-    images: [{ url: '/images/link-preview.png' }],
+    siteName: 'AISafety.com',
     type: 'website',
+    images: [{ url: '/images/link-preview.jpg' }],
   },
+  // Card type only: title, description and image fall back to each page's
+  // own (its metadata, or its opengraph-image.tsx), so X shows the page
+  // rather than the homepage blurb.
   twitter: {
     card: 'summary_large_image',
-    title: 'AISafety.com',
-    description:
-      'The hub for AI existential safety, providing resources to help you learn about and help mitigate the risks from advanced AI.',
-    images: ['/images/link-preview.png'],
   },
 }
 
@@ -49,6 +48,7 @@ export default async function RootLayout({
   children: React.ReactNode
 }>) {
   const counts = await fetchAllCounts()
+  const preview = await isPreviewRequest()
 
   return (
     <html lang="en" suppressHydrationWarning>
@@ -83,7 +83,10 @@ export default async function RootLayout({
         <Suspense fallback={null}>
           <MatomoRouteTracker />
         </Suspense>
-        <LayoutShell counts={counts}>{children}</LayoutShell>
+        <LayoutShell counts={counts} preview={preview}>
+          <ScrollToHash />
+          {children}
+        </LayoutShell>
         <PreviewBanner />
       </body>
     </html>

@@ -71,6 +71,30 @@ export const TYPE_PATH: Record<SearchType, string | null> = {
   page: null,
 }
 
+/** The search type whose listings a resource page shows ('/map' → 'map'),
+ *  or null for pages without any (the homepage, /about). */
+export function typeForPath(pathname: string): SearchType | null {
+  for (const [type, path] of Object.entries(TYPE_PATH)) {
+    if (path !== null && path === pathname) return type as SearchType
+  }
+  return null
+}
+
+/** The index with one type's entries replaced by `entries`, in the same
+ *  place — preview mode lays a live read of the page being looked at over
+ *  the prebuilt index (see SearchProvider). Other types are untouched; a
+ *  type the index didn't have goes at the end. */
+export function withLiveEntries(
+  index: SearchEntry[],
+  type: SearchType,
+  entries: SearchEntry[]
+): SearchEntry[] {
+  const first = index.findIndex(e => e.type === type)
+  if (first === -1) return [...index, ...entries]
+  const after = index.slice(first).filter(e => e.type !== type)
+  return [...index.slice(0, first), ...entries, ...after]
+}
+
 export function countsByType(
   pathCounts: Partial<Record<string, number>>
 ): Map<SearchType, number> {

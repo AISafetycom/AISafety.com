@@ -6,10 +6,11 @@ import {
   fieldString,
   fieldText,
   publishedFormula,
+  type AirtableRawRecord,
 } from './airtable'
 import { fetchPublicData, hasAirtableCredentials } from './public-api'
 
-const TABLE_ID = 'tbl59Ye8oxvPjoVJv'
+export const TABLE_ID = 'tbl59Ye8oxvPjoVJv'
 const VIEW_ID = 'viwzMBhPBk1GpQXnn'
 
 // Permanent Airtable field IDs for the Founder toolkit table. Fetching,
@@ -42,6 +43,33 @@ export interface FounderResource {
   featuredTagline: string | null
 }
 
+/**
+ * One Founder toolkit record (fields keyed by field id) → the listing the page
+ * renders, or null when the site would skip it (no name). Publish/Hide
+ * filtering stays in getFounderResources(), so an unpublished record can still be
+ * mapped — the admin Queue previews proposed records through this.
+ */
+export function founderResourceFromRecord(
+  record: AirtableRawRecord
+): FounderResource | null {
+  const f = record.fields
+  const name = fieldString(f[FIELD.name])
+  if (!name) return null
+
+  return {
+    id: record.id,
+    dateAdded: record.createdTime?.slice(0, 10) ?? null,
+    lastModified: fieldDateOnly(f[FIELD.lastModified]),
+    name,
+    type: fieldText(f[FIELD.type]),
+    image: fieldAttachmentUrl(f[FIELD.image]),
+    description: fieldString(f[FIELD.description]) || '',
+    website: fieldString(f[FIELD.website]) || '#',
+    featured: fieldFeatured(f[FIELD.featured]),
+    featuredTagline: fieldString(f[FIELD.featuredTagline]),
+  }
+}
+
 export async function getFounderResources(): Promise<FounderResource[]> {
   if (!hasAirtableCredentials())
     return fetchPublicData<FounderResource>('founder-resources')
@@ -58,22 +86,9 @@ export async function getFounderResources(): Promise<FounderResource[]> {
 
   const results: FounderResource[] = []
   for (const record of raw) {
-    const f = record.fields
-    const name = fieldString(f[FIELD.name])
-    if (!name) continue
-
-    results.push({
-      id: record.id,
-      dateAdded: record.createdTime?.slice(0, 10) ?? null,
-      lastModified: fieldDateOnly(f[FIELD.lastModified]),
-      name,
-      type: fieldText(f[FIELD.type]),
-      image: fieldAttachmentUrl(f[FIELD.image]),
-      description: fieldString(f[FIELD.description]) || '',
-      website: fieldString(f[FIELD.website]) || '#',
-      featured: fieldFeatured(f[FIELD.featured]),
-      featuredTagline: fieldString(f[FIELD.featuredTagline]),
-    })
+    const resource = founderResourceFromRecord(record)
+    if (!resource) continue
+    results.push(resource)
   }
 
   return results

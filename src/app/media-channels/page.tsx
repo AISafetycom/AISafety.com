@@ -3,13 +3,10 @@ import PageHeader from '@/components/PageHeader'
 import FeaturedCard from '@/components/FeaturedCard'
 import MediaChannelsClient from './MediaChannelsClient'
 import { getMediaChannels } from '@/lib/data/media-channels'
+import { pageMetadata } from '@/lib/page-metadata'
+import { SITE_PAGES } from '@/lib/site-pages'
 
-export const metadata = {
-  title: 'Media Channels – AISafety.com',
-  description:
-    'Information sources to help you learn more about AI safety and stay up to date.',
-  alternates: { canonical: '/media-channels' },
-}
+export const metadata = pageMetadata(SITE_PAGES.mediaChannels)
 
 export default async function MediaChannelsPage() {
   const [channels, lastUpdated] = await Promise.all([

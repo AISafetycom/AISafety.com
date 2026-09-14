@@ -1,204 +1,128 @@
-# Architecture Documentation
+# Architecture
 
 ## Overview
 
-AISafety.com is a **Next.js 16 web application** using the App Router pattern. It serves as a community hub for AI safety resources, pulling content from Airtable.
+AISafety.com is a **Next.js 16 (App Router) + TypeScript** app on Vercel. The public pages are prerendered at build time from one Airtable base. Around them sit a public read-only Data API, a chatbot, first-party analytics, and a password-gated admin area. Nearly all of the code is written with Claude Code; `CLAUDE.md` at the repo root holds the conventions, this file explains how the pieces fit.
 
-## Architecture Diagram
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        BROWSER                               │
-├─────────────────────────────────────────────────────────────┤
-│  Pages (SSR)           │  Client Components                  │
-│  - Homepage            │  - D3Map (interactive map)          │
-│  - Events              │  - LastUpdated (dynamic dates)      │
-│  - Map page            │  - UpButton (scroll behavior)       │
-└────────────┬───────────┴──────────────┬─────────────────────┘
-             │                          │
-             ▼                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    NEXT.JS SERVER                            │
-├─────────────────────────────────────────────────────────────┤
-│  API Routes (src/app/api/)                                   │
-│  ┌─────────────────┐  ┌─────────────────┐                   │
-│  │ /api/map        │  │ /api/last-updated│                  │
-│  │ GET: all orgs   │  │ GET: timestamps  │                  │
-│  │ 5-min cache     │  │ 5-min cache      │                  │
-│  └────────┬────────┘  └────────┬─────────┘                  │
-└───────────┼────────────────────┼────────────────────────────┘
-            │                    │
-            ▼                    ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      AIRTABLE                                │
-│  ┌─────────────────┐  ┌─────────────────┐                   │
-│  │ Map Table       │  │ Metadata Table  │                   │
-│  │ 323+ orgs       │  │ Last updated    │                   │
-│  └─────────────────┘  └─────────────────┘                   │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Key Architectural Decisions
-
-### 1. Server vs Client Components
-
-| Component   | Rendering | Why                                           |
-| ----------- | --------- | --------------------------------------------- |
-| Navigation  | Server    | Static content, no interactivity              |
-| Footer      | Server    | Static content                                |
-| D3Map       | Client    | D3 requires DOM access, zoom/pan interactions |
-| LastUpdated | Client    | Fetches data after hydration                  |
-| Pages       | Server    | SEO, faster initial load                      |
-
-### 2. Data Fetching Strategy
-
-- **API Routes as proxy**: Don't expose Airtable credentials to client
-- **5-minute cache**: `{ next: { revalidate: 300 } }` balances freshness with performance
-- **Pagination handling**: Airtable returns max 100 records, API loops to get all
-
-### 3. Styling: Constraint-Based CSS
-
-Instead of Tailwind's unlimited utilities, this project enforces a design system:
-
-```css
-/* Allowed spacing values (globals.css) */
-.padding-4px, .padding-8px, .padding-12px, .padding-16px,
-.padding-24px, .padding-32px, .padding-40px, .padding-56px,
-.padding-80px, .padding-104px
-
-/* Color palette */
---teal-100 through --teal-900 (grays with teal tint)
---bright-teal-300, --bright-teal-500 (accent colors)
-```
-
-**Rationale**: Prevents arbitrary values that break visual consistency. If you need `padding-bottom: 14px`, the answer is "use 12px or 16px instead."
-
-### 4. No Global State Library
-
-Current state management uses only React's built-in hooks:
-
-- `useState` for local component state
-- `useEffect` for side effects
-- No Redux, Zustand, or Context API needed yet
-
-This is appropriate given the app's current complexity. Consider adding global state if:
-
-- Multiple unrelated components need the same data
-- You're prop-drilling more than 2-3 levels deep
-
-## API Reference
-
-### GET /api/map
-
-Returns all organizations for the field map.
-
-**Response:**
-
-```json
-{
-  "records": [
-    {
-      "id": "rec123",
-      "title": "Anthropic",
-      "shortName": null,
-      "description": "AI safety company...",
-      "category": "Research Lab",
-      "status": "Active",
-      "logo": "https://...",
-      "mapLogo": "https://...",
-      "link": "https://anthropic.com",
-      "x": 45.3,
-      "y": 15.9,
-      "scale": "Large",
-      "isMagic": false
-    }
-  ],
-  "lastUpdated": "2026-01-15",
-  "count": 323
-}
-```
-
-### GET /api/last-updated/map
-
-### GET /api/last-updated/events
-
-Returns timestamp for when data was last updated.
-
-**Response:**
-
-```json
-{
-  "lastUpdated": "2026-01-15T00:00:00.000Z",
-  "formattedDate": "15 January 2026"
-}
-```
-
-## File Organization
+## The big picture
 
 ```
-src/app/
-├── layout.tsx          # Root layout - wraps all pages
-├── globals.css         # ALL styles live here
-├── page.tsx            # Homepage
-├── not-found.tsx       # 404 page
-├── map/
-│   ├── page.tsx        # Map page (fetches data, renders D3Map)
-│   ├── D3Map.tsx       # Client component with D3 visualization
-│   ├── layout.tsx      # Map-specific layout
-│   └── page.module.css # Map-specific styles
-├── events/
-│   └── page.tsx
-├── training/
-│   └── page.tsx
-└── api/
-    ├── map/
-    │   └── route.ts    # Main data endpoint
-    └── last-updated/
-        ├── map/route.ts
-        └── events/route.ts
+ Visitor's browser
+   │ static pages · chatbot (SSE) · /api/track beacon · Data API
+   ▼
+ ┌──────────────────────── Next.js on Vercel ─────────────────────────┐
+ │ src/app/*                 pages, prerendered from src/lib/data     │
+ │ src/app/api/v1/*          public Data API (src/lib/api)            │
+ │ src/app/api/assistant     chatbot ──────────────▶ Anthropic API    │
+ │ src/app/api/track         analytics beacon ─────▶ Upstash Redis   │
+ │ src/app/admin/*           queue · analytics · chat log ·           │
+ │                           map editor · preview · newsletter        │
+ │ src/proxy.ts              AI-assistant fetches ─▶ Matomo           │
+ │ crons (vercel.json)       check-rebuild · check-catalog · themes   │
+ └────────────────────────────────────────────────────────────────────┘
+   │ reads (hourly cache)        │ attachments, transcripts
+   ▼                             ▼
+ Airtable base               Vercel Blob
+ (source of truth)           (permanent image URLs)
 ```
 
-## Admin map editor
+## Data layer: `src/lib/data`
 
-`/admin/map` (owner password only, `mapEditor` capability in
-`src/lib/admin/auth.ts`) lets the owner drag logos on the Field map and writes
-the record's `x`/`y` to Airtable via `/api/admin/map` (GET live records,
-PATCH one move). It is deliberately a **copy** of the public map's rendering,
-not a shared component: `src/lib/admin/map-geometry.ts` mirrors the constants
-in `src/app/map/D3Map.tsx` and `map-geometry.test.ts` fails if they drift.
-The editor reads Airtable directly with `cache: 'no-store'` (unpublished rows
-included, `Hide?` rows excluded) – never through `fetchAirtableRecords` /
-`unstable_cache` – and never revalidates anything, so `/map`'s data path,
-cache and bundle are untouched. The only Airtable fields it can write are `x`
-and `y` (`buildPositionFields` in `map-editor-core.ts`; any other key in the
-request body is rejected). Publish?/Hide?/Scale stay in Airtable.
+- **One module per Airtable table**, each exporting a typed `getX()` (`getEvents`, `getJobs`, `getMapData`, …). A module declares `TABLE_ID`, an optional `VIEW_ID`, and a `FIELD` map of **permanent field IDs** with the field names as comments. Records are fetched with `returnFieldsByFieldId`, so renaming a field in Airtable changes nothing here.
+- **What is live:** `publishedFormula(publishId, hideId)` = Publish? checked and Hide? unchecked. Every public read uses it.
+- **`fetchAirtableRecords`** (in `airtable.ts`) does pagination, retries, and pacing to stay under Airtable's five requests per second, and wraps the read in `unstable_cache` for one hour under the tag `airtable-records`. Field helpers (`fieldString`, `fieldNumber`, `fieldStringArray`, `fieldText`, `fieldAttachmentUrl`, `fieldDateOnly`, `fieldFeatured`) coerce the untyped values.
+- **Attachments are mirrored to Vercel Blob** (`mirrorAttachments`, prefix `airtable/`). Airtable's own attachment URLs are signed and expire within hours, so they must never reach a cached page or an API response. Without `BLOB_READ_WRITE_TOKEN` the code warns and falls back to the expiring URLs, which is fine for a local dev session.
+- **Contributor mode** (`public-api.ts`): with no Airtable credentials, every `getX()` fetches the same objects from the live site's Data API instead, minus the internal curation fields. Anyone can run the site locally with no secrets.
+- Cross-cutting logic lives in dependency-free modules next to the data layer: `featured.ts` (featured slots and the events/training queue), `placements.ts`, `filter-counts.ts`, `training-order.ts`, `format-date.ts`, `utm.ts`, `search.ts` with `data/search-index.ts`.
+
+## Pages: `src/app`
+
+- `page.tsx` is a **server component**: it awaits `getX()` and `fetchLastUpdated()`, renders `PageHeader`, and hands the listings to a **client component** (`EventsClient.tsx`, `JobsClient.tsx`, …) that owns filters, sorting, and click tracking. Nothing in the browser talks to Airtable.
+- `export const metadata = pageMetadata(SITE_PAGES.x)`. `src/lib/site-pages.ts` is the one list of public pages (title, description, nav icon); `pageMetadata()` turns an entry into `<head>` tags and each route's `opengraph-image.tsx` renders the link-preview card from the same entry (`src/lib/link-preview`).
+- `sitemap.ts` lists the public routes; `next.config.ts` holds every redirect, including the old Webflow paths.
+- The root `layout.tsx` wraps pages in nav, footer, the Matomo script, the preview banner, and the chatbot widget (`src/components/assistant`).
+
+## Freshness: builds, revalidation, preview
+
+- Pages are static, so the site is only as fresh as its last build. A Vercel cron calls **`/api/check-rebuild` every minute**. For each table in its `TABLES` list it asks Airtable whether any published row changed since `BUILD_TIME` (`hasChangesSince` in `changed-since.ts`, using `LAST_MODIFIED_TIME()` so same-day edits are not lost). If one did, it clears the `airtable-records` cache tag so runtime readers (chatbot catalog, search index, Data API) refetch, then POSTs the Vercel deploy hook, with cooldowns so a burst of edits triggers one build. An Airtable edit is live in about two to three minutes.
+- **Preview mode:** `/admin/preview` turns on Next Draft Mode for that admin's browser. With the Draft Mode cookie, `fetchAirtableRecords` skips the cache and reads Airtable live; identical reads within two seconds share one request (`shareLiveRead` in `src/lib/preview.ts`). `PreviewAutoRefresh` polls `/api/admin/preview/changed` every two seconds and refreshes the page when something changed. `scripts/pin-preview-keys.mjs` runs before every build and derives the Draft Mode keys from `PREVIEW_KEY_SEED`, so preview cookies survive rebuilds.
+
+## Public Data API: `/api/v1`
+
+`src/lib/api` is a thin skin over the data layer. `registry.ts` declares each endpoint (slug, description, which fields are public, which can be filtered), `filter.ts` applies the whitelisted query parameters and free-text `q`, `response.ts` builds the JSON envelope with CORS and cache headers, and `handler.ts` (`createCollectionHandler(slug, loader)`) wires them together and strips internal curation fields where they are not shown publicly. `/api/v1/openapi.json` and the `/developers` page describe it; `docs/api.md` and `docs/api-changelog.md` are the written contract. Data shaping belongs in `src/lib/data`, never here.
+
+## Chatbot: `src/lib/assistant`, `src/components/assistant`
+
+- `POST /api/assistant` streams Server-Sent Events from the Anthropic SDK (`runAssistantStream` in `stream.ts`). `prompt.ts` holds `PRODUCTION_PROMPT` and `PROMPT_VERSION`; `models.ts` pins the model IDs; `tools.ts` gives the model tools over a catalog (`catalog.ts`) built from the same data layer, plus page reading, search, geocoding, and the donation guide.
+- `rate-limit.ts`: 50 requests per IP per day through Upstash's sliding window. Without Redis (local dev) requests are allowed and production logs a warning.
+- Logging runs **after the response is sent** (`after()`): `conversation-store.ts` writes each turn to the console, the Airtable conversations table (`ADMIN_CONVERSATIONS_TABLE_ID`) and an optional webhook; `transcript-blob.ts` mirrors the full transcript to Blob. Chats not arriving on `aisafety.com` (dev, previews) are tagged internal.
+- Admin: `/admin/chatbot/log` browses and annotates conversations (`PATCH /api/admin/conversations`), `/admin/chatbot/playground` tries prompt drafts and models against `/api/admin/test-run`. A daily cron, `/api/check-catalog`, checks that every table in the base is either in the catalog's `RESOURCE_TABLES` or its internal denylist.
+
+## Analytics
+
+- **Matomo:** the script in the root layout plus `MatomoRouteTracker` for client-side navigation. `src/proxy.ts` runs on every page request and reports fetches by AI assistants (ChatGPT, Claude, Perplexity, …) server-side, since they never run the script. Visitors can opt out on the privacy page (`useTrackingOptOut`).
+- **First-party events:** the browser posts to `/api/track` (public, every field length-capped, per-IP throttle that fails open). `src/lib/analytics/events.ts` stores events in Upstash Redis, one list per calendar month, or in an `.analytics-dev/` NDJSON file when Redis is not configured. `/admin/analytics` aggregates per query. `themes.ts` groups typed chatbot questions with a Claude call, refreshed by a weekly cron or the dashboard button. Client helpers for click and filter tracking live in `src/lib/analytics.ts`.
+
+## Admin: `src/app/admin`, `src/lib/admin`
+
+- **Auth** (`auth.ts`, `access.ts`, `users.ts`, `users-store.ts`, `google-oidc.ts`, `session.ts`): people sign in with Google. `/api/admin/auth/google` starts an OpenID Connect authorization-code flow with PKCE (state, nonce and verifier sealed in a ten-minute cookie under `ADMIN_SESSION_SECRET`); `/api/admin/auth/google/callback` swaps the code for an ID token, checks its signature against Google's published keys plus issuer, audience, expiry and nonce, and only then looks the verified email up: first `ROOT_ADMINS` in `users.ts` (the owner, built into the code so an empty or unreachable store can never lock them out), then the managed list in `users-store.ts`. A hit sets a 7-day httpOnly session cookie holding just the email and timestamps under an HMAC. Access is looked up again on every request, so removing someone or unticking an area takes effect on their next click.
+
+  There are no roles. Each person has one grant per area (`AccessFlags` in `access.ts`: `queue`, `playground`, `conversationLog`, `analytics`, `mapEditor`, `preview`, `newsletter`, `manageUsers`), and a grant is `false`, `'view'` or `'edit'`: `'view'` opens the tab, `'edit'` also lets its writes through. Areas that can change the live site (Queue, Map editor, Newsletters, Admin admin) carry an `edit` note in `ACCESS_AREAS`, which is what puts a "can edit" tick next to them on the Admin admin page; the others stop at `'view'` (`parseAccess` clamps). `ACCESS_AREAS` is the single list that drives the tab bar (`nav.ts`), the ticks on the Admin admin page and the gates. Layouts call `currentAccess()` once and let a view-only session in; the page hides what it can't do (a "View only" line instead of the action buttons) and the API routes ask the specific capability, read-level for reads and edit-level for writes (`canViewQueue` / `canReviewQueue`, `canViewMap` / `canEditMap`, `canViewNewsletter` / `canSendNewsletter`, `canViewUsers` / `canManageUsers`), never `isAdmin()`. Rows stored before 11 September 2026 hold booleans (a tick meant everything the tab could do) plus a separate `newsletterPreview`; `users-store.ts` reads every row through `parseAccess`, which maps `true` to the area's top grant and `newsletterPreview` to `newsletter: 'view'`, so nothing needs migrating and the next write stores the new shape. `currentAdmin()` returns who is signed in for attribution. Approving a newsletter send and changing who can sign in additionally need `hasFreshSession(SENSITIVE_FRESH_SECONDS)`: a session Google minted within the last 30 minutes, which a stolen cookie cannot produce on its own. Env: `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` (Google Cloud console, project "AISafety admin"), `ADMIN_SESSION_SECRET` (rotating it signs everyone out). Registered redirect URIs: production, `ai-safety-com.vercel.app` and localhost dev ports; branch preview deployments cannot sign in with Google.
+
+  **Admin admin** (`/admin/users`, `manageUsers` area; its `'view'` grant shows the list, `'edit'` changes it) is where people are added by Google email, given tabs or removed; their display name is whatever Google reports at their first sign-in (`recordSignIn`), never typed in. Everyone but the root admins lives in `users-store.ts`: one small JSON document in the same Upstash Redis the analytics use (`admin:users`, plus an `admin:last-sign-in` hash the Google callback updates), or `.admin-dev/users.json` on a laptop without Redis. `/api/admin/users` (GET/POST/PATCH/DELETE) validates input with `validateUserInput`; writes need the fresh session above, nobody can edit a root admin, remove their own login or take the edit grant off their own Admin admin access, and every person must keep at least one tab. A write refused for a stale session (401 `reauth`) makes the page stash its ticks, the add form and that request in `sessionStorage` (`users-pending.ts`, honoured for an hour), leave for Google with `next=/admin/users?resume=1`, and on the way back restore the ticks and send the request again; without the marker (a later visit) only the ticks come back. Nobody needs to send their email first: a Google account that isn't on the list gets an "Access requested" screen (`/admin/login?requested=1`, the address carried in a sealed five-minute cookie rather than the URL) and the callback records the request (`admin:access-requests`, capped at 100, one entry per email with a try count). Requests appear at the top of Admin admin with a badge on the tab; approving is a normal add that keeps the Google name and clears the request, `DELETE /api/admin/users/requests` dismisses one. `mail.ts` emails the owner when a request is recorded and the person when they are approved or added, through the same kind of Google Apps Script web app the hackathon forms use (source in docs/admin-mail-script.md; env `ADMIN_MAIL_SCRIPT_URL` + `ADMIN_MAIL_SECRET`, off without them); both run in `after()` so nothing waits on them. The script only delivers a "request" mail to the owner's own address, so a leaked secret can at most send the fixed approval template.
+
+  **Passwords are gone** (retired 4 September 2026). `POST /api/admin/auth` no longer exists; `DELETE` there is sign-out. The old `aisafety_admin` cookie is only ever deleted.
+
+- **Who annotated what.** Every rating, label and notes change on `/admin/chatbot/log` is attributed: `updateConversation` reads the row, works out what actually changed (`annotation-log.ts`), appends one line per change to the row's **Review log** field (`2026-09-05 11:42 UTC · Name · rated Good`) and keeps the current verdict's author in **Reviewed by**. Notes are signed entries in the **Notes** field (a `2026-09-05 12:10 UTC · Name` header line, then the text; `parseNotes`/`appendNote`), added one at a time from the log page, and anyone signed in may delete any entry (`removeNote` checks the entry still sits where the page saw it; the deletion is logged with the note's author); text from before signing existed shows as an unsigned block. The log page shows all of it. Names come from the Google sign-in.
+
+- **Map editor.** `/admin/map` (`mapEditor` area; `'edit'` to move anything, `'view'` shows the same map and side panel with nothing to drag, place or resize, `applyChange` being the one place every change passes through) lets the owner drag logos on the Field map and change a logo's size. It writes to Airtable through `/api/admin/map` (GET live records, PATCH one change). It is deliberately a **copy** of the public map's rendering, not a shared component: `map-geometry.ts` mirrors the constants in `src/app/map/D3Map.tsx` and `map-geometry.test.ts` fails if they drift. The editor reads Airtable directly with `cache: 'no-store'` (unpublished rows included, Hide? rows excluded), never through `fetchAirtableRecords`, and never revalidates anything, so `/map`'s data path, cache and bundle are untouched. The only fields it can write are `x` and `y` together, or `Scale` as one of its existing options (`map-editor-core.ts`; any other key in the request body is rejected). Publish? and Hide? stay in Airtable.
+
+- **Queue.** `/admin/queue` (`queue` area; `'edit'` to decide anything, `'view'` shows the same inbox with a "View only" line in place of Accept / Reject / Undo and every field read-only, `act()` a no-op) is one review inbox for everything waiting on the owner: a person's email or Discord request, a Broom flag, a rulebook edit written from earlier reject reasons, a Comb suggestion. Rows live in the Airtable table **Queue** (`tblonlKwIFJ7Aa8QN`, `src/lib/admin/queue.ts` holds the field ids) and are written by the bots on the owner's Mac (`~/Queue`); the site only lists them and carries out decisions through `/api/admin/queue` (GET list, POST `{id, action}` with `accept` / `reject` / `revise` / `undo`). The list is the rows and nothing else, so it lands in about a second; the page then fills the logos in through `POST /api/admin/queue/logos` (the site's catalog, plus one read per table for unpublished targets: seconds when the catalog's cache is cold, which every accept makes it) and builds the cards through `/api/admin/queue/previews`, both in the background. The row carries the proposal as JSON: for an **Add** the proposed record's fields (accept ticks `Publish?` on the target record, plus any values edited on the page); for a **Change** a list of `{field, from, to}` (accept writes the `to` values by field NAME and deletes the Broom flag row; reject deletes the flag row too); for a **Rule** a diff (accept only marks the row Accepted, the Mac worker patches the file). Every accept re-reads the row and refuses one already decided (409), then calls `revalidateTag('airtable-records', 'max')` so the public pages refresh within a few minutes. Reject needs a reason (the page offers chips Fable wrote at intake); a rejected suggestion is deleted by the Mac worker 24 hours later, which is the undo window. `Publish?` and `Hide?` can never be set through edits or proposals (`sanitiseEdits`, `PROTECTED_FIELDS`). Nothing auto-applies, ever. An emailed request (Source Email, written by the owner's inbox bot) also carries a reply draft in the owner's voice: the page shows it editable, an accept writes the approved text to the row, and then the page calls a small **agent on the owner's Mac** (loopback HTTP, port from `QUEUE_AGENT_PORT`, default 8790) to save it as a Gmail draft at once, never to send it. `GET /api/admin/queue` hands the page `{ port, token }` for that call, the token sealed with `QUEUE_AGENT_SECRET` (both sides hold it; unset = no agent, the Mac worker saves the draft on its next pass). The agent only acts on rows Airtable says are already accepted, so the token can do nothing the queue has not approved. A Discord request (Source Discord, written by the hourly intake on the owner's Mac, `~/Queue/discord_intake.py`, from the Matrix bridge) carries a reply draft in Fable's own voice under a "From Fable:" line and the person's Discord avatar beside what they wrote; the draft sits next to the message as an exchange. Replies from the Queue are drafts, never sent (owner's rule, 14 Sept 2026): the page offers Copy reply and Open on Discord (the toast, the card, the Done list) and the owner pastes and sends it himself, as an emailed request's reply stays a Gmail draft. The page opens the item named in a `#rec…` hash, which is how the bot's "Queued:" links land on the right card, and it keeps the hash in step with the item in focus (replaced, never pushed) so the address bar is always a link to that one suggestion.
+
+- **Newsletter approval.** `/admin/newsletter` (`newsletter` area; `'edit'` to approve, `'view'` opens the same page read-only — drafts and previews, no Approve button, send API refuses — for a design reviewer or a second pair of eyes) is the approval step for the weekly newsletters. The pipeline on the owner's machine renders a draft into a branded email and creates a **draft** ActiveCampaign campaign whose message carries a hidden content marker (`<!--aisafety-issue:<checksum>-->`). The page lists those drafts via `/api/admin/newsletter` (GET), re-running the pipeline's own checks on each: still a draft, wired to exactly one list (per-list one-click unsubscribe depends on it), one message, marker present and matching a fresh checksum of the HTML (`contentDigest` in `newsletter.ts`; `newsletter.test.ts` pins it to the pipeline's fixtures). A missing marker means someone saved the email in ActiveCampaign's visual designer, which wipes injected HTML, and the page refuses to send. The preview is the stored HTML in a sandboxed iframe (`/api/admin/newsletter/preview?draft=ID`; `draft=` because ad blockers refuse `campaign=` URLs, and CSP `frame-ancestors` rather than X-Frame-Options, which would reject the sandbox's opaque origin). Approving (POST) re-verifies, then schedules the send through ActiveCampaign's legacy v1 API, the only one that can schedule, by creating the sending campaign from the verified message two minutes out and deleting the draft shell. **Reordering** (10 Sept 2026): the renderer wraps every listing card in `<!--card:gN:KEY-->…<!--/card-->` (gN = section, KEY = the Airtable record id) and ends the email with a base64 JSON manifest (`<!--aisafety-cards:…-->`: sections, card titles, and the plain-text version as keyed segments). The page's Reorder panel (shown beside the preview for approvers; drag and drop, arrow keys on a focused row as the keyboard route; a card never leaves its section) posts the new order to `/api/admin/newsletter/reorder`, which re-verifies the draft, moves the card blocks, rebuilds the text from the manifest, re-stamps the marker and writes the message back through the v3 API — `reorderHtml` in `newsletter.ts` is the same algorithm as the pipeline's `render.py reorder_cards()`, and a rebuild on the owner's machine reads the live order first so a manual reorder survives later edits. Env: `ACTIVECAMPAIGN_URL`, `ACTIVECAMPAIGN_KEY` (production only).
+
+- **Preview:** see Freshness above.
+
+## Other integrations
+
+- **Hackathon forms** (`/hackathon`, `/hackathon/details`) post to Google Apps Script, which appends to a private Sheet and emails the applicant. See `docs/hackathon-signup.md`. Env: `HACKATHON_SCRIPT_URL`, `HACKATHON_FORM_SECRET`.
+- **Suggest-a-listing and feedback forms** are Airtable forms opened from the site (`ContributeButtons`), not app code.
+
+## Scheduled jobs (`vercel.json`)
+
+| Path                          | Schedule          | Purpose                                              |
+| ----------------------------- | ----------------- | ---------------------------------------------------- |
+| `/api/check-rebuild`          | every minute      | rebuild when published Airtable rows changed         |
+| `/api/check-catalog`          | daily 09:00 UTC   | every Airtable table is known to the chatbot catalog |
+| `/api/admin/analytics/themes` | Mondays 07:00 UTC | regroup chatbot questions into themes                |
+
+Cron routes check the `Authorization` header against `CRON_SECRET` when it is set.
+
+## Environment variables
+
+| Variable                                                                       | Used for                                                                                                                                                 |
+| ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AIRTABLE_TOKEN`, `AIRTABLE_BASE_ID`                                           | all Airtable reads; without them the app runs in contributor mode                                                                                        |
+| `BLOB_READ_WRITE_TOKEN`                                                        | mirroring attachments and chatbot transcripts to Vercel Blob                                                                                             |
+| `ANTHROPIC_API_KEY`                                                            | the chatbot and the analytics theme grouping                                                                                                             |
+| `KV_REST_API_URL`, `KV_REST_API_TOKEN`                                         | Upstash Redis: analytics events and chatbot rate limits (`UPSTASH_REDIS_REST_*` also accepted)                                                           |
+| `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `ADMIN_SESSION_SECRET` | admin sign-in with Google; who gets in is `src/lib/admin/users.ts`                                                                                       |
+| `ADMIN_MAIL_SCRIPT_URL`, `ADMIN_MAIL_SECRET`                                   | admin emails via the owner's Apps Script (docs/admin-mail-script.md): the owner hears about access requests, people hear when approved; off without them |
+| `ADMIN_PASSWORD` and the `ADMIN_PASSWORD_*` roles                              | legacy password sign-in, being retired                                                                                                                   |
+| `ADMIN_CONVERSATIONS_TABLE_ID`                                                 | the Airtable table the chatbot log is written to and read from                                                                                           |
+| `ASSISTANT_CONVERSATION_WEBHOOK`, `ASSISTANT_LOG_WEBHOOK`                      | optional extra sinks for chatbot logging                                                                                                                 |
+| `VERCEL_DEPLOY_HOOK_URL`, `CRON_SECRET`                                        | `/api/check-rebuild` and cron authentication                                                                                                             |
+| `PREVIEW_KEY_SEED`                                                             | stable Draft Mode keys across builds (build step only)                                                                                                   |
+| `ACTIVECAMPAIGN_URL`, `ACTIVECAMPAIGN_KEY`                                     | newsletter approval (production only)                                                                                                                    |
+| `HACKATHON_SCRIPT_URL`, `HACKATHON_FORM_SECRET`                                | hackathon forms                                                                                                                                          |
+| `PUBLIC_DATA_ORIGIN`                                                           | point contributor mode at a local or preview Data API instead of the live site                                                                           |
+| `EVENTS_USE_MOCK`                                                              | local only: serve `/events` from an untracked `events.mock.json`                                                                                         |
+| `BUILD_TIME`                                                                   | set by `next.config.ts` at build; never set by hand                                                                                                      |
+
+## Testing
+
+Unit tests run with Vitest (`npm test`; files `src/**/*.test.ts`, node environment, `@` alias resolves to `src`). Pure modules only, nothing that imports Next, d3 or the DOM; tests sit next to what they test. `npm run build` runs the suite before building. Browser verification is manual (a dev server, or Playwright headless, especially for the D3 maps). There is no CI: nothing runs automatically on push.
 
 ## Deployment
 
-- **Platform**: Vercel (recommended for Next.js)
-- **Environment Variables**: Set in Vercel dashboard
-- **Build**: `npm run build` (automatic on push)
-
-## Future Considerations
-
-### Component Extraction Opportunities
-
-As more pages are built, consider extracting:
-
-- **Card components** (currently inline in homepage)
-- **Page header/title pattern**
-- **Airtable embed wrapper**
-- **Filter/search UI** (for jobs, communities pages)
-
-### Testing
-
-Unit tests run with Vitest (`npm test`, files `src/**/*.test.ts`, node
-environment, `@` alias resolves to `src`). Pure modules only – nothing that
-imports Next, d3 or the DOM. E2E is still manual (Playwright headless against a
-local server, especially for the D3 map).
-
-### Performance
-
-- Images use `next/image` for optimization
-- Consider adding `loading="lazy"` to below-fold images
-- D3 map could benefit from virtualization for very large datasets
+Vercel. Every push to `main` deploys production; every branch gets a preview deployment. Environment variables live in the Vercel project. Blob and Upstash Redis come from the Vercel Marketplace integrations, which is why the Redis variables carry the legacy `KV_REST_API_*` names. Analytics and the chatbot log treat only `aisafety.com` as real traffic, so previews and localhost never pollute the data.

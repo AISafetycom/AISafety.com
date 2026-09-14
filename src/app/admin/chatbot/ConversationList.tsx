@@ -1,6 +1,12 @@
 'use client'
 
 import {
+  entryFromEnd,
+  historyIsComplete,
+  loggedTurnCount,
+  turnFromEnd,
+} from '@/lib/admin/conversation-turns'
+import {
   Fragment,
   useContext,
   useEffect,
@@ -8,6 +14,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { parseLog, parseNotes, stampToDate } from '@/lib/admin/annotation-log'
 import styles from '../admin.module.css'
 import TranscriptMessage, {
   ClickedCardsContext,
@@ -33,34 +40,15 @@ interface LoggedToolCall {
 
 /** The tool calls behind the chatbot message at history index msgIdx.
  *
- *  Data.tools holds one array per LOGGED TURN since the conversation began,
- *  and every turn carries exactly one user message (abandoned/error turns log
- *  the question with no reply). Data.history however is a sliding WINDOW (the
- *  last 50 messages; 14 on older rows), so long conversations lose their
- *  oldest stored messages while
- *  tools keeps growing — the two can only be aligned from the END: the last
- *  user message in the window belongs to the last tools entry, and so on
- *  backwards. A reply's tools sit at the entry of the user message it answers;
- *  a window that opens mid-turn (leading assistant message) resolves to the
- *  entry before the window's first user turn. */
-function turnEntryForMessage(
-  history: HistoryTurn[],
-  entries: unknown[],
-  msgIdx: number
-): unknown {
-  const totalUsers = history.filter(t => t.role === 'user').length
-  const usersUpToHere = history
-    .slice(0, msgIdx)
-    .filter(t => t.role === 'user').length
-  return entries[entries.length - 1 - (totalUsers - usersUpToHere)]
-}
-
+ *  Data.tools holds one array per LOGGED TURN since the conversation began
+ *  (abandoned/error turns log the question with no reply), while
+ *  Data.history is a sliding WINDOW (the last 50 messages; 14 on older
+ *  rows). turnFromEnd in conversation-turns.ts does the lining up. */
 function toolCallsForMessage(
-  history: HistoryTurn[],
-  tools: unknown[],
+  data: ConversationData,
   msgIdx: number
 ): LoggedToolCall[] {
-  const turn = turnEntryForMessage(history, tools, msgIdx)
+  const turn = entryFromEnd(data.tools, turnFromEnd(data, msgIdx))
   if (!Array.isArray(turn)) return []
   return turn.filter(
     (t): t is LoggedToolCall =>
@@ -76,12 +64,11 @@ function toolCallsForMessage(
  *  resolvability heuristic. The set carries each id plus its bare rec form,
  *  since card tokens are sometimes written without the type prefix. */
 function fallbackCardsForMessage(
-  history: HistoryTurn[],
-  fallbackCards: unknown[] | undefined,
+  data: ConversationData,
   msgIdx: number
 ): Set<string> | undefined {
-  if (!fallbackCards) return undefined
-  const turn = turnEntryForMessage(history, fallbackCards, msgIdx)
+  if (!data.fallbackCards) return undefined
+  const turn = entryFromEnd(data.fallbackCards, turnFromEnd(data, msgIdx))
   if (!Array.isArray(turn)) return undefined
   const set = new Set<string>()
   for (const id of turn) {
@@ -156,6 +143,9 @@ interface ConversationData {
   /** Per-turn (aligned with tools): ISO timestamp of when that turn's user
    *  message arrived. Absent on rows from before this was logged. */
   turnTimes?: unknown[]
+  /** One entry per logged turn (aligned with `tools`): the position of that
+   *  turn's reply in the visitor's message list. Rows since 2 Sept 2026. */
+  turnIndices?: unknown[]
   /** Per-turn (aligned with tools): the site page the visitor was on when
    *  they sent that turn's message. Absent on rows from before this was
    *  logged. */
@@ -176,6 +166,8 @@ interface TurnDelivery {
   received?: number
   stopped?: number
   error?: number
+  /** What the error was, as the browser saw it (set alongside `error`). */
+  errorText?: string
   left?: number
   panelClosed?: number
   tabHidden?: number
@@ -200,6 +192,10 @@ interface Conversation {
   /** Reviewer's verdict on the whole conversation ('' when not yet rated) —
    *  distinct from `ratings`, the visitor's own thumbs on individual replies. */
   review: ReviewValue | ''
+  /** Admin name behind the current verdict ('' when unrated). */
+  reviewedBy: string
+  /** One line per annotation change, oldest first (see annotation-log.ts). */
+  reviewLog: string
   data: ConversationData | null
   clickedCitations: string[]
   /** Visitor's thumbs ratings of the bot's replies (turn index → 'up' |
@@ -267,6 +263,20 @@ function formatTime(iso: string): string {
   return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
 }
 
+/** A stored "2026-09-05 11:42 UTC" annotation stamp, in the viewer's own time
+ *  zone like every other time on this page ("5 Sept 2026, 12:42"). */
+function formatStamp(stamp: string): string {
+  const d = stampToDate(stamp)
+  if (!d) return stamp
+  return d.toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 function formatLatency(ms: number): string {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
 }
@@ -304,11 +314,13 @@ function describeDelivery(
     }
   }
   if (d.error != null) {
+    const at = `failed in the browser at ${formatElapsed(d.error)}`
     return {
-      label: `failed in the browser at ${formatElapsed(d.error)}`,
+      label: d.errorText ? `${at} — ${d.errorText}` : at,
       warn: true,
       title:
-        "The visitor's browser hit an error before the reply finished (network drop, or the server sent an error) — they saw an error message",
+        "The visitor's browser hit an error before the reply finished (network drop, or the server sent an error) — they saw an error message" +
+        (d.errorText ? `\n\nWhat the browser reported: ${d.errorText}` : ''),
     }
   }
   if (d.received != null) {
@@ -365,6 +377,14 @@ function describeDelivery(
   return undefined
 }
 
+/** Tooltip for the row-header thumb badge. */
+function ratingTitle(value: 'up' | 'down', count: number): string {
+  const which = value === 'up' ? 'thumbs up' : 'thumbs down'
+  return count === 1
+    ? `The visitor rated a reply ${which}`
+    : `The visitor rated ${count} replies ${which}`
+}
+
 /** Row-header badge for the latest turn: only the cases worth flagging when
  *  skimming (the transcript carries the full note per reply). */
 function deliveryBadge(
@@ -385,7 +405,8 @@ function deliveryBadge(
     return {
       text: 'NOT DELIVERED',
       title:
-        "The visitor's browser hit an error before the reply finished — they saw an error message",
+        "The visitor's browser hit an error before the reply finished — they saw an error message" +
+        (d.errorText ? `\n\nWhat the browser reported: ${d.errorText}` : ''),
     }
   }
   if (
@@ -412,10 +433,7 @@ function timeForUserMessage(
   msgIdx: number,
   conversationStart: string
 ): string | undefined {
-  // turnEntryForMessage counts user messages BEFORE msgIdx; passing the index
-  // just past this user message counts the message itself, landing on its own
-  // turn entry (the same one its reply resolves to).
-  const ts = turnEntryForMessage(data.history, data.turnTimes ?? [], msgIdx + 1)
+  const ts = entryFromEnd(data.turnTimes, turnFromEnd(data, msgIdx))
   if (typeof ts !== 'string') return undefined
   const d = new Date(ts)
   if (Number.isNaN(d.getTime())) return undefined
@@ -428,12 +446,12 @@ function timeForUserMessage(
 
 /** The page the visitor was on when they sent the user message at history
  *  index msgIdx. Undefined for rows logged before per-turn pages were
- *  tracked (same end-aligned turn resolution as timeForUserMessage). */
+ *  tracked (same turn resolution as timeForUserMessage). */
 function pageForUserMessage(
   data: ConversationData,
   msgIdx: number
 ): string | undefined {
-  const page = turnEntryForMessage(data.history, data.pages ?? [], msgIdx + 1)
+  const page = entryFromEnd(data.pages, turnFromEnd(data, msgIdx))
   return typeof page === 'string' ? page : undefined
 }
 
@@ -838,7 +856,8 @@ function ConversationRow({
   onToggle: () => void
   onUpdate: (c: Conversation) => void
 }) {
-  const [notes, setNotes] = useState(conv.notes)
+  const [noteDraft, setNoteDraft] = useState('')
+  const [deletingNote, setDeletingNote] = useState<number | null>(null)
   const [saveStatus, setSaveStatus] = useState('')
   const [labelInput, setLabelInput] = useState('')
   // Custom suggestion menu under the label input (a native <datalist> can't
@@ -850,14 +869,19 @@ function ConversationRow({
   // Visitor messages actually stored in the (windowed) history — what the
   // transcript below can show.
   const storedTurns = data?.history.filter(t => t.role === 'user').length ?? 0
-  // True length of the conversation: the per-turn arrays get one entry per
-  // logged turn and are never windowed, unlike history. turnTimes is the
-  // newest of them; tools counts too when it has the per-turn shape (one
-  // array per turn). Rows predating both fall back to the stored history.
-  const loggedTurns =
-    data?.turnTimes?.length ||
-    (data?.tools?.every(t => Array.isArray(t)) ? data.tools.length : 0)
-  const turnCount = loggedTurns > 0 ? loggedTurns : storedTurns
+  // True length of the conversation. When the stored history is the whole
+  // message list it is the truth itself — the per-turn arrays can only
+  // overshoot it (re-sent turns logged twice, before 2 Sept 2026). Otherwise
+  // the per-turn arrays, one entry per logged turn and never windowed, say
+  // how far a long chat outgrew the history window. Rows predating per-turn
+  // tracking fall back to the stored history.
+  const loggedTurns = data ? loggedTurnCount(data) : 0
+  const turnCount =
+    data && historyIsComplete(data)
+      ? storedTurns
+      : loggedTurns > 0
+        ? loggedTurns
+        : storedTurns
   const missingTurns = Math.max(0, turnCount - storedTurns)
   const geo = data ? geoString(data.geo) : ''
   // Collapsed row previews the visitor's OPENING message (how they first
@@ -903,6 +927,19 @@ function ConversationRow({
       }
     }
     return m
+  }, [conv.ratings])
+  // Header badge: how many replies the visitor rated each way, so a thumb is
+  // visible while skimming the list rather than only inside the transcript.
+  // Counted straight off the field (not via clientIndexOf) — a rating is worth
+  // flagging even when we can't pin it to a specific reply.
+  const ratingCounts = useMemo(() => {
+    let up = 0
+    let down = 0
+    for (const value of Object.values(conv.ratings)) {
+      if (value === 'up') up++
+      else if (value === 'down') down++
+    }
+    return { up, down }
   }, [conv.ratings])
   // Maps a stored-history index to the visitor's message-list position — the
   // indexing the delivery reports, thumbs ratings, and turn-scoped click keys
@@ -985,6 +1022,8 @@ function ConversationRow({
     notes?: string
     tags?: string[]
     review?: ReviewValue | null
+    addNote?: string
+    deleteNote?: { index: number; at: string; actor: string }
   }) => {
     setSaveStatus('saving…')
     try {
@@ -994,7 +1033,8 @@ function ConversationRow({
         body: JSON.stringify({ id: conv.id, ...patch }),
       })
       if (!res.ok) {
-        setSaveStatus('save failed')
+        const body = (await res.json().catch(() => ({}))) as { error?: string }
+        setSaveStatus(body.error ?? 'save failed')
         return
       }
       const updated = (await res.json()) as { conversation: Conversation }
@@ -1080,6 +1120,22 @@ function ConversationRow({
             </span>
             {turnCount > 1 && <span>{turnCount} turns</span>}
             {geo && <span>{geo}</span>}
+            {ratingCounts.up > 0 && (
+              <span
+                className={styles.convRowRating}
+                title={ratingTitle('up', ratingCounts.up)}
+              >
+                👍{ratingCounts.up > 1 ? ` ${ratingCounts.up}` : ''}
+              </span>
+            )}
+            {ratingCounts.down > 0 && (
+              <span
+                className={styles.convRowRating}
+                title={ratingTitle('down', ratingCounts.down)}
+              >
+                👎{ratingCounts.down > 1 ? ` ${ratingCounts.down}` : ''}
+              </span>
+            )}
             {conv.review && (
               <span
                 className={`${styles.convRowReview} ${styles[`convRowReview${conv.review}`]}`}
@@ -1224,11 +1280,7 @@ function ConversationRow({
                         : undefined
                     const reads =
                       t.role === 'assistant'
-                        ? toolCallsForMessage(
-                            data.history,
-                            data.tools ?? [],
-                            i
-                          ).filter(
+                        ? toolCallsForMessage(data, i).filter(
                             c =>
                               c.name === 'read_listing_page' ||
                               c.name === 'get_program_history'
@@ -1324,11 +1376,7 @@ function ConversationRow({
                             <TranscriptMessage
                               text={t.content}
                               turnIndex={clientIdx}
-                              fallbackCardIds={fallbackCardsForMessage(
-                                data.history,
-                                data.fallbackCards,
-                                i
-                              )}
+                              fallbackCardIds={fallbackCardsForMessage(data, i)}
                             />
                           )}
                         </div>
@@ -1382,11 +1430,16 @@ function ConversationRow({
                   type="button"
                   className={styles.convCopyLink}
                   onClick={() => void copyLink()}
-                  title="Copy a direct link to this conversation — opening it still needs the admin password"
+                  title="Copy a direct link to this conversation — opening it still needs an admin sign-in"
                 >
                   {linkCopied ? 'Link copied ✓' : '🔗 Copy link'}
                 </button>
               </div>
+              {conv.review && conv.reviewedBy && (
+                <div className={styles.convReviewedBy}>
+                  Rated {conv.review.toLowerCase()} by {conv.reviewedBy}
+                </div>
+              )}
             </div>
 
             <div className={styles.convDetailField}>
@@ -1495,16 +1548,129 @@ function ConversationRow({
 
             <div className={styles.convDetailField}>
               <div className={styles.convDetailLabel}>Notes</div>
+              {(() => {
+                const parsed = parseNotes(conv.notes)
+                return (
+                  <>
+                    {parsed.legacy && (
+                      <div className={styles.convNoteLegacy}>
+                        {parsed.legacy}
+                      </div>
+                    )}
+                    {parsed.entries.length > 0 && (
+                      <ul className={styles.convNoteList}>
+                        {parsed.entries.map((n, i) => (
+                          <li key={i} className={styles.convNoteEntry}>
+                            <div className={styles.convNoteMeta}>
+                              <span className={styles.convActivityWho}>
+                                {n.actor}
+                              </span>
+                              <span className={styles.convActivityWhen}>
+                                {formatStamp(n.at)}
+                              </span>
+                              <span className={styles.convNoteActions}>
+                                {deletingNote === i ? (
+                                  <>
+                                    <span className={styles.convNoteConfirm}>
+                                      Delete this note?
+                                    </span>
+                                    <button
+                                      type="button"
+                                      className={`${styles.convNoteDelete} ${styles.convNoteDanger}`}
+                                      onClick={() => {
+                                        setDeletingNote(null)
+                                        void persist({
+                                          deleteNote: {
+                                            index: i,
+                                            at: n.at,
+                                            actor: n.actor,
+                                          },
+                                        })
+                                      }}
+                                    >
+                                      Yes, delete
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className={styles.convNoteDelete}
+                                      onClick={() => setDeletingNote(null)}
+                                    >
+                                      Cancel
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className={styles.convNoteDelete}
+                                    onClick={() => setDeletingNote(i)}
+                                  >
+                                    Delete
+                                  </button>
+                                )}
+                              </span>
+                            </div>
+                            <div className={styles.convNoteText}>{n.text}</div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </>
+                )
+              })()}
               <textarea
                 className={styles.convNotes}
-                value={notes}
-                onChange={e => setNotes(e.target.value)}
-                onBlur={() => {
-                  if (notes !== conv.notes) void persist({ notes })
+                value={noteDraft}
+                onChange={e => setNoteDraft(e.target.value)}
+                onKeyDown={e => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                    e.preventDefault()
+                    if (noteDraft.trim()) {
+                      void persist({ addNote: noteDraft })
+                      setNoteDraft('')
+                    }
+                  }
                 }}
-                placeholder="Notes for this conversation…"
+                placeholder="Add a note — it will be signed with your name and the time"
               />
+              <div className={styles.convAnnotRow}>
+                <button
+                  type="button"
+                  className={styles.convLabelAdd}
+                  disabled={!noteDraft.trim()}
+                  onClick={() => {
+                    void persist({ addNote: noteDraft })
+                    setNoteDraft('')
+                  }}
+                >
+                  Add note
+                </button>
+              </div>
             </div>
+
+            {conv.reviewLog.trim() && (
+              <div className={styles.convDetailField}>
+                <div className={styles.convDetailLabel}>Activity</div>
+                <ul className={styles.convActivity}>
+                  {parseLog(conv.reviewLog).map((e, i) => (
+                    <li key={i} className={styles.convActivityRow}>
+                      {e.actor ? (
+                        <>
+                          <span className={styles.convActivityWho}>
+                            {e.actor}
+                          </span>{' '}
+                          {e.what}
+                          <span className={styles.convActivityWhen}>
+                            {formatStamp(e.at)}
+                          </span>
+                        </>
+                      ) : (
+                        e.what
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {saveStatus && (
               <div className={styles.convStatus}>{saveStatus}</div>

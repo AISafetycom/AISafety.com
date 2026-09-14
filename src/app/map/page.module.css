@@ -25,6 +25,231 @@
   z-index: 95;
 }
 
+/* Map search — top-left, mirroring the zoom controls top-right. Same
+   z-index reasoning: stay below the assistant scrim/panel/pill (96-100). */
+.map-search {
+  position: absolute;
+  top: 24px;
+  left: 24px;
+  z-index: 95;
+  width: 340px;
+}
+
+/* Collapsed state: a round icon button, sized to the zoom control buttons.
+   The expanded field matches this height so nothing jumps on open. */
+.map-search-toggle {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background-color: var(--teal-850);
+  border: 1px solid var(--teal-700);
+  border-radius: 50%;
+  box-shadow: 0px 12px 24px 0px rgba(0, 25, 27, 0.5);
+  cursor: pointer;
+  transition: background-color var(--hover-transition);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.map-search-toggle:hover {
+  background-color: var(--teal-800);
+}
+
+/* Expanded field and dropdown copy the /events "Find events near you" box
+   (.nearMe* in events/page.module.css). The field tint there is 10%
+   bright-teal over the page background; mixed over teal-900 here so the
+   floating field stays opaque and legible on top of the map artwork. */
+.map-search-icon {
+  position: absolute;
+  left: 14px;
+  top: 20px;
+  transform: translateY(-50%);
+  z-index: 1;
+  width: 16px;
+  height: 16px;
+  background-color: var(--teal-400);
+  -webkit-mask: url('/images/icons/magnifying-glass.svg') no-repeat center /
+    contain;
+  mask: url('/images/icons/magnifying-glass.svg') no-repeat center / contain;
+  pointer-events: none;
+}
+
+.map-search-input {
+  height: 40px;
+  padding-left: 38px;
+  /* Same outline as the collapsed circle and the zoom controls; the global
+     .text-field focus style still brightens it to teal-400 while typing. */
+  border: 1px solid var(--teal-700);
+  border-radius: 20px;
+  background-color: color-mix(
+    in srgb,
+    var(--bright-teal-500) 10%,
+    var(--teal-900)
+  );
+  color: var(--white);
+  font-size: 15px;
+  font-weight: 300;
+  box-shadow: 0px 12px 24px 0px rgba(0, 25, 27, 0.5);
+  /* The field mounts on expand, so a mount animation from the collapsed
+     button's width and color makes the circle appear to morph open. */
+  animation: map-search-expand 0.08s ease-out;
+}
+
+/* iOS zooms the page in whenever it focuses a field under 16px, which yanks
+   the map about as the keyboard appears. 16px is the threshold, not a design
+   choice — the desktop size above is unchanged. */
+@media (max-width: 991px) and (pointer: coarse) {
+  .map-search-input {
+    font-size: 16px;
+  }
+}
+
+@keyframes map-search-expand {
+  from {
+    width: 40px;
+    background-color: var(--teal-850);
+  }
+  to {
+    width: 100%;
+  }
+}
+
+/* Reverse of the unfurl: the field shrinks back into the circle before it is
+   removed. `forwards` holds the collapsed frame so it cannot pop back to full
+   width in the beat before React unmounts it. */
+.map-search-input-closing {
+  animation: map-search-collapse 0.08s ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes map-search-collapse {
+  from {
+    width: 100%;
+  }
+  to {
+    width: 40px;
+    background-color: var(--teal-850);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-search-input,
+  .map-search-input-closing {
+    animation: none;
+  }
+}
+
+.map-search-input::placeholder {
+  color: var(--teal-500);
+}
+
+.map-search-results {
+  margin-top: 8px;
+  padding: 8px;
+  background-color: var(--teal-bright-850);
+  border-radius: 16px;
+  box-shadow: 0px 12px 24px 0px rgba(0, 25, 27, 0.5);
+}
+
+.map-search-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+
+/* Active (keyboard cursor) must come after the base row rule so it wins. */
+.map-search-row:hover,
+.map-search-row-active {
+  background-color: color-mix(in srgb, var(--bright-teal-500) 10%, transparent);
+}
+
+.map-search-logo {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: var(--white);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* The map's exact pin treatment: the image itself is clipped to a circle
+   (border-radius), then sits on the white disc at the map's 60/64 ratio —
+   so square logo files become bold discs with a thin, even white ring,
+   instead of bleeding to the container edge. */
+.map-search-logo img {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  object-fit: contain;
+}
+
+.map-search-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Up to two lines so bracketed acronyms at the end of long names stay
+   visible instead of being ellipsed away. */
+.map-search-name {
+  font-size: 15px;
+  font-weight: 300;
+  line-height: 1.3;
+  color: var(--white);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.map-search-category {
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--teal-300);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-search-empty {
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--teal-300);
+}
+
+.map-search-suggest {
+  color: var(--bright-teal-500);
+  cursor: pointer;
+}
+
+.map-search-suggest:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 767px) {
+  .map-search {
+    top: 16px;
+    left: 16px;
+    /* Clear of the zoom controls in the top-right corner */
+    width: calc(100% - 96px);
+  }
+}
+
 /* Map tooltip — matches communities mapbox-tooltip */
 .map-tooltip {
   position: fixed;

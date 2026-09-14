@@ -3,13 +3,10 @@ import PageHeader from '@/components/PageHeader'
 import FeaturedCard from '@/components/FeaturedCard'
 import AdvisorsClient from './AdvisorsClient'
 import { getAdvisors } from '@/lib/data/advisors'
+import { pageMetadata } from '@/lib/page-metadata'
+import { SITE_PAGES } from '@/lib/site-pages'
 
-export const metadata = {
-  title: 'Advisors – AISafety.com',
-  description:
-    'Advisors offering free guidance calls to help you most effectively contribute to AI safety.',
-  alternates: { canonical: '/advisors' },
-}
+export const metadata = pageMetadata(SITE_PAGES.advisors)
 
 export default async function AdvisorsPage() {
   const [advisors, lastUpdated] = await Promise.all([

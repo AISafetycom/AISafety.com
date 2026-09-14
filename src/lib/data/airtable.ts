@@ -1,7 +1,7 @@
 import path from 'path'
 import { list, put } from '@vercel/blob'
 import { unstable_cache } from 'next/cache'
-import { isPreviewRequest } from '@/lib/preview'
+import { isPreviewRequest, shareLiveRead } from '@/lib/preview'
 
 export interface AirtableRawRecord {
   id: string
@@ -85,6 +85,10 @@ export function publishedFormula(
 // attachment URLs are signed and expire within hours, so they must never end
 // up in cached pages or API responses; Blob URLs are permanent.
 const BLOB_PREFIX = 'airtable/'
+
+function isBuildPhase(): boolean {
+  return process.env.NEXT_PHASE === 'phase-production-build'
+}
 const CONCURRENCY = 20
 const DOWNLOAD_MAX_RETRIES = 3
 const DOWNLOAD_RETRY_DELAY_MS = 2000
@@ -203,6 +207,46 @@ interface MirrorTask {
   pathname: string
 }
 
+// Listing the store (some 1,400 files, two pages, well over half a second) is
+// the slowest step of a request-time fetch, and preview mode paid it once per
+// table per page view. Outside the build the listing is remembered for a
+// minute: nothing is ever deleted from the store, and a listing that predates
+// a file mirrored moments ago only costs one redundant, idempotent re-upload.
+// The build always lists afresh — it must see the store exactly as it is.
+const BLOB_LISTING_MEMO_MS = 60_000
+let blobListingMemo: {
+  at: number
+  listing: Promise<Map<string, string>>
+} | null = null
+
+async function listMirroredBlobs(): Promise<Map<string, string>> {
+  const existing = new Map<string, string>()
+  let cursor: string | undefined
+  do {
+    const page = await list({ prefix: BLOB_PREFIX, cursor })
+    for (const blob of page.blobs) {
+      existing.set(blob.pathname, blob.url)
+    }
+    cursor = page.cursor
+  } while (cursor)
+  return existing
+}
+
+function mirroredBlobs(): Promise<Map<string, string>> {
+  if (isBuildPhase()) return listMirroredBlobs()
+  const now = Date.now()
+  if (blobListingMemo && now - blobListingMemo.at < BLOB_LISTING_MEMO_MS) {
+    return blobListingMemo.listing
+  }
+  const listing = listMirroredBlobs()
+  blobListingMemo = { at: now, listing }
+  // A failed listing is not the store's contents — forget it straight away.
+  listing.catch(() => {
+    if (blobListingMemo?.listing === listing) blobListingMemo = null
+  })
+  return listing
+}
+
 // Rewrites every record's first attachment URL to a permanent copy in Vercel
 // Blob, uploading any attachment not yet mirrored. Unlike the filesystem, Blob
 // is writable at request time too, so the same path runs at build time and at
@@ -250,21 +294,14 @@ async function mirrorAttachments(records: AirtableRawRecord[]): Promise<void> {
   // One listing covers every already-mirrored attachment. Pathnames embed the
   // attachment id, so replacing an image in Airtable changes the pathname and
   // the new file is uploaded on the next fetch.
-  const existing = new Map<string, string>()
+  let existing: Map<string, string>
   try {
-    let cursor: string | undefined
-    do {
-      const page = await list({ prefix: BLOB_PREFIX, cursor })
-      for (const blob of page.blobs) {
-        existing.set(blob.pathname, blob.url)
-      }
-      cursor = page.cursor
-    } while (cursor)
+    existing = await mirroredBlobs()
   } catch (error) {
     // A Blob outage (or revoked token) must not take down every consumer of
     // the shared data cache — degrade to signed URLs at runtime, but fail the
     // build loudly: deploying pages with expiring URLs defeats the mirror.
-    if (process.env.NEXT_PHASE === 'phase-production-build') {
+    if (isBuildPhase()) {
       throw error
     }
     console.warn(
@@ -313,6 +350,8 @@ async function mirrorAttachments(records: AirtableRawRecord[]): Promise<void> {
 
       if (result.status === 'fulfilled') {
         task.holder[0] = { ...task.holder[0], url: result.value.url }
+        // The remembered listing now knows about it too.
+        existing.set(task.pathname, result.value.url)
       } else {
         failures.push(
           `${task.fieldName} for ${task.recordId}: ${result.reason}`
@@ -326,27 +365,72 @@ async function mirrorAttachments(records: AirtableRawRecord[]): Promise<void> {
     // A broken image must fail the build, but at request time it would take
     // down every consumer of the shared data cache (assistant, search, ISR
     // revalidation) over a single logo — warn and degrade there instead.
-    if (process.env.NEXT_PHASE === 'phase-production-build') {
+    if (isBuildPhase()) {
       throw new Error(message)
     }
     console.warn(message)
   }
 }
 
-// Airtable's documented rate limit is 5 req/sec per base. Build-time
-// fan-out across many tables can burst past that, so retry 429s with
-// real backoff (exponential, plus the Retry-After header when present).
-const FETCH_MAX_RETRIES = 5
+// Airtable's documented rate limit is 5 req/sec per base. Every request from
+// this process passes through a small pacer first, so a burst — a preview
+// page's tables fetched side by side, a render overlapping the preview poll —
+// is spread out just under the limit instead of tripping it. Build workers
+// and server instances each pace only themselves; the retry below still
+// covers the bursts they can't see from each other.
+const AIRTABLE_MAX_PER_WINDOW = 4
+const AIRTABLE_WINDOW_MS = 1_000
+const airtableSendTimes: number[] = []
+let airtableQueue: Promise<void> = Promise.resolve()
+
+function waitForAirtableSlot(): Promise<void> {
+  const turn = airtableQueue.then(async () => {
+    const now = Date.now()
+    while (
+      airtableSendTimes.length > 0 &&
+      now - airtableSendTimes[0] >= AIRTABLE_WINDOW_MS
+    ) {
+      airtableSendTimes.shift()
+    }
+    if (airtableSendTimes.length >= AIRTABLE_MAX_PER_WINDOW) {
+      const wait = AIRTABLE_WINDOW_MS - (now - airtableSendTimes[0])
+      await new Promise(r => setTimeout(r, wait))
+      airtableSendTimes.shift()
+    }
+    airtableSendTimes.push(Date.now())
+  })
+  // Whatever happens to this turn, the next one must not be held up.
+  airtableQueue = turn.catch(() => {})
+  return turn
+}
+
+export interface FetchRetryOptions {
+  /** Retries after the first attempt; 0 sends once and returns whatever
+   *  Airtable answered. */
+  attempts?: number
+}
+
+// Retry 429s and transient failures with exponential backoff (plus the
+// Retry-After header when present). The build can afford to sit out
+// Airtable's documented 30-second cool-off after a 429. A request-time render
+// can't: a preview page that waits half a minute per attempt runs into the
+// function timeout instead (a /map preview spent 84 s on one retry, and pages
+// hit the 300 s limit, on 4 Sept 2026), so at request time the backoff is
+// short and gives up sooner — a reload then beats a hung page.
 const FETCH_RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504])
-const RATE_LIMIT_BASE_DELAY_MS = 30_000
-const TRANSIENT_BASE_DELAY_MS = 1_000
+const BUILD_RETRY = { attempts: 5, rateLimitMs: 30_000, transientMs: 1_000 }
+const REQUEST_RETRY = { attempts: 3, rateLimitMs: 3_000, transientMs: 500 }
 
 export async function fetchAirtableWithRetry(
   url: string,
   token: string,
-  init?: RequestInit
+  init?: RequestInit,
+  retry?: FetchRetryOptions
 ): Promise<Response> {
-  for (let attempt = 0; attempt <= FETCH_MAX_RETRIES; attempt++) {
+  const policy = isBuildPhase() ? BUILD_RETRY : REQUEST_RETRY
+  const attempts = retry?.attempts ?? policy.attempts
+  for (let attempt = 0; attempt <= attempts; attempt++) {
+    await waitForAirtableSlot()
     const response = await fetch(url, {
       ...init,
       headers: { Authorization: `Bearer ${token}` },
@@ -354,12 +438,10 @@ export async function fetchAirtableWithRetry(
 
     if (response.ok) return response
     if (!FETCH_RETRYABLE_STATUS.has(response.status)) return response
-    if (attempt === FETCH_MAX_RETRIES) return response
+    if (attempt === attempts) return response
 
     const base =
-      response.status === 429
-        ? RATE_LIMIT_BASE_DELAY_MS
-        : TRANSIENT_BASE_DELAY_MS
+      response.status === 429 ? policy.rateLimitMs : policy.transientMs
     const retryAfter = parseRetryAfter(response.headers.get('retry-after'))
     const backoff = base * Math.pow(2, attempt)
     // Jitter so parallel workers don't all wake up and slam the API together.
@@ -367,7 +449,7 @@ export async function fetchAirtableWithRetry(
     const delay = Math.max(retryAfter ?? 0, backoff + jitter)
 
     console.warn(
-      `Airtable API ${response.status}, retrying in ${delay}ms (attempt ${attempt + 1}/${FETCH_MAX_RETRIES})`
+      `Airtable API ${response.status}, retrying in ${delay}ms (attempt ${attempt + 1}/${attempts})`
     )
     await new Promise(r => setTimeout(r, delay))
   }
@@ -473,7 +555,8 @@ const fetchAirtableRecordsCached = unstable_cache(
 )
 
 // Preview-mode requests (see src/lib/preview.ts) skip the cache and read
-// Airtable live, so an admin sees their edit on the real page immediately.
+// Airtable live, so an admin sees their edit on the real page immediately —
+// the requests one page view fans out into share each read (shareLiveRead).
 // Everyone else gets the cached entry above; Blob mirroring runs either way,
 // so preview pages carry the same permanent image URLs the live site serves.
 // (The explicit branch also documents intent: with Draft Mode enabled, Next
@@ -481,6 +564,10 @@ const fetchAirtableRecordsCached = unstable_cache(
 export async function fetchAirtableRecords(
   options: FetchOptions
 ): Promise<AirtableRawRecord[]> {
-  if (await isPreviewRequest()) return fetchAirtableRecordsImpl(options)
+  if (await isPreviewRequest()) {
+    return shareLiveRead(`records:${JSON.stringify(options)}`, () =>
+      fetchAirtableRecordsImpl(options)
+    )
+  }
   return fetchAirtableRecordsCached(options)
 }

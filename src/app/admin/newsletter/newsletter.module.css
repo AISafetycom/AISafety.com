@@ -1,0 +1,317 @@
+/* Newsletter approval page. Same utilitarian admin look as the other
+   sections (admin.module.css); only what that file doesn't already have. */
+
+.draftMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  font-size: 12px;
+  color: var(--teal-300);
+  margin: 0;
+}
+
+.draftMetaValue {
+  color: var(--white);
+}
+
+.statusOk {
+  color: var(--bright-teal-300);
+  font-weight: 600;
+}
+
+.statusBad {
+  color: #ff6b6b;
+  font-weight: 600;
+}
+
+.problems {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: #ff6b6b;
+  line-height: 1.5;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.button,
+.buttonPrimary {
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.button {
+  border: 1px solid var(--teal-700);
+  background: var(--teal-900);
+  color: var(--white);
+}
+
+.button:hover:not(:disabled) {
+  background: var(--teal-800);
+}
+
+.buttonPrimary {
+  border: 1px solid var(--bright-teal-300);
+  background: var(--bright-teal-300);
+  color: var(--teal-900);
+}
+
+.buttonPrimary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.button:disabled,
+.buttonPrimary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.notice {
+  font-size: 12px;
+  color: var(--teal-300);
+}
+
+.noticeError {
+  font-size: 12px;
+  color: #ff6b6b;
+}
+
+.noticeOk {
+  font-size: 12px;
+  color: var(--bright-teal-300);
+}
+
+/* Reorder panel beside the preview (Bryce, 11 Sept 2026), stacked on narrow screens. */
+.previewRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.reorderSide {
+  flex: 0 0 380px;
+  max-width: 100%;
+  position: sticky;
+  top: 86px; /* under the sticky admin header */
+}
+
+@media (max-width: 1100px) {
+  .previewRow {
+    flex-direction: column;
+  }
+  .reorderSide {
+    position: static;
+    flex-basis: auto;
+    width: 100%;
+  }
+}
+
+.previewFrame {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 820px;
+  border: 1px solid var(--teal-800);
+  border-radius: 8px;
+  background: var(--teal-900);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: 7px 10px 7px 0;
+  border-bottom: 1px solid var(--teal-800);
+  vertical-align: top;
+}
+
+.table th {
+  color: var(--teal-400);
+  font-weight: 500;
+}
+
+.table td {
+  color: var(--white);
+}
+
+.muted {
+  color: var(--teal-400);
+}
+
+/* ─── Send confirmation ───────────────────────────────────────────────── */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 25, 27, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.dialog {
+  width: 100%;
+  max-width: 460px;
+  padding: 24px;
+  background-color: var(--teal-850);
+  border: 1px solid var(--teal-700);
+  border-radius: 12px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+}
+
+.dialogTitle {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  margin: 0 0 16px;
+  line-height: 1.2;
+}
+
+.dialogFacts {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 8px 12px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.dialogFacts dt {
+  color: var(--teal-400);
+}
+
+.dialogFacts dd {
+  margin: 0;
+  color: var(--white);
+  overflow-wrap: anywhere;
+}
+
+.dialogNote {
+  margin: 16px 0 0;
+  font-size: 12px;
+  color: var(--teal-300);
+  line-height: 1.5;
+}
+
+.dialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+/* Same amber warning box as the map editor's "this edits the live site". */
+.liveWarning {
+  border-color: #f5b942;
+  color: #f5b942;
+}
+
+.liveWarning strong {
+  color: #f5b942;
+  font-weight: 600;
+}
+
+/* ─── Reorder panel ───────────────────────────────────────────────────── */
+
+.reorder {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--teal-800);
+  border-radius: 8px;
+  background: var(--teal-900);
+}
+
+.reorderGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reorderGroupLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--teal-300);
+}
+
+.reorderList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.reorderRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--teal-800);
+  border-radius: 6px;
+  background: var(--teal-850);
+  color: var(--white);
+  font-size: 13px;
+  cursor: grab;
+  user-select: none;
+}
+
+.reorderRow:active {
+  cursor: grabbing;
+}
+
+.reorderRowDragging {
+  opacity: 0.45;
+  border-style: dashed;
+}
+
+.reorderHandle {
+  color: var(--teal-500);
+  letter-spacing: -2px;
+  font-size: 14px;
+}
+
+.reorderIndex {
+  min-width: 18px;
+  color: var(--teal-400);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.reorderLogo {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  object-fit: contain;
+}
+
+.reorderTitle {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.reorderRow:focus-visible {
+  outline: 2px solid var(--bright-teal-300);
+  outline-offset: 1px;
+}

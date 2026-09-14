@@ -33,9 +33,10 @@ interface TrackPayload {
   /** The map-area dimension — the listing's FIRST category, stamped on
    *  Map-page clicks and hovers so the dashboard can slice the map by area. */
   area?: string
-  /** Site-search events: the query text as typed. */
+  /** Site-search and map-search events: the query text as typed. */
   query?: string
-  /** search_query only: how many results the query returned. */
+  /** search_query / map_search_query only: how many results the query
+   *  returned. */
   results?: number
 }
 
@@ -325,6 +326,22 @@ export function trackSearchOpen(method: SearchOpenMethod): void {
   })
 }
 
+/** How the global nav's +N menu was opened: a mouse/trackpad hover, or a tap
+ *  on a touch screen. */
+export type NavOverflowOpenMethod = 'hover' | 'tap'
+
+/** Track the global nav's +N menu opening, and how. Fired once per
+ *  closed→open transition: the 150 ms hover grace keeps the panel open while
+ *  the pointer crosses the gap into it, so that never counts twice. */
+export function trackNavOverflowOpen(method: NavOverflowOpenMethod): void {
+  if (typeof window === 'undefined') return
+  sendTrackEvent({
+    type: 'nav_overflow_open',
+    source: method,
+    page: window.location.pathname,
+  })
+}
+
 /**
  * Track a settled site-search query — fired once the visitor pauses typing,
  * or immediately if they click a result / close search before the pause.
@@ -374,6 +391,59 @@ export function trackSearchClick(
   })
 }
 
+/** How the /map search box was opened: its magnifying-glass button, or
+ *  ⌘F/Ctrl+F taking over the browser's find-in-page while over the map. */
+export type MapSearchOpenMethod = 'button' | 'cmd-f'
+
+/**
+ * Track the Field map's own search box opening. Distinct from the sitewide
+ * search modal, which has its own search_* events: different box, different
+ * outcome (a pick flies the map to the pin instead of opening a page). Always
+ * on the Map page, so `page` is the resource-page name the map's clicks and
+ * hovers already use.
+ */
+export function trackMapSearchOpen(method: MapSearchOpenMethod): void {
+  if (typeof window === 'undefined') return
+  sendTrackEvent({ type: 'map_search_open', page: 'Map', source: method })
+}
+
+/**
+ * Track a settled /map search — fired once the visitor pauses typing, or
+ * immediately if they pick a result / leave the box before the pause.
+ * `results` is how many listings matched (0 = the map has nothing for it).
+ */
+export function trackMapSearchQuery(query: string, results: number): void {
+  if (typeof window === 'undefined') return
+  sendTrackEvent({ type: 'map_search_query', page: 'Map', query, results })
+}
+
+/**
+ * Track a /map search result being picked (the map flies to the listing).
+ * `query` is what was typed when it was picked; `position` is the result's
+ * rank counted from 1; `area` is the listing's first category — the same area
+ * dimension map clicks and hovers carry, so picks can be sliced like them.
+ */
+export function trackMapSearchPick(
+  query: string,
+  title: string,
+  url: string,
+  listingId: string,
+  position: string,
+  area?: string
+): void {
+  if (typeof window === 'undefined') return
+  sendTrackEvent({
+    type: 'map_search_pick',
+    page: 'Map',
+    query: query || undefined,
+    label: title,
+    url,
+    listingId,
+    position,
+    area,
+  })
+}
+
 /**
  * Track an arbitrary first-party event (e.g. a chatbot open, newsletter signup,
  * or donate click). Send-only — does not touch Matomo. Lets us start capturing
@@ -385,4 +455,29 @@ export function trackEvent(
 ): void {
   if (typeof window === 'undefined') return
   sendTrackEvent({ type, ...props })
+}
+
+/**
+ * Track a click on the button that sits on a page's map and scrolls down to
+ * the listings below it ("View cards" on Map, "View online communities" on
+ * Communities). `label` is the button's visible text.
+ */
+export function trackCardsButtonClick(page: string, label: string): void {
+  if (typeof window === 'undefined') return
+  if (isTrackingOptedOut()) return
+  window._paq?.push(['trackEvent', `Cards - ${page}`, 'Button click', label])
+  sendTrackEvent({ type: 'cards_button_click', page, label })
+}
+
+/**
+ * Track a visitor reaching the listings below a page's map (Map,
+ * Communities). Fired once per page load, when the top of the cards section
+ * scrolls into the upper half of the screen — via the button, by hand, or by
+ * arriving on a link straight to it. First-party only, like hovers: a passive
+ * signal for the dashboard rather than a Matomo event. The fixed label gives
+ * the dashboard's unique-mode dedupe (one per visitor per page per day) a key.
+ */
+export function trackCardsView(page: string): void {
+  if (typeof window === 'undefined') return
+  sendTrackEvent({ type: 'cards_view', page, label: 'Cards section' })
 }

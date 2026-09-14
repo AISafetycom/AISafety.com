@@ -4,6 +4,7 @@ import { useState, useMemo, useRef, useLayoutEffect } from 'react'
 import FilterBar from '@/components/FilterBar'
 import FilterDropdown from '@/components/FilterDropdown'
 import ListingCard from '@/components/ListingCard'
+import { advisorCardProps } from './card'
 import ContributeButtons from '@/components/ContributeButtons'
 import { Advisor } from '@/lib/data/advisors'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
@@ -91,15 +92,7 @@ export default function AdvisorsClient({ advisors }: AdvisorsClientProps) {
           {filteredAdvisors.map(advisor => (
             <ListingCard
               key={advisor.id}
-              href={advisor.url !== '#' ? advisor.url : undefined}
-              name={advisor.name}
-              description={advisor.description}
-              logo={advisor.logo}
-              meta={
-                advisor.focus
-                  ? [{ icon: '/images/icons/target.svg', value: advisor.focus }]
-                  : []
-              }
+              {...advisorCardProps(advisor)}
               trackingPage="Advisors"
               listingId={advisor.id}
               placement={placements.get(advisor.id)}

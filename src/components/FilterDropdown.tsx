@@ -3,6 +3,7 @@
 import Icon from './Icon'
 import { useEffect, useRef, useState } from 'react'
 import { trackFilterApply } from '@/lib/analytics'
+import { trackedFilterGroup, trackedFilterValue } from '@/lib/filter-tracking'
 import styles from './FilterDropdown.module.css'
 
 interface FilterDropdownProps {
@@ -14,12 +15,10 @@ interface FilterDropdownProps {
   /** Optional 16×16 svg icon (path in /images) shown before the label. */
   icon?: string
   /** Analytics page name (e.g. 'Training'). When set, turning a value on
-   *  records a filter_apply event under this page and the dropdown's title. */
+   *  records a filter_apply event under this page and the dropdown's title.
+   *  Renamed titles and options keep logging their original names via
+   *  lib/filter-tracking, so history stays in one line. */
   trackingPage?: string
-  /** Overrides the name the filter is tracked under, so a friendlier display
-   *  title (e.g. 'Remote or on-site') can keep a stable analytics name
-   *  ('Work location'). Defaults to `title`. */
-  trackingTitle?: string
 }
 
 // A single pill-shaped filter that opens a checkbox popover. Used in the
@@ -32,7 +31,6 @@ export default function FilterDropdown({
   onToggle,
   icon,
   trackingPage,
-  trackingTitle,
 }: FilterDropdownProps) {
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState({ top: 0, left: 0 })
@@ -121,12 +119,14 @@ export default function FilterDropdown({
                   type="checkbox"
                   checked={selected.includes(option)}
                   onChange={() => {
-                    if (trackingPage && !selected.includes(option))
+                    if (trackingPage && !selected.includes(option)) {
+                      const group = trackedFilterGroup(trackingPage, title)
                       trackFilterApply(
                         trackingPage,
-                        trackingTitle ?? title,
-                        option
+                        group,
+                        trackedFilterValue(trackingPage, group, option)
                       )
+                    }
                     onToggle(option)
                   }}
                   className="checkbox"

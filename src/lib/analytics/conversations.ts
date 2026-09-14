@@ -3,6 +3,12 @@
 // reads). Everything here is computed per-query from the raw transcripts —
 // nothing is precomputed or stored — so the panels are fully date-range aware.
 
+import {
+  entryFromEnd,
+  historyIsComplete,
+  loggedTurnCount,
+  turnFromEnd,
+} from '@/lib/admin/conversation-turns'
 import { franc } from 'franc-min'
 import { PAGES, DEFAULT_CHIPS } from '@/lib/assistant/pages'
 import { extractChips, stripChipTokens } from '@/lib/assistant/tokens'
@@ -10,7 +16,6 @@ import {
   isConversationsTableConfigured,
   listConversationsForStats,
   type ConversationRow,
-  type HistoryTurn,
 } from '@/lib/admin/airtable'
 import type { Counted, DateRange } from './events'
 
@@ -133,10 +138,10 @@ function userMessages(row: ConversationRow): string[] {
 function conversationLength(row: ConversationRow): number {
   const d = row.data
   if (!d) return 0
-  if (Array.isArray(d.turnTimes) && d.turnTimes.length > 0)
-    return d.turnTimes.length
-  if (Array.isArray(d.tools) && d.tools.length > 0) return d.tools.length
-  return userMessages(row).length
+  // A complete history is the truth itself; the per-turn count can only
+  // overshoot it (re-sent turns logged twice, before 2 Sept 2026).
+  if (historyIsComplete(d)) return userMessages(row).length
+  return loggedTurnCount(d) || userMessages(row).length
 }
 
 /** `[[card:ID|note]]` and `[[suggest:type]]` markers in a reply — dropped for
@@ -162,23 +167,6 @@ function replyText(raw: string): string {
     .trim()
 }
 
-/** The per-turn entry (turn time, page) behind the message at history index
- *  `msgIdx`. The per-turn arrays hold one entry per logged turn since the
- *  conversation began while the history is a sliding window, so the two are
- *  aligned from the END: the window's last user message belongs to the last
- *  entry, and so on backwards. Same rule the Conversation Log viewer uses. */
-function turnEntryFor(
-  history: HistoryTurn[],
-  entries: unknown[],
-  msgIdx: number
-): unknown {
-  const totalUsers = history.filter(t => t.role === 'user').length
-  const usersUpToHere = history
-    .slice(0, msgIdx)
-    .filter(t => t.role === 'user').length
-  return entries[entries.length - 1 - (totalUsers - usersUpToHere)]
-}
-
 /** The rated replies on one conversation row. The rating's turn index is the
  *  reply's position in the message list, which matches the stored history
  *  unless the conversation outgrew the history window (or an errored turn
@@ -193,14 +181,11 @@ function ratedRepliesOf(row: ConversationRow): RatedReply[] {
     const reply = d?.history[idx]
     const question = idx > 0 ? d?.history[idx - 1] : undefined
     const aligned = reply?.role === 'assistant' && question?.role === 'user'
-    // Look the turn up by the user message that started it (index idx - 1;
-    // the slice bound idx includes it), so the time/page belong to this reply.
-    const at = aligned
-      ? turnEntryFor(d!.history, d!.turnTimes ?? [], idx)
-      : undefined
-    const page = aligned
-      ? turnEntryFor(d!.history, d!.pages ?? [], idx)
-      : undefined
+    // The reply's own logged turn (turnFromEnd resolves a reply to the turn
+    // of the question it answers), so the time/page belong to this reply.
+    const turn = aligned ? turnFromEnd(d!, idx) : 0
+    const at = aligned ? entryFromEnd(d!.turnTimes, turn) : undefined
+    const page = aligned ? entryFromEnd(d!.pages, turn) : undefined
     out.push({
       at: typeof at === 'string' ? at : row.createdAt,
       rating,

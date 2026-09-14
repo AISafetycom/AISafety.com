@@ -25,11 +25,23 @@ import {
 } from '@/lib/training-types'
 import { selectFeatured, withRandomStandIns } from '@/lib/featured'
 import { placementsById } from '@/lib/placements'
+import {
+  compareByDeadline,
+  SECTION_LABELS,
+  sectionFor,
+  type Section,
+} from '@/lib/training-order'
 import type {
   ProgramBase,
   RecurringProgram,
   TrainingProgram,
 } from '@/lib/data/training'
+import {
+  bottomMetaFor,
+  recurringProgramCardProps,
+  titleMetaFor,
+  trainingCardProps,
+} from './card'
 
 // Each tab links to its own add form and share view; the correction form is
 // the sitewide one.
@@ -57,60 +69,6 @@ interface TrainingClientProps {
   recurring: RecurringProgram[]
 }
 
-function parseISO(date: string): Date {
-  return new Date(date + 'T00:00:00Z')
-}
-
-function formatShortDate(date: string): string {
-  const d = parseISO(date)
-  // en-US, not en-GB: en-GB abbreviates September as "Sept".
-  const month = new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    timeZone: 'UTC',
-  }).format(d)
-  return `${d.getUTCDate()} ${month} ${d.getUTCFullYear()}`
-}
-
-// "1 year", "3 months", "8 weeks", "6 days" — rounded to whichever unit
-// reads most naturally for the span.
-function durationLabel(
-  startDate: string | null,
-  endDate: string | null
-): string | null {
-  if (!startDate || !endDate || endDate < startDate) return null
-  const start = parseISO(startDate).getTime()
-  const end = parseISO(endDate).getTime()
-  const days = Math.round((end - start) / 86_400_000) + 1
-  if (days >= 330) {
-    const years = Math.max(1, Math.round(days / 365.25))
-    return years === 1 ? '1 year' : `${years} years`
-  }
-  const months = Math.round(days / 30.44)
-  // Anything over 8 weeks reads better in months ("33 weeks" -> "8 months");
-  // under that, use months only when the span is within days of a whole month.
-  if (days > 56 || (months >= 1 && Math.abs(days - months * 30.44) <= 4)) {
-    return months === 1 ? '1 month' : `${months} months`
-  }
-  if (days >= 14) {
-    return `${Math.round(days / 7)} weeks`
-  }
-  return days === 1 ? '1 day' : `${days} days`
-}
-
-function monthKey(startDate: string | null): string {
-  if (!startDate) return 'tbc'
-  const d = parseISO(startDate)
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth()).padStart(2, '0')}`
-}
-function monthLabel(startDate: string | null): string {
-  if (!startDate) return 'Dates to be confirmed'
-  return new Intl.DateTimeFormat('en-GB', {
-    month: 'long',
-    year: 'numeric',
-    timeZone: 'UTC',
-  }).format(parseISO(startDate))
-}
-
 // Online-or-in-person programs can be done either way, so they surface under
 // both the Online and In person filters. Hybrid programs (required online +
 // in-person parts, job-board sense) get their own filter option — they don't
@@ -121,86 +79,6 @@ function locationFacets(program: ProgramBase): string[] {
   return program.mode === 'Online or in person'
     ? ['Online', 'In person']
     : [program.mode]
-}
-
-function titleMetaFor(program: ProgramBase, upcoming?: TrainingProgram) {
-  const rows: { icon: string; value: string }[] = []
-  if (program.mode === 'Online') {
-    rows.push({ icon: '/images/icons/computer.svg', value: 'Online' })
-  } else if (program.location) {
-    rows.push({ icon: '/images/icons/pin.svg', value: program.location })
-  }
-  const startText =
-    upcoming?.startDateApprox ??
-    (upcoming?.startDate ? formatShortDate(upcoming.startDate) : null)
-  if (upcoming && startText) {
-    const duration = durationLabel(upcoming.startDate, upcoming.endDate)
-    const starts = `Starts ${startText}`
-    rows.push({
-      icon: '/images/icons/calendar.svg',
-      value: duration ? `${duration} · ${starts}` : starts,
-    })
-  } else {
-    // Recurring programs have no dates, but most run a consistent length.
-    const typical = (program as RecurringProgram).typicalLength
-    if (typical) {
-      rows.push({ icon: '/images/icons/calendar.svg', value: typical })
-    }
-  }
-  return rows
-}
-
-function bottomMetaFor(program: ProgramBase, upcoming?: TrainingProgram) {
-  const rows: { icon: string; value: string }[] = []
-  if (program.stipend) {
-    rows.push({
-      icon:
-        program.stipend === 'No stipend'
-          ? '/images/icons/money-off.svg'
-          : '/images/icons/money.svg',
-      value: program.stipend,
-    })
-  }
-  if (program.timeCommitment) {
-    rows.push({
-      icon:
-        program.timeCommitment === 'Part-time'
-          ? '/images/icons/timer-half.svg'
-          : '/images/icons/timer.svg',
-      value: program.timeCommitment,
-    })
-  }
-  if (program.entryBar) {
-    rows.push({
-      icon: `/images/icons/entry-${program.entryBar.toLowerCase()}.svg`,
-      value: `Entry bar: ${program.entryBar.toLowerCase()}`,
-    })
-  }
-  if (program.focus.length > 0) {
-    rows.push({
-      icon: '/images/icons/target.svg',
-      value: `Focus: ${program.focus.map(f => f.toLowerCase()).join(', ')}`,
-    })
-  }
-  if (upcoming) {
-    if (upcoming.notYetOpen) {
-      rows.push({
-        icon: '/images/icons/paper-closed.svg',
-        value: 'Applications not yet open',
-      })
-    } else if (upcoming.applicationsClose) {
-      const open = upcoming.applicationStatus === 'Open'
-      rows.push({
-        icon: open
-          ? '/images/icons/paper.svg'
-          : '/images/icons/paper-closed.svg',
-        value: open
-          ? `Apply by ${formatShortDate(upcoming.applicationsClose)}`
-          : 'Applications closed',
-      })
-    }
-  }
-  return rows
 }
 
 // The active set is shareable: the non-default tab writes ?view= to the
@@ -250,7 +128,11 @@ export default function TrainingClient({
     scrollToAnchor(toggleAnchorRef.current)
   }
 
-  const [selectedStatus, setSelectedStatus] = useState<string[]>(['Open'])
+  // No default Applications filter: the deadline order already keeps open
+  // programs first and parks closed ones at the bottom under a divider, so
+  // everything can show. (/events defaults to Open — a closed event is one
+  // you can't attend, and it has no such ordering to lean on.)
+  const [selectedStatus, setSelectedStatus] = useState<string[]>([])
   const [selectedTypes, setSelectedTypes] = useState<string[]>([])
   const [selectedFocus, setSelectedFocus] = useState<string[]>([])
   const [selectedEntryBar, setSelectedEntryBar] = useState<string[]>([])
@@ -258,7 +140,12 @@ export default function TrainingClient({
   const [selectedLength, setSelectedLength] = useState<string[]>([])
   const [selectedLocation, setSelectedLocation] = useState<string[]>([])
 
-  const modePrograms: ProgramBase[] = mode === 'upcoming' ? programs : recurring
+  const orderedPrograms = useMemo(
+    () => [...programs].sort(compareByDeadline),
+    [programs]
+  )
+  const modePrograms: ProgramBase[] =
+    mode === 'upcoming' ? orderedPrograms : recurring
 
   // Programs whose applications closed are never shown as featured
   // (recurring programs have no applications and always count as open);
@@ -385,20 +272,19 @@ export default function TrainingClient({
     selectedLocation,
   ])
 
-  // Upcoming programs group under month-of-start headings, mirroring
-  // /events; recurring programs have no dates and stay one flat A–Z grid.
-  const monthGroups = useMemo(() => {
+  // Upcoming programs are one deadline-ordered list; each card carries its
+  // own "Apply by" line, so no month headings. Programs that can't be applied
+  // to sit at the bottom, and once the Applications filter shows more than
+  // one set the blocks get labels so the switch is obvious. Recurring
+  // programs have no dates and stay one flat A–Z grid.
+  const sections = useMemo(() => {
     if (mode !== 'upcoming') return []
-    const groups: {
-      key: string
-      label: string
-      programs: TrainingProgram[]
-    }[] = []
+    const groups: { key: Section; programs: TrainingProgram[] }[] = []
     for (const program of filtered as TrainingProgram[]) {
-      const key = monthKey(program.startDate)
+      const key = sectionFor(program)
       let group = groups.find(g => g.key === key)
       if (!group) {
-        group = { key, label: monthLabel(program.startDate), programs: [] }
+        group = { key, programs: [] }
         groups.push(group)
       }
       group.programs.push(program)
@@ -438,22 +324,9 @@ export default function TrainingClient({
   const renderCard = (program: ProgramBase) => (
     <ListingCard
       key={program.id}
-      href={program.url}
-      name={program.name}
-      description={program.description}
-      logo={program.logo}
-      pills={program.type.map(t => ({
-        label: t,
-        colorClass: trainingTypeColor(t),
-      }))}
-      titleMeta={titleMetaFor(
-        program,
-        mode === 'upcoming' ? (program as TrainingProgram) : undefined
-      )}
-      meta={bottomMetaFor(
-        program,
-        mode === 'upcoming' ? (program as TrainingProgram) : undefined
-      )}
+      {...(mode === 'upcoming'
+        ? trainingCardProps(program as TrainingProgram)
+        : recurringProgramCardProps(program as RecurringProgram))}
       trackingPage="Training"
       listingId={program.id}
       placement={placements.get(program.id)}
@@ -595,16 +468,18 @@ export default function TrainingClient({
       <div className="flex gap-56px">
         <div className="width-9-col padding-bottom-80px">
           {mode === 'upcoming' ? (
-            monthGroups.map((group, i) => (
+            sections.map((section, i) => (
               <div
-                key={group.key}
+                key={section.key}
                 className={i === 0 ? undefined : 'padding-top-32px'}
               >
-                <p className="paragraph-small color-teal-300 padding-bottom-24px">
-                  {group.label}
-                </p>
+                {sections.length > 1 && (
+                  <p className="paragraph-small color-teal-300 padding-bottom-24px">
+                    {SECTION_LABELS[section.key]}
+                  </p>
+                )}
                 <div className="collection-list">
-                  {group.programs.map(program => renderCard(program))}
+                  {section.programs.map(program => renderCard(program))}
                 </div>
               </div>
             ))

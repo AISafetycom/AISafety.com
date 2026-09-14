@@ -29,6 +29,9 @@ interface Props {
   onSetPosition: (id: string, x: number, y: number) => void
   /** Change the record's Scale (logo size); saved like a move. */
   onSetScale: (id: string, scale: ScaleName) => void
+  /** A view-only session: the same lists and details, nothing to place,
+   *  move or resize. */
+  readOnly: boolean
 }
 
 /** Case-insensitive match on any name the record goes by, or its category.
@@ -86,6 +89,7 @@ export default function SidePanel({
   onPick,
   onSetPosition,
   onSetScale,
+  readOnly,
 }: Props) {
   const [search, setSearch] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
@@ -294,7 +298,7 @@ export default function SidePanel({
                         <span className={styles.rowCoords}>
                           {r.x!.toFixed(1)}, {r.y!.toFixed(1)}
                         </span>
-                      ) : (
+                      ) : readOnly ? null : (
                         <button
                           type="button"
                           className={
@@ -377,17 +381,19 @@ export default function SidePanel({
                     )}
                     <Badges r={r} />
                   </span>
-                  <button
-                    type="button"
-                    className={
-                      placeModeId === r.id
-                        ? adminStyles.editorButtonPrimary
-                        : adminStyles.editorButton
-                    }
-                    onClick={() => onPlace(r.id)}
-                  >
-                    {placeModeId === r.id ? 'Placing…' : 'Place'}
-                  </button>
+                  {!readOnly && (
+                    <button
+                      type="button"
+                      className={
+                        placeModeId === r.id
+                          ? adminStyles.editorButtonPrimary
+                          : adminStyles.editorButton
+                      }
+                      onClick={() => onPlace(r.id)}
+                    >
+                      {placeModeId === r.id ? 'Placing…' : 'Place'}
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -425,93 +431,113 @@ export default function SidePanel({
                 <dd>{selected.status}</dd>
                 <dt>Scale</dt>
                 <dd>
-                  <select
-                    className={`${adminStyles.editorSelect} ${styles.scaleSelect}`}
-                    aria-label="Scale (logo size)"
-                    // An unset Scale shows as a disabled placeholder so the
-                    // first real choice is a deliberate one.
-                    value={isScaleName(selected.scale) ? selected.scale : ''}
-                    onChange={e => {
-                      const v = e.target.value
-                      if (isScaleName(v)) onSetScale(selected.id, v)
-                    }}
-                  >
-                    {!isScaleName(selected.scale) && (
-                      <option value="" disabled>
-                        {selected.scale
-                          ? `${selected.scale} (unknown)`
-                          : `Not set – drawn as ${DEFAULT_SCALE_NAME}`}
-                      </option>
-                    )}
-                    {SCALE_OPTIONS.map(s => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
+                  {readOnly ? (
+                    isScaleName(selected.scale) ? (
+                      selected.scale
+                    ) : (
+                      `Not set – drawn as ${DEFAULT_SCALE_NAME}`
+                    )
+                  ) : (
+                    <select
+                      className={`${adminStyles.editorSelect} ${styles.scaleSelect}`}
+                      aria-label="Scale (logo size)"
+                      // An unset Scale shows as a disabled placeholder so the
+                      // first real choice is a deliberate one.
+                      value={isScaleName(selected.scale) ? selected.scale : ''}
+                      onChange={e => {
+                        const v = e.target.value
+                        if (isScaleName(v)) onSetScale(selected.id, v)
+                      }}
+                    >
+                      {!isScaleName(selected.scale) && (
+                        <option value="" disabled>
+                          {selected.scale
+                            ? `${selected.scale} (unknown)`
+                            : `Not set – drawn as ${DEFAULT_SCALE_NAME}`}
+                        </option>
+                      )}
+                      {SCALE_OPTIONS.map(s => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </dd>
                 <dt>Label</dt>
                 <dd>{selected.labelName}</dd>
               </dl>
-              <div className={styles.coords}>
-                <label>
-                  x
-                  <input
-                    className={adminStyles.editorInput}
-                    type="number"
-                    step="0.1"
-                    min={GRID_BOUNDS.x[0]}
-                    max={GRID_BOUNDS.x[1]}
-                    value={xValue}
-                    onChange={e =>
-                      setDraft({
-                        id: selected.id,
-                        x: e.target.value,
-                        y: yValue,
-                      })
-                    }
-                    onKeyDown={e => e.key === 'Enter' && submitPosition()}
-                  />
-                </label>
-                <label>
-                  y
-                  <input
-                    className={adminStyles.editorInput}
-                    type="number"
-                    step="0.1"
-                    min={GRID_BOUNDS.y[0]}
-                    max={GRID_BOUNDS.y[1]}
-                    value={yValue}
-                    onChange={e =>
-                      setDraft({
-                        id: selected.id,
-                        x: xValue,
-                        y: e.target.value,
-                      })
-                    }
-                    onKeyDown={e => e.key === 'Enter' && submitPosition()}
-                  />
-                </label>
-                <button
-                  type="button"
-                  className={adminStyles.editorButton}
-                  onClick={submitPosition}
-                >
-                  Set
-                </button>
-              </div>
-              <p className={adminStyles.sectionHint}>
-                Arrow keys nudge the selected listing by 0.1 (Shift: 1.0). Map
-                is 0–{GRID_BOUNDS.x[1]} wide, 0–{GRID_BOUNDS.y[1]} tall.
-              </p>
-              {(selected.x === null || selected.y === null) && (
-                <button
-                  type="button"
-                  className={adminStyles.editorButtonPrimary}
-                  onClick={() => onPlace(selected.id)}
-                >
-                  {placeModeId === selected.id ? 'Placing…' : 'Place on map'}
-                </button>
+              {readOnly ? (
+                <p className={adminStyles.sectionHint}>
+                  {selected.x === null || selected.y === null
+                    ? 'Not on the map yet.'
+                    : `At ${selected.x.toFixed(1)}, ${selected.y.toFixed(1)}.`}
+                </p>
+              ) : (
+                <>
+                  <div className={styles.coords}>
+                    <label>
+                      x
+                      <input
+                        className={adminStyles.editorInput}
+                        type="number"
+                        step="0.1"
+                        min={GRID_BOUNDS.x[0]}
+                        max={GRID_BOUNDS.x[1]}
+                        value={xValue}
+                        onChange={e =>
+                          setDraft({
+                            id: selected.id,
+                            x: e.target.value,
+                            y: yValue,
+                          })
+                        }
+                        onKeyDown={e => e.key === 'Enter' && submitPosition()}
+                      />
+                    </label>
+                    <label>
+                      y
+                      <input
+                        className={adminStyles.editorInput}
+                        type="number"
+                        step="0.1"
+                        min={GRID_BOUNDS.y[0]}
+                        max={GRID_BOUNDS.y[1]}
+                        value={yValue}
+                        onChange={e =>
+                          setDraft({
+                            id: selected.id,
+                            x: xValue,
+                            y: e.target.value,
+                          })
+                        }
+                        onKeyDown={e => e.key === 'Enter' && submitPosition()}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className={adminStyles.editorButton}
+                      onClick={submitPosition}
+                    >
+                      Set
+                    </button>
+                  </div>
+                  <p className={adminStyles.sectionHint}>
+                    Arrow keys nudge the selected listing by 0.1 (Shift: 1.0).
+                    Map is 0–{GRID_BOUNDS.x[1]} wide, 0–{GRID_BOUNDS.y[1]} tall.
+                  </p>
+                  {(selected.x === null || selected.y === null) && (
+                    <button
+                      type="button"
+                      className={adminStyles.editorButtonPrimary}
+                      onClick={() => onPlace(selected.id)}
+                    >
+                      {placeModeId === selected.id
+                        ? 'Placing…'
+                        : 'Place on map'}
+                    </button>
+                  )}
+                </>
               )}
               <a
                 className={styles.airtableLink}

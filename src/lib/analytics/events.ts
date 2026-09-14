@@ -24,6 +24,7 @@ import { Redis } from '@upstash/redis'
 import { Ratelimit } from '@upstash/ratelimit'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { displayFilterGroup, displayFilterValue } from '@/lib/filter-tracking'
 
 export interface AnalyticsEvent {
   /** Event kind, e.g. 'listing_click'. Must be in ALLOWED_EVENT_TYPES. */
@@ -44,16 +45,19 @@ export interface AnalyticsEvent {
    *  other click (cards, featured cards) is left unset and treated as a card.
    *  Search events reuse it: on search_open it's how the modal was opened
    *  ('button' | 'cmd-k' | 'slash'); on search_query, the active type filter;
-   *  on search_click, the clicked result's type ('job', 'funder', …). */
+   *  on search_click, the clicked result's type ('job', 'funder', …). On
+   *  map_search_open it's how the map's box was opened ('button' | 'cmd-f'). */
   source?: string
   /** The map-area dimension — the listing's first category, stamped on
    *  Map-page clicks and hovers so the dashboard can slice the map by area. */
   area?: string
-  /** Site-search events: the query text as typed — the subject of a
-   *  search_query, and on a search_click the query that produced the result. */
+  /** Site-search and map-search events: the query text as typed — the
+   *  subject of a search_query / map_search_query, and on a search_click /
+   *  map_search_pick the query that produced the result. */
   query?: string
-  /** search_query only: how many results the query returned. 0 means the
-   *  visitor searched for something the site has nothing for. */
+  /** search_query / map_search_query only: how many results the query
+   *  returned. 0 means the visitor searched for something the site (or the
+   *  map) has nothing for. */
   results?: number
   /** Destination / relevant URL. */
   url?: string
@@ -84,6 +88,12 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   // A click on a page's "View data in Airtable" card — data curiosity, not a
   // contribution, so it's its own kind.
   'airtable_view',
+  // Map pages (Map, Communities): a click on the button on the map that
+  // scrolls down to the listings, and a visitor reaching those listings —
+  // fired once per page load when the top of the cards section scrolls into
+  // the upper half of the screen, however they got there.
+  'cards_button_click',
+  'cards_view',
   // A submit of the newsletter signup box (Events/Training). Counts the
   // attempt — the submit opens Substack's subscribe page, so completion
   // happens off-site. Never carries the email address.
@@ -112,7 +122,25 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   'search_open',
   'search_query',
   'search_click',
+  // The Field map's own search box (/map): opening it, a settled query, and
+  // a result being picked (the map flies to the listing). Kept apart from the
+  // sitewide search_* events — different box, different outcome. Picks carry
+  // the listing like a map click does (label, listingId, url, area) plus the
+  // result's rank in `position`.
+  'map_search_open',
+  'map_search_query',
+  'map_search_pick',
+  // The global nav's +N pill (the pages that don't fit the bar) opening its
+  // menu. `source` is how: 'hover' (mouse/trackpad) or 'tap' (touch screens);
+  // `page` the path it happened on. One per closed→open transition.
+  'nav_overflow_open',
 ])
+
+/** Dashboard labels for how the +N menu was opened (nav_overflow_open.source). */
+const NAV_OVERFLOW_OPEN_LABEL: Record<string, string> = {
+  hover: 'Hover',
+  tap: 'Tap',
+}
 
 // ─── Redis backend ───────────────────────────────────────────────────────────
 
@@ -424,6 +452,28 @@ export interface SearchPanelData {
   destinations: ClickDestination[]
 }
 
+export interface MapSearchPanelData {
+  /** Unique users at each step of using the map's search box. */
+  funnel: {
+    opened: number
+    searched: number
+    picked: number
+  }
+  /** Distinct visitors who opened the map search vs the Map page's distinct
+   *  visitors. Null when the Map page isn't selected. */
+  openShare: VisitorShare | null
+  /** How the box gets opened: its button, or ⌘F over the map. */
+  openMethods: Counted[]
+  /** What people search the map for, busiest first (lowercased so casings
+   *  group). */
+  topQueries: Counted[]
+  /** Map searches that matched nothing. A subset of topQueries. */
+  noResultQueries: Counted[]
+  /** The listings picked from the results, busiest first, each with the rank
+   *  range it was picked at (1 = the top result). */
+  picked: ListingRow[]
+}
+
 export interface VisitsData {
   /** Page views bucketed by page, busiest first — visitors or raw views,
    *  depending on the dashboard's count mode. */
@@ -542,6 +592,15 @@ export interface DashboardData {
   /** Distinct visitors who clicked a "View data in Airtable" card on each
    *  page vs the page's distinct visitors. */
   airtableShareByPage: VisitorShare[]
+  /** Map pages only: visitors reaching the listings below the map (cards_view
+   *  — once per page load, when the cards section scrolls into the upper half
+   *  of the screen) and clicks on the button on the map that scrolls there.
+   *  The counts follow the unique/total mode; the shares divide distinct
+   *  visitors who did it by the page's distinct visitors. 0/null elsewhere. */
+  cardsViews: number
+  cardsViewShare: VisitorShare | null
+  cardsButtonClicks: number
+  cardsButtonShare: VisitorShare | null
   /** Newsletter signup-box submits per page (the box lives on Events and
    *  Training). Submits, not confirmed Substack subscriptions. */
   newsletterByPage: Counted[]
@@ -588,6 +647,16 @@ export interface DashboardData {
   /** Clicks on the footer's external links, one row per link ('Donate',
    *  'AI Safety Funding', …), sitewide. */
   footerClicks: Counted[]
+  /** Opens of the global nav's +N menu, one row per method ('Hover' |
+   *  'Tap'), sitewide. */
+  navOverflowOpens: Counted[]
+  /** Per method: distinct visitors who opened the +N menu that way vs
+   *  distinct visitors site-wide — the nav is on every page, so the site is
+   *  the denominator. Keyed by the row names `navOverflowOpens` uses. */
+  navOverflowOpenShare: VisitorShare[]
+  /** The +N table's Total row: distinct visitors who opened the menu at all
+   *  vs distinct visitors site-wide. */
+  anyNavOverflowOpenShare: VisitorShare
   /** For pages with a map (Map, Communities): `selectedPage`'s most-hovered
    *  map listings — tooltip dwells (500 ms cursor rest on desktop, first tap
    *  on mobile), grouped like `topListings` and following the same unique/
@@ -605,6 +674,9 @@ export interface DashboardData {
   chatbot: ChatbotPanelData
   /** The Search tab's event-derived panels (opens, queries, result clicks). */
   search: SearchPanelData
+  /** The Map tab's search-box panels (opens, queries, picks). Empty on every
+   *  other page — only the Field map has the box. */
+  mapSearch: MapSearchPanelData
   /** The privacy page's analytics switch, one bucket per browser by its latest
    *  toggle in range: `off` = switched analytics off and hasn't switched it
    *  back, `on` = switched it back on. Changing your mind moves a browser
@@ -615,8 +687,9 @@ export interface DashboardData {
   /** Cross-interest overlaps between pages (and the chatbot), from anonymous
    *  visitor ids: pairs ranked by how many visitors engaged with both. */
   correlations: CorrelationRow[]
-  /** Recent clicks and chatbot/search events — page views and map hovers are
-   *  excluded so the feed stays an activity log rather than a firehose. */
+  /** Recent clicks and chatbot/search events — page views, map hovers and
+   *  cards-section views are excluded so the feed stays an activity log
+   *  rather than a firehose. */
   recent: AnalyticsEvent[]
   /** Timestamp of the oldest event in the WHOLE store (not just the selected
    *  range) — lets the dashboard say how far back its data actually goes.
@@ -656,6 +729,10 @@ const EMPTY: Omit<DashboardData, 'source'> = {
   airtableByPage: [],
   airtableViews: 0,
   airtableShareByPage: [],
+  cardsViews: 0,
+  cardsViewShare: null,
+  cardsButtonClicks: 0,
+  cardsButtonShare: null,
   newsletterByPage: [],
   newsletterShareByPage: [],
   siteClickShare: null,
@@ -673,6 +750,9 @@ const EMPTY: Omit<DashboardData, 'source'> = {
   contributeButtonShare: [],
   hoverShare: [],
   footerClicks: [],
+  navOverflowOpens: [],
+  navOverflowOpenShare: [],
+  anyNavOverflowOpenShare: { name: 'Any open', active: 0, visitors: 0 },
   topHovered: [],
   areaClicks: [],
   funnel: { opened: 0, typed: 0, clicked: 0 },
@@ -691,6 +771,14 @@ const EMPTY: Omit<DashboardData, 'source'> = {
     topQueries: [],
     noResultQueries: [],
     destinations: [],
+  },
+  mapSearch: {
+    funnel: { opened: 0, searched: 0, picked: 0 },
+    openShare: null,
+    openMethods: [],
+    topQueries: [],
+    noResultQueries: [],
+    picked: [],
   },
   optOuts: { off: 0, on: 0 },
   visits: {
@@ -776,11 +864,40 @@ function tallyPositions(positions: string[]): Counted[] {
     .sort((a, b) => positionSortKey(a.name) - positionSortKey(b.name))
 }
 
+// ─── The dashboard's time zone ───────────────────────────────────────────────
+// Day boundaries, "today" and displayed times all use one fixed reporting
+// zone, the same for every viewer — the usual analytics convention (store
+// UTC, report in one configured zone). UTC was chosen on 6 September 2026 so
+// the definition of "a day" never depends on where the owner happens to be
+// living. Change it here and nowhere else; the page says which zone it is.
+export const DASHBOARD_TZ = 'UTC'
+
+/** "2026-09-05" — the dashboard-zone calendar day an instant falls on. */
+export function dashboardDay(ms: number): string {
+  return new Date(ms).toLocaleDateString('en-CA', { timeZone: DASHBOARD_TZ })
+}
+
+/** "+00:00" / "+01:00" — the dashboard zone's UTC offset on a given day, for
+ *  turning a calendar date into an epoch bound (DST-aware should the zone
+ *  ever be one that has it). */
+export function dashboardOffset(day: string): string {
+  const probe = new Date(`${day}T12:00:00Z`)
+  const part = new Intl.DateTimeFormat('en-GB', {
+    timeZone: DASHBOARD_TZ,
+    timeZoneName: 'longOffset',
+  })
+    .formatToParts(probe)
+    .find(p => p.type === 'timeZoneName')?.value
+  const m = /GMT([+-]\d{2}:\d{2})/.exec(part ?? '')
+  return m ? m[1] : '+00:00'
+}
+
 /** Collapse repeat events so a visitor counts once per listing per day: keep
  *  only the most recent event per (visitor, day, page, listing). Used for
  *  listing clicks, and by topHovered for map hovers — same key, same
- *  semantics, and the two types are always deduped separately. The day uses
- *  Bryce's timezone (UTC-5), matching the date-range bounds. Clicks with no id
+ *  semantics, and the two types are always deduped separately. The day is the
+ *  dashboard's (DASHBOARD_TZ, see dashboardDay), matching the date-range bounds.
+ *  Clicks with no id
  *  (e.g. private browsing, where we can't tell visitors apart) are each kept.
  *  Expects a newest-first list, so the first time a key is seen is the most
  *  recent click. */
@@ -793,9 +910,7 @@ function uniqueClicks(clicks: AnalyticsEvent[]): AnalyticsEvent[] {
       continue
     }
     const t = Date.parse(e.ts)
-    const day = Number.isNaN(t)
-      ? ''
-      : new Date(t - 5 * 3_600_000).toISOString().slice(0, 10)
+    const day = Number.isNaN(t) ? '' : dashboardDay(t)
     const key = `${e.vid}\x00${day}\x00${e.page ?? ''}\x00${listingMember(e)}`
     if (seen.has(key)) continue
     seen.add(key)
@@ -805,7 +920,7 @@ function uniqueClicks(clicks: AnalyticsEvent[]): AnalyticsEvent[] {
 }
 
 /** Unique-mode dedupe for filter activations: one per visitor per group+value
- *  per Bogotá day. The group (`source`) is part of the key — the same value
+ *  per dashboard-zone day. The group (`source`) is part of the key — the same value
  *  under two groups (e.g. 'Online') stays two activations. */
 function uniqueFilterApplies(events: AnalyticsEvent[]): AnalyticsEvent[] {
   const seen = new Set<string>()
@@ -816,9 +931,7 @@ function uniqueFilterApplies(events: AnalyticsEvent[]): AnalyticsEvent[] {
       continue
     }
     const t = Date.parse(e.ts)
-    const day = Number.isNaN(t)
-      ? ''
-      : new Date(t - 5 * 3_600_000).toISOString().slice(0, 10)
+    const day = Number.isNaN(t) ? '' : dashboardDay(t)
     const key = `${e.vid}\x00${day}\x00${e.page ?? ''}\x00${e.source ?? ''}\x00${e.label ?? ''}`
     if (seen.has(key)) continue
     seen.add(key)
@@ -1000,12 +1113,18 @@ function aggregate(
   const filterApplies = unique ? uniqueFilterApplies(filterHits) : filterHits
   const filtersByPage = tally(filterApplies.map(e => e.page as string))
   const pageFilters = filterApplies.filter(e => e.page === selectedPage)
-  const filterGroups = tally(pageFilters.map(e => e.source ?? '(unknown)'))
-  const filterValues = tally(
-    pageFilters.map(
-      e => `${e.source ?? '(unknown)'}: ${e.label ?? '(unknown)'}`
-    )
-  )
+  // Renamed filter titles and options are logged under their original names;
+  // show the current wording so old and new clicks land in one row.
+  const filterGroupName = (e: AnalyticsEvent) =>
+    displayFilterGroup(e.page ?? '', e.source ?? '(unknown)')
+  const filterValueName = (e: AnalyticsEvent) => {
+    const group = e.source ?? '(unknown)'
+    const label = e.label ?? '(unknown)'
+    const page = e.page ?? ''
+    return `${displayFilterGroup(page, group)}: ${displayFilterValue(page, group, label)}`
+  }
+  const filterGroups = tally(pageFilters.map(filterGroupName))
+  const filterValues = tally(pageFilters.map(filterValueName))
   const filterUsers = uniqueUsers(
     filterHits.filter(e => e.page === selectedPage)
   )
@@ -1079,14 +1198,8 @@ function aggregate(
     pageClicks.filter(e => e.position),
     e => e.position as string
   )
-  const filterGroupShare = shareOnPage(
-    pageFilters,
-    e => e.source ?? '(unknown)'
-  )
-  const filterValueShare = shareOnPage(
-    pageFilters,
-    e => `${e.source ?? '(unknown)'}: ${e.label ?? '(unknown)'}`
-  )
+  const filterGroupShare = shareOnPage(pageFilters, filterGroupName)
+  const filterValueShare = shareOnPage(pageFilters, filterValueName)
   const anyFilterShare = anyOnPage(pageFilters, 'Any filter')
 
   // Contribute-button and Airtable-card clicks. uniqueClicks dedupes on
@@ -1151,6 +1264,20 @@ function aggregate(
   const footerHits = inRange.filter(e => e.type === 'footer_click')
   const footerEvents = unique ? uniqueClicks(footerHits) : footerHits
   const footerClicks = tally(footerEvents.map(e => listingMember(e)))
+  // The global nav's +N menu: opens by method, sitewide, following the count
+  // mode (unique = one per visitor per method). Shares divide by all site
+  // visitors, since the nav is on every page.
+  const navOpens = inRange.filter(e => e.type === 'nav_overflow_open')
+  const navOpenMethod = (e: AnalyticsEvent) =>
+    NAV_OVERFLOW_OPEN_LABEL[e.source ?? ''] ?? 'Unknown'
+  const navOverflowOpens = tallyBy(navOpens, navOpenMethod, unique)
+  const navOverflowOpenShare = navOverflowOpens.map(row =>
+    anyOnSite(
+      navOpens.filter(e => navOpenMethod(e) === row.name),
+      row.name
+    )
+  )
+  const anyNavOverflowOpenShare = anyOnSite(navOpens, 'Any open')
 
   // Most-hovered map listings for the selected page — tooltip dwells
   // (listing_hover events), grouped exactly like topListings but with no
@@ -1162,6 +1289,13 @@ function aggregate(
   let topHovered: ListingRow[] = []
   let hoverShare: VisitorShare[] = []
   let anyHoverShare: VisitorShare | null = null
+  // The cards section below the map: visitors reaching it, and the button
+  // that scrolls there. Both events carry a fixed label, so uniqueClicks'
+  // page+label dedupe makes unique mode one per visitor per day.
+  let cardsViews = 0
+  let cardsViewShare: VisitorShare | null = null
+  let cardsButtonClicks = 0
+  let cardsButtonShare: VisitorShare | null = null
   if (selectedPage != null && MAP_PAGES.has(selectedPage)) {
     const hoverHits = inRange.filter(e => e.type === 'listing_hover' && e.page)
     const hovers = (unique ? uniqueClicks(hoverHits) : hoverHits).filter(
@@ -1170,6 +1304,19 @@ function aggregate(
     topHovered = listingRows(hovers)
     hoverShare = shareOnPage(hovers, listingMember)
     anyHoverShare = anyOnPage(hovers, 'Any listing')
+
+    const cardsViewHits = inRange.filter(
+      e => e.type === 'cards_view' && e.page === selectedPage
+    )
+    cardsViews = (unique ? uniqueClicks(cardsViewHits) : cardsViewHits).length
+    cardsViewShare = anyOnPage(cardsViewHits, 'Cards section')
+    const cardsButtonHits = inRange.filter(
+      e => e.type === 'cards_button_click' && e.page === selectedPage
+    )
+    cardsButtonClicks = (
+      unique ? uniqueClicks(cardsButtonHits) : cardsButtonHits
+    ).length
+    cardsButtonShare = anyOnPage(cardsButtonHits, 'Cards button')
   }
 
   // The Map tab's by-area rollup compares clicks against hovers per area, and
@@ -1183,6 +1330,13 @@ function aggregate(
         ? listingRows(pageClicksAll)
         : topListings
       : []
+
+  // The Map tab's search-box panels. Map page only — no other page has the
+  // box. Never source-narrowed: a pick is by definition from the search.
+  const mapSearch: MapSearchPanelData =
+    selectedPage === 'Map'
+      ? mapSearchPanels(inRange, unique, anyOnPage)
+      : EMPTY.mapSearch
 
   return {
     totalEvents: inRange.length,
@@ -1208,6 +1362,10 @@ function aggregate(
     airtableByPage,
     airtableViews,
     airtableShareByPage,
+    cardsViews,
+    cardsViewShare,
+    cardsButtonClicks,
+    cardsButtonShare,
     newsletterByPage,
     newsletterShareByPage,
     siteClickShare,
@@ -1225,6 +1383,9 @@ function aggregate(
     contributeButtonShare,
     hoverShare,
     footerClicks,
+    navOverflowOpens,
+    navOverflowOpenShare,
+    anyNavOverflowOpenShare,
     topHovered,
     areaClicks,
     funnel: {
@@ -1234,14 +1395,20 @@ function aggregate(
     },
     chatbot: chatbotPanels(inRange, unique),
     search: searchPanels(inRange, unique),
+    mapSearch,
     optOuts: optOutSplit(inRange),
     visits: visitsData(inRange, unique, firstSeen, startMs, viewVidsByPage),
     correlations: correlations(inRange),
-    // Newest-first already; page views and map hovers are left out so the
-    // feed stays a log of deliberate actions rather than a firehose of visits
-    // and passing cursors.
+    // Newest-first already; page views, map hovers and cards-section views
+    // are left out so the feed stays a log of deliberate actions rather than
+    // a firehose of visits, passing cursors and scrolls.
     recent: inRange
-      .filter(e => e.type !== 'page_view' && e.type !== 'listing_hover')
+      .filter(
+        e =>
+          e.type !== 'page_view' &&
+          e.type !== 'listing_hover' &&
+          e.type !== 'cards_view'
+      )
       .slice(0, 50),
   }
 }
@@ -1374,6 +1541,8 @@ function interestOf(e: AnalyticsEvent): string | undefined {
   if (e.type === 'listing_click') return e.page
   if (e.type.startsWith('chatbot')) return 'Chatbot'
   if (e.type.startsWith('search')) return 'Search'
+  // Using the map's search box is engaging with the map.
+  if (e.type.startsWith('map_search')) return 'Map'
   return undefined
 }
 
@@ -1612,6 +1781,47 @@ function searchPanels(
       unique
     ),
     destinations: destinationRows(clicks, unique, true),
+  }
+}
+
+const MAP_SEARCH_OPEN_LABEL: Record<string, string> = {
+  button: 'Search button',
+  'cmd-f': '⌘F shortcut',
+}
+
+/** The Map tab's search-box panels. The funnel always counts unique users;
+ *  the tables follow `unique` — picks are deduped like clicks (one per
+ *  visitor per listing per day), the rest one per visitor per bucket.
+ *  `anyOnPage` is aggregate's "% of the page's visitors" helper, already
+ *  bound to the selected page. */
+function mapSearchPanels(
+  inRange: AnalyticsEvent[],
+  unique: boolean,
+  anyOnPage: (hits: AnalyticsEvent[], name: string) => VisitorShare | null
+): MapSearchPanelData {
+  const opens = inRange.filter(e => e.type === 'map_search_open')
+  const queries = inRange.filter(e => e.type === 'map_search_query' && e.query)
+  const pickHits = inRange.filter(e => e.type === 'map_search_pick')
+  const picks = unique ? uniqueClicks(pickHits) : pickHits
+  return {
+    funnel: {
+      opened: uniqueUsers(opens),
+      searched: uniqueUsers(queries),
+      picked: uniqueUsers(pickHits),
+    },
+    openShare: anyOnPage(opens, 'Map search'),
+    openMethods: tallyBy(
+      opens,
+      e => MAP_SEARCH_OPEN_LABEL[e.source ?? ''] ?? 'Unknown',
+      unique
+    ),
+    topQueries: tallyBy(queries, e => e.query!.toLowerCase(), unique),
+    noResultQueries: tallyBy(
+      queries.filter(e => e.results === 0),
+      e => e.query!.toLowerCase(),
+      unique
+    ),
+    picked: listingRows(picks),
   }
 }
 

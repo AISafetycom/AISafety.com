@@ -11,14 +11,14 @@ export const metadata = {
   openGraph: {
     title: 'AISafety.com Hackathon 2026',
     description: OG_DESCRIPTION,
-    images: [{ url: '/images/link-preview.png' }],
+    images: [{ url: '/images/link-preview.jpg' }],
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
     title: 'AISafety.com Hackathon 2026',
     description: OG_DESCRIPTION,
-    images: ['/images/link-preview.png'],
+    images: ['/images/link-preview.jpg'],
   },
 }
 

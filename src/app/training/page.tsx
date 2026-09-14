@@ -3,6 +3,10 @@ import { fetchLastUpdated } from '@/lib/data/last-updated'
 import PageHeader from '@/components/PageHeader'
 import { getTrainingPrograms, getRecurringPrograms } from '@/lib/data/training'
 import TrainingClient from './TrainingClient'
+import { pageMetadata } from '@/lib/page-metadata'
+import { SITE_PAGES } from '@/lib/site-pages'
+
+export const metadata = pageMetadata(SITE_PAGES.training)
 
 export default async function TrainingPage() {
   const [programs, recurring, lastUpdated] = await Promise.all([

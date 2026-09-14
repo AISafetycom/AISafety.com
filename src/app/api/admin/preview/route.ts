@@ -18,8 +18,13 @@
 */
 
 import { NextRequest } from 'next/server'
-import { draftMode } from 'next/headers'
+import { cookies, draftMode } from 'next/headers'
 import { canUsePreview, setPreviewPillsCookie } from '@/lib/admin/auth'
+
+// Next's own cookie name for Draft Mode (not exported by next/headers).
+const DRAFT_MODE_COOKIE = '__prerender_bypass'
+// Matches the admin session cookie (src/lib/admin/auth.ts).
+const PREVIEW_COOKIE_MAX_AGE = 60 * 60 * 24 * 30
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -65,6 +70,22 @@ export async function POST(request: NextRequest) {
   if (enabled) {
     if (!(await canUsePreview())) return json({ error: 'unauthorized' }, 401)
     dm.enable()
+    // Next sets its Draft Mode cookie without an expiry, so preview would
+    // silently end whenever the browser fully quits. Re-set the same cookie
+    // (same value and attributes) with the admin session's lifetime.
+    const store = await cookies()
+    const bypass = store.get(DRAFT_MODE_COOKIE)
+    if (bypass) {
+      store.set({
+        name: DRAFT_MODE_COOKIE,
+        value: bypass.value,
+        httpOnly: true,
+        sameSite: process.env.NODE_ENV !== 'development' ? 'none' : 'lax',
+        secure: process.env.NODE_ENV !== 'development',
+        path: '/',
+        maxAge: PREVIEW_COOKIE_MAX_AGE,
+      })
+    }
   } else {
     dm.disable()
   }

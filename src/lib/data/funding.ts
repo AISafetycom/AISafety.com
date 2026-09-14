@@ -6,10 +6,11 @@ import {
   fieldString,
   fieldText,
   publishedFormula,
+  type AirtableRawRecord,
 } from './airtable'
 import { fetchPublicData, hasAirtableCredentials } from './public-api'
 
-const TABLE_ID = 'tblzMTLDZWZKqTxrq'
+export const TABLE_ID = 'tblzMTLDZWZKqTxrq'
 const VIEW_ID = 'viwxv2w8utSEhUeiJ'
 
 // Permanent Airtable field IDs for the Funding table. Fetching, filtering
@@ -44,6 +45,34 @@ export interface Funder {
   featuredTagline: string | null
 }
 
+/**
+ * One Funding record (fields keyed by field id) → the listing the page
+ * renders, or null when the site would skip it (no name). Publish/Hide
+ * filtering stays in getFunders(), so an unpublished record can still be
+ * mapped — the admin Queue previews proposed records through this.
+ */
+export function funderFromRecord(record: AirtableRawRecord): Funder | null {
+  const f = record.fields
+  const name = fieldString(f[FIELD.name])
+  if (!name) return null
+
+  return {
+    id: record.id,
+    dateAdded: record.createdTime?.slice(0, 10) ?? null,
+    lastModified: fieldDateOnly(f[FIELD.lastModified]),
+    name,
+    description: fieldString(f[FIELD.description]) || '',
+    logo: fieldAttachmentUrl(f[FIELD.logo]),
+    type: fieldText(f[FIELD.type]),
+    // The Recipient type field no longer exists in Airtable.
+    recipientType: '',
+    acceptingApplications: fieldText(f[FIELD.acceptingApplications]),
+    url: fieldString(f[FIELD.website]) || '#',
+    featured: fieldFeatured(f[FIELD.featured]),
+    featuredTagline: fieldString(f[FIELD.featuredTagline]),
+  }
+}
+
 export async function getFunders(): Promise<Funder[]> {
   if (!hasAirtableCredentials()) return fetchPublicData<Funder>('funding')
   const raw = await fetchAirtableRecords({
@@ -56,25 +85,9 @@ export async function getFunders(): Promise<Funder[]> {
 
   const results: Funder[] = []
   for (const record of raw) {
-    const f = record.fields
-    const name = fieldString(f[FIELD.name])
-    if (!name) continue
-
-    results.push({
-      id: record.id,
-      dateAdded: record.createdTime?.slice(0, 10) ?? null,
-      lastModified: fieldDateOnly(f[FIELD.lastModified]),
-      name,
-      description: fieldString(f[FIELD.description]) || '',
-      logo: fieldAttachmentUrl(f[FIELD.logo]),
-      type: fieldText(f[FIELD.type]),
-      // The Recipient type field no longer exists in Airtable.
-      recipientType: '',
-      acceptingApplications: fieldText(f[FIELD.acceptingApplications]),
-      url: fieldString(f[FIELD.website]) || '#',
-      featured: fieldFeatured(f[FIELD.featured]),
-      featuredTagline: fieldString(f[FIELD.featuredTagline]),
-    })
+    const funder = funderFromRecord(record)
+    if (!funder) continue
+    results.push(funder)
   }
 
   return results

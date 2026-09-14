@@ -76,6 +76,19 @@
   gap: 12px;
 }
 
+.adminSignedInAs {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--white);
+  white-space: nowrap;
+}
+
+.adminSignedInLabel {
+  color: var(--teal-300);
+}
+
 .adminBackLink {
   font-size: 12px;
   color: var(--teal-300);
@@ -129,47 +142,57 @@
   line-height: 1.2;
 }
 
-.loginForm {
+.loginGoogle {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   gap: 10px;
-}
-
-.loginInput {
-  height: 40px;
-  padding: 0 12px;
-  background-color: var(--teal-900);
+  height: 42px;
+  padding: 0 14px;
+  background-color: var(--white);
+  color: #1f1f1f;
   border: 1px solid var(--teal-800);
   border-radius: 6px;
-  color: var(--white);
   font-size: 14px;
-  outline: none;
-  font-family: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  margin-bottom: 14px;
 }
 
-.loginInput:focus {
-  border-color: var(--teal-500);
+.loginGoogle:hover {
+  background-color: #f1f3f4;
 }
 
-.loginButton {
-  height: 40px;
-  padding: 0 12px;
+.loginGoogle:focus-visible {
+  outline: 2px solid var(--bright-teal-300);
+  outline-offset: 2px;
+}
+
+.loginTick {
+  width: 44px;
+  height: 44px;
+  margin-bottom: 14px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background-color: var(--bright-teal-300);
   color: var(--teal-900);
-  border: none;
-  border-radius: 6px;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.loginText {
+  margin: 0 0 18px;
   font-size: 13px;
+  line-height: 1.55;
+  color: var(--teal-300);
+}
+
+.loginText strong {
+  color: var(--white);
   font-weight: 600;
-  cursor: pointer;
-}
-
-.loginButton:hover:not(:disabled) {
-  background-color: var(--bright-teal-500);
-}
-
-.loginButton:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 
 .loginError {
@@ -695,6 +718,13 @@
   font-weight: 600;
 }
 
+/* Visitor's thumb in the collapsed row header, so a rated chat stands out
+ * while skimming; the per-reply thumb in the transcript says which reply. */
+.convRowRating {
+  font-size: 14px;
+  line-height: 1;
+}
+
 .convRowAbandoned {
   color: #ffb87a;
   font-weight: 600;
@@ -1146,6 +1176,110 @@
 
 .convNotes:focus {
   border-color: var(--teal-500);
+}
+
+.convReviewedBy {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--teal-400);
+}
+
+.convActivity {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+
+.convActivityRow {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--teal-300);
+}
+
+.convActivityWho {
+  color: var(--white);
+  font-weight: 600;
+}
+
+.convActivityWhen {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--teal-400);
+}
+
+.convNoteLegacy {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px dashed var(--teal-800);
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--teal-300);
+  white-space: pre-wrap;
+}
+
+.convNoteList {
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.convNoteEntry {
+  padding: 8px 10px;
+  background-color: var(--teal-850);
+  border: 1px solid var(--teal-800);
+  border-radius: 6px;
+}
+
+.convNoteMeta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.convNoteActions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.convNoteDelete {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--teal-400);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.convNoteDelete:hover {
+  color: var(--white);
+}
+
+.convNoteDanger {
+  color: #ff8b8b;
+}
+
+.convNoteConfirm {
+  color: #ff8b8b;
+  font-size: 11px;
+}
+
+.convNoteText {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--white);
+  white-space: pre-wrap;
 }
 
 .convStatus {

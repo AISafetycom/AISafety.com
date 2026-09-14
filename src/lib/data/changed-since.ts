@@ -1,4 +1,4 @@
-import { fetchAirtableWithRetry } from './airtable'
+import { fetchAirtableWithRetry, type FetchRetryOptions } from './airtable'
 
 // Uses LAST_MODIFIED_TIME() (a formula function) rather than any table's
 // "Last modified" field. The field may be configured as date-only, which
@@ -13,7 +13,8 @@ export async function hasChangesSince(
   token: string,
   tableId: string,
   since: Date,
-  filter?: string
+  filter?: string,
+  retry?: FetchRetryOptions
 ): Promise<boolean> {
   const sinceIso = since.toISOString()
   const timeCheck = `IS_AFTER(LAST_MODIFIED_TIME(), DATETIME_PARSE("${sinceIso}"))`
@@ -23,9 +24,12 @@ export async function hasChangesSince(
   url.searchParams.set('filterByFormula', formula)
   url.searchParams.set('maxRecords', '1')
 
-  const response = await fetchAirtableWithRetry(url.toString(), token, {
-    cache: 'no-store',
-  })
+  const response = await fetchAirtableWithRetry(
+    url.toString(),
+    token,
+    { cache: 'no-store' },
+    retry
+  )
 
   if (!response.ok) {
     throw new Error(

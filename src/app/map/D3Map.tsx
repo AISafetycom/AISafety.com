@@ -2,12 +2,15 @@
 
 // @refresh reset — d3 pipeline is inside useEffect; force remount on edit.
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import * as d3 from 'd3'
 import MapControls from '@/components/MapControls'
+import MapSearch, { NO_MAP_SEARCH_CONTROL } from './MapSearch'
+import type { MapSearchControl } from './MapSearch'
 import { trackListingClick, trackListingHover } from '@/lib/analytics'
 import { withUtm } from '@/lib/utm'
 import { positionTooltip } from '@/lib/mapTooltip'
+import { MAP_BACKGROUND_URL } from '@/lib/map-images'
 import styles from './page.module.css'
 
 interface MapOrg {
@@ -22,10 +25,12 @@ interface MapOrg {
   x: number | null
   y: number | null
   scale: string | null
+  isMagic?: boolean
 }
 
 interface D3MapProps {
   orgs: MapOrg[]
+  suggestEntryUrl: string
 }
 
 // Map constants from WebFlow
@@ -35,7 +40,6 @@ const PADDING_FACTOR = 1.1
 const PADDED_WIDTH = MAP_WIDTH * PADDING_FACTOR
 const PADDED_HEIGHT = MAP_HEIGHT * PADDING_FACTOR
 const GRID_SIZE = MAP_WIDTH / 60
-const BACKGROUND_IMAGE_URL = '/images/map-1.5.1.svg'
 
 // Logo size scales (handle both cases)
 const SIZE_TO_SCALE: Record<string, number> = {
@@ -71,7 +75,7 @@ const AREA_LABELS = [
   { label: 'Gone Graveyard', x: 56, y: 30 },
 ]
 
-export default function D3Map({ orgs }: D3MapProps) {
+export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
   // Zoom actions live in the d3 pipeline inside useEffect; the buttons reach
@@ -81,6 +85,36 @@ export default function D3Map({ orgs }: D3MapProps) {
     zoomOut: () => {},
     reset: () => {},
   })
+  // Search fly-to lives in the d3 pipeline for the same reason the zoom
+  // buttons do — the zoom behavior only exists inside the effect below.
+  // Filled in by MapSearch: lets the map shut the search on a bare-map tap,
+  // and lets ESC reach the search before it reaches the view reset.
+  const searchControlRef = useRef<MapSearchControl>(NO_MAP_SEARCH_CONTROL)
+  const searchRef = useRef<{
+    flyTo: (org: {
+      x: number | null
+      y: number | null
+      scale: string | null
+    }) => void
+    clearHighlight: () => void
+  }>({
+    flyTo: () => {},
+    clearHighlight: () => {},
+  })
+  // Magic-map decorations and unlinked furniture rows (e.g. "Last updated")
+  // render as pins but shouldn't be findable.
+  const searchOrgs = useMemo(
+    () =>
+      orgs.filter(
+        org =>
+          !org.isMagic &&
+          org.link &&
+          org.link !== '#' &&
+          org.x !== null &&
+          org.y !== null
+      ),
+    [orgs]
+  )
   // The d3 pipeline below tears down and rebuilds whenever `orgs` changes
   // identity — which preview mode's auto-refresh does on every data change
   // and tab focus. Keeping the last zoom transform here lets the rebuild
@@ -176,6 +210,17 @@ export default function D3Map({ orgs }: D3MapProps) {
 
     svg.call(zoom)
 
+    // Mobile: a tap on bare map closes the search. On desktop the field
+    // already collapses when it loses focus, but a touch tap never blurs it
+    // — the d3 gesture handlers swallow that. Pins and their labels live
+    // inside <a>, so taps on a listing are left to their own handler, and a
+    // pan does not reach here because the drag cancels the synthetic click.
+    svg.on('click.mapsearch', event => {
+      if (!isMobile()) return
+      if ((event.target as Element | null)?.closest('a')) return
+      searchControlRef.current.close()
+    })
+
     if (savedTransformRef.current) {
       svg.call(zoom.transform, savedTransformRef.current)
     }
@@ -203,7 +248,7 @@ export default function D3Map({ orgs }: D3MapProps) {
     // Add background image
     svgGroup
       .append('image')
-      .attr('xlink:href', BACKGROUND_IMAGE_URL)
+      .attr('xlink:href', MAP_BACKGROUND_URL)
       .attr('width', MAP_WIDTH)
       .attr('height', MAP_HEIGHT)
       .attr('x', 0)
@@ -352,6 +397,14 @@ export default function D3Map({ orgs }: D3MapProps) {
               'map',
               firstCategory || undefined
             )
+            // Clicking a pin leaves the browser's focus ring on the link, and
+            // it is still sitting there when you come back from the tab that
+            // opened. A mouse click does not need a focus ring. detail > 0
+            // means a real pointer click, so a keyboard Enter on a focused
+            // pin keeps its ring and the user keeps their place.
+            if (event.detail > 0) {
+              ;(event.currentTarget as SVGElement | null)?.blur?.()
+            }
           })
       }
 
@@ -514,6 +567,75 @@ export default function D3Map({ orgs }: D3MapProps) {
       reset: resetView,
     }
 
+    // Search: fly the viewport to a pin and pulse a ring around it. The ring
+    // sits inside svgGroup so it pans/zooms with the map; non-scaling-stroke
+    // keeps its line width constant at any zoom.
+    let highlightRing: d3.Selection<
+      SVGCircleElement,
+      unknown,
+      null,
+      undefined
+    > | null = null
+    const clearHighlight = () => {
+      if (highlightRing) {
+        highlightRing.interrupt()
+        highlightRing.remove()
+        highlightRing = null
+      }
+    }
+    searchRef.current = {
+      clearHighlight,
+      flyTo: org => {
+        if (org.x === null || org.y === null) return
+        clearHighlight()
+        const px = org.x * GRID_SIZE
+        const py = org.y * GRID_SIZE
+        // Mobile pins are tiny at rest, so land closer in.
+        const k = isMobile() ? 8 : 3.5
+        // Centers the pin in the rendered viewBox area: the group transform
+        // places map point p at viewBox coordinate t + offset + k*p.
+        svg
+          .transition()
+          .duration(800)
+          .call(
+            zoom.transform,
+            d3.zoomIdentity
+              .translate(
+                PADDED_WIDTH / 2 - offsetX - k * px,
+                PADDED_HEIGHT / 2 - offsetY - k * py
+              )
+              .scale(k)
+          )
+        const rawScale = SIZE_TO_SCALE[org.scale || 'Medium'] || 0.6
+        const r = (BASE_LOGO_SIZE * rawScale) / 2 + 10
+        const ring = svgGroup
+          .append('circle')
+          .attr('cx', px)
+          .attr('cy', py)
+          .attr('r', r)
+          .attr('fill', 'none')
+          .attr('stroke', 'var(--white)')
+          .attr('stroke-width', 3.5)
+          .attr('vector-effect', 'non-scaling-stroke')
+          .style('pointer-events', 'none')
+        highlightRing = ring
+        let growing = true
+        const pulse = () => {
+          ring
+            .transition()
+            .duration(600)
+            .ease(d3.easeSinInOut)
+            .attr('r', growing ? r * 1.7 : r)
+            .attr('stroke-opacity', growing ? 0.3 : 0.9)
+            .on('end', () => {
+              growing = !growing
+              pulse()
+            })
+        }
+        pulse()
+      },
+    }
+
     // ESC resets the view, same as the recenter button. Skip while typing in
     // a form field — ESC there shouldn't yank the map.
     const handleEscKey = (e: KeyboardEvent) => {
@@ -526,6 +648,13 @@ export default function D3Map({ orgs }: D3MapProps) {
           target.isContentEditable)
       )
         return
+      // An open search gets ESC first. Clicking a listing on the map takes
+      // focus out of the field but leaves the box open, and ESC then has to
+      // still mean "close the search", not "reset the view".
+      if (searchControlRef.current.isOpen()) {
+        searchControlRef.current.escape()
+        return
+      }
       resetView()
     }
     document.addEventListener('keydown', handleEscKey)
@@ -572,6 +701,9 @@ export default function D3Map({ orgs }: D3MapProps) {
     return () => {
       // A pending hover dwell must not fire after unmount.
       cancelHoverTimer()
+      // The ring is removed with the SVG; the fns must not outlive the zoom
+      // behavior they close over.
+      searchRef.current = { flyTo: () => {}, clearHighlight: () => {} }
       svgNode.removeEventListener('wheel', preventPageZoom)
       if (tooltipEl) tooltipEl.removeEventListener('click', handleTooltipClick)
       document.removeEventListener('click', handleDocumentClick)
@@ -591,6 +723,15 @@ export default function D3Map({ orgs }: D3MapProps) {
         onZoomIn={() => controlsRef.current.zoomIn()}
         onZoomOut={() => controlsRef.current.zoomOut()}
         onReset={() => controlsRef.current.reset()}
+      />
+
+      <MapSearch
+        className={styles['map-search']}
+        orgs={searchOrgs}
+        suggestEntryUrl={suggestEntryUrl}
+        controlRef={searchControlRef}
+        onPick={org => searchRef.current.flyTo(org)}
+        onClear={() => searchRef.current.clearHighlight()}
       />
 
       {/* Tooltip — always in DOM for measuring, visibility toggled via ref */}

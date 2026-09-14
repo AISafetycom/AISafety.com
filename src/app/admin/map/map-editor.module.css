@@ -390,15 +390,17 @@
   flex-shrink: 0;
 }
 
+/* Clipped to a circle at the map's 60/64 ratio, matching the pins. */
 .rowLogo img {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
   object-fit: contain;
 }
 
 .rowLogoMissing {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   background-color: red;
 }

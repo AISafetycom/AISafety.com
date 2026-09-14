@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "check:icons": "node scripts/check-icon-sizes.mjs",
-    "prebuild": "node scripts/check-icon-sizes.mjs",
+    "prebuild": "node scripts/check-icon-sizes.mjs && node scripts/pin-preview-keys.mjs",
     "build": "vitest run && next build",
     "start": "next start",
     "lint": "eslint .",
@@ -25,10 +25,11 @@
     "airtable": "^0.12.2",
     "d3": "^7.9.0",
     "franc-min": "^6.2.0",
-    "next": "^16.1.6",
+    "next": "^16.3.4",
     "qrcode": "^1.5.4",
     "react": "19.2.0",
-    "react-dom": "19.2.0"
+    "react-dom": "19.2.0",
+    "sharp": "^0.35.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -44,7 +45,7 @@
     "prettier": "^3.7.4",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx}": [

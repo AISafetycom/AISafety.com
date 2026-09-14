@@ -3,15 +3,109 @@ import Icon from '@/components/Icon'
 import Link from 'next/link'
 import RelativeDate from '@/components/RelativeDate'
 import TrackedLink from '@/components/TrackedLink'
+import CardLogo from '@/components/CardLogo'
 import { fetchAllLastUpdated } from '@/lib/data/last-updated'
+import { getTrainingPrograms, type TrainingProgram } from '@/lib/data/training'
+import { selectFeatured, withRandomStandIns } from '@/lib/featured'
 import styles from './page.module.css'
 
 export const metadata = {
   alternates: { canonical: '/' },
 }
 
+// The training card's featured slot mirrors the top of /training: the
+// best-ranked program in the Airtable Featured queue whose applications are
+// still open, or a random stand-in from the page when the queue has none.
+function pickFeaturedProgram(
+  programs: TrainingProgram[]
+): TrainingProgram | undefined {
+  const isOpen = (p: TrainingProgram) => p.applicationStatus === 'Open'
+  return withRandomStandIns(
+    selectFeatured(programs, isOpen),
+    programs,
+    isOpen
+  )[0]
+}
+
+// "16 October 2026" — full month name, matching the events card beside it.
+function formatLongDate(iso: string): string {
+  const d = new Date(iso + 'T00:00:00Z')
+  const month = new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    timeZone: 'UTC',
+  }).format(d)
+  return `${d.getUTCDate()} ${month} ${d.getUTCFullYear()}`
+}
+
+// The box's subtitle already says where a program runs, so the place is
+// dropped from the round part of its name ("GCP: London November 2026" →
+// "GCP: November 2026") to keep long names to two lines. Only the part after
+// the last colon is touched, so a place inside the program's own name stays.
+function nameWithoutPlace(program: TrainingProgram): string {
+  const i = program.name.lastIndexOf(': ')
+  if (i === -1) return program.name
+  let round = program.name.slice(i + 2)
+  for (const facet of program.location.split(' & ')) {
+    const place = facet.split(',')[0].trim()
+    if (!place) continue
+    const escaped = place.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    round = round.replace(new RegExp(`(?<!\\w)${escaped}(?!\\w)`), '')
+  }
+  round = round.replace(/\s+/g, ' ').replace(/^[\s,–-]+|[\s,–-]+$/g, '')
+  return round
+    ? `${program.name.slice(0, i + 2)}${round}`
+    : program.name.slice(0, i)
+}
+
+// The line under the program's name — "Apply by DATE · PLACE": the
+// application deadline when there is one, otherwise the start, then where
+// it runs (Bryce wants the location kept even when the line wraps).
+function programDateLine(program: TrainingProgram): string {
+  let when: string | null = null
+  if (program.notYetOpen) {
+    when = 'Applications not yet open'
+  } else if (program.applicationsClose) {
+    when =
+      program.applicationStatus === 'Open'
+        ? `Apply by ${formatLongDate(program.applicationsClose)}`
+        : 'Applications closed'
+  } else if (program.startDateApprox) {
+    when = `Starts ${program.startDateApprox}`
+  } else if (program.startDate) {
+    when = `Starts ${formatLongDate(program.startDate)}`
+  }
+  const where = program.mode === 'Online' ? 'Online' : program.location
+  return [when, where].filter(Boolean).join(' · ')
+}
+
+// The featured box fits three lines, like the events card's blurb, while
+// Airtable descriptions run longer. Show whole sentences up to that budget —
+// never a cut-off sentence or an ellipsis. When even the first sentence is
+// too long, end it at its last clause break instead ("…risks from advanced
+// AI, for professionals…" → "…risks from advanced AI.").
+function leadSentences(text: string, max = 125): string {
+  const sentences = text.split(/(?<=[.!?])\s+(?=[A-Z])/)
+  let out = ''
+  for (const sentence of sentences) {
+    const next = out ? `${out} ${sentence}` : sentence
+    if (out && next.length > max) break
+    out = next
+  }
+  if (out.length > max) {
+    const clause = out.slice(0, max).replace(/[,;:]\s[^,;:]*$/, '')
+    if (clause.length < out.length && clause.length >= max / 2) {
+      return `${clause}.`
+    }
+  }
+  return out
+}
+
 export default async function Home() {
-  const dates = await fetchAllLastUpdated()
+  const [dates, programs] = await Promise.all([
+    fetchAllLastUpdated(),
+    getTrainingPrograms(),
+  ])
+  const featuredProgram = pickFeaturedProgram(programs)
 
   return (
     <div className="container-default home-page">
@@ -130,6 +224,73 @@ export default async function Home() {
             />
           )}
         </div>
+      </div>
+
+      <div
+        className={`${styles['card-full-width-1']} ${styles['card-full-width-training']} margin-bottom-40px`}
+      >
+        <div>
+          <p className="paragraph-small-bold shadow-text padding-bottom-12px">
+            Join a training program
+          </p>
+          <h2 className="shadow-text padding-bottom-40px">
+            Fellowships, bootcamps, and courses to build skills and career
+            capital in AI safety – online and in person
+          </h2>
+          <Link href="/training" className="button-primary drop-shadow">
+            View all training programs
+          </Link>
+          {dates.training && (
+            <RelativeDate
+              iso={dates.training}
+              className={`${styles.date} paragraph-xs shadow-text`}
+            />
+          )}
+        </div>
+        {featuredProgram && (
+          <div className={styles['card-full-width-1-right-card']}>
+            <Image
+              loading="lazy"
+              src="/images/bookmarks/bookmark-light.svg"
+              alt=""
+              className={styles.bookmark}
+              width={24}
+              height={32}
+            />
+            <div className="flex items-start gap-16px padding-bottom-16px">
+              {featuredProgram.logo && (
+                <CardLogo
+                  src={featuredProgram.logo}
+                  alt={`${featuredProgram.name} logo`}
+                />
+              )}
+              <div>
+                <h3 className="shadow-text padding-bottom-8px">
+                  {nameWithoutPlace(featuredProgram)}
+                </h3>
+                <p className="paragraph-small-bold shadow-text">
+                  {programDateLine(featuredProgram)}
+                </p>
+              </div>
+            </div>
+            <p className={`${styles['max-3-lines']} margin-bottom-40px`}>
+              {leadSentences(featuredProgram.description)}
+            </p>
+            {featuredProgram.url !== '#' && (
+              <TrackedLink
+                href={featuredProgram.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="button-secondary"
+                trackingPage="Home"
+                trackingName={featuredProgram.name}
+                trackingId={featuredProgram.id}
+              >
+                Learn more
+              </TrackedLink>
+            )}
+          </div>
+        )}
       </div>
 
       <div className={`${styles['card-full-width-3']} margin-bottom-40px`}>

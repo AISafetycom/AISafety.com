@@ -10,23 +10,6 @@ import PreviewToggle from './PreviewToggle'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-// Every page whose content comes from Airtable. /donation-guide is left out —
-// its content lives in the code, so there is nothing to preview.
-const PAGES: Array<{ href: string; label: string }> = [
-  { href: '/', label: 'Home' },
-  { href: '/events', label: 'Events' },
-  { href: '/training', label: 'Training' },
-  { href: '/map', label: 'Field map' },
-  { href: '/communities', label: 'Communities' },
-  { href: '/self-study', label: 'Self-study' },
-  { href: '/jobs', label: 'Jobs' },
-  { href: '/funding', label: 'Funding' },
-  { href: '/media-channels', label: 'Media channels' },
-  { href: '/advisors', label: 'Advisors' },
-  { href: '/projects', label: 'Volunteer projects' },
-  { href: '/founders', label: 'Founder toolkit' },
-]
-
 export default async function PreviewAdminPage() {
   const pillsShown = await previewPillsShown()
   const previewOn = await isPreviewRequest()
@@ -64,23 +47,13 @@ export default async function PreviewAdminPage() {
           rendered from live Airtable data — open pages notice an edit within a
           few seconds and update themselves, no reload needed. The pink preview
           button switches you back, and always stays visible while preview mode
-          is on, even with the switch buttons hidden here. Visitors see none of
-          this: they keep the fast prebuilt pages, which catch up on their own a
-          couple of minutes after each edit.
+          is on, even with the switch buttons hidden here. Search keeps up too:
+          it re-reads the listings you have just edited — the page you are on
+          whenever it refreshes, and every other page each time you come back to
+          this tab — so an edit shows in search within seconds. Visitors see
+          none of this: they keep the fast prebuilt pages, which catch up on
+          their own a couple of minutes after each edit.
         </p>
-      </div>
-
-      <div className={adminStyles.editorBlock}>
-        <div className={adminStyles.editorBlockHeader}>
-          <h2 className={adminStyles.editorBlockTitle}>Resource pages</h2>
-        </div>
-        <div className={styles.pageLinks}>
-          {PAGES.map(page => (
-            <a key={page.href} href={page.href} className={styles.pageLink}>
-              {page.label}
-            </a>
-          ))}
-        </div>
       </div>
     </div>
   )

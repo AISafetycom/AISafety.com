@@ -3,13 +3,10 @@ import PageHeader from '@/components/PageHeader'
 import FeaturedCard from '@/components/FeaturedCard'
 import SelfStudyClient from './SelfStudyClient'
 import { getCourses } from '@/lib/data/self-study'
+import { pageMetadata } from '@/lib/page-metadata'
+import { SITE_PAGES } from '@/lib/site-pages'
 
-export const metadata = {
-  title: 'Self-study – AISafety.com',
-  description:
-    'Curricula and reading lists to dive deeper into AI safety through independent learning.',
-  alternates: { canonical: '/self-study' },
-}
+export const metadata = pageMetadata(SITE_PAGES.selfStudy)
 
 export default async function SelfStudyPage() {
   const [courses, lastUpdated] = await Promise.all([

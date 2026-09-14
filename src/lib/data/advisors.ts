@@ -6,10 +6,11 @@ import {
   fieldString,
   fieldText,
   publishedFormula,
+  type AirtableRawRecord,
 } from './airtable'
 import { fetchPublicData, hasAirtableCredentials } from './public-api'
 
-const TABLE_ID = 'tblf3KKYnmgcjVGhD'
+export const TABLE_ID = 'tblf3KKYnmgcjVGhD'
 const VIEW_ID = 'viwIdRmaCar2Y6gPi'
 
 // Permanent Airtable field IDs for the Advisors table. Fetching, filtering
@@ -46,6 +47,31 @@ export interface Advisor {
 // Inactive advisors aren't taking guidance calls, so they're left off the page
 // entirely rather than surfaced behind a status filter.
 const isActiveAdvisor = (a: Advisor) => a.status === 'Active'
+/**
+ * One Advisors record (fields keyed by field id) → the listing the page
+ * renders, or null when the site would skip it (no name). Publish/Hide
+ * filtering stays in getAdvisors(), so an unpublished record can still be
+ * mapped — the admin Queue previews proposed records through this.
+ */
+export function advisorFromRecord(record: AirtableRawRecord): Advisor | null {
+  const f = record.fields
+  const name = fieldString(f[FIELD.name])
+  if (!name) return null
+
+  return {
+    id: record.id,
+    dateAdded: record.createdTime?.slice(0, 10) ?? null,
+    lastModified: fieldDateOnly(f[FIELD.lastModified]),
+    name,
+    description: fieldString(f[FIELD.description]) || '',
+    logo: fieldAttachmentUrl(f[FIELD.logo]),
+    focus: fieldText(f[FIELD.focus]),
+    status: fieldText(f[FIELD.status]),
+    url: fieldString(f[FIELD.link]) || '#',
+    featured: fieldFeatured(f[FIELD.featured]),
+    featuredTagline: fieldString(f[FIELD.featuredTagline]),
+  }
+}
 
 export async function getAdvisors(): Promise<Advisor[]> {
   if (!hasAirtableCredentials())
@@ -60,23 +86,9 @@ export async function getAdvisors(): Promise<Advisor[]> {
 
   const results: Advisor[] = []
   for (const record of raw) {
-    const f = record.fields
-    const name = fieldString(f[FIELD.name])
-    if (!name) continue
-
-    results.push({
-      id: record.id,
-      dateAdded: record.createdTime?.slice(0, 10) ?? null,
-      lastModified: fieldDateOnly(f[FIELD.lastModified]),
-      name,
-      description: fieldString(f[FIELD.description]) || '',
-      logo: fieldAttachmentUrl(f[FIELD.logo]),
-      focus: fieldText(f[FIELD.focus]),
-      status: fieldText(f[FIELD.status]),
-      url: fieldString(f[FIELD.link]) || '#',
-      featured: fieldFeatured(f[FIELD.featured]),
-      featuredTagline: fieldString(f[FIELD.featuredTagline]),
-    })
+    const advisor = advisorFromRecord(record)
+    if (!advisor) continue
+    results.push(advisor)
   }
 
   return results.filter(isActiveAdvisor)

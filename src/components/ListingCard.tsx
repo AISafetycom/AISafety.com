@@ -18,7 +18,7 @@ export interface ListingCardPill {
   colorClass?: string
 }
 
-interface ListingCardProps {
+export interface ListingCardProps {
   /** External link. Omit for a static, non-clickable card (e.g. projects). */
   href?: string
   name: string
@@ -46,6 +46,14 @@ interface ListingCardProps {
    *  with a view toggle (e.g. 'online' / 'in-person' on Events). */
   trackingSource?: string
 }
+
+/** What a resource page's card.ts builds from one listing: the card's
+ *  content, minus the tracking and placement props the page adds when it
+ *  renders. The admin Queue's site preview renders the same content. */
+export type CardProps = Omit<
+  ListingCardProps,
+  'trackingPage' | 'listingId' | 'placement' | 'trackingSource'
+>
 
 function MetaRows({ rows }: { rows: ListingCardMeta[] }) {
   return (
@@ -140,11 +148,16 @@ export default function ListingCard({
 
   // No link → a static, non-clickable card (e.g. projects have no external URL).
   if (!href) {
-    return <div className="card card-static">{inner}</div>
+    return (
+      <div id={listingId} className="card card-static">
+        {inner}
+      </div>
+    )
   }
 
   return (
     <a
+      id={listingId}
       href={withUtm(href, trackingPage)}
       target="_blank"
       rel="noopener noreferrer"

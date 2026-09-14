@@ -4,6 +4,7 @@ import { useState, useMemo, useRef, useLayoutEffect } from 'react'
 import FilterBar from '@/components/FilterBar'
 import FilterDropdown from '@/components/FilterDropdown'
 import ListingCard from '@/components/ListingCard'
+import { mediaChannelCardProps } from './card'
 import ContributeButtons from '@/components/ContributeButtons'
 import { MediaChannel } from '@/lib/data/media-channels'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
@@ -106,20 +107,7 @@ export default function MediaChannelsClient({
           {filteredChannels.map(channel => (
             <ListingCard
               key={channel.id}
-              href={channel.url !== '#' ? channel.url : undefined}
-              name={channel.name}
-              description={channel.description}
-              logo={channel.logo}
-              meta={
-                channel.type
-                  ? [
-                      {
-                        icon: '/images/icons/computer.svg',
-                        value: channel.type,
-                      },
-                    ]
-                  : []
-              }
+              {...mediaChannelCardProps(channel)}
               trackingPage="Media channels"
               listingId={channel.id}
               placement={placements.get(channel.id)}

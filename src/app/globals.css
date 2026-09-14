@@ -59,6 +59,10 @@
   /* Accent Colors */
   --bright-teal-300: #a6dad9;
   --bright-teal-500: #6cbdbb;
+  /* Retired as the site's highlight on 19 July 2026 (PR #474): highlights are
+     --bright-teal-300 again. Still used on purpose by the event/training type
+     colour classes (.color-bright-green / .bg-bright-green) and a few older
+     admin styles; don't reach for it in new work. */
   --bright-green: #7affb2;
   --orange: #ffb580;
   --pink: #ff80fd;
@@ -1155,6 +1159,8 @@ select.text-field {
 /* Shared card styles used across listing pages */
 .card {
   position: relative;
+  /* a link to #<record id> lands with the card clear of the nav */
+  scroll-margin-top: 110px;
   padding: 40px;
   background-color: var(--teal-bright-850);
   border-radius: 16px;

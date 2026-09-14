@@ -4,13 +4,10 @@ import FeaturedCard from '@/components/FeaturedCard'
 import FundingClient from './FundingClient'
 import { getFunders } from '@/lib/data/funding'
 import { isAcceptingApplications } from '@/lib/funding-status'
+import { pageMetadata } from '@/lib/page-metadata'
+import { SITE_PAGES } from '@/lib/site-pages'
 
-export const metadata = {
-  title: 'Funding – AISafety.com',
-  description:
-    'Organizations offering financial support to organizations and individuals working on AI safety.',
-  alternates: { canonical: '/funding' },
-}
+export const metadata = pageMetadata(SITE_PAGES.funding)
 
 export default async function FundingPage() {
   const [funders, lastUpdated] = await Promise.all([
@@ -52,9 +49,6 @@ export default async function FundingPage() {
             description={funder.description}
             logo={funder.logo ?? undefined}
             meta={[
-              ...(funder.type
-                ? [{ icon: '/images/icons/tag.svg', value: funder.type }]
-                : []),
               ...(funder.acceptingApplications
                 ? [
                     {
@@ -66,6 +60,9 @@ export default async function FundingPage() {
                       value: funder.acceptingApplications,
                     },
                   ]
+                : []),
+              ...(funder.type
+                ? [{ icon: '/images/icons/tag.svg', value: funder.type }]
                 : []),
             ]}
             trackingPage="Funding"
