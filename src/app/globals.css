@@ -905,6 +905,21 @@ label {
    8. DISPLAY & VISIBILITY UTILITIES
    =============================== */
 
+/* Text for screen readers and search engines only: the map pages use it for
+   their page heading, which the map itself stands in for visually. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* Display */
 .hidden {
   display: none;

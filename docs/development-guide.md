@@ -103,7 +103,7 @@ An icon file's native size is its only display size: a 16px icon renders at 16, 
 
 Pure logic (ordering, parsing, formatting, validation) goes in a dependency-free module under `src/lib` with a `*.test.ts` next to it, following `training-order.ts` and `featured.ts`. Vitest runs in a node environment, so nothing that imports Next, d3 or the DOM.
 
-Browser smoke tests live in `e2e/` and run with Playwright against a production build: `npm run build && npm run test:e2e` (the first run needs `npx playwright install chromium`). They open every public page, fail on any runtime or console error, check that listings and the map render, and call every Data API endpoint. Add a page to `SITE_PAGES` and it is covered automatically. They are deliberately broad and shallow; visual changes are still checked by hand in a browser, at desktop and mobile widths.
+Browser smoke tests live in `e2e/` and run with Playwright against a production build: `npm run build && npm run test:e2e` (the first run needs `npx playwright install chromium`). They open every public page, fail on any runtime or console error, check that listings and the map render, and call every Data API endpoint. They find the pages themselves by scanning `src/app` for `page.tsx` files (everything outside `admin/`), so a new page is covered the moment it exists. They are deliberately broad and shallow; visual changes are still checked by hand in a browser, at desktop and mobile widths.
 
 ## Admin and preview mode locally
 

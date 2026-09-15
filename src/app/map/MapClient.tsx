@@ -14,6 +14,7 @@ import CardsViewTracker from '@/components/CardsViewTracker'
 import { placementsById } from '@/lib/placements'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
 import { isPlacedOnMap } from '@/lib/map-images'
+import { SITE_PAGES } from '@/lib/site-pages'
 import styles from './page.module.css'
 
 const D3Map = dynamic(() => import('./D3Map'), {
@@ -215,6 +216,9 @@ export default function MapClient({
 
   return (
     <>
+      {/* The map is the page, so its heading is for screen readers and
+          search engines only; every other page shows its <h1>. */}
+      <h1 className="visually-hidden">{SITE_PAGES.map.title}</h1>
       <div className="padding-bottom-24px">
         <div ref={mapWrapperRef} className={styles['map-wrapper']}>
           <D3Map orgs={mapOrgs} suggestEntryUrl={suggestEntryLink} />
