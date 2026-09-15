@@ -1,5 +1,6 @@
-// Email for the admin's sign-in flow: the owner hears when someone requests
-// access, and a person hears when they have been approved.
+// Email for the admin: the owner hears when someone requests access, a
+// person hears when they have been approved, and the owner hears (at most
+// once a day) when someone else publishes the donation guide.
 //
 // Sent the same way the hackathon forms send their confirmations: a small
 // Google Apps Script web app in the owner's Google account (source mirrored
@@ -10,14 +11,15 @@
 //   ADMIN_MAIL_SCRIPT_URL   the script's /exec URL
 //   ADMIN_MAIL_SECRET       shared with the script; it refuses anything else
 //
-// The script also limits what a leaked secret could do: a "request" mail can
-// only ever go to the owner's own address (fixed in the script), and an
-// "approved" mail is a fixed template with the recipient as its only variable.
+// The script also limits what a leaked secret could do: a "request" or
+// "digest" mail can only ever go to the owner's own address (fixed in the
+// script), and an "approved" mail is a fixed template with the recipient as
+// its only variable.
 //
 // Off until both variables are set; every send is best effort and logged,
 // never something the sign-in or the approval waits on or fails over.
 
-export type MailKind = 'request' | 'approved'
+export type MailKind = 'request' | 'approved' | 'digest'
 
 export interface Mail {
   subject: string
@@ -163,6 +165,69 @@ export function approvedMail(p: {
       `<p>Your Google account (<strong>${esc(p.email)}</strong>) now has access to the AISafety.com admin.</p>` +
       `<p><strong>Sign in:</strong> <a href="${esc(p.loginUrl)}">${esc(p.loginUrl)}</a></p>` +
       `<p style="color:#666;font-size:13px">Use the &ldquo;Sign in with Google&rdquo; button and pick that account. This email was sent by the admin itself; reply to it if something looks wrong.</p>`
+  )
+  return { subject, text, html }
+}
+
+/** To the owner: someone else published the donation guide. One email
+ *  covers every publish since the last one (never more than one a day). */
+export function digestMail(p: {
+  publishes: {
+    version: number
+    by: { name: string; email: string }
+    at: string
+    changes: string[]
+  }[]
+  adminUrl: string
+  pageUrl: string
+}): Mail {
+  const n = p.publishes.length
+  const names = [...new Set(p.publishes.map(x => x.by.name))].join(', ')
+  const subject =
+    n === 1
+      ? `Donation guide published by ${names} (version ${p.publishes[0].version})`
+      : `Donation guide: ${n} publishes by ${names}`
+  const textBlocks = p.publishes.map(x =>
+    [
+      `Version ${x.version} by ${x.by.name} (${x.by.email}), ${longDate(x.at)}`,
+      ...(x.changes.length
+        ? x.changes.map(c => `  - ${c}`)
+        : ['  - No text changes']),
+    ].join('\n')
+  )
+  const text = [
+    n === 1
+      ? 'The donation guide was published from the admin.'
+      : `The donation guide was published ${n} times from the admin.`,
+    '',
+    ...textBlocks,
+    '',
+    `Live page: ${p.pageUrl}`,
+    `History and restore: ${p.adminUrl}`,
+    '',
+    'This email was sent by the admin itself, at most once a day.',
+  ].join('\n')
+  const htmlBlocks = p.publishes
+    .map(
+      x =>
+        `<p><strong>Version ${x.version}</strong> by ${esc(x.by.name)} (${esc(x.by.email)}), ${esc(longDate(x.at))}</p>` +
+        `<ul>${
+          x.changes.length
+            ? x.changes.map(c => `<li>${esc(c)}</li>`).join('')
+            : '<li>No text changes</li>'
+        }</ul>`
+    )
+    .join('')
+  const html = wrap(
+    `<p>${
+      n === 1
+        ? 'The donation guide was published from the admin.'
+        : `The donation guide was published ${n} times from the admin.`
+    }</p>` +
+      htmlBlocks +
+      `<p><strong>Live page:</strong> <a href="${esc(p.pageUrl)}">${esc(p.pageUrl)}</a><br>` +
+      `<strong>History and restore:</strong> <a href="${esc(p.adminUrl)}">${esc(p.adminUrl)}</a></p>` +
+      `<p style="color:#666;font-size:13px">This email was sent by the admin itself, at most once a day.</p>`
   )
   return { subject, text, html }
 }
