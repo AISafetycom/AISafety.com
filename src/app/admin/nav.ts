@@ -8,9 +8,16 @@ export type AdminAccess = AccessFlags
 export interface AdminNavTab {
   href: string
   label: string
-  /** Tabs are grouped in the header; a divider is drawn where the group changes
-   *  (so the two chatbot tabs read as a pair, separate from Analytics). */
+  /** Tabs are grouped in the header; a divider is drawn where the group
+   *  changes, and a group named in NAV_MENUS folds into one dropdown. */
   group: string
+}
+
+/** Groups the header shows as a dropdown, with the dropdown's label. A group
+ *  a session has only one tab of stays a plain tab. */
+export const NAV_MENUS: Record<string, string> = {
+  chatbot: 'Bot',
+  editors: 'Editors',
 }
 
 /** Tabs shown in the admin header, limited to the areas this session can
@@ -33,7 +40,9 @@ export function adminTabs(
       group:
         a.key === 'playground' || a.key === 'conversationLog'
           ? 'chatbot'
-          : a.key,
+          : a.key === 'mapEditor' || a.key === 'donationGuide'
+            ? 'editors'
+            : a.key,
     })
   }
   return tabs

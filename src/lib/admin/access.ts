@@ -26,6 +26,9 @@ export interface AccessFlags {
   /** /admin/map — the Field map's logos. Edit: drag and resize them; every
    *  move writes x/y to Airtable. */
   mapEditor: Grant
+  /** /admin/donation-guide — the guide's text. Edit: save drafts and
+   *  publish; every publish changes the live page. */
+  donationGuide: Grant
   /** /admin/preview — see live Airtable data on the real pages, this browser only. */
   preview: Grant
   /** /admin/newsletter — the drafted issues and their previews. Edit:
@@ -72,6 +75,12 @@ export const ACCESS_AREAS: AreaInfo[] = [
     label: 'Map editor',
     href: '/admin/map',
     edit: 'move and resize logos on the live map',
+  },
+  {
+    key: 'donationGuide',
+    label: 'Donation guide editor',
+    href: '/admin/donation-guide',
+    edit: 'save drafts and publish; every publish changes the live page',
   },
   { key: 'preview', label: 'Site preview', href: '/admin/preview' },
   {

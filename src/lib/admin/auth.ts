@@ -177,6 +177,18 @@ export async function canEditMap(): Promise<boolean> {
   return canEdit(await currentAccess(), 'mapEditor')
 }
 
+/** May open /admin/donation-guide: read the draft, the preview and the
+ *  history. */
+export async function canViewDonationGuide(): Promise<boolean> {
+  return canOpen(await currentAccess(), 'donationGuide')
+}
+
+/** May save drafts, publish and restore; every publish changes the live
+ *  page within seconds. */
+export async function canEditDonationGuide(): Promise<boolean> {
+  return canEdit(await currentAccess(), 'donationGuide')
+}
+
 export async function canUsePreview(): Promise<boolean> {
   return canOpen(await currentAccess(), 'preview')
 }
