@@ -3,7 +3,7 @@ import { MAP_AREA_BY_CATEGORY } from '@/lib/data/map-areas'
 
 /** Stamp on every conversation log row. Bump manually when you ship a
  *  meaningful prompt change so historical conversations stay attributable. */
-export const PROMPT_VERSION = '2026-09-14-01'
+export const PROMPT_VERSION = '2026-09-15-01'
 
 /** "Category → **Area**" lines for the Field map section, generated from the
  *  same table the catalog uses to compute each org's \`mapArea\`, so the prompt

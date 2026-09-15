@@ -51,7 +51,6 @@ const RECURRING_FIELD = {
   type: 'fld86l7WsvLm8jm86',
   mode: 'fldZketwZonfcYWie',
   location: 'fld3wvi1BIj2QSXMV',
-  host: 'fldaQgHIMc3RqnFqv',
   featured: 'fldonn5EmegA4Yqlf',
   publish: 'fldpjcvh7n6w4cIsi',
   hide: 'fldnYj4lieZlkXjWB',
@@ -111,7 +110,6 @@ export interface TrainingProgram extends ProgramBase {
 }
 
 export interface RecurringProgram extends ProgramBase {
-  host: string
   /** How long an iteration typically runs, e.g. "10 weeks", "3–6 months". */
   typicalLength: string | null
 }
@@ -457,7 +455,6 @@ export function recurringProgramFromRecord(
   return {
     ...parseBase(f, record.id, name, RECURRING_FIELD),
     dateAdded: record.createdTime?.slice(0, 10) ?? null,
-    host: optionalString(f[RECURRING_FIELD.host]) || '',
     typicalLength,
     lengthBucket: lengthBucketForTypical(typicalLength),
   }
