@@ -123,7 +123,6 @@ export const ENDPOINTS: EndpointDef[] = [
       'type',
       'location',
       'mode',
-      'host',
       'focus',
       'entryBar',
       'timeCommitment',
