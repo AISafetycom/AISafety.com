@@ -174,12 +174,13 @@ export default function RichEditor({ value, onChange, mode, editable }: Props) {
         <div className={styles.toolbar}>
           <button
             type="button"
-            className={`${styles.tbButton} ${active(state?.bold) ? styles.tbButtonOn : ''}`}
+            className={tb(active(state?.bold))}
             onMouseDown={keepFocus}
             onClick={() => editor?.chain().focus().toggleBold().run()}
             title="Highlight the selected words in the teal accent (Cmd+B)"
+            aria-label="Highlight"
           >
-            Highlight
+            <Icon src="/images/icons/highlight.svg" />
           </button>
         </div>
       )}

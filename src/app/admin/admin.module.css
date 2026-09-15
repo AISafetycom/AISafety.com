@@ -62,6 +62,57 @@
   background-color: var(--teal-800);
 }
 
+/* A dropdown of tabs (Bot, Editors). */
+.adminNavMenu {
+  position: relative;
+}
+
+.adminNavMenuButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.adminNavCaret {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.adminNavMenuList {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 60;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  background-color: var(--teal-850);
+  border: 1px solid var(--teal-700);
+  border-radius: 8px;
+  box-shadow: 0 12px 24px rgba(0, 25, 27, 0.5);
+}
+
+.adminNavMenuItem {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--teal-300);
+  text-decoration: none;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.adminNavMenuItem:hover,
+.adminNavMenuItemActive {
+  color: var(--white);
+  background-color: var(--teal-800);
+}
+
 .adminNavDivider {
   align-self: center;
   width: 1px;
