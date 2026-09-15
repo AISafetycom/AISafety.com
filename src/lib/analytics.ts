@@ -326,6 +326,22 @@ export function trackSearchOpen(method: SearchOpenMethod): void {
   })
 }
 
+/** How the global nav's +N menu was opened: a mouse/trackpad hover, or a tap
+ *  on a touch screen. */
+export type NavOverflowOpenMethod = 'hover' | 'tap'
+
+/** Track the global nav's +N menu opening, and how. Fired once per
+ *  closed→open transition: the 150 ms hover grace keeps the panel open while
+ *  the pointer crosses the gap into it, so that never counts twice. */
+export function trackNavOverflowOpen(method: NavOverflowOpenMethod): void {
+  if (typeof window === 'undefined') return
+  sendTrackEvent({
+    type: 'nav_overflow_open',
+    source: method,
+    page: window.location.pathname,
+  })
+}
+
 /**
  * Track a settled site-search query — fired once the visitor pauses typing,
  * or immediately if they click a result / close search before the pause.

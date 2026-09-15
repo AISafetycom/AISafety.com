@@ -53,6 +53,7 @@ events.mock.json
 # local-dev analytics event log (no Redis in dev)
 /.analytics-dev/
 
-# local icon design lab (not shipped)
+# local icon design lab / preview (not shipped)
 public/icon-lab.html
+public/activity-lab.html
 /.admin-dev/

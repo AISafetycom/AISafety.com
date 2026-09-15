@@ -73,3 +73,31 @@
     gap: 16px;
   }
 }
+
+/* No global list styling exists; the guide's lists get theirs here, the
+   same rule the hackathon page uses. */
+.bullets {
+  margin: 0;
+  padding-left: 24px;
+  list-style: disc;
+}
+
+.bullets li {
+  margin-bottom: 8px;
+}
+
+.bullets ul {
+  margin: 8px 0 0;
+  padding-left: 24px;
+  list-style: circle;
+}
+
+.numbers {
+  margin: 0;
+  padding-left: 24px;
+  list-style: decimal;
+}
+
+.numbers li {
+  margin-bottom: 8px;
+}

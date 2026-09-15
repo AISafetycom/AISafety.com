@@ -277,7 +277,7 @@ export async function POST(req: NextRequest) {
         client,
         systemPrompt: PRODUCTION_PROMPT,
         pagesBlock: PAGES_BLOCK,
-        donationGuide: getDonationGuideText(),
+        donationGuide: await getDonationGuideText(),
         model: DEFAULT_MODEL_ID,
         apiMessages,
         catalog,

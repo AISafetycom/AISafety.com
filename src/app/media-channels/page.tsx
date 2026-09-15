@@ -1,7 +1,6 @@
 import { fetchLastUpdated } from '@/lib/data/last-updated'
-import { withUtm } from '@/lib/utm'
 import PageHeader from '@/components/PageHeader'
-import FeaturedCard from '@/components/FeaturedCardLegacy'
+import FeaturedCard from '@/components/FeaturedCard'
 import MediaChannelsClient from './MediaChannelsClient'
 import { getMediaChannels } from '@/lib/data/media-channels'
 import { pageMetadata } from '@/lib/page-metadata'
@@ -14,6 +13,11 @@ export default async function MediaChannelsPage() {
     getMediaChannels(),
     fetchLastUpdated('media-channels'),
   ])
+
+  const featured = [
+    channels.find(c => c.featured === '1'),
+    channels.find(c => c.featured === '2'),
+  ].filter((c): c is NonNullable<typeof c> => c != null)
 
   return (
     <div className="container-default">
@@ -31,52 +35,31 @@ export default async function MediaChannelsPage() {
         }
       />
 
-      {/* Featured Cards + Related Resources */}
-      <div className="flex flex-col-mobile gap-56px padding-bottom-80px">
-        <div className="flex flex-col-mobile gap-40px">
-          {[
-            channels.find(c => c.featured === '1'),
-            channels.find(c => c.featured === '2'),
-          ]
-            .filter((c): c is NonNullable<typeof c> => c != null)
-            .map(channel => (
-              <FeaturedCard
-                key={channel.id}
-                href={channel.url !== '#' ? channel.url : undefined}
-                tagline={channel.featuredTagline!}
-                name={channel.name}
-                description={channel.description}
-                logo={channel.logo ?? undefined}
-                metadata={[{ label: 'Type', value: channel.type }]}
-                trackingPage="Media channels"
-                trackingId={channel.id}
-                trackingPosition={`F${channel.featured}`}
-              />
-            ))}
-        </div>
-
-        <aside className="hide-mobile">
-          <p className="paragraph-small-bold padding-bottom-32px">
-            Related resource
-          </p>
-          <a
-            href={withUtm('https://aisafety.info', 'Media channels')}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block hover-opacity-80"
-          >
-            <h3 className="padding-bottom-16px">
-              AISafety.info <span className="color-teal-400">&rarr;</span>
-            </h3>
-            <p className="paragraph-small color-teal-300">
-              A comprehensive FAQ on various AI safety topics, written and
-              curated by our team and affiliates
-            </p>
-          </a>
-        </aside>
+      <div className="flex flex-wrap gap-56px padding-bottom-80px">
+        {featured.map((channel, i) => (
+          <FeaturedCard
+            key={channel.id}
+            className="width-6-col"
+            href={channel.url !== '#' ? channel.url : undefined}
+            tagline={channel.featuredTagline!}
+            name={channel.name}
+            description={channel.description}
+            logo={channel.logo ?? undefined}
+            meta={
+              channel.type
+                ? [{ icon: '/images/icons/computer.svg', value: channel.type }]
+                : []
+            }
+            trackingPage="Media channels"
+            trackingId={channel.id}
+            trackingPosition={`F${channel.featured}`}
+            trackingSource="cards"
+            index={i}
+            count={featured.length}
+          />
+        ))}
       </div>
 
-      {/* Main Content with Search, Cards, and Filters */}
       <MediaChannelsClient channels={channels} />
     </div>
   )

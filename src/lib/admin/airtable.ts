@@ -34,8 +34,9 @@
     Delivery        (long text)         — JSON map of turn index → what the
                                           visitor's browser reported about
                                           the reply (received / stopped /
-                                          left the page mid-answer, panel
-                                          closed, tab hidden, seen later); see
+                                          failed, with the error text / left
+                                          the page mid-answer, panel closed,
+                                          tab hidden, seen later); see
                                           TurnDelivery. Written out-of-band by
                                           the delivery logger
 
@@ -112,11 +113,29 @@ export interface AirtableListResponse<F> {
   offset?: string
 }
 
+const AIRTABLE_ORIGIN = 'https://api.airtable.com'
+
+/** Airtable record ids are "rec" plus 14 letters or digits. Ids arrive from
+ *  request bodies and query strings, so anything else is refused before it
+ *  can become part of a URL. */
+const RECORD_ID_RE = /^rec[A-Za-z0-9]{14}$/
+export function isRecordId(id: string): boolean {
+  return RECORD_ID_RE.test(id)
+}
+
 export async function airtableRequest(
   path: string,
   init: RequestInit = {}
 ): Promise<Response> {
-  return fetch(`https://api.airtable.com/v0/${BASE}/${path}`, {
+  // Resolve the path against this base's URL and refuse anything that
+  // escapes it, so a request-supplied value can never point the call at
+  // another table, another base, or another host.
+  const base = `${AIRTABLE_ORIGIN}/v0/${BASE}/`
+  const url = new URL(path, base)
+  if (url.origin !== AIRTABLE_ORIGIN || !url.href.startsWith(base)) {
+    throw new Error('Airtable request path escapes the base')
+  }
+  return fetch(url, {
     ...init,
     headers: {
       Authorization: `Bearer ${TOKEN}`,
@@ -242,6 +261,10 @@ export interface TurnDelivery {
   stopped?: number
   /** The browser hit an error mid-reply (network drop, malformed frame). */
   error?: number
+  /** What that error was, as the browser saw it — the exception's name and
+   *  message, the server's error event, or 'empty reply' — plus how much of
+   *  the reply had arrived by then. Only ever set alongside `error`. */
+  errorText?: string
   /** The page was unloaded (tab closed, full navigation) mid-reply. */
   left?: number
   /** The chat panel was closed while the reply was still streaming (first
@@ -271,6 +294,10 @@ const DELIVERY_NUMBER_KEYS = [
   'seen',
 ] as const
 const DELIVERY_BOOLEAN_KEYS = ['panelOpen', 'tabVisible'] as const
+const DELIVERY_STRING_KEYS = ['errorText'] as const
+/** Cap on a stored error text — room for an HTTP status line plus the start
+ *  of the server's message, without a runaway body bloating the field. */
+export const DELIVERY_TEXT_MAX = 300
 
 /** Raw record fields, keyed by permanent field ID (see FIELD above). The
  *  Clicked field holds a JSON array of listing ids whose cards the visitor
@@ -404,6 +431,12 @@ function parseDelivery(raw: string | undefined): DeliveryByTurn {
       }
       for (const key of DELIVERY_BOOLEAN_KEYS) {
         if (typeof v[key] === 'boolean') entry[key] = v[key]
+      }
+      for (const key of DELIVERY_STRING_KEYS) {
+        const text = v[key]
+        if (typeof text === 'string' && text.trim() !== '') {
+          entry[key] = text.slice(0, DELIVERY_TEXT_MAX)
+        }
       }
       if (Object.keys(entry).length > 0) out[turn] = entry
     }
@@ -599,6 +632,7 @@ export async function updateConversation(
   actor: string
 ): Promise<ConversationRow> {
   ensureConfig(CONVERSATIONS_TABLE)
+  if (!isRecordId(id)) throw new Error('not an Airtable record id')
   // Read the row first so the log can say what actually changed (a re-sent
   // identical label list or unchanged notes writes no line).
   const current = await airtableRequest(
@@ -705,6 +739,8 @@ export async function getConversation(
   id: string
 ): Promise<ConversationRow | null> {
   ensureConfig(CONVERSATIONS_TABLE)
+  // Not a record id, so not a conversation either.
+  if (!isRecordId(id)) return null
   const params = new URLSearchParams()
   params.set('returnFieldsByFieldId', 'true')
   const res = await airtableRequest(
@@ -759,8 +795,9 @@ async function findConversationBySession(
   session: string
 ): Promise<AirtableRow<ConversationFields> | null> {
   ensureConfig(CONVERSATIONS_TABLE)
-  // Escape any double-quotes for the formula literal.
-  const escaped = session.replace(/"/g, '\\"')
+  // Quote the value for the formula literal: backslashes first, then double
+  // quotes, so neither can end the string early.
+  const escaped = session.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
   const params = new URLSearchParams()
   params.set('filterByFormula', `{${FIELD.session}} = "${escaped}"`)
   params.set('maxRecords', '1')

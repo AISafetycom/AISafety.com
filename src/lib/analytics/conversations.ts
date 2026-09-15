@@ -1,5 +1,5 @@
 // Chatbot conversation stats for the admin analytics dashboard, derived from
-// the Airtable conversation log (the same table the Conversation Log viewer
+// the Airtable conversation log (the same table the Bot log viewer
 // reads). Everything here is computed per-query from the raw transcripts —
 // nothing is precomputed or stored — so the panels are fully date-range aware.
 

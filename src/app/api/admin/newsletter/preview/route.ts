@@ -3,7 +3,7 @@
 
   The draft's email HTML, as a subscriber will see it (personalisation tags
   neutralised), for the sandboxed preview frame on /admin/newsletter.
-  Approvers and preview-only reviewers (canViewNewsletter). Never cached.
+  Approvers and view-only reviewers (canViewNewsletter). Never cached.
 */
 
 import { NextRequest } from 'next/server'
@@ -44,6 +44,8 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[newsletter] preview ${id} failed: ${message}`)
-    return new Response(message, { status: 502 })
+    return new Response('Preview failed; details are in the server log.', {
+      status: 502,
+    })
   }
 }

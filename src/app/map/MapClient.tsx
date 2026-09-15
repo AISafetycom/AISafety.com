@@ -2,16 +2,15 @@
 
 import dynamic from 'next/dynamic'
 import Icon from '@/components/Icon'
-import Image from 'next/image'
 import { useState, useMemo, useRef, useLayoutEffect, useCallback } from 'react'
 import FilterGroup from '@/components/FilterGroup'
 import FilterSidebar from '@/components/FilterSidebar'
 import ContributeButtons from '@/components/ContributeButtons'
 import RelativeDate from '@/components/RelativeDate'
+import MapOrgCard from './MapOrgCard'
 import SearchBar from '@/components/SearchBar'
-import { trackListingClick, trackCardsButtonClick } from '@/lib/analytics'
+import { trackCardsButtonClick } from '@/lib/analytics'
 import CardsViewTracker from '@/components/CardsViewTracker'
-import { withUtm } from '@/lib/utm'
 import { placementsById } from '@/lib/placements'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
 import { isPlacedOnMap } from '@/lib/map-images'
@@ -263,53 +262,11 @@ export default function MapClient({
 
             <div className="collection-list padding-bottom-16px">
               {filteredOrgs.map(org => (
-                <a
+                <MapOrgCard
                   key={org.id}
-                  href={withUtm(org.link, 'Map')}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="card"
-                  onClick={() =>
-                    trackListingClick(
-                      'Map',
-                      org.title,
-                      org.link,
-                      org.id,
-                      placements.get(org.id),
-                      'cards',
-                      // First category = the org's map area; the dashboard
-                      // groups Map-page activity by it.
-                      org.category.split(',')[0].trim() || undefined
-                    )
-                  }
-                >
-                  <div className="flex items-center gap-16px padding-bottom-24px">
-                    <div className="featured-img">
-                      {org.logo && (
-                        <Image
-                          src={org.logo}
-                          alt=""
-                          className="card-image"
-                          width={64}
-                          height={64}
-                          unoptimized
-                          onError={e => {
-                            ;(e.target as HTMLImageElement).style.display =
-                              'none'
-                          }}
-                        />
-                      )}
-                    </div>
-                    <h3>{org.title}</h3>
-                  </div>
-                  <p className="paragraph-small padding-bottom-24px">
-                    {org.description}
-                  </p>
-                  <p className="paragraph-xs-bold color-teal-400 padding-bottom-4px">
-                    Category
-                  </p>
-                  <p className="paragraph-small">{org.category}</p>
-                </a>
+                  org={org}
+                  placement={placements.get(org.id)}
+                />
               ))}
               {filteredOrgs.length === 0 && (
                 <p className="paragraph-small color-teal-300">Nothing found.</p>

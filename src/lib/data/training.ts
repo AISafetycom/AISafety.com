@@ -1,4 +1,4 @@
-import { fetchAirtableRecords } from './airtable'
+import { fetchAirtableRecords, type AirtableRawRecord } from './airtable'
 import { fetchPublicData, hasAirtableCredentials } from './public-api'
 import {
   ENTRY_BARS,
@@ -12,8 +12,8 @@ import { parseFeaturedRank } from '../featured'
 // The redesigned /training page reads from two tables: "Training" holds
 // dated upcoming iterations, "Recurring training" holds evergreen programs
 // that run repeatedly (shown under the Recurring toggle, without dates).
-const TRAINING_TABLE_ID = 'tbli1YSCpIuNY2DvL'
-const RECURRING_TABLE_ID = 'tblEEIbj6dW5oS4cX'
+export const TRAINING_TABLE_ID = 'tbli1YSCpIuNY2DvL'
+export const RECURRING_TABLE_ID = 'tblEEIbj6dW5oS4cX'
 // Grid view on "Recurring training" — records come back in the view's order
 // (driven by its Sort field), so the page mirrors the table as arranged in
 // Airtable.
@@ -305,6 +305,49 @@ function parseBase(
   }
 }
 
+/**
+ * One Training record (fields keyed by field id) → the dated program the
+ * page renders, or null when the site would skip it (no name). Publish/Hide
+ * and the date cut-offs are getTrainingPrograms()'s filters, not the
+ * mapper's, so an unpublished or draft record can still be mapped — the
+ * admin Queue previews proposed records through this. `today` (YYYY-MM-DD)
+ * decides Open/Closed against the deadline; it defaults to the current
+ * date, and getTrainingPrograms() passes one value for the whole batch.
+ */
+export function trainingProgramFromRecord(
+  record: AirtableRawRecord,
+  today: string = new Date().toISOString().slice(0, 10)
+): TrainingProgram | null {
+  const f = record.fields
+  const name = optionalString(f[TRAINING_FIELD.name])
+  if (!name) return null
+
+  const startDate = optionalString(f[TRAINING_FIELD.startDate])
+  const endDate = optionalString(f[TRAINING_FIELD.endDate])
+  const closesOn = optionalString(f[TRAINING_FIELD.deadline])
+
+  // No close date means applications are open-ended — unless applications
+  // haven't opened yet, which outranks any deadline (orgs sometimes
+  // announce the deadline before opening). See the field descriptions on
+  // the Training table.
+  const notYetOpen = f[TRAINING_FIELD.notYetOpen] === true
+  const applicationStatus: 'Open' | 'Closed' =
+    !notYetOpen && (!closesOn || closesOn >= today) ? 'Open' : 'Closed'
+
+  return {
+    ...parseBase(f, record.id, name, TRAINING_FIELD),
+    dateAdded: record.createdTime?.slice(0, 10) ?? null,
+    startDate,
+    startDateApprox:
+      optionalString(f[TRAINING_FIELD.startDateApprox])?.trim() || null,
+    endDate,
+    applicationStatus,
+    applicationsClose: closesOn,
+    notYetOpen,
+    lengthBucket: lengthBucketFor(startDate, endDate),
+  }
+}
+
 export async function getTrainingPrograms(): Promise<TrainingProgram[]> {
   if (!hasAirtableCredentials()) {
     const all = await fetchPublicData<TrainingProgram & { recurring: boolean }>(
@@ -326,8 +369,6 @@ export async function getTrainingPrograms(): Promise<TrainingProgram[]> {
 
   for (const record of raw) {
     const f = record.fields
-    const name = optionalString(f[TRAINING_FIELD.name])
-    if (!name) continue
     if (f[TRAINING_FIELD.publish] !== true || f[TRAINING_FIELD.hide] === true)
       continue
 
@@ -340,28 +381,9 @@ export async function getTrainingPrograms(): Promise<TrainingProgram[]> {
     // (defaulting to Open) hides it. Dateless programs stay indefinitely.
     if (startDate && startDate < today) continue
 
-    const closesOn = optionalString(f[TRAINING_FIELD.deadline])
-
-    // No close date means applications are open-ended — unless applications
-    // haven't opened yet, which outranks any deadline (orgs sometimes
-    // announce the deadline before opening). See the field descriptions on
-    // the Training table.
-    const notYetOpen = f[TRAINING_FIELD.notYetOpen] === true
-    const applicationStatus: 'Open' | 'Closed' =
-      !notYetOpen && (!closesOn || closesOn >= today) ? 'Open' : 'Closed'
-
-    results.push({
-      ...parseBase(f, record.id, name, TRAINING_FIELD),
-      dateAdded: record.createdTime?.slice(0, 10) ?? null,
-      startDate,
-      startDateApprox:
-        optionalString(f[TRAINING_FIELD.startDateApprox])?.trim() || null,
-      endDate,
-      applicationStatus,
-      applicationsClose: closesOn,
-      notYetOpen,
-      lengthBucket: lengthBucketFor(startDate, endDate),
-    })
+    const program = trainingProgramFromRecord(record, today)
+    if (!program) continue
+    results.push(program)
   }
 
   // Order by start date (soonest first), programs without a start date
@@ -417,6 +439,30 @@ export async function getTrainingRounds(): Promise<ProgramRound[]> {
   return rounds
 }
 
+/**
+ * One Training (recurring) record (fields keyed by field id) → the evergreen
+ * program the page renders, or null when the site would skip it (no name).
+ * Publish/Hide filtering stays in getRecurringPrograms(), so an unpublished
+ * record can still be mapped — the admin Queue previews proposed records
+ * through this.
+ */
+export function recurringProgramFromRecord(
+  record: AirtableRawRecord
+): RecurringProgram | null {
+  const f = record.fields
+  const name = optionalString(f[RECURRING_FIELD.name])
+  if (!name) return null
+
+  const typicalLength = optionalString(f[RECURRING_FIELD.typicalLength])
+  return {
+    ...parseBase(f, record.id, name, RECURRING_FIELD),
+    dateAdded: record.createdTime?.slice(0, 10) ?? null,
+    host: optionalString(f[RECURRING_FIELD.host]) || '',
+    typicalLength,
+    lengthBucket: lengthBucketForTypical(typicalLength),
+  }
+}
+
 export async function getRecurringPrograms(): Promise<RecurringProgram[]> {
   if (!hasAirtableCredentials()) {
     const all = await fetchPublicData<
@@ -435,19 +481,12 @@ export async function getRecurringPrograms(): Promise<RecurringProgram[]> {
 
   for (const record of raw) {
     const f = record.fields
-    const name = optionalString(f[RECURRING_FIELD.name])
-    if (!name) continue
     if (f[RECURRING_FIELD.publish] !== true || f[RECURRING_FIELD.hide] === true)
       continue
 
-    const typicalLength = optionalString(f[RECURRING_FIELD.typicalLength])
-    results.push({
-      ...parseBase(f, record.id, name, RECURRING_FIELD),
-      dateAdded: record.createdTime?.slice(0, 10) ?? null,
-      host: optionalString(f[RECURRING_FIELD.host]) || '',
-      typicalLength,
-      lengthBucket: lengthBucketForTypical(typicalLength),
-    })
+    const program = recurringProgramFromRecord(record)
+    if (!program) continue
+    results.push(program)
   }
 
   // Order comes from the Airtable view (RECURRING_VIEW_ID) — no sorting here.

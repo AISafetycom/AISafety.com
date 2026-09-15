@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers'
 import { cache } from 'react'
-import { NO_ACCESS, type AccessFlags } from './access'
+import { canEdit, canOpen, NO_ACCESS, type AccessFlags } from './access'
 import { openToken, sealToken } from './session'
 import { findAdminUser } from './users'
 
@@ -149,50 +149,82 @@ export async function isAdmin(): Promise<boolean> {
 }
 
 export async function canViewPlayground(): Promise<boolean> {
-  return (await currentAccess()).playground
+  return canOpen(await currentAccess(), 'playground')
 }
 
 /** May read visitors' chat transcripts (the log page and its API). */
 export async function canViewConversationLog(): Promise<boolean> {
-  return (await currentAccess()).conversationLog
+  return canOpen(await currentAccess(), 'conversationLog')
 }
 
 /** May enter the chatbot section at all: either of its two pages. */
 export async function canViewChatbot(): Promise<boolean> {
   const a = await currentAccess()
-  return a.playground || a.conversationLog
+  return canOpen(a, 'playground') || canOpen(a, 'conversationLog')
 }
 
 export async function canViewAnalytics(): Promise<boolean> {
-  return (await currentAccess()).analytics
+  return canOpen(await currentAccess(), 'analytics')
+}
+
+/** May open /admin/map and read the live records. */
+export async function canViewMap(): Promise<boolean> {
+  return canOpen(await currentAccess(), 'mapEditor')
 }
 
 /** Every save is a write to the live base. */
 export async function canEditMap(): Promise<boolean> {
-  return (await currentAccess()).mapEditor
+  return canEdit(await currentAccess(), 'mapEditor')
+}
+
+/** May open /admin/donation-guide: read the draft, the preview and the
+ *  history. */
+export async function canViewDonationGuide(): Promise<boolean> {
+  return canOpen(await currentAccess(), 'donationGuide')
+}
+
+/** May save drafts, publish and restore; every publish changes the live
+ *  page within seconds. */
+export async function canEditDonationGuide(): Promise<boolean> {
+  return canEdit(await currentAccess(), 'donationGuide')
 }
 
 export async function canUsePreview(): Promise<boolean> {
-  return (await currentAccess()).preview
+  return canOpen(await currentAccess(), 'preview')
 }
 
 /** An approval sends to every subscriber on the list. Callers that actually
  *  send should also require hasFreshSession(NEWSLETTER_FRESH_SECONDS). */
 export async function canSendNewsletter(): Promise<boolean> {
-  return (await currentAccess()).newsletter
+  return canEdit(await currentAccess(), 'newsletter')
 }
 
 /** May open /admin/newsletter and look at drafts and previews: approvers,
- *  plus preview-only reviewers who can never send. */
+ *  plus view-only reviewers who can never send. */
 export async function canViewNewsletter(): Promise<boolean> {
-  const a = await currentAccess()
-  return a.newsletter || a.newsletterPreview
+  return canOpen(await currentAccess(), 'newsletter')
 }
 
-/** May open /admin/users and change who can sign in; the write routes also
- *  require hasFreshSession(SENSITIVE_FRESH_SECONDS). */
+/** May open /admin/queue and read what is waiting, the previews included. */
+export async function canViewQueue(): Promise<boolean> {
+  return canOpen(await currentAccess(), 'queue')
+}
+
+/** May accept, reject or revise proposals. Every accept is a write to the
+ *  live base (a publish, a field change, a deletion later). */
+export async function canReviewQueue(): Promise<boolean> {
+  return canEdit(await currentAccess(), 'queue')
+}
+
+/** May open /admin/users and see who can sign in. */
+export async function canViewUsers(): Promise<boolean> {
+  return canOpen(await currentAccess(), 'manageUsers')
+}
+
+/** May change who can sign in; the write routes also require
+ *  hasFreshSession(SENSITIVE_FRESH_SECONDS). */
 export async function canManageUsers(): Promise<boolean> {
-  return (await currentAccess()).manageUsers
+  return canEdit(await currentAccess(), 'manageUsers')
 }
 
 /** True when the session was minted by Google within the last

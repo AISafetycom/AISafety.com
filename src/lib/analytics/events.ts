@@ -130,7 +130,17 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   'map_search_open',
   'map_search_query',
   'map_search_pick',
+  // The global nav's +N pill (the pages that don't fit the bar) opening its
+  // menu. `source` is how: 'hover' (mouse/trackpad) or 'tap' (touch screens);
+  // `page` the path it happened on. One per closed→open transition.
+  'nav_overflow_open',
 ])
+
+/** Dashboard labels for how the +N menu was opened (nav_overflow_open.source). */
+const NAV_OVERFLOW_OPEN_LABEL: Record<string, string> = {
+  hover: 'Hover',
+  tap: 'Tap',
+}
 
 // ─── Redis backend ───────────────────────────────────────────────────────────
 
@@ -637,6 +647,16 @@ export interface DashboardData {
   /** Clicks on the footer's external links, one row per link ('Donate',
    *  'AI Safety Funding', …), sitewide. */
   footerClicks: Counted[]
+  /** Opens of the global nav's +N menu, one row per method ('Hover' |
+   *  'Tap'), sitewide. */
+  navOverflowOpens: Counted[]
+  /** Per method: distinct visitors who opened the +N menu that way vs
+   *  distinct visitors site-wide — the nav is on every page, so the site is
+   *  the denominator. Keyed by the row names `navOverflowOpens` uses. */
+  navOverflowOpenShare: VisitorShare[]
+  /** The +N table's Total row: distinct visitors who opened the menu at all
+   *  vs distinct visitors site-wide. */
+  anyNavOverflowOpenShare: VisitorShare
   /** For pages with a map (Map, Communities): `selectedPage`'s most-hovered
    *  map listings — tooltip dwells (500 ms cursor rest on desktop, first tap
    *  on mobile), grouped like `topListings` and following the same unique/
@@ -730,6 +750,9 @@ const EMPTY: Omit<DashboardData, 'source'> = {
   contributeButtonShare: [],
   hoverShare: [],
   footerClicks: [],
+  navOverflowOpens: [],
+  navOverflowOpenShare: [],
+  anyNavOverflowOpenShare: { name: 'Any open', active: 0, visitors: 0 },
   topHovered: [],
   areaClicks: [],
   funnel: { opened: 0, typed: 0, clicked: 0 },
@@ -1241,6 +1264,20 @@ function aggregate(
   const footerHits = inRange.filter(e => e.type === 'footer_click')
   const footerEvents = unique ? uniqueClicks(footerHits) : footerHits
   const footerClicks = tally(footerEvents.map(e => listingMember(e)))
+  // The global nav's +N menu: opens by method, sitewide, following the count
+  // mode (unique = one per visitor per method). Shares divide by all site
+  // visitors, since the nav is on every page.
+  const navOpens = inRange.filter(e => e.type === 'nav_overflow_open')
+  const navOpenMethod = (e: AnalyticsEvent) =>
+    NAV_OVERFLOW_OPEN_LABEL[e.source ?? ''] ?? 'Unknown'
+  const navOverflowOpens = tallyBy(navOpens, navOpenMethod, unique)
+  const navOverflowOpenShare = navOverflowOpens.map(row =>
+    anyOnSite(
+      navOpens.filter(e => navOpenMethod(e) === row.name),
+      row.name
+    )
+  )
+  const anyNavOverflowOpenShare = anyOnSite(navOpens, 'Any open')
 
   // Most-hovered map listings for the selected page — tooltip dwells
   // (listing_hover events), grouped exactly like topListings but with no
@@ -1346,6 +1383,9 @@ function aggregate(
     contributeButtonShare,
     hoverShare,
     footerClicks,
+    navOverflowOpens,
+    navOverflowOpenShare,
+    anyNavOverflowOpenShare,
     topHovered,
     areaClicks,
     funnel: {

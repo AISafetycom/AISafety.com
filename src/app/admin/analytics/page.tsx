@@ -393,6 +393,8 @@ function pillFor(e: { page?: string; type: string }): string | null {
   if (e.type.startsWith('search')) return 'Search'
   // Footer clicks carry the raw path they happened on; 'Footer' reads better.
   if (e.type === 'footer_click') return 'Footer'
+  // Likewise the +N menu: it belongs to the nav, whatever page it opened on.
+  if (e.type === 'nav_overflow_open') return 'Nav'
   if (e.page) return e.page
   return null
 }
@@ -404,6 +406,10 @@ function labelFor(e: {
   query?: string
   page?: string
 }): string {
+  if (e.type === 'nav_overflow_open')
+    return e.source === 'tap'
+      ? 'Opened the +N menu (tap)'
+      : 'Opened the +N menu'
   if (e.type === 'search_open')
     return SEARCH_OPEN_LABELS[e.source ?? ''] ?? 'Opened search'
   if (e.type === 'search_query')
@@ -654,6 +660,13 @@ export default async function AnalyticsPage({
     0
   )
   const footerTotal = data.footerClicks.reduce((sum, r) => sum + r.count, 0)
+  const navOpenTotal = data.navOverflowOpens.reduce(
+    (sum, r) => sum + r.count,
+    0
+  )
+  const navOpenShare = new Map(
+    data.navOverflowOpenShare.map(s => [s.name, s] as const)
+  )
   const newsletterTotalByPage = data.newsletterByPage.reduce(
     (sum, r) => sum + r.count,
     0
@@ -1263,6 +1276,23 @@ export default async function AnalyticsPage({
                   The footer&apos;s external links – the &quot;Help us out&quot;
                   and &quot;Newsletters&quot; columns. Recording since 29 July
                   2026.
+                </p>
+              </Panel>
+              <Panel title="+N menu opens">
+                <CountTable
+                  rows={data.navOverflowOpens}
+                  labelHead="Method"
+                  countHead={unique ? 'Users' : 'Opens'}
+                  total={navOpenTotal}
+                  shareFor={name => navOpenShare.get(name)}
+                  totalShare={data.anyNavOverflowOpenShare}
+                />
+                <p className={styles.caption}>
+                  The +N pill at the end of the global nav, which holds the
+                  pages that don&apos;t fit the bar. Hover = mouse or trackpad,
+                  tap = touch screens. % of visitors = the share of all visitors
+                  who opened it that way at least once; the Total row is the
+                  share who opened it at all. Recording since 7 September 2026.
                 </p>
               </Panel>
             </div>

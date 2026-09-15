@@ -32,9 +32,9 @@ describe('users store (file backend)', () => {
 
   it('updates name and access, and reports unknown emails', async () => {
     const updated = await store.update('a@example.com', {
-      access: accessFrom(['newsletter']),
+      access: accessFrom([], ['newsletter']),
     })
-    expect(updated?.access.newsletter).toBe(true)
+    expect(updated?.access.newsletter).toBe('edit')
     expect(updated?.access.playground).toBe(false)
     expect(updated?.name).toBeNull()
     expect(await store.update('nobody@example.com', { name: 'x' })).toBeNull()

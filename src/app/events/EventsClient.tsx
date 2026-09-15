@@ -23,6 +23,7 @@ import { selectFeatured, withRandomStandIns } from '@/lib/featured'
 import { trackFilterApply } from '@/lib/analytics'
 import { placementsById } from '@/lib/placements'
 import type { EventListing } from '@/lib/data/events'
+import { bottomMetaFor, eventCardProps, parseISO, titleMetaFor } from './card'
 import styles from './page.module.css'
 
 const ADD_EVENT_URL =
@@ -51,53 +52,6 @@ interface EventsClientProps {
   events: EventListing[]
 }
 
-function parseISO(date: string): Date {
-  return new Date(date + 'T00:00:00Z')
-}
-function shortMonth(d: Date): string {
-  // en-US, not en-GB: en-GB abbreviates September as "Sept".
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    timeZone: 'UTC',
-  }).format(d)
-}
-
-function formatEventDate(
-  startDate: string | null,
-  endDate: string | null
-): string | null {
-  if (!startDate) return null
-  const s = parseISO(startDate)
-  const day = (d: Date) => d.getUTCDate()
-  if (!endDate || endDate === startDate) {
-    return `${day(s)} ${shortMonth(s)} ${s.getUTCFullYear()}`
-  }
-  const e = parseISO(endDate)
-  const sameYear = s.getUTCFullYear() === e.getUTCFullYear()
-  const sameMonth = sameYear && s.getUTCMonth() === e.getUTCMonth()
-  if (sameMonth) {
-    return `${day(s)} – ${day(e)} ${shortMonth(e)} ${e.getUTCFullYear()}`
-  }
-  if (sameYear) {
-    return `${day(s)} ${shortMonth(s)} – ${day(e)} ${shortMonth(e)} ${e.getUTCFullYear()}`
-  }
-  return `${day(s)} ${shortMonth(s)} ${s.getUTCFullYear()} – ${day(e)} ${shortMonth(e)} ${e.getUTCFullYear()}`
-}
-
-function formatEventTime(
-  startTime: string | null,
-  endTime: string | null
-): string | null {
-  if (!startTime) return null
-  return endTime ? `${startTime} – ${endTime}` : startTime
-}
-
-function formatDeadline(event: EventListing): string | null {
-  if (!event.deadlineType || !event.applicationsClose) return null
-  const d = parseISO(event.applicationsClose)
-  return `${event.deadlineType} by ${d.getUTCDate()} ${shortMonth(d)} ${d.getUTCFullYear()}`
-}
-
 function monthKey(startDate: string | null): string {
   if (!startDate) return 'tbc'
   const d = parseISO(startDate)
@@ -110,40 +64,6 @@ function monthLabel(startDate: string | null): string {
     year: 'numeric',
     timeZone: 'UTC',
   }).format(parseISO(startDate))
-}
-
-function titleMetaFor(event: EventListing) {
-  const date = formatEventDate(event.startDate, event.endDate)
-  const time = formatEventTime(event.startTime, event.endTime)
-  const rows: { icon: string; value: string }[] = []
-  // Online events say so via Mode rather than the Location text (mirroring
-  // /training), so Location in Airtable can stay empty for them. Hybrid
-  // events can be attended either way, so the card spells out both facets
-  // ("Online & Oxford, UK") the way /training listings do. The raw location
-  // stays city-only in Airtable so the city filter isn't polluted.
-  if (event.mode === 'Online') {
-    rows.push({ icon: '/images/icons/computer.svg', value: 'Online' })
-  } else if (event.location) {
-    rows.push({
-      icon: '/images/icons/pin.svg',
-      value:
-        event.mode === 'Hybrid' ? `Online & ${event.location}` : event.location,
-    })
-  }
-  if (date) rows.push({ icon: '/images/icons/calendar.svg', value: date })
-  if (time) rows.push({ icon: '/images/icons/timer.svg', value: time })
-  return rows
-}
-
-function bottomMetaFor(event: EventListing) {
-  const deadline = formatDeadline(event)
-  const rows: { icon: string; value: string }[] = []
-  if (event.host)
-    rows.push({ icon: '/images/icons/person.svg', value: `By ${event.host}` })
-  if (event.cost.length > 0)
-    rows.push({ icon: '/images/icons/tag.svg', value: event.cost.join(', ') })
-  if (deadline) rows.push({ icon: '/images/icons/paper.svg', value: deadline })
-  return rows
 }
 
 function pluralizeTypes(types: string[]): string {
@@ -668,16 +588,7 @@ export default function EventsClient({ events }: EventsClientProps) {
                 {group.events.map(event => (
                   <ListingCard
                     key={event.id}
-                    href={event.url}
-                    name={event.name}
-                    description={event.description}
-                    logo={event.logo}
-                    pills={event.type.map(t => ({
-                      label: t,
-                      colorClass: eventTypeColor(t),
-                    }))}
-                    titleMeta={titleMetaFor(event)}
-                    meta={bottomMetaFor(event)}
+                    {...eventCardProps(event)}
                     trackingPage="Events"
                     listingId={event.id}
                     placement={placements.get(event.id)}

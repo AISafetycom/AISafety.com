@@ -156,11 +156,15 @@
   }
 }
 
-/* Close: a plain, quicker fade (DROPDOWN_EXIT_MS in the JSX keeps the panel
-   mounted for exactly this long). No movement on the way out. */
+/* Close: the entrance in reverse, a touch quicker (DROPDOWN_EXIT_MS in the
+   JSX keeps the panel mounted for exactly this long). The 150 ms hover grace
+   in the JSX means the entrance has always finished by the time this runs. */
 .nav-dropdown-closing {
   opacity: 0;
-  transition: opacity 0.08s ease-in;
+  transform: translateY(-6px) scale(0.98);
+  transition:
+    opacity 0.1s ease-in,
+    transform 0.1s ease-in;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -169,6 +173,7 @@
   }
 
   .nav-dropdown-closing {
+    transform: none;
     transition: none;
   }
 }

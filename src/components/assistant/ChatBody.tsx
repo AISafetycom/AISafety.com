@@ -207,6 +207,23 @@ export interface TurnLifecycleEvent {
   turnIndex: number
   /** Milliseconds since the message was sent (0 for 'start'). */
   ms: number
+  /** For 'error': what went wrong — the exception's name and message, the
+   *  server's error event, or 'empty reply' — and how much of the reply had
+   *  arrived, so the log can say whether the visitor saw the answer. */
+  error?: string
+}
+
+/** One line for the delivery report on a failed turn: what went wrong and
+ *  how much text had already arrived, so the admin log can tell a
+ *  dead-on-arrival failure from a connection that dropped at the very end. */
+function describeFailure(
+  errorText: string | undefined,
+  arrivedChars: number
+): string {
+  const what = errorText ?? 'unknown error'
+  return arrivedChars > 0
+    ? `${what} (${arrivedChars} characters had arrived)`
+    : `${what} (nothing had arrived)`
 }
 
 interface AssistantMessageViewProps {
@@ -625,6 +642,10 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
       const sentAt = Date.now()
       onTurnLifecycleRef.current?.({ phase: 'start', turnIndex, ms: 0 })
       let outcome: TurnLifecycleEvent['phase'] = 'error'
+      // For the delivery report when the turn fails: what went wrong, and
+      // how much text had arrived by then.
+      let errorText: string | undefined
+      let arrivedChars = 0
 
       try {
         const extras =
@@ -691,6 +712,7 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
             if (eventType === 'text') {
               const delta = data.delta as string
               streamingText += delta
+              arrivedChars = streamingText.length
               setMessages(prev =>
                 prev.map(m => {
                   if (m.id !== asstId) return m
@@ -767,6 +789,9 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
               )
             } else if (eventType === 'error') {
               sawServerError = true
+              errorText = `server error: ${
+                typeof data.message === 'string' ? data.message : 'no message'
+              }`
               setMessages(prev =>
                 prev.map(m =>
                   m.id === asstId
@@ -828,6 +853,7 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
           )
         )
         if (answer.trim() !== '' && !sawServerError) outcome = 'received'
+        else if (!sawServerError) errorText = 'empty reply'
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') {
           outcome = 'stopped'
@@ -835,6 +861,8 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
             prev.map(m => (m.id === asstId ? { ...m, isStreaming: false } : m))
           )
         } else {
+          errorText =
+            err instanceof Error ? `${err.name}: ${err.message}` : String(err)
           setMessages(prev =>
             prev.map(m =>
               m.id === asstId
@@ -854,6 +882,9 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
           phase: outcome,
           turnIndex,
           ms: Date.now() - sentAt,
+          ...(outcome === 'error'
+            ? { error: describeFailure(errorText, arrivedChars) }
+            : {}),
         })
       }
     },

@@ -239,6 +239,9 @@ label {
 .color-teal-400 {
   color: var(--teal-400);
 }
+.color-teal-500 {
+  color: var(--teal-500);
+}
 .color-teal {
   color: var(--bright-teal-500);
 }
@@ -1156,6 +1159,8 @@ select.text-field {
 /* Shared card styles used across listing pages */
 .card {
   position: relative;
+  /* a link to #<record id> lands with the card clear of the nav */
+  scroll-margin-top: 110px;
   padding: 40px;
   background-color: var(--teal-bright-850);
   border-radius: 16px;

@@ -21,6 +21,14 @@
   couple of minutes out, in the account's local time) and deletes the draft
   shell. Reads use the v3 API; the two writes use v1, the only API that can
   schedule a send (unlocked on the paid plan, 30 Aug 2026).
+
+  Reordering (10 Sept 2026): the renderer wraps every card in
+  `<!--card:gN:KEY-->…<!--/card-->` and ends the email with one
+  `<!--aisafety-cards:BASE64(JSON)-->` manifest (groups + titles + the plain
+  text as keyed segments). `reorderDraft()` moves the cards inside a group,
+  rebuilds the text from the manifest, re-stamps the marker and writes the
+  message back through the v3 API (which returns HTML byte-identical, checked
+  10 Sept 2026). Same algorithm as ~/Newsletter/render.py `reorder_cards()`.
 */
 
 import { createHash } from 'node:crypto'
@@ -62,6 +70,20 @@ async function v3<T = any>(path: string): Promise<T> {
     )
   }
   return res.json() as Promise<T>
+}
+
+async function v3put(path: string, body: unknown): Promise<void> {
+  const res = await fetch(`${base()}/api/3/${path}`, {
+    method: 'PUT',
+    headers: { 'Api-Token': apiKey(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    cache: 'no-store',
+  })
+  if (!res.ok) {
+    throw new Error(
+      `ActiveCampaign PUT ${path.split('?')[0]}: ${res.status} ${await res.text()}`
+    )
+  }
 }
 
 async function v1(
@@ -134,6 +156,12 @@ export interface DraftSummary {
   activeContacts: number | null
   /** Empty when the draft passes every check and may be sent. */
   problems: string[]
+  /** The inbox preview line (the email's hidden preheader), as Gmail shows it
+   *  after the subject. Null when the email has none. */
+  preview: string | null
+  /** The email's cards by section, in their current order — what the
+   *  Reorder panel edits. Null for emails built before card markers existed. */
+  cards: CardGroup[] | null
 }
 
 export interface SentSummary {
@@ -277,9 +305,37 @@ export async function listDrafts(): Promise<DraftSummary[]> {
       listName: listId ? (names.get(listId) ?? null) : null,
       activeContacts: listId ? await activeContactCount(listId) : null,
       problems,
+      preview: previewText(msg.html ?? ''),
+      cards: cardGroups(msg.html ?? ''),
     })
   }
   return out
+}
+
+const PREHEADER_RE = /<div style="display:none[^"]*"[^>]*>([\s\S]*?)<\/div>/
+
+/** The preheader the renderer hides at the top of the email: the text mail
+ *  apps show after the subject in the inbox. Tags stripped, the invisible
+ *  padding (nbsp + zero-width non-joiner, as entities or characters) and
+ *  common entities resolved. */
+export function previewText(html: string): string | null {
+  const m = PREHEADER_RE.exec(html)
+  if (!m) return null
+  const text = m[1]
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;|&zwnj;|&#8204;|\u00a0|\u200c/g, ' ')
+    .replace(/&rsquo;/g, '\u2019')
+    .replace(/&lsquo;/g, '\u2018')
+    .replace(/&ndash;/g, '\u2013')
+    .replace(/&mdash;/g, '\u2014')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return text || null
 }
 
 /** The most recent sends (and anything scheduled or stuck), newest first. */
@@ -310,6 +366,199 @@ export async function listRecent(limit = 12): Promise<SentSummary[]> {
     })
   }
   return out
+}
+
+/* ─── Reorderable cards ─────────────────────────────────────────────── */
+
+const CARD_RE = /<!--card:(g\d+):([^>]+?)-->([\s\S]*?)<!--\/card-->/g
+const MANIFEST_RE = /<!--aisafety-cards:([A-Za-z0-9+/=]+)-->/
+
+export interface CardInfo {
+  key: string
+  title: string
+  /** Hosted logo PNG (the same one the email shows), when the listing has one. */
+  logo: string | null
+}
+
+export interface CardGroup {
+  /** `g0`, `g1`… — the section's id in the card markers. */
+  id: string
+  /** The section heading ("New events", "Closing in the next two weeks"…). */
+  label: string
+  /** In document order. */
+  cards: CardInfo[]
+}
+
+interface Manifest {
+  v: number
+  groups: CardGroup[]
+  /** The plain-text email as segments; card segments carry `c` = `gN:KEY`. */
+  text: Array<{ t: string; c?: string }>
+}
+
+function readManifest(html: string): Manifest | null {
+  const m = MANIFEST_RE.exec(html)
+  if (!m) return null
+  try {
+    const data = JSON.parse(
+      Buffer.from(m[1], 'base64').toString('utf8')
+    ) as Manifest
+    if (
+      data?.v !== 1 ||
+      !Array.isArray(data.groups) ||
+      !Array.isArray(data.text)
+    )
+      return null
+    return data
+  } catch {
+    return null
+  }
+}
+
+interface Block {
+  gid: string
+  key: string
+  start: number
+  end: number
+  raw: string
+}
+
+function cardBlocks(html: string): Block[] {
+  const out: Block[] = []
+  for (const m of html.matchAll(CARD_RE)) {
+    out.push({
+      gid: m[1],
+      key: m[2],
+      start: m.index ?? 0,
+      end: (m.index ?? 0) + m[0].length,
+      raw: m[0],
+    })
+  }
+  return out
+}
+
+/** The cards as they currently sit in the email, grouped by section. Null
+ *  when the email carries no markers (built before 10 Sept 2026). */
+export function cardGroups(html: string): CardGroup[] | null {
+  const manifest = readManifest(html)
+  if (!manifest) return null
+  const info = new Map<string, { title: string; logo: string | null }>()
+  for (const g of manifest.groups)
+    for (const c of g.cards)
+      info.set(`${g.id}:${c.key}`, {
+        title: c.title,
+        logo: typeof c.logo === 'string' && c.logo ? c.logo : null,
+      })
+  const groups = new Map<string, CardGroup>(
+    manifest.groups.map(g => [g.id, { id: g.id, label: g.label, cards: [] }])
+  )
+  for (const b of cardBlocks(html)) {
+    const g = groups.get(b.gid)
+    if (!g) continue
+    const meta = info.get(`${b.gid}:${b.key}`)
+    g.cards.push({
+      key: b.key,
+      title: meta?.title ?? b.key,
+      logo: meta?.logo ?? null,
+    })
+  }
+  const out = [...groups.values()].filter(g => g.cards.length > 0)
+  return out.length > 0 ? out : null
+}
+
+export class ReorderError extends Error {}
+
+/** Pure: the email with each listed group's cards in the given order, plus
+ *  the plain-text version rebuilt to match. Throws ReorderError when `order`
+ *  is not exactly a permutation of a group's cards. Mirrors render.py
+ *  `reorder_cards()`. */
+export function reorderHtml(
+  html: string,
+  order: Record<string, string[]>
+): { html: string; text: string } {
+  const manifest = readManifest(html)
+  if (!manifest) throw new ReorderError('no card manifest in this email')
+  let blocks = cardBlocks(html)
+  for (const [gid, keys] of Object.entries(order)) {
+    const mine = blocks.filter(b => b.gid === gid)
+    if (mine.length === 0) throw new ReorderError(`unknown group ${gid}`)
+    const want = [...keys].sort()
+    const have = mine.map(b => b.key).sort()
+    if (
+      want.length !== have.length ||
+      new Set(keys).size !== keys.length ||
+      want.some((k, i) => k !== have[i])
+    ) {
+      throw new ReorderError(
+        `group ${gid}: the keys must be exactly its cards, each once`
+      )
+    }
+    const first = mine[0]
+    const last = mine[mine.length - 1]
+    const span = html.slice(first.start, last.end)
+    if (span !== mine.map(b => b.raw).join(''))
+      throw new ReorderError(`group ${gid}: cards are not contiguous`)
+    const byKey = new Map(mine.map(b => [b.key, b.raw]))
+    html =
+      html.slice(0, first.start) +
+      keys.map(k => byKey.get(k) ?? '').join('') +
+      html.slice(last.end)
+    blocks = cardBlocks(html)
+  }
+  const textByKey = new Map<string, string>()
+  for (const seg of manifest.text) if (seg.c) textByKey.set(seg.c, seg.t)
+  const slots = new Map<string, string[]>(
+    Object.entries(order).map(([gid, keys]) => [gid, [...keys]])
+  )
+  const text = manifest.text
+    .map(seg => {
+      if (!seg.c) return seg.t
+      const gid = seg.c.split(':', 1)[0]
+      const queue = slots.get(gid)
+      if (!queue || queue.length === 0) return seg.t
+      return textByKey.get(`${gid}:${queue.shift()}`) ?? seg.t
+    })
+    .join('')
+  return { html, text }
+}
+
+/** Move the cards of a draft into `order` ({ groupId: keys }) inside
+ *  ActiveCampaign: verify the draft first (same checks as approval), rewrite
+ *  the message HTML + text, re-stamp the content marker, write it back, and
+ *  re-check the live message. Returns the new card order. */
+export async function reorderDraft(
+  draftId: string,
+  order: Record<string, string[]>
+): Promise<{ cards: CardGroup[] }> {
+  const campaigns = await allCampaigns()
+  const draft = campaigns.find(c => c.id === draftId)
+  if (!draft) throw new DraftProblemError(['draft campaign not found'])
+  const { problems, messageId, msg } = await checkDraft(draft, null)
+  if (problems.length > 0 || !messageId || !msg) {
+    throw new DraftProblemError(
+      problems.length > 0 ? problems : ['no message on the draft']
+    )
+  }
+  const body = (msg.html ?? '').replace(MARKER_RE, '')
+  const { html, text } = reorderHtml(body, order)
+  const stamped = `<!--aisafety-issue:${contentDigest(html)}-->` + html
+  await v3put(`messages/${messageId}`, { message: { html: stamped, text } })
+  const live = await message(messageId)
+  const liveHtml = live.html ?? ''
+  const m = MARKER_RE.exec(liveHtml)
+  if (!m || m[1] !== contentDigest(liveHtml)) {
+    throw new Error(
+      `message ${messageId} failed verification after the reorder — check the ActiveCampaign dashboard`
+    )
+  }
+  const cards = cardGroups(liveHtml)
+  if (!cards) throw new Error('card markers missing after the reorder')
+  console.info(
+    `[newsletter] draft ${draftId} reordered: ${Object.entries(order)
+      .map(([g, k]) => `${g}=${k.join(',')}`)
+      .join(' ')}`
+  )
+  return { cards }
 }
 
 /** The message HTML as a subscriber will see it, with AC's personalisation

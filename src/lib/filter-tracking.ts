@@ -35,6 +35,8 @@ const RELABELLED_FILTERS: Record<string, PageRelabels> = {
     groups: {
       // Was "Work location" until the /jobs page upgrades (August 2026).
       'Remote or on-site': 'Work location',
+      // Was "Role type" until the directory-template rollout (September 2026).
+      Type: 'Role type',
     },
   },
 }

@@ -1,10 +1,10 @@
-import { fetchAirtableRecords } from './airtable'
+import { fetchAirtableRecords, type AirtableRawRecord } from './airtable'
 import { fetchPublicData, hasAirtableCredentials } from './public-api'
 import { EVENT_TYPES, type EventType } from '../event-types'
 import { parseFeaturedRank } from '../featured'
 import { parseAttendMode, type AttendMode, type ProgramRound } from './training'
 
-const TABLE_ID = 'tblXbN9swwldwq8f7'
+export const TABLE_ID = 'tblXbN9swwldwq8f7'
 const VIEW_ID: string | undefined = undefined
 
 // Permanent Airtable field IDs for the Events table. Fetching by ID
@@ -87,6 +87,95 @@ function isUpcomingOrOngoing(
   return end >= Date.now()
 }
 
+/**
+ * One Events record (fields keyed by field id) → the listing the page
+ * renders, or null when the site would skip it (no name). Publish/Hide and
+ * the past-event cut-off are getEvents()'s filters, not the mapper's, so an
+ * unpublished or draft record can still be mapped — the admin Queue previews
+ * proposed records through this. `today` (YYYY-MM-DD) decides Open/Closed
+ * against the deadline; it defaults to the current date, and getEvents()
+ * passes one value for the whole batch.
+ */
+export function eventFromRecord(
+  record: AirtableRawRecord,
+  today: string = new Date().toISOString().slice(0, 10)
+): EventListing | null {
+  const f = record.fields
+  const name = optionalString(f[FIELD.name])
+  if (!name) return null
+
+  const startDate = optionalString(f[FIELD.startDate])
+  const endDate = optionalString(f[FIELD.endDate])
+
+  const rawTypes = toArray(f[FIELD.type])
+  for (const t of rawTypes) {
+    if (!EVENT_TYPES.includes(t as EventType)) {
+      console.warn(
+        `[events] "${name}" has unexpected Type "${t}" ` +
+          `(allowed: ${EVENT_TYPES.join(', ')})`
+      )
+    }
+  }
+  const type = rawTypes.filter(t => EVENT_TYPES.includes(t as EventType))
+
+  const location = toArray(f[FIELD.location]).join(', ')
+  const mode = parseAttendMode(f[FIELD.mode], location, name, 'events')
+
+  // No close date means there is nothing to apply/register for, so the
+  // event counts as open — unless applications/registrations haven't
+  // opened yet, which outranks any deadline (orgs sometimes announce the
+  // deadline before opening). See the field descriptions on the Events
+  // table.
+  const closesOn = optionalString(f[FIELD.deadline])
+  const notYetOpen = f[FIELD.notYetOpen] === true
+  const applicationStatus: 'Open' | 'Closed' =
+    !notYetOpen && (!closesOn || closesOn >= today) ? 'Open' : 'Closed'
+
+  const rawDeadlineType = optionalString(f[FIELD.deadlineType])
+  const deadlineType =
+    rawDeadlineType === 'Apply' || rawDeadlineType === 'Register'
+      ? rawDeadlineType
+      : null
+  if (rawDeadlineType && !deadlineType) {
+    console.warn(
+      `[events] "${name}" has unexpected Deadline type "${rawDeadlineType}" (allowed: Apply, Register)`
+    )
+  }
+  if (deadlineType && !closesOn && !notYetOpen) {
+    console.warn(
+      `[events] "${name}" has a Deadline type but no deadline date — no deadline will be shown`
+    )
+  }
+
+  const logoField = f[FIELD.logo] as Array<{ url?: string }> | undefined
+  const featuredRaw = f[FIELD.featured]
+
+  return {
+    id: record.id,
+    dateAdded: record.createdTime?.slice(0, 10) ?? null,
+    lastModified: optionalString(f[FIELD.lastModified])?.slice(0, 10) ?? null,
+    name,
+    description: optionalString(f[FIELD.description]) || '',
+    url: normalizeUrl(optionalString(f[FIELD.url]) || ''),
+    type,
+    location,
+    mode,
+    startDate,
+    endDate,
+    // The Events table has no time fields yet.
+    startTime: null,
+    endTime: null,
+    host: optionalString(f[FIELD.host]) || '',
+    cost: toArray(f[FIELD.cost]),
+    applicationStatus,
+    applicationsClose: closesOn,
+    notYetOpen,
+    deadlineType,
+    logo: logoField?.[0]?.url ?? null,
+    featured: parseFeaturedRank(featuredRaw),
+  }
+}
+
 export async function getEvents(): Promise<EventListing[]> {
   if (process.env.EVENTS_USE_MOCK === 'true') {
     const { readFileSync } = await import('fs')
@@ -119,81 +208,18 @@ export async function getEvents(): Promise<EventListing[]> {
 
   for (const record of raw) {
     const f = record.fields
-    const name = optionalString(f[FIELD.name])
-    if (!name) continue
     if (f[FIELD.publish] !== true || f[FIELD.hide] === true) continue
-
-    const startDate = optionalString(f[FIELD.startDate])
-    const endDate = optionalString(f[FIELD.endDate])
-    if (!isUpcomingOrOngoing(endDate, startDate)) continue
-
-    const rawTypes = toArray(f[FIELD.type])
-    for (const t of rawTypes) {
-      if (!EVENT_TYPES.includes(t as EventType)) {
-        console.warn(
-          `[events] "${name}" has unexpected Type "${t}" ` +
-            `(allowed: ${EVENT_TYPES.join(', ')})`
-        )
-      }
-    }
-    const type = rawTypes.filter(t => EVENT_TYPES.includes(t as EventType))
-
-    const location = toArray(f[FIELD.location]).join(', ')
-    const mode = parseAttendMode(f[FIELD.mode], location, name, 'events')
-
-    // No close date means there is nothing to apply/register for, so the
-    // event counts as open — unless applications/registrations haven't
-    // opened yet, which outranks any deadline (orgs sometimes announce the
-    // deadline before opening). See the field descriptions on the Events
-    // table.
-    const closesOn = optionalString(f[FIELD.deadline])
-    const notYetOpen = f[FIELD.notYetOpen] === true
-    const applicationStatus: 'Open' | 'Closed' =
-      !notYetOpen && (!closesOn || closesOn >= today) ? 'Open' : 'Closed'
-
-    const rawDeadlineType = optionalString(f[FIELD.deadlineType])
-    const deadlineType =
-      rawDeadlineType === 'Apply' || rawDeadlineType === 'Register'
-        ? rawDeadlineType
-        : null
-    if (rawDeadlineType && !deadlineType) {
-      console.warn(
-        `[events] "${name}" has unexpected Deadline type "${rawDeadlineType}" (allowed: Apply, Register)`
+    if (
+      !isUpcomingOrOngoing(
+        optionalString(f[FIELD.endDate]),
+        optionalString(f[FIELD.startDate])
       )
-    }
-    if (deadlineType && !closesOn && !notYetOpen) {
-      console.warn(
-        `[events] "${name}" has a Deadline type but no deadline date — no deadline will be shown`
-      )
-    }
+    )
+      continue
 
-    const logoField = f[FIELD.logo] as Array<{ url?: string }> | undefined
-    const featuredRaw = f[FIELD.featured]
-
-    results.push({
-      id: record.id,
-      dateAdded: record.createdTime?.slice(0, 10) ?? null,
-      lastModified: optionalString(f[FIELD.lastModified])?.slice(0, 10) ?? null,
-      name,
-      description: optionalString(f[FIELD.description]) || '',
-      url: normalizeUrl(optionalString(f[FIELD.url]) || ''),
-      type,
-      location,
-      mode,
-      startDate,
-      endDate,
-      // The Events table has no time fields yet.
-      startTime: null,
-      endTime: null,
-      host: optionalString(f[FIELD.host]) || '',
-      cost: toArray(f[FIELD.cost]),
-      applicationStatus,
-      applicationsClose: closesOn,
-      notYetOpen,
-      deadlineType,
-      logo: logoField?.[0]?.url ?? null,
-      featured: parseFeaturedRank(featuredRaw),
-    })
+    const event = eventFromRecord(record, today)
+    if (!event) continue
+    results.push(event)
   }
 
   results.sort((a, b) => {

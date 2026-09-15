@@ -68,7 +68,8 @@
   color: var(--bright-teal-300);
 }
 
-/* One checkbox per tab. */
+/* One pill per tab. Pills for tabs that can change the live site carry a
+   second, smaller "can edit" tick after a divider. */
 .picker {
   display: flex;
   flex-wrap: wrap;
@@ -77,25 +78,62 @@
 
 .pick {
   display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 10px 5px 8px;
+  align-items: stretch;
   border: 1px solid var(--teal-800);
   border-radius: 999px;
   font-size: 12px;
   color: var(--teal-300);
-  cursor: pointer;
   user-select: none;
 }
 
-.pick:has(input:checked) {
+.pickOn {
   border-color: var(--bright-teal-500);
   color: var(--white);
 }
 
-.pick:has(input:disabled) {
-  cursor: default;
+.pickDisabled {
   opacity: 0.7;
+}
+
+.pickTab,
+.pickEdit {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+}
+
+.pickTab {
+  padding: 5px 10px 5px 8px;
+}
+
+/* Amber, like the "this edits the live site" boxes on the pages it unlocks. */
+.pickEdit {
+  padding: 5px 10px 5px 8px;
+  border-left: 1px solid var(--teal-800);
+  font-size: 11px;
+  color: #f5b942;
+  opacity: 0.6;
+}
+
+.pickOn .pickEdit {
+  border-left-color: var(--teal-700);
+  opacity: 0.85;
+}
+
+.pickEdit:has(input:checked) {
+  opacity: 1;
+  background-color: rgba(245, 185, 66, 0.12);
+  border-radius: 0 999px 999px 0;
+}
+
+.pick .pickEdit input {
+  accent-color: #f5b942;
+}
+
+.pickDisabled .pickTab,
+.pickDisabled .pickEdit {
+  cursor: default;
 }
 
 .pick input {
@@ -116,7 +154,7 @@
   padding: 0 14px;
 }
 
-.pick:has(input:checked) .rowActions {
+.rowActions {
   display: flex;
   align-items: center;
   gap: 16px;

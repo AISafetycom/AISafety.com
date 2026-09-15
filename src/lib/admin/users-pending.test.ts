@@ -18,12 +18,12 @@ const approveEmily: PendingState = {
     url: USERS_API,
     body: {
       email: 'emily@example.com',
-      access: accessFrom(['newsletterPreview']),
+      access: accessFrom(['newsletter']),
     },
     okText: 'Emily can now sign in.',
     clearForm: false,
   },
-  requestPicks: { 'emily@example.com': accessFrom(['newsletterPreview']) },
+  requestPicks: { 'emily@example.com': accessFrom(['newsletter']) },
   form: { email: 'noah@example.com', access: accessFrom(['analytics']) },
 }
 
@@ -99,7 +99,7 @@ describe('Admin admin stash across the Google round trip', () => {
       at: NOW,
       action: null,
       requestPicks: {
-        'emily@example.com': { newsletterPreview: true, bogus: true },
+        'emily@example.com': { newsletter: 'view', bogus: true },
         'noah@example.com': 'all of them',
       },
       form: { email: 42, access: { analytics: 'yes' } },
@@ -107,7 +107,7 @@ describe('Admin admin stash across the Google round trip', () => {
     const got = decodePending(JSON.stringify(messy), NOW)
     expect(got?.action).toBe(null)
     expect(got?.requestPicks).toEqual({
-      'emily@example.com': accessFrom(['newsletterPreview']),
+      'emily@example.com': accessFrom(['newsletter']),
     })
     expect(got?.form).toEqual({ email: '', access: accessFrom([]) })
     expect(decodePending(JSON.stringify({ at: NOW }), NOW)?.form).toEqual({

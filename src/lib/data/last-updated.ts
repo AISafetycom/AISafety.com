@@ -1,5 +1,5 @@
-import { DONATION_GUIDE_LAST_UPDATED } from '@/lib/donation-guide-date'
 import { formatDate } from '@/lib/format-date'
+import { getLiveGuide } from '@/lib/donation-guide/live'
 import { fetchAirtableWithRetry } from './airtable'
 import { isPreviewRequest, shareLiveRead } from '@/lib/preview'
 
@@ -21,9 +21,10 @@ type RecordConfig = {
   dateField: string
 }
 
-type ConstantConfig = {
-  type: 'constant'
-  value: string
+// The donation guide: its date is the last publish from /admin/donation-guide
+// (or the seed's date before the first one), read from the site's own store.
+type GuideConfig = {
+  type: 'guide'
 }
 
 // For pages that draw from several tables; resolves to the latest edit
@@ -36,7 +37,7 @@ type MultiQueryConfig = {
 type ResourceConfig =
   | QueryConfig
   | RecordConfig
-  | ConstantConfig
+  | GuideConfig
   | MultiQueryConfig
 
 const configs: Record<string, ResourceConfig> = {
@@ -116,10 +117,7 @@ const configs: Record<string, ResourceConfig> = {
     filter: '{fld9Epdrxu9n0FV20} = TRUE()', // Publish?
     sortField: 'fldMM2jKZeORMO5mP', // Last modified
   },
-  'donation-guide': {
-    type: 'constant',
-    value: DONATION_GUIDE_LAST_UPDATED,
-  },
+  'donation-guide': { type: 'guide' },
 }
 
 export const validResources = Object.keys(configs)
@@ -134,7 +132,7 @@ export const validResources = Object.keys(configs)
 export function resourceTables(resource: string): string[] {
   const config = configs[resource]
   if (!config) throw new Error(`Unknown resource: '${resource}'`)
-  if (config.type === 'constant') return []
+  if (config.type === 'guide') return []
   if (config.type === 'multi') return config.queries.map(q => q.tableId)
   return [config.tableId]
 }
@@ -150,9 +148,12 @@ export async function fetchLastUpdated(
   const config = configs[resource]
   if (!config) throw new Error(`Unknown resource: '${resource}'`)
 
-  if (config.type === 'constant') {
-    const date = new Date(config.value)
-    return { lastUpdated: config.value, formattedDate: formatDate(date) }
+  if (config.type === 'guide') {
+    const { publishedAt } = await getLiveGuide()
+    return {
+      lastUpdated: publishedAt,
+      formattedDate: formatDate(new Date(publishedAt)),
+    }
   }
 
   const token = process.env.AIRTABLE_TOKEN
@@ -175,7 +176,7 @@ export async function fetchLastUpdated(
 }
 
 async function readLastUpdated(
-  config: Exclude<ResourceConfig, ConstantConfig>,
+  config: Exclude<ResourceConfig, GuideConfig>,
   resource: string,
   token: string,
   baseId: string,

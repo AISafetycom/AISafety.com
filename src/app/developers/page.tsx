@@ -8,6 +8,25 @@ import {
 } from '@/lib/api/constants'
 import styles from './page.module.css'
 
+// Spelled out so the copy reads naturally; digits past twelve.
+const COUNT_WORDS = [
+  'Zero',
+  'One',
+  'Two',
+  'Three',
+  'Four',
+  'Five',
+  'Six',
+  'Seven',
+  'Eight',
+  'Nine',
+  'Ten',
+  'Eleven',
+  'Twelve',
+]
+const COLLECTION_COUNT =
+  COUNT_WORDS[ENDPOINTS.length] ?? String(ENDPOINTS.length)
+
 export const metadata: Metadata = {
   title: 'Developer API – AISafety.com',
   description:
@@ -96,7 +115,7 @@ export default function DevelopersPage() {
       <section className={styles.section}>
         <h2>Endpoints</h2>
         <p className={`paragraph-small ${styles.sectionLead}`}>
-          Ten collections. Click any card to open its live JSON.
+          {COLLECTION_COUNT} collections. Click any card to open its live JSON.
         </p>
         <div className={styles.endpointGrid}>
           {ENDPOINTS.map(endpoint => (

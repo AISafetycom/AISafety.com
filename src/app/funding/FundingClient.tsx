@@ -9,6 +9,7 @@ import { Funder } from '@/lib/data/funding'
 import { isAcceptingApplications } from '@/lib/funding-status'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
 import { placementsById } from '@/lib/placements'
+import { funderCardProps } from './card'
 
 interface FundingClientProps {
   funders: Funder[]
@@ -130,27 +131,7 @@ export default function FundingClient({ funders }: FundingClientProps) {
           {filteredFunders.map(funder => (
             <ListingCard
               key={funder.id}
-              href={funder.url !== '#' ? funder.url : undefined}
-              name={funder.name}
-              description={funder.description}
-              logo={funder.logo}
-              meta={[
-                ...(funder.acceptingApplications
-                  ? [
-                      {
-                        icon: isAcceptingApplications(
-                          funder.acceptingApplications
-                        )
-                          ? '/images/icons/form-check.svg'
-                          : '/images/icons/form-pause.svg',
-                        value: funder.acceptingApplications,
-                      },
-                    ]
-                  : []),
-                ...(funder.type
-                  ? [{ icon: '/images/icons/tag.svg', value: funder.type }]
-                  : []),
-              ]}
+              {...funderCardProps(funder)}
               trackingPage="Funding"
               listingId={funder.id}
               placement={placements.get(funder.id)}
