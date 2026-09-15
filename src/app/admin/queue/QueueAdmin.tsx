@@ -212,6 +212,20 @@ function ago(iso: string | null): string {
   return `${Math.round(h / 24)} days ago`
 }
 
+/** Midnight this morning in the viewer's own time zone. */
+function startOfToday(): number {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
+
+/** Decided at or after the given moment. A row with no decision time
+ *  (there should be none) is shown rather than lost. */
+function decidedSince(item: QueueItem, since: number): boolean {
+  const t = item.decidedAt ? Date.parse(item.decidedAt) : NaN
+  return !Number.isFinite(t) || t >= since
+}
+
 function show(v: unknown): string {
   if (v === null || v === undefined || v === '') return '—'
   if (typeof v === 'string') return v
@@ -725,6 +739,19 @@ export default function QueueAdmin({
     Record<string, { fields: Record<string, unknown>; schema: FieldInfo[] }>
   >({})
   const [showDone, setShowDone] = useState(false)
+  // "Done today" is the viewer's own calendar day, not the last 24 hours:
+  // the server sends a day's worth, the browser keeps what was decided
+  // since its local midnight, and moves on when the next one passes.
+  const [dayStart, setDayStart] = useState(startOfToday)
+  useEffect(() => {
+    const midnight = new Date()
+    midnight.setHours(24, 0, 0, 0)
+    const t = setTimeout(
+      () => setDayStart(startOfToday()),
+      Math.max(1000, midnight.getTime() - Date.now() + 1000)
+    )
+    return () => clearTimeout(t)
+  }, [dayStart])
   const [showHelp, setShowHelp] = useState(false)
   const [theme, setTheme] = useState<Theme>('light')
   const [kind, setKind] = useState<Kind>('additions')
@@ -934,7 +961,11 @@ export default function QueueAdmin({
     let open = 0
     for (const item of items ?? []) {
       if (!isOpen(item)) {
-        done.push(item)
+        // Today's decisions, plus one linked from the address bar however
+        // old: that link promised to show it.
+        if (decidedSince(item, dayStart) || item.id === selectedId) {
+          done.push(item)
+        }
         continue
       }
       open++
@@ -953,12 +984,17 @@ export default function QueueAdmin({
     done.sort((a, b) => ((a.decidedAt ?? '') < (b.decidedAt ?? '') ? 1 : -1))
     const flat = SECTIONS.filter(s => !collapsed[s]).flatMap(s => groups[s])
     return { groups, done, flat, open, perKind }
-  }, [items, collapsed, kind])
+  }, [items, collapsed, kind, dayStart, selectedId])
 
   const selected = useMemo(() => {
     if (!items) return null
     return items.find(i => i.id === selectedId) ?? null
   }, [items, selectedId])
+
+  // Midnight can empty the done list while it is open; back to the queue.
+  useEffect(() => {
+    if (showDone && items && !ordered.done.length) setShowDone(false)
+  }, [showDone, items, ordered.done])
 
   // Keep something in focus: the first open item, or the next one after a
   // decision.

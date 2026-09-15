@@ -430,8 +430,10 @@ function rowToItem(
   }
 }
 
-// Open rows, plus anything decided in the last day (the "Done today" strip
-// with its Undo buttons).
+// Open rows, plus anything decided in the last day: the "Done today" strip
+// with its Undo buttons. A day is enough for any viewer's "today" (their
+// midnight is at most 24 hours back); the browser trims it to its own
+// calendar day.
 const LIST_FORMULA =
   "OR({Status}='Pending',{Status}='Revising',{Status}='Accepted',{Status}='Failed'," +
   "AND(OR({Status}='Applied',{Status}='Rejected'),IS_AFTER({Decided at},DATEADD(NOW(),-1,'day'))))"
