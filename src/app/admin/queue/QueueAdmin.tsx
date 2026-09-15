@@ -604,6 +604,7 @@ function doneLabel(item: QueueItem): string {
   if (item.type === 'Add') return 'Published'
   if (item.type === 'Change') {
     const n = item.changes.length
+    if (n === 0) return 'Flag cleared'
     return `Changed ${n} field${n === 1 ? '' : 's'}`
   }
   return 'Applied'
@@ -1071,6 +1072,17 @@ export default function QueueAdmin({
     },
     []
   )
+
+  // Fable changed the record from the chat on the Mac: drop the live read
+  // so the effect above fetches it again.
+  const forgetLive = useCallback((id: string) => {
+    setLive(prev => {
+      if (!prev[id]) return prev
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+  }, [])
 
   // A fresh draft starts from the edits saved on the row, so what was
   // applied (by hand or from the chat) is still there after a reload.
@@ -1547,6 +1559,7 @@ export default function QueueAdmin({
                 onImage={(field, urls) =>
                   setLiveField(selected.id, field, urls)
                 }
+                onWrote={() => forgetLive(selected.id)}
                 d={draft(selected.id)}
                 setD={patch => setDraft(selected.id, patch)}
                 act={(action, extra) => void act(selected, action, extra)}
@@ -1744,6 +1757,7 @@ function Detail({
   item,
   live,
   onImage,
+  onWrote,
   d,
   setD,
   act,
@@ -1755,6 +1769,8 @@ function Detail({
   item: QueueItem
   live: { fields: Record<string, unknown>; schema: FieldInfo[] } | null
   onImage: (field: string, urls: string[]) => void
+  /** Fable changed the record from the chat: re-read it. */
+  onWrote: () => void
   d: Draft
   setD: (patch: Partial<Draft>) => void
   act: (action: Action, extra?: Record<string, unknown>) => void
@@ -2014,8 +2030,9 @@ function Detail({
         {item.type === 'Change' &&
           (nothingToApply ? (
             <p className={styles.note}>
-              No field change proposed. Accept keeps the flag in Airtable for
-              you to handle; Reject clears it; or ask Claude for a change.
+              No field change proposed. Accept says the flag was right and you
+              have dealt with it, and clears it in Airtable; Reject clears it as
+              wrong; or ask Fable for a change.
             </p>
           ) : (
             <div className={styles.diff}>
@@ -2140,6 +2157,7 @@ function Detail({
               }
               onSetEdits={edits => setD({ edits })}
               onSetReply={text => setD({ reply: text })}
+              onWrote={onWrote}
               focusTick={chatFocus}
             />
           )}

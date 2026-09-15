@@ -1038,19 +1038,15 @@ export async function acceptItem(
         fields[c.field] =
           c.field in edits ? edits[c.field] : (asAttachments(c.to) ?? c.to)
       }
-      if (Object.keys(fields).length === 0) {
-        // Accepting a flag with no proposed change: the flag is real and
-        // the admin handles it by hand, so the Broom issue row stays; the
-        // Mac worker marks this row Applied once that issue is cleared.
-        await patchQueueRow(item.id, {
-          ...draftFields,
-          [F.status]: 'Accepted',
-          [F.decidedAt]: stamp,
-          [F.error]: null,
-        })
-        return
+      if (Object.keys(fields).length > 0) {
+        await patchRecord(t.table, t.record, fields)
       }
-      await patchRecord(t.table, t.record, fields)
+      // The Broom flag row goes either way: an applied fix clears it, and
+      // so does accepting a flag with nothing to apply – the flag was right
+      // and the admin has dealt with it, usually through the chat (Bryce,
+      // 15 Sept 2026: "the flag was correct and led me to take action … I
+      // also want the Airtable record to be removed"). It used to stay for
+      // him to handle by hand, with the row parked at Accepted.
       if (item.issueRow && isRecordId(item.issueRow)) {
         await deleteRecord(BROOM_ISSUES_TABLE_ID, item.issueRow)
       }
@@ -1208,8 +1204,10 @@ export async function undoItem(item: QueueItem): Promise<void> {
     item.status === 'Accepted' &&
     (item.type === 'Rule' || item.type === 'Change')
   ) {
-    // A rule the worker has not applied yet, or a flag accepted without a
-    // field change: nothing was written, so reopening is enough.
+    // A rule the worker has not applied yet (or a flag accepted without a
+    // field change before 15 Sept 2026): nothing was written, so reopening
+    // is enough. A flag cleared since then cannot come back – its Broom row
+    // is gone – but the item reopens like any applied change.
     await patchQueueRow(item.id, reopen)
     return
   }

@@ -8,11 +8,12 @@ import styles from './queue.module.css'
 // message goes to the agent on the owner's Mac (~/Queue/agent.py, POST
 // /chat), which runs one headless Claude Code call from the home folder –
 // so Fable has the same memory every session on that Mac has, the Airtable
-// read tools, the web and the rulebooks – and streams the reply back as it
-// is written. The thread continues across messages (the CLI resumes its own
-// session) and is stored on the Mac, so it is there again when the item is
-// reopened. Nothing here changes Airtable: wording Fable proposes arrives
-// in an ```edits block, shown as an Apply button, and goes with Accept.
+// tools (reading and writing, since 15 Sept 2026), the web and the rulebooks
+// – and streams the reply back as it is written. The thread continues across
+// messages (the CLI resumes its own session) and is stored on the Mac, so it
+// is there again when the item is reopened. Changes to OTHER records Fable
+// makes itself and says so; wording for this item's own record arrives in an
+// ```edits block, applied on the page, and reaches Airtable with Accept.
 
 // A reply's parts: its prose, what it was doing at that point (shown only
 // while it is still answering – one line that changes; Bryce, 14 Sept 2026:
@@ -30,6 +31,8 @@ interface Msg {
   at: string
   /** e.g. "Fable is at its usage limit until … – this reply is from Opus" */
   note?: string
+  /** Fable wrote to Airtable while answering: the page re-reads the record. */
+  wrote?: boolean
 }
 
 interface Event {
@@ -110,6 +113,7 @@ export default function Chat({
   canEditField,
   onSetEdits,
   onSetReply,
+  onWrote,
   focusTick,
 }: {
   item: QueueItem
@@ -125,6 +129,8 @@ export default function Chat({
   onSetEdits: (edits: Record<string, string>) => void
   /** Set the reply draft as edited on the page (null: as it came). */
   onSetReply: (text: string | null) => void
+  /** A reply that changed Airtable has landed: re-read the live record. */
+  onWrote?: () => void
   /** Bumped by the F key: focus the box. */
   focusTick: number
 }) {
@@ -146,6 +152,12 @@ export default function Chat({
     y: number
   } | null>(null)
   const [quote, setQuote] = useState<string | null>(null)
+  // Messages typed while Fable was still answering. Sending one stops the
+  // reply being written (the Mac kills that call; what it wrote stays, with
+  // a note) and this goes as soon as its stream ends – like the Claude Code
+  // app (Bryce, 15 Sept 2026: "make it interrupt it"). Several in a row go
+  // in order.
+  const [queued, setQueued] = useState<string[]>([])
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
   // The page's current values, readable from inside stream handlers.
@@ -162,6 +174,7 @@ export default function Chat({
   const applyFrom = useCallback(
     (msg: Msg) => {
       if (msg.role !== 'fable') return
+      if (msg.wrote) onWrote?.()
       const { edits: proposed, reply: draft } = blocksOf(textOf(msg))
       const undo: Undo = {}
       if (proposed) {
@@ -182,7 +195,7 @@ export default function Chat({
       }
       if (undo.edits || undo.reply !== undefined) undoRef.current[msg.at] = undo
     },
-    [canEditField, onSetEdits, onSetReply]
+    [canEditField, onSetEdits, onSetReply, onWrote]
   )
 
   const undoFor = (msg: Msg): (() => void) | undefined => {
@@ -253,15 +266,22 @@ export default function Chat({
     return () => clearInterval(t)
   }, [pending, loadHistory])
 
+  // Only a fresh press of F focuses the box. The count lives on the page and
+  // outlives this component (it remounts per item), so a mount that sees an
+  // old count must not focus: that put the cursor in the box on every switch
+  // of item, and the letter shortcuts stopped working (Bryce, 15 Sept 2026).
+  const focusSeen = useRef(focusTick)
   useEffect(() => {
-    if (focusTick > 0) inputRef.current?.focus()
+    if (focusTick === focusSeen.current) return
+    focusSeen.current = focusTick
+    inputRef.current?.focus()
   }, [focusTick])
 
   // Keep the newest words in view: the panel is its own scroll box.
   useEffect(() => {
     const box = endRef.current?.closest<HTMLElement>('[data-chat-scroll]')
     if (box) box.scrollTop = box.scrollHeight
-  }, [messages, live, note])
+  }, [messages, live, note, queued])
 
   // Select words anywhere in the panel (Fable's verdict included) and a
   // Reply button appears by them; it quotes them into the next message,
@@ -367,9 +387,12 @@ export default function Chat({
     }
   }
 
-  const send = async () => {
+  /** Enter: what was typed goes now; while Fable is still answering it
+   *  stops that reply and goes right after (the Mac takes one message per
+   *  item at a time). */
+  const submit = () => {
     const typed = text.trim()
-    if ((!typed && !quote) || busy || pending) return
+    if (!typed && !quote) return
     // The quote goes first, as a markdown quote, then what was typed.
     const msg = quote
       ? '> ' + quote.replace(/\n+/g, '\n> ') + (typed ? '\n\n' + typed : '')
@@ -377,6 +400,17 @@ export default function Chat({
     setText('')
     setQuote(null)
     if (inputRef.current) inputRef.current.style.height = 'auto'
+    if (busy || pending) {
+      setQueued(q => [...q, msg])
+      // The Mac stops the call being written; its stream ends with what
+      // was written so far, and the effect below sends this one.
+      void call('/chat/interrupt', {}).catch(() => {})
+      return
+    }
+    void deliver(msg)
+  }
+
+  const deliver = async (msg: string) => {
     setError(null)
     setBusy(true)
     setMessages(m => [
@@ -422,11 +456,26 @@ export default function Chat({
     }
   }
 
+  // The next waiting message goes the moment the reply before it ends –
+  // stopped or finished (or the Mac finishes one it was still writing after
+  // a reload).
+  const deliverRef = useRef(deliver)
+  deliverRef.current = deliver
+  useEffect(() => {
+    if (busy || pending || queued.length === 0) return
+    const [next, ...rest] = queued
+    setQueued(rest)
+    void deliverRef.current(next)
+  }, [busy, pending, queued])
+
   const startOver = async () => {
     if (busy || pending) return
     try {
       const res = await call('/chat/clear', {})
-      if (res.ok) setMessages([])
+      if (res.ok) {
+        setMessages([])
+        setQueued([])
+      }
     } catch {
       setError('The Mac agent did not answer.')
     }
@@ -491,6 +540,22 @@ export default function Chat({
               Fable is still answering an earlier message…
             </p>
           )}
+          {queued.map((q, i) => (
+            <div
+              key={`q${i}`}
+              className={`${styles.chatMsg} ${styles.chatQueued}`}
+            >
+              <span className={styles.chatWho}>You · sending</span>
+              <YouText text={q} />
+              <button
+                type="button"
+                className={styles.chatLink}
+                onClick={() => setQueued(qs => qs.filter((_, j) => j !== i))}
+              >
+                Remove
+              </button>
+            </div>
+          ))}
           <div ref={endRef} />
         </div>
       )}
@@ -532,29 +597,33 @@ export default function Chat({
                 : 'Ask Fable, or say what should change…'
           }
           value={text}
-          disabled={pending}
           onChange={e => setText(e.target.value)}
           onInput={e => grow(e.currentTarget)}
           onKeyDown={e => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
-              void send()
+              submit()
             } else if (e.key === 'Escape' && quote) {
               e.preventDefault()
               setQuote(null)
             }
           }}
         />
-        {thread.length > 0 && !busy && !pending && (
+        {thread.length > 0 && (
+          // Always there once a thread exists, so the panel's foot keeps
+          // its height while Fable answers (the box looked cut off at the
+          // bottom edge without it – Bryce, 15 Sept 2026).
           <div className={styles.chatHint}>
-            <span />
-            <button
-              type="button"
-              className={styles.chatLink}
-              onClick={() => void startOver()}
-            >
-              Start over
-            </button>
+            <span>{queued.length > 0 ? `${queued.length} waiting` : ''}</span>
+            {!busy && !pending && (
+              <button
+                type="button"
+                className={styles.chatLink}
+                onClick={() => void startOver()}
+              >
+                Start over
+              </button>
+            )}
           </div>
         )}
       </div>
