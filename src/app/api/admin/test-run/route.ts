@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
       client,
       systemPrompt: prompt,
       pagesBlock: PAGES_BLOCK,
-      donationGuide: getDonationGuideText(),
+      donationGuide: await getDonationGuideText(),
       model,
       apiMessages,
       catalog,
