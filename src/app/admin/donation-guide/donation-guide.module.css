@@ -38,6 +38,17 @@
   flex-wrap: wrap;
 }
 
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.iconButton:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 /* ─── Banners ─────────────────────────────────────────────────────────── */
 
 .banner {
@@ -229,9 +240,33 @@
   border-top: 1px solid var(--teal-800);
 }
 
+.paneHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* Delete buttons: the red the Queue uses for danger in its dark theme. */
 .danger {
-  color: var(--pink);
-  border-color: var(--pink);
+  --dg-danger: #ff8b8b;
+  color: var(--dg-danger);
+  border-color: var(--dg-danger);
+}
+
+.danger:hover {
+  background-color: var(--dg-danger);
+  color: var(--teal-900);
+}
+
+.danger:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.danger:disabled:hover {
+  background-color: transparent;
+  color: var(--dg-danger);
 }
 
 /* The tab's own fields, side by side. */
@@ -255,6 +290,35 @@
 
 .sectionBlockActive {
   border-top-color: var(--bright-teal-300);
+}
+
+.sectionBlockDragOver {
+  border-top: 2px solid var(--bright-teal-300);
+}
+
+/* The grip down the right of a section: drag it to reorder. */
+.sectionBlockEditable {
+  grid-template-columns: 200px minmax(0, 1fr) 32px;
+}
+
+.sectionGrip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  border-radius: 6px;
+  color: var(--teal-500);
+  cursor: grab;
+  user-select: none;
+}
+
+.sectionGrip:hover {
+  color: var(--white);
+  background-color: var(--teal-800);
+}
+
+.sectionGrip:active {
+  cursor: grabbing;
 }
 
 .sectionSide {
@@ -592,6 +656,13 @@
   font-size: 13px;
 }
 
+/* The site's paragraph style sets a tall line-height; dialogs read at
+   their own size. */
+.dialogBody p {
+  margin: 0 0 10px;
+  line-height: 1.5;
+}
+
 .dialogFoot {
   display: flex;
   justify-content: flex-end;
@@ -614,7 +685,8 @@
 @media (max-width: 991px) {
   .split,
   .tabFields,
-  .sectionBlock {
+  .sectionBlock,
+  .sectionBlockEditable {
     grid-template-columns: 1fr;
   }
 

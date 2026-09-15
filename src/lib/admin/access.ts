@@ -78,7 +78,7 @@ export const ACCESS_AREAS: AreaInfo[] = [
   },
   {
     key: 'donationGuide',
-    label: 'Donation guide',
+    label: 'Donation guide editor',
     href: '/admin/donation-guide',
     edit: 'save drafts and publish; every publish changes the live page',
   },

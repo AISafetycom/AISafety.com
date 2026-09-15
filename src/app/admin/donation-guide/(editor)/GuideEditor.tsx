@@ -11,6 +11,7 @@ import type {
   VersionMeta,
 } from '@/lib/donation-guide/types'
 import { formatTimeAgo } from '@/lib/format-date'
+import Icon from '@/components/Icon'
 import RichEditor from './RichEditor'
 import styles from '../donation-guide.module.css'
 import adminStyles from '../../admin.module.css'
@@ -21,6 +22,9 @@ const AUTOSAVE_MS = 1500
 const POLL_MS = 30_000
 /** The preview iframe renders the page at this width and is scaled to fit. */
 const PREVIEW_WIDTH = 1280
+/** Typing into the same field within this long is one undo step. */
+const COALESCE_MS = 1000
+const MAX_UNDO = 200
 
 interface LiveMeta {
   version: number
@@ -110,7 +114,7 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [conflict, setConflict] = useState<DraftDoc | null>(null)
   const [selected, setSelected] = useState<Selection>({ kind: 'intro' })
-  const [showPreview, setShowPreview] = useState(true)
+  const [discardOpen, setDiscardOpen] = useState(false)
   const [previewScale, setPreviewScale] = useState(1)
   const [previewWidth, setPreviewWidth] = useState(PREVIEW_WIDTH)
   const [editorKey, setEditorKey] = useState(0)
@@ -133,6 +137,12 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
   const savingRef = useRef(false)
   const queuedRef = useRef(false)
   const previewBox = useRef<HTMLDivElement | null>(null)
+  // One undo history for everything: typing, renames, adds, removes and
+  // reorders all go through update(), which keeps the guide as it was.
+  const past = useRef<Guide[]>([])
+  const future = useRef<Guide[]>([])
+  const lastEdit = useRef<{ key: string; at: number } | null>(null)
+  const [historyLen, setHistoryLen] = useState({ past: 0, future: 0 })
   latestGuide.current = guide
 
   const dirty = useMemo(
@@ -163,6 +173,10 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
     setConflict(null)
     setSaveError(null)
     setEditorKey(k => k + 1)
+    past.current = []
+    future.current = []
+    lastEdit.current = null
+    setHistoryLen({ past: 0, future: 0 })
   }, [])
 
   const load = useCallback(async (): Promise<Loaded | null> => {
@@ -289,7 +303,7 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
 
   useEffect(() => {
     const box = previewBox.current
-    if (!box || !showPreview) return
+    if (!box) return
     // Wider than the page's own width: shown 1:1 and filling the panel;
     // narrower: the page at its real width, scaled down to fit.
     const measure = () => {
@@ -301,13 +315,93 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
     const ro = new ResizeObserver(measure)
     ro.observe(box)
     return () => ro.disconnect()
-  }, [showPreview, data])
+  }, [data])
 
   // ─── Edits ────────────────────────────────────────────────────────────
 
-  function update(fn: (g: Guide) => Guide) {
-    setGuide(g => (g ? fn(g) : g))
+  /** Change the guide, remembering what it was. `coalesce` names a field
+   *  so a burst of typing into it is one undo step rather than one per key. */
+  function update(fn: (g: Guide) => Guide, coalesce?: string) {
+    const g = latestGuide.current
+    if (!g) return
+    const next = fn(g)
+    if (next === g || JSON.stringify(next) === JSON.stringify(g)) return
+    const at = Date.now()
+    const merge =
+      coalesce !== undefined &&
+      lastEdit.current?.key === coalesce &&
+      at - lastEdit.current.at < COALESCE_MS
+    if (!merge) {
+      past.current = [...past.current.slice(-(MAX_UNDO - 1)), g]
+      future.current = []
+    }
+    lastEdit.current = coalesce !== undefined ? { key: coalesce, at } : null
+    latestGuide.current = next
+    setGuide(next)
+    setHistoryLen({ past: past.current.length, future: future.current.length })
   }
+
+  /** After an undo or redo the selected tab or section may be gone. */
+  const keepSelectionValid = useCallback((g: Guide) => {
+    setSelected(sel => {
+      if (sel.kind === 'tab' && !g.tabs.some(t => t.id === sel.id)) {
+        return { kind: 'intro' }
+      }
+      if (
+        sel.kind === 'section' &&
+        !g.tabs.some(t => t.sections.some(x => x.id === sel.id))
+      ) {
+        return { kind: 'intro' }
+      }
+      return sel
+    })
+  }, [])
+
+  const undo = useCallback(() => {
+    const prev = past.current.pop()
+    const cur = latestGuide.current
+    if (!prev || !cur) return
+    future.current.push(cur)
+    lastEdit.current = null
+    latestGuide.current = prev
+    setGuide(prev)
+    setEditorKey(k => k + 1)
+    keepSelectionValid(prev)
+    setHistoryLen({ past: past.current.length, future: future.current.length })
+  }, [keepSelectionValid])
+
+  const redo = useCallback(() => {
+    const next = future.current.pop()
+    const cur = latestGuide.current
+    if (!next || !cur) return
+    past.current.push(cur)
+    lastEdit.current = null
+    latestGuide.current = next
+    setGuide(next)
+    setEditorKey(k => k + 1)
+    keepSelectionValid(next)
+    setHistoryLen({ past: past.current.length, future: future.current.length })
+  }, [keepSelectionValid])
+
+  // Cmd+Z / Shift+Cmd+Z (or Cmd+Y) anywhere on the page, the text boxes
+  // included: their own undo is switched off so there is one history.
+  useEffect(() => {
+    if (!canEdit) return
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return
+      const k = e.key.toLowerCase()
+      if (k === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) redo()
+        else undo()
+      } else if (k === 'y') {
+        e.preventDefault()
+        redo()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [canEdit, undo, redo])
 
   const selectedTabId =
     selected.kind === 'tab'
@@ -345,29 +439,14 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
   }
 
   function removeTab(id: string) {
-    const tab = guide?.tabs.find(t => t.id === id)
-    if (
-      !tab ||
-      !window.confirm(
-        `Remove the "${tab.amount}" tab and its ${tab.sections.length} sections?`
-      )
-    )
-      return
+    if (!guide?.tabs.some(t => t.id === id)) return
     update(g => ({ ...g, tabs: g.tabs.filter(t => t.id !== id) }))
     setSelected({ kind: 'intro' })
   }
 
   function removeSection(id: string) {
     const tab = guide?.tabs.find(t => t.sections.some(s => s.id === id))
-    const section = tab?.sections.find(s => s.id === id)
-    if (
-      !tab ||
-      !section ||
-      !window.confirm(
-        `Remove the "${section.time}" section from "${tab.amount}"?`
-      )
-    )
-      return
+    if (!tab) return
     update(g => ({
       ...g,
       tabs: g.tabs.map(t => ({
@@ -402,23 +481,29 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
   }
 
   function setTabField(id: string, patch: { amount?: string; lead?: string }) {
-    update(g => ({
-      ...g,
-      tabs: g.tabs.map(t => (t.id === id ? { ...t, ...patch } : t)),
-    }))
+    update(
+      g => ({
+        ...g,
+        tabs: g.tabs.map(t => (t.id === id ? { ...t, ...patch } : t)),
+      }),
+      `tab:${id}:${patch.amount !== undefined ? 'amount' : 'lead'}`
+    )
   }
 
   function setSectionField(
     id: string,
     patch: { time?: string; body?: RichText }
   ) {
-    update(g => ({
-      ...g,
-      tabs: g.tabs.map(t => ({
-        ...t,
-        sections: t.sections.map(s => (s.id === id ? { ...s, ...patch } : s)),
-      })),
-    }))
+    update(
+      g => ({
+        ...g,
+        tabs: g.tabs.map(t => ({
+          ...t,
+          sections: t.sections.map(s => (s.id === id ? { ...s, ...patch } : s)),
+        })),
+      }),
+      `${patch.body !== undefined ? 'body' : 'time'}:${id}`
+    )
   }
 
   function onDrop(target: Selection) {
@@ -452,11 +537,8 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
   // ─── Draft, publish, history ──────────────────────────────────────────
 
   async function discardDraft() {
-    if (
-      !data ||
-      !window.confirm('Discard the draft and go back to what is live?')
-    )
-      return
+    setDiscardOpen(false)
+    if (!data) return
     const res = await fetch(API, { method: 'DELETE' })
     if (!res.ok) {
       setSaveError(String((await readJson(res)).error ?? `HTTP ${res.status}`))
@@ -465,7 +547,6 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
     const l = await load()
     if (l) adopt(l)
     setSelected({ kind: 'intro' })
-    setNotice('Draft discarded.')
   }
 
   async function openPublish() {
@@ -617,13 +698,30 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
         </div>
         <div className={styles.actions}>
           {!canEdit && <span className={styles.status}>View only</span>}
-          <button
-            type="button"
-            className={adminStyles.editorButton}
-            onClick={() => setShowPreview(p => !p)}
-          >
-            {showPreview ? 'Hide preview' : 'Show preview'}
-          </button>
+          {canEdit && (
+            <>
+              <button
+                type="button"
+                className={`${adminStyles.editorButton} ${styles.iconButton}`}
+                onClick={undo}
+                disabled={historyLen.past === 0}
+                title="Undo (Cmd+Z)"
+              >
+                <Icon src="/images/icons/undo.svg" />
+                Undo
+              </button>
+              <button
+                type="button"
+                className={`${adminStyles.editorButton} ${styles.iconButton}`}
+                onClick={redo}
+                disabled={historyLen.future === 0}
+                title="Redo (Shift+Cmd+Z)"
+              >
+                <Icon src="/images/icons/redo.svg" />
+                Redo
+              </button>
+            </>
+          )}
           <button
             type="button"
             className={adminStyles.editorButton}
@@ -640,7 +738,7 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
               <button
                 type="button"
                 className={adminStyles.editorButton}
-                onClick={discardDraft}
+                onClick={() => setDiscardOpen(true)}
                 disabled={!draftMeta && !dirty}
               >
                 Discard draft
@@ -681,6 +779,10 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
                 seenSavedAt.current = theirs.savedAt
                 setConflict(null)
                 setEditorKey(k => k + 1)
+                past.current = []
+                future.current = []
+                lastEdit.current = null
+                setHistoryLen({ past: 0, future: 0 })
               }}
             >
               Load their draft
@@ -722,7 +824,7 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
       <div className={styles.split}>
         <nav className={styles.outline} aria-label="Guide outline">
           <div className={styles.outlineHint}>
-            {canEdit ? 'Click to edit · drag to reorder' : 'Click to view'}
+            {canEdit ? 'Click to edit · drag to reorder tabs' : 'Click to view'}
           </div>
           <button
             type="button"
@@ -759,44 +861,6 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
                 )}
                 <span className={styles.nodeLabel}>{tab.amount}</span>
               </button>
-              {tab.sections.map(s => (
-                <button
-                  key={s.id}
-                  type="button"
-                  className={`${styles.node} ${styles.nodeSection} ${selected.kind === 'section' && selected.id === s.id ? styles.nodeActive : ''} ${dragOver === s.id ? styles.nodeDragOver : ''}`}
-                  onClick={() => setSelected({ kind: 'section', id: s.id })}
-                  draggable={canEdit}
-                  onDragStart={() => setDragging({ kind: 'section', id: s.id })}
-                  onDragOver={e => {
-                    if (dragging?.kind === 'section') {
-                      e.preventDefault()
-                      setDragOver(s.id)
-                    }
-                  }}
-                  onDragLeave={() => setDragOver(null)}
-                  onDrop={() => onDrop({ kind: 'section', id: s.id })}
-                  onDragEnd={() => {
-                    setDragging(null)
-                    setDragOver(null)
-                  }}
-                >
-                  {canEdit && (
-                    <span className={styles.nodeHandle} aria-hidden="true">
-                      ⋮⋮
-                    </span>
-                  )}
-                  <span className={styles.nodeLabel}>{s.time}</span>
-                </button>
-              ))}
-              {canEdit && (
-                <button
-                  type="button"
-                  className={`${styles.node} ${styles.nodeAdd} ${styles.nodeAddSection}`}
-                  onClick={() => addSection(tab.id)}
-                >
-                  + Add section
-                </button>
-              )}
             </div>
           ))}
           {canEdit && (
@@ -826,18 +890,35 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
                 mode="intro"
                 value={guide.intro}
                 editable={canEdit}
-                onChange={rt => update(g => ({ ...g, intro: rt }))}
+                onChange={rt => update(g => ({ ...g, intro: rt }), 'intro')}
               />
             </>
           )}
 
           {paneTab && (
             <>
-              <div>
-                <div className={styles.paneCrumb}>Amount tab</div>
-                <div className={styles.paneTitle}>
-                  {paneTab.amount} donation
+              <div className={styles.paneHead}>
+                <div>
+                  <div className={styles.paneCrumb}>Amount tab</div>
+                  <div className={styles.paneTitle}>
+                    {paneTab.amount} donation
+                  </div>
                 </div>
+                {canEdit && (
+                  <button
+                    type="button"
+                    className={`${adminStyles.editorButton} ${styles.danger}`}
+                    disabled={guide.tabs.length === 1}
+                    title={
+                      guide.tabs.length === 1
+                        ? 'The guide needs at least one tab'
+                        : 'Delete this tab and its sections (Undo brings it back)'
+                    }
+                    onClick={() => removeTab(paneTab.id)}
+                  >
+                    Delete tab
+                  </button>
+                )}
               </div>
               <div className={styles.tabFields}>
                 <label className={styles.field}>
@@ -851,10 +932,6 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
                       setTabField(paneTab.id, { amount: e.target.value })
                     }
                   />
-                  <span className={styles.fieldHint}>
-                    Shows on the tab and as the heading “{paneTab.amount || '…'}{' '}
-                    donation”.
-                  </span>
                 </label>
                 <label className={styles.field}>
                   <span className={styles.fieldLabel}>
@@ -876,7 +953,15 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
                 <div
                   key={s.id}
                   id={`section-${s.id}`}
-                  className={`${styles.sectionBlock} ${focusSectionId === s.id ? styles.sectionBlockActive : ''}`}
+                  className={`${styles.sectionBlock} ${canEdit ? styles.sectionBlockEditable : ''} ${focusSectionId === s.id ? styles.sectionBlockActive : ''} ${dragOver === s.id ? styles.sectionBlockDragOver : ''}`}
+                  onDragOver={e => {
+                    if (dragging?.kind === 'section') {
+                      e.preventDefault()
+                      setDragOver(s.id)
+                    }
+                  }}
+                  onDragLeave={() => setDragOver(null)}
+                  onDrop={() => onDrop({ kind: 'section', id: s.id })}
                 >
                   <div className={styles.sectionSide}>
                     <label className={styles.field}>
@@ -897,7 +982,7 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
                         className={`${adminStyles.editorButton} ${styles.danger}`}
                         onClick={() => removeSection(s.id)}
                       >
-                        Remove section
+                        Delete
                       </button>
                     )}
                   </div>
@@ -908,6 +993,22 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
                     editable={canEdit}
                     onChange={rt => setSectionField(s.id, { body: rt })}
                   />
+                  {canEdit && (
+                    <span
+                      className={styles.sectionGrip}
+                      draggable
+                      title="Drag to reorder"
+                      onDragStart={() =>
+                        setDragging({ kind: 'section', id: s.id })
+                      }
+                      onDragEnd={() => {
+                        setDragging(null)
+                        setDragOver(null)
+                      }}
+                    >
+                      <Icon src="/images/icons/grip.svg" />
+                    </span>
+                  )}
                 </div>
               ))}
               {paneTab.sections.length === 0 && (
@@ -923,14 +1024,6 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
                   >
                     + Add section
                   </button>
-                  <button
-                    type="button"
-                    className={`${adminStyles.editorButton} ${styles.danger}`}
-                    disabled={guide.tabs.length === 1}
-                    onClick={() => removeTab(paneTab.id)}
-                  >
-                    Remove tab
-                  </button>
                 </div>
               )}
             </>
@@ -942,37 +1035,31 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
         </section>
       </div>
 
-      {showPreview && (
-        <div className={styles.preview}>
-          <div className={styles.previewHead}>
-            <span>
-              Preview of {draftMeta || dirty ? 'the draft' : 'what is live'}, as
-              the page will show it
-              {dirty ? ' (refreshes after the next save)' : ''}
-            </span>
-            <a
-              href={previewSrc}
-              target="_blank"
-              rel="noreferrer"
-              className={adminStyles.editorButton}
-            >
-              Open in new tab
-            </a>
-          </div>
-          <div className={styles.previewFrame} ref={previewBox}>
-            <iframe
-              key={previewSrc}
-              src={previewSrc}
-              title="Donation guide preview"
-              style={{
-                width: `${previewWidth}px`,
-                transform: `scale(${previewScale})`,
-                height: `${760 / previewScale}px`,
-              }}
-            />
-          </div>
+      <div className={styles.preview}>
+        <div className={styles.previewHead}>
+          <span>Preview</span>
+          <a
+            href={previewSrc}
+            target="_blank"
+            rel="noreferrer"
+            className={adminStyles.editorButton}
+          >
+            Open in new tab
+          </a>
         </div>
-      )}
+        <div className={styles.previewFrame} ref={previewBox}>
+          <iframe
+            key={previewSrc}
+            src={previewSrc}
+            title="Donation guide preview"
+            style={{
+              width: `${previewWidth}px`,
+              transform: `scale(${previewScale})`,
+              height: `${760 / previewScale}px`,
+            }}
+          />
+        </div>
+      </div>
 
       {historyOpen && (
         <>
@@ -1086,6 +1173,43 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
               )}
             </div>
           </aside>
+        </>
+      )}
+
+      {discardOpen && (
+        <>
+          <div className={styles.scrim} onClick={() => setDiscardOpen(false)} />
+          <div
+            className={styles.dialog}
+            role="dialog"
+            aria-label="Discard draft"
+          >
+            <div className={styles.drawerHead}>
+              <span>Discard the draft?</span>
+            </div>
+            <div className={styles.dialogBody}>
+              <p className={styles.muted}>
+                Everything in the draft goes and the editor shows what is live
+                again. Undo cannot bring it back.
+              </p>
+            </div>
+            <div className={styles.dialogFoot}>
+              <button
+                type="button"
+                className={adminStyles.editorButton}
+                onClick={() => setDiscardOpen(false)}
+              >
+                Keep editing
+              </button>
+              <button
+                type="button"
+                className={adminStyles.editorButtonPrimary}
+                onClick={discardDraft}
+              >
+                Discard draft
+              </button>
+            </div>
+          </div>
         </>
       )}
 
