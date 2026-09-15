@@ -56,10 +56,14 @@ export const ACCESS_AREAS: AreaInfo[] = [
     href: '/admin/queue',
     edit: 'accept, reject or revise suggestions; every accept publishes',
   },
-  { key: 'playground', label: 'Playground', href: '/admin/chatbot/playground' },
+  {
+    key: 'playground',
+    label: 'Bot playground',
+    href: '/admin/chatbot/playground',
+  },
   {
     key: 'conversationLog',
-    label: 'Conversation Log',
+    label: 'Bot log',
     href: '/admin/chatbot/log',
   },
   { key: 'analytics', label: 'Analytics', href: '/admin/analytics' },
