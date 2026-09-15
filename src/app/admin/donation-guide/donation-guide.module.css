@@ -234,6 +234,40 @@
   border-color: var(--pink);
 }
 
+/* The tab's own fields, side by side. */
+.tabFields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 14px;
+  align-items: start;
+}
+
+/* One "If you have" section: the label on the left, the text on the right,
+   like the live page; a rule between sections like the page's divider. */
+.sectionBlock {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--teal-800);
+  scroll-margin-top: 76px;
+}
+
+.sectionBlockActive {
+  border-top-color: var(--bright-teal-300);
+}
+
+.sectionSide {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.sectionSide .field {
+  width: 100%;
+}
+
 /* ─── Rich text editor ────────────────────────────────────────────────── */
 
 .toolbar {
@@ -256,6 +290,15 @@
 
 .tbButton:hover {
   background-color: var(--teal-800);
+}
+
+.tbIcon {
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .tbButtonOn {
@@ -307,7 +350,7 @@
 }
 
 .prose :global(.ProseMirror) {
-  min-height: 220px;
+  min-height: 96px;
   padding: 12px 14px;
   outline: none;
   font-size: 15px;
@@ -569,7 +612,9 @@
 }
 
 @media (max-width: 991px) {
-  .split {
+  .split,
+  .tabFields,
+  .sectionBlock {
     grid-template-columns: 1fr;
   }
 

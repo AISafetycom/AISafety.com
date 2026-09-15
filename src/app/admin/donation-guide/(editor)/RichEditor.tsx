@@ -12,6 +12,7 @@ import {
 } from '@/lib/donation-guide/tiptap-map'
 import { validHref } from '@/lib/donation-guide/validate'
 import type { RichText } from '@/lib/donation-guide/types'
+import Icon from '@/components/Icon'
 import styles from '../donation-guide.module.css'
 
 // One text box, typed like a document. TipTap trimmed to what the guide
@@ -131,7 +132,7 @@ export default function RichEditor({ value, onChange, mode, editable }: Props) {
   }
 
   const tb = (on: boolean) =>
-    `${styles.tbButton} ${on ? styles.tbButtonOn : ''}`
+    `${styles.tbButton} ${styles.tbIcon} ${on ? styles.tbButtonOn : ''}`
 
   return (
     <div className={styles.field}>
@@ -142,8 +143,9 @@ export default function RichEditor({ value, onChange, mode, editable }: Props) {
             className={tb(Boolean(state?.bold))}
             onClick={() => editor?.chain().focus().toggleBold().run()}
             title="Bold (Cmd+B)"
+            aria-label="Bold"
           >
-            Bold
+            <Icon src="/images/icons/text-bold.svg" />
           </button>
           {!intro && (
             <>
@@ -151,8 +153,10 @@ export default function RichEditor({ value, onChange, mode, editable }: Props) {
                 type="button"
                 className={tb(Boolean(state?.bullets))}
                 onClick={() => editor?.chain().focus().toggleBulletList().run()}
+                title="Bullet list"
+                aria-label="Bullet list"
               >
-                Bullets
+                <Icon src="/images/icons/list-bullets.svg" />
               </button>
               <button
                 type="button"
@@ -160,8 +164,10 @@ export default function RichEditor({ value, onChange, mode, editable }: Props) {
                 onClick={() =>
                   editor?.chain().focus().toggleOrderedList().run()
                 }
+                title="Numbered list"
+                aria-label="Numbered list"
               >
-                Numbered
+                <Icon src="/images/icons/list-numbered.svg" />
               </button>
             </>
           )}
@@ -169,9 +175,10 @@ export default function RichEditor({ value, onChange, mode, editable }: Props) {
             type="button"
             className={tb(Boolean(state?.link))}
             onClick={openLink}
-            title="Select words, then add a link (or paste a URL over them)"
+            title="Link: select the words first (or paste a web address over them)"
+            aria-label="Link"
           >
-            Link
+            <Icon src="/images/icons/link.svg" />
           </button>
           {state?.link && (
             <button
@@ -191,11 +198,12 @@ export default function RichEditor({ value, onChange, mode, editable }: Props) {
           )}
           <button
             type="button"
-            className={styles.tbButton}
+            className={`${styles.tbButton} ${styles.tbIcon}`}
             onClick={() => editor?.chain().focus().undo().run()}
             title="Undo (Cmd+Z)"
+            aria-label="Undo"
           >
-            Undo
+            <Icon src="/images/icons/undo.svg" />
           </button>
         </div>
       )}

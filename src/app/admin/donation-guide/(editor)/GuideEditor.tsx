@@ -110,7 +110,6 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [conflict, setConflict] = useState<DraftDoc | null>(null)
   const [selected, setSelected] = useState<Selection>({ kind: 'intro' })
-  const [previewKey, setPreviewKey] = useState(0)
   const [showPreview, setShowPreview] = useState(true)
   const [previewScale, setPreviewScale] = useState(1)
   const [previewWidth, setPreviewWidth] = useState(PREVIEW_WIDTH)
@@ -164,7 +163,6 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
     setConflict(null)
     setSaveError(null)
     setEditorKey(k => k + 1)
-    setPreviewKey(k => k + 1)
   }, [])
 
   const load = useCallback(async (): Promise<Loaded | null> => {
@@ -219,7 +217,6 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
         })
         setSavedGuide(g)
         setSaveError(null)
-        setPreviewKey(k => k + 1)
         ok = true
       }
     } catch (err) {
@@ -280,6 +277,13 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
     }, POLL_MS)
     return () => clearInterval(t)
   }, [data, dirty, load, adopt])
+
+  useEffect(() => {
+    if (selected.kind !== 'section') return
+    document
+      .getElementById(`section-${selected.id}`)
+      ?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }, [selected])
 
   // ─── Preview scale ────────────────────────────────────────────────────
 
@@ -592,18 +596,14 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
       ? 'Live: the built-in copy (nothing published yet)'
       : `Live: version ${data.live.version}, published ${when(data.live.publishedAt)} by ${data.live.publishedBy?.name ?? 'unknown'}`
 
-  const selectedTab =
-    selected.kind === 'tab'
-      ? guide.tabs.find(t => t.id === selected.id)
-      : undefined
-  const selectedSection =
-    selected.kind === 'section'
-      ? guide.tabs
-          .flatMap(t => t.sections.map(s => ({ tab: t, section: s })))
-          .find(x => x.section.id === selected.id)
-      : undefined
+  // The pane shows a whole amount tab, every section stacked like the live
+  // page; picking a section in the outline scrolls to its block.
+  const paneTab = selectedTabId
+    ? guide.tabs.find(t => t.id === selectedTabId)
+    : undefined
+  const focusSectionId = selected.kind === 'section' ? selected.id : null
 
-  const previewSrc = `${PREVIEW_PATH}?v=${previewKey}${selectedTabId ? `&tab=${encodeURIComponent(selectedTabId)}` : ''}`
+  const previewSrc = `${PREVIEW_PATH}${selectedTabId ? `?tab=${encodeURIComponent(selectedTabId)}` : ''}`
 
   return (
     <div>
@@ -681,7 +681,6 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
                 seenSavedAt.current = theirs.savedAt
                 setConflict(null)
                 setEditorKey(k => k + 1)
-                setPreviewKey(k => k + 1)
               }}
             >
               Load their draft
@@ -832,82 +831,103 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
             </>
           )}
 
-          {selectedTab && (
+          {paneTab && (
             <>
               <div>
                 <div className={styles.paneCrumb}>Amount tab</div>
-                <div className={styles.paneTitle}>{selectedTab.amount}</div>
+                <div className={styles.paneTitle}>
+                  {paneTab.amount} donation
+                </div>
               </div>
-              <label className={styles.field}>
-                <span className={styles.fieldLabel}>Tab name</span>
-                <input
-                  className={styles.input}
-                  value={selectedTab.amount}
-                  maxLength={40}
-                  disabled={!canEdit}
-                  onChange={e =>
-                    setTabField(selectedTab.id, { amount: e.target.value })
-                  }
-                />
-                <span className={styles.fieldHint}>
-                  Shows on the tab and as the heading: “
-                  {selectedTab.amount || '…'} donation”.
-                </span>
-              </label>
-              <label className={styles.field}>
-                <span className={styles.fieldLabel}>
-                  Lead sentence under the heading
-                </span>
-                <input
-                  className={styles.input}
-                  value={selectedTab.lead}
-                  maxLength={400}
-                  disabled={!canEdit}
-                  onChange={e =>
-                    setTabField(selectedTab.id, { lead: e.target.value })
-                  }
-                />
-              </label>
-              <div className={styles.fieldHint}>
-                {selectedTab.sections.length === 0
-                  ? 'No sections yet: add one from the outline.'
-                  : `${selectedTab.sections.length} section${selectedTab.sections.length === 1 ? '' : 's'}: pick one in the outline to edit its text.`}
+              <div className={styles.tabFields}>
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>Tab name</span>
+                  <input
+                    className={styles.input}
+                    value={paneTab.amount}
+                    maxLength={40}
+                    disabled={!canEdit}
+                    onChange={e =>
+                      setTabField(paneTab.id, { amount: e.target.value })
+                    }
+                  />
+                  <span className={styles.fieldHint}>
+                    Shows on the tab and as the heading “{paneTab.amount || '…'}{' '}
+                    donation”.
+                  </span>
+                </label>
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>
+                    Lead sentence under the heading
+                  </span>
+                  <input
+                    className={styles.input}
+                    value={paneTab.lead}
+                    maxLength={400}
+                    disabled={!canEdit}
+                    onChange={e =>
+                      setTabField(paneTab.id, { lead: e.target.value })
+                    }
+                  />
+                </label>
               </div>
+
+              {paneTab.sections.map(s => (
+                <div
+                  key={s.id}
+                  id={`section-${s.id}`}
+                  className={`${styles.sectionBlock} ${focusSectionId === s.id ? styles.sectionBlockActive : ''}`}
+                >
+                  <div className={styles.sectionSide}>
+                    <label className={styles.field}>
+                      <span className={styles.fieldLabel}>If you have</span>
+                      <input
+                        className={styles.input}
+                        value={s.time}
+                        maxLength={60}
+                        disabled={!canEdit}
+                        onChange={e =>
+                          setSectionField(s.id, { time: e.target.value })
+                        }
+                      />
+                    </label>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        className={`${adminStyles.editorButton} ${styles.danger}`}
+                        onClick={() => removeSection(s.id)}
+                      >
+                        Remove section
+                      </button>
+                    )}
+                  </div>
+                  <RichEditor
+                    key={`${s.id}-${editorKey}`}
+                    mode="section"
+                    value={s.body}
+                    editable={canEdit}
+                    onChange={rt => setSectionField(s.id, { body: rt })}
+                  />
+                </div>
+              ))}
+              {paneTab.sections.length === 0 && (
+                <div className={styles.empty}>No sections yet.</div>
+              )}
+
               {canEdit && (
                 <div className={styles.paneActions}>
                   <button
                     type="button"
                     className={adminStyles.editorButton}
-                    disabled={guide.tabs[0].id === selectedTab.id}
-                    onClick={() =>
-                      moveTab(
-                        selectedTab.id,
-                        guide.tabs.findIndex(t => t.id === selectedTab.id) - 1
-                      )
-                    }
+                    onClick={() => addSection(paneTab.id)}
                   >
-                    Move up
-                  </button>
-                  <button
-                    type="button"
-                    className={adminStyles.editorButton}
-                    disabled={
-                      guide.tabs[guide.tabs.length - 1].id === selectedTab.id
-                    }
-                    onClick={() =>
-                      moveTab(
-                        selectedTab.id,
-                        guide.tabs.findIndex(t => t.id === selectedTab.id) + 1
-                      )
-                    }
-                  >
-                    Move down
+                    + Add section
                   </button>
                   <button
                     type="button"
                     className={`${adminStyles.editorButton} ${styles.danger}`}
                     disabled={guide.tabs.length === 1}
-                    onClick={() => removeTab(selectedTab.id)}
+                    onClick={() => removeTab(paneTab.id)}
                   >
                     Remove tab
                   </button>
@@ -916,100 +936,7 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
             </>
           )}
 
-          {selectedSection && (
-            <>
-              <div>
-                <div className={styles.paneCrumb}>
-                  {selectedSection.tab.amount} › section
-                </div>
-                <div className={styles.paneTitle}>
-                  {selectedSection.section.time}
-                </div>
-              </div>
-              <label className={styles.field}>
-                <span className={styles.fieldLabel}>“If you have” label</span>
-                <input
-                  className={styles.input}
-                  value={selectedSection.section.time}
-                  maxLength={60}
-                  disabled={!canEdit}
-                  onChange={e =>
-                    setSectionField(selectedSection.section.id, {
-                      time: e.target.value,
-                    })
-                  }
-                />
-              </label>
-              <div className={styles.field}>
-                <span className={styles.fieldLabel}>Text</span>
-                <RichEditor
-                  key={`${selectedSection.section.id}-${editorKey}`}
-                  mode="section"
-                  value={selectedSection.section.body}
-                  editable={canEdit}
-                  onChange={rt =>
-                    setSectionField(selectedSection.section.id, { body: rt })
-                  }
-                />
-                {canEdit && (
-                  <span className={styles.fieldHint}>
-                    Links: select the words, then press Link or paste a web
-                    address over them.
-                  </span>
-                )}
-              </div>
-              {canEdit && (
-                <div className={styles.paneActions}>
-                  <button
-                    type="button"
-                    className={adminStyles.editorButton}
-                    disabled={
-                      selectedSection.tab.sections[0].id ===
-                      selectedSection.section.id
-                    }
-                    onClick={() =>
-                      moveSection(
-                        selectedSection.section.id,
-                        selectedSection.tab.sections.findIndex(
-                          s => s.id === selectedSection.section.id
-                        ) - 1
-                      )
-                    }
-                  >
-                    Move up
-                  </button>
-                  <button
-                    type="button"
-                    className={adminStyles.editorButton}
-                    disabled={
-                      selectedSection.tab.sections[
-                        selectedSection.tab.sections.length - 1
-                      ].id === selectedSection.section.id
-                    }
-                    onClick={() =>
-                      moveSection(
-                        selectedSection.section.id,
-                        selectedSection.tab.sections.findIndex(
-                          s => s.id === selectedSection.section.id
-                        ) + 1
-                      )
-                    }
-                  >
-                    Move down
-                  </button>
-                  <button
-                    type="button"
-                    className={`${adminStyles.editorButton} ${styles.danger}`}
-                    onClick={() => removeSection(selectedSection.section.id)}
-                  >
-                    Remove section
-                  </button>
-                </div>
-              )}
-            </>
-          )}
-
-          {selected.kind !== 'intro' && !selectedTab && !selectedSection && (
+          {selected.kind !== 'intro' && !paneTab && (
             <div className={styles.empty}>Pick something in the outline.</div>
           )}
         </section>
