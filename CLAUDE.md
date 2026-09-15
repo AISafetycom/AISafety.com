@@ -96,8 +96,9 @@ npm test
 
 - `npm run build` runs the vitest suite first, then builds. Husky runs lint-staged on every commit.
 - Pure logic (ordering, formatting, parsing) goes in a dependency-free `src/lib` module with a vitest test next to it, following `training-order.ts` and `featured.ts`.
-- Verify visual changes in a real browser on localhost, at desktop and mobile widths. Compare against the design rules, not against the old Webflow site.
-- **There is no CI yet.** Nothing runs automatically on push, so these local checks are the only gate.
+- Browser smoke tests live in `e2e/` (Playwright): every public page renders without runtime errors and with its listings, and every Data API endpoint answers. Run them against a production build with `npm run build && npm run test:e2e`. They need no credentials.
+- Verify visual changes yourself in a real browser on localhost, at desktop and mobile widths. Compare against the design rules, not against the old Webflow site.
+- **CI** (`.github/workflows/ci.yml`) runs type-check, lint, unit tests, a production build and the smoke tests on every pull request and every push to `main`. A red check means the change is not ready; fix it rather than merging around it.
 
 ## Git and pull requests
 
@@ -111,6 +112,6 @@ npm test
 - `docs/css-guidelines.md` — styling rules, current and authoritative
 - `docs/api.md`, `docs/api-changelog.md` — the public Data API
 - `docs/claude.md` — development philosophy: keep it simple, collocate, extract only on real reuse
-- `docs/architecture.md` — the admin map editor and newsletter sections are current; the overview at the top predates the data layer
-- `docs/development-guide.md` — setup and commands; its Airtable fetching examples predate `src/lib/data`
+- `docs/architecture.md` — how the pieces fit: data layer, freshness, Data API, chatbot, analytics, admin, crons, env vars
+- `docs/development-guide.md` — setup, commands, and recipes for adding a page or an Airtable table
 - `README.md` — contributor mode and team setup

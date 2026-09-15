@@ -121,7 +121,7 @@ Cron routes check the `Authorization` header against `CRON_SECRET` when it is se
 
 ## Testing
 
-Unit tests run with Vitest (`npm test`; files `src/**/*.test.ts`, node environment, `@` alias resolves to `src`). Pure modules only, nothing that imports Next, d3 or the DOM; tests sit next to what they test. `npm run build` runs the suite before building. Browser verification is manual (a dev server, or Playwright headless, especially for the D3 maps). There is no CI: nothing runs automatically on push.
+Unit tests run with Vitest (`npm test`; files `src/**/*.test.ts`, node environment, `@` alias resolves to `src`). Pure modules only, nothing that imports Next, d3 or the DOM; tests sit next to what they test. `npm run build` runs the suite before building. Browser smoke tests (`e2e/smoke.spec.ts`, Playwright, `npm run test:e2e` against a production build) open every public page in Chromium, fail on any uncaught error or console error, check that listing pages show listings and the map draws its logos, and call every Data API endpoint. CI (`.github/workflows/ci.yml`) runs type-check, lint, unit tests, a production build and the smoke tests on every pull request and push to `main`, with no secrets: the build runs in contributor mode against the live site's public data. Visual review of design changes is still done by hand.
 
 ## Deployment
 
