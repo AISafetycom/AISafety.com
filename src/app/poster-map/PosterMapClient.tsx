@@ -38,6 +38,7 @@ export default function PosterMapClient({ orgs }: PosterMapClientProps) {
 
   return (
     <>
+      <h1 className="visually-hidden">Field map poster</h1>
       <div ref={mapWrapperRef} className={styles['map-wrapper']}>
         <D3PosterMap orgs={orgs} />
         <button onClick={scrollToWarning} className={styles['scroll-button']}>
