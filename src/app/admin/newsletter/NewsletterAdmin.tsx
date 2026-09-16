@@ -186,7 +186,13 @@ export default function NewsletterAdmin({
               </span>
             </>
           ) : (
-            'Reading ActiveCampaign…'
+            <>
+              <span
+                className={`${styles.spinner} ${styles.spinnerSmall}`}
+                aria-hidden="true"
+              />
+              Reading ActiveCampaign…
+            </>
           )}{' '}
           <button
             type="button"
@@ -241,6 +247,21 @@ export default function NewsletterAdmin({
           untouched since the pipeline wrote it. Approving schedules the send
           for about two minutes later.
         </p>
+        {/* The first read takes several seconds; say so where the drafts
+            will appear, not only in the small line at the top (Bryce, 16
+            Sept 2026: "make this more obvious"). */}
+        {!data && loading && !loadError && (
+          <div className={styles.loading} role="status" aria-live="polite">
+            <span className={styles.spinner} aria-hidden="true" />
+            <div>
+              <strong>Reading ActiveCampaign…</strong>
+              <span className={styles.loadingNote}>
+                Drafts waiting for approval and recent sends appear here in a
+                few seconds.
+              </span>
+            </div>
+          </div>
+        )}
         {data && data.drafts.length === 0 && !loading && (
           <p className={styles.notice}>
             Nothing waiting. A draft appears here when the pipeline finishes an
@@ -363,6 +384,15 @@ export default function NewsletterAdmin({
         <div className={adminStyles.editorBlockHeader}>
           <h2 className={adminStyles.editorBlockTitle}>Recent sends</h2>
         </div>
+        {!data && loading && !loadError && (
+          <p className={styles.notice}>
+            <span
+              className={`${styles.spinner} ${styles.spinnerSmall}`}
+              aria-hidden="true"
+            />
+            Reading ActiveCampaign…
+          </p>
+        )}
         {data && data.recent.length === 0 && (
           <p className={styles.notice}>No sends yet.</p>
         )}

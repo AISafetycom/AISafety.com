@@ -385,3 +385,60 @@
   outline: 2px solid var(--bright-teal-300);
   outline-offset: 1px;
 }
+
+/* Loading: the ActiveCampaign read takes several seconds, so the wait is
+   shown where the drafts will appear (Bryce, 16 Sept 2026). */
+.loading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--teal-700);
+  border-radius: 8px;
+  background: var(--teal-900);
+  color: var(--white);
+  font-size: 14px;
+}
+
+.loading strong {
+  display: block;
+  font-weight: 600;
+}
+
+.loadingNote {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--teal-300);
+}
+
+.spinner {
+  flex: 0 0 auto;
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--bright-teal-300);
+  border-top-color: transparent;
+  animation: spin 0.8s linear infinite;
+}
+
+.spinnerSmall {
+  width: 10px;
+  height: 10px;
+  border-width: 1.5px;
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}
