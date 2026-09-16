@@ -7,10 +7,11 @@ import {
   fieldString,
   fieldStringArray,
   publishedFormula,
+  type AirtableRawRecord,
 } from './airtable'
 import { fetchPublicData, hasAirtableCredentials } from './public-api'
 
-const TABLE_ID = 'tbluI5Dll697WiSm8'
+export const TABLE_ID = 'tbluI5Dll697WiSm8'
 const VIEW_ID = 'viwFIU3lKQHZlpc0b'
 
 // Permanent Airtable field IDs for the Communities table. Fetching,
@@ -59,6 +60,41 @@ export interface Community {
   featuredTagline: string | null
 }
 
+/**
+ * One Communities record (fields keyed by field id) → the listing the page
+ * renders, or null when the site would skip it (no name). Publish/Hide
+ * filtering stays in getCommunities(), so an unpublished record can still be
+ * mapped — the admin Queue previews proposed records through this.
+ */
+export function communityFromRecord(
+  record: AirtableRawRecord
+): Community | null {
+  const f = record.fields
+  const name = fieldString(f[FIELD.name])
+  if (!name) return null
+
+  return {
+    id: record.id,
+    dateAdded: record.createdTime?.slice(0, 10) ?? null,
+    lastModified: fieldDateOnly(f[FIELD.lastModified]),
+    name,
+    description: fieldString(f[FIELD.description]) || '',
+    logo: fieldAttachmentUrl(f[FIELD.logo]),
+    platform: fieldStringArray(f[FIELD.platform]),
+    platformText: fieldString(f[FIELD.platformWrangled]) || '',
+    type: fieldStringArray(f[FIELD.type]),
+    activityLevel: fieldString(f[FIELD.activityLevel]) || '',
+    focus: fieldString(f[FIELD.focus]) || '',
+    joinLink: fieldString(f[FIELD.link]) || '#',
+    location: fieldString(f[FIELD.locationIfInPerson]),
+    size: fieldString(f[FIELD.size]),
+    latitude: fieldNumber(f[FIELD.latitude]),
+    longitude: fieldNumber(f[FIELD.longitude]),
+    featured: fieldFeatured(f[FIELD.featured]),
+    featuredTagline: fieldString(f[FIELD.featuredTagline]),
+  }
+}
+
 export async function getCommunities(): Promise<Community[]> {
   if (!hasAirtableCredentials())
     return fetchPublicData<Community>('communities')
@@ -72,30 +108,9 @@ export async function getCommunities(): Promise<Community[]> {
 
   const results: Community[] = []
   for (const record of raw) {
-    const f = record.fields
-    const name = fieldString(f[FIELD.name])
-    if (!name) continue
-
-    results.push({
-      id: record.id,
-      dateAdded: record.createdTime?.slice(0, 10) ?? null,
-      lastModified: fieldDateOnly(f[FIELD.lastModified]),
-      name,
-      description: fieldString(f[FIELD.description]) || '',
-      logo: fieldAttachmentUrl(f[FIELD.logo]),
-      platform: fieldStringArray(f[FIELD.platform]),
-      platformText: fieldString(f[FIELD.platformWrangled]) || '',
-      type: fieldStringArray(f[FIELD.type]),
-      activityLevel: fieldString(f[FIELD.activityLevel]) || '',
-      focus: fieldString(f[FIELD.focus]) || '',
-      joinLink: fieldString(f[FIELD.link]) || '#',
-      location: fieldString(f[FIELD.locationIfInPerson]),
-      size: fieldString(f[FIELD.size]),
-      latitude: fieldNumber(f[FIELD.latitude]),
-      longitude: fieldNumber(f[FIELD.longitude]),
-      featured: fieldFeatured(f[FIELD.featured]),
-      featuredTagline: fieldString(f[FIELD.featuredTagline]),
-    })
+    const community = communityFromRecord(record)
+    if (!community) continue
+    results.push(community)
   }
 
   return results

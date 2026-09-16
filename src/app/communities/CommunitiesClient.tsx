@@ -9,6 +9,7 @@ import { Community } from '@/lib/data/communities'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
 import { withUtm } from '@/lib/utm'
 import { placementsById } from '@/lib/placements'
+import { communityCardProps } from './card'
 
 interface CommunitiesClientProps {
   communities: Community[]
@@ -27,7 +28,7 @@ const platformOptions = [
   'WhatsApp',
   'Other',
 ]
-const activityOptions = ['Very active', 'Active', 'Semi-active', 'Inactive']
+const activityOptions = ['Active', 'Semi-active', 'Inactive']
 const focusOptions = ['Main focus is AI safety', 'Partial focus on AI safety']
 
 // No search box on this page, so every community passes the base filter.
@@ -179,33 +180,7 @@ export default function CommunitiesClient({
           {filteredCommunities.map(community => (
             <ListingCard
               key={community.id}
-              href={community.joinLink !== '#' ? community.joinLink : undefined}
-              name={community.name}
-              description={community.description}
-              logo={community.logo}
-              meta={[
-                {
-                  icon: '/images/icons/computer.svg',
-                  value:
-                    community.platformText || community.platform.join(', '),
-                },
-                ...(community.activityLevel
-                  ? [
-                      {
-                        icon: '/images/icons/activity.svg',
-                        value: community.activityLevel,
-                      },
-                    ]
-                  : []),
-                ...(community.focus
-                  ? [
-                      {
-                        icon: '/images/icons/target.svg',
-                        value: community.focus,
-                      },
-                    ]
-                  : []),
-              ]}
+              {...communityCardProps(community)}
               trackingPage="Communities"
               listingId={community.id}
               placement={placements.get(community.id)}

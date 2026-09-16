@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ACCESS_AREAS,
   DEFAULT_NEW_ACCESS,
+  describeAccess,
   type AccessFlags,
 } from '@/lib/admin/access'
 import {
@@ -42,6 +43,9 @@ interface Payload {
   users: Row[]
   requests: AccessRequest[]
   shared: boolean
+  /** Whether this session may change anything here; false shows the same
+   *  page with the controls taken away. */
+  canEdit: boolean
 }
 
 function when(iso: string | null): string {
@@ -110,7 +114,10 @@ function action(
   return { method, body, okText, url: USERS_API, clearForm: false, ...extra }
 }
 
-/** One checkbox per tab. */
+/** One tick per tab. Tabs that can change the live site carry a second,
+ *  "can edit" tick: the first opens the tab to look, the second lets its
+ *  writes through. Ticking "can edit" on a closed tab opens it too; unticking
+ *  the tab takes "can edit" with it. */
 function AccessPicker({
   value,
   onChange,
@@ -124,20 +131,57 @@ function AccessPicker({
 }) {
   return (
     <div className={styles.picker} role="group" aria-label="Tabs">
-      {ACCESS_AREAS.map(area => (
-        <label key={area.key} className={styles.pick}>
-          <input
-            type="checkbox"
-            id={`${idPrefix}-${area.key}`}
-            checked={value[area.key]}
-            disabled={disabled}
-            onChange={e =>
-              onChange?.({ ...value, [area.key]: e.target.checked })
-            }
-          />
-          {area.label}
-        </label>
-      ))}
+      {ACCESS_AREAS.map(area => {
+        const grant = value[area.key]
+        return (
+          <span
+            key={area.key}
+            className={`${styles.pick} ${grant ? styles.pickOn : ''} ${
+              disabled ? styles.pickDisabled : ''
+            }`}
+          >
+            <label className={styles.pickTab}>
+              <input
+                type="checkbox"
+                id={`${idPrefix}-${area.key}`}
+                checked={grant !== false}
+                disabled={disabled}
+                onChange={e =>
+                  onChange?.({
+                    ...value,
+                    [area.key]: e.target.checked ? 'view' : false,
+                  })
+                }
+              />
+              {area.label}
+            </label>
+            {area.edit && (
+              <label
+                className={styles.pickEdit}
+                title={`Can edit: ${area.edit}`}
+              >
+                <input
+                  type="checkbox"
+                  id={`${idPrefix}-${area.key}-edit`}
+                  checked={grant === 'edit'}
+                  disabled={disabled}
+                  onChange={e =>
+                    onChange?.({
+                      ...value,
+                      [area.key]: e.target.checked
+                        ? 'edit'
+                        : grant === false
+                          ? false
+                          : 'view',
+                    })
+                  }
+                />
+                can edit
+              </label>
+            )}
+          </span>
+        )
+      })}
     </div>
   )
 }
@@ -263,9 +307,10 @@ export default function UsersAdmin() {
     })()
   }, [load, call])
 
-  const tabsOn = (a: AccessFlags) =>
-    ACCESS_AREAS.filter(x => a[x.key]).map(x => x.label)
   const who = (u: Row) => u.name ?? u.email
+  // False while the list is still loading, so nothing is offered that the
+  // API would then refuse.
+  const canEdit = data?.canEdit ?? false
 
   /** Tick or untick a tab for someone: shown at once, then saved. */
   function setAccess(u: Row, next: AccessFlags) {
@@ -283,7 +328,7 @@ export default function UsersAdmin() {
       action(
         'PATCH',
         { email: u.email, access: next },
-        `${who(u)} now has: ${tabsOn(next).join(', ') || 'nothing'}.`
+        `${who(u)} now has: ${describeAccess(next).join(', ') || 'nothing'}.`
       )
     )
   }
@@ -318,6 +363,14 @@ export default function UsersAdmin() {
         </p>
       </div>
 
+      {data && !canEdit && (
+        <p className={styles.notice}>
+          View only: you can see who can sign in and what they can open, but
+          adding, changing or removing anyone stays with people who can edit
+          this page.
+        </p>
+      )}
+
       {notice && (
         <p
           className={
@@ -341,9 +394,10 @@ export default function UsersAdmin() {
             </h2>
           </div>
           <p className={adminStyles.sectionHint}>
-            These people signed in with Google but aren&apos;t on the list. Tick
-            the tabs they should get and approve, or dismiss. Nothing is granted
-            until you approve.
+            These people signed in with Google but aren&apos;t on the list.
+            {canEdit
+              ? ' Tick the tabs they should get and approve, or dismiss. Nothing is granted until you approve.'
+              : ' Nothing is granted until someone who can edit this page approves them.'}
           </p>
           <div className={styles.people}>
             {data.requests.map(r => {
@@ -357,46 +411,48 @@ export default function UsersAdmin() {
                       )}
                       <span className={styles.cardEmail}>{r.email}</span>
                     </div>
-                    <div className={styles.rowActions}>
-                      <button
-                        type="button"
-                        className={adminStyles.editorButtonPrimary}
-                        disabled={busy}
-                        onClick={() =>
-                          void call(
-                            action(
-                              'POST',
-                              { email: r.email, access: picks },
-                              `${r.name ?? r.email} can now sign in.`
+                    {canEdit && (
+                      <div className={styles.rowActions}>
+                        <button
+                          type="button"
+                          className={adminStyles.editorButtonPrimary}
+                          disabled={busy}
+                          onClick={() =>
+                            void call(
+                              action(
+                                'POST',
+                                { email: r.email, access: picks },
+                                `${r.name ?? r.email} can now sign in.`
+                              )
                             )
-                          )
-                        }
-                      >
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.linkButton}
-                        disabled={busy}
-                        onClick={() =>
-                          void call(
-                            action(
-                              'DELETE',
-                              { email: r.email },
-                              `Request from ${r.name ?? r.email} dismissed.`,
-                              { url: REQUESTS_API }
+                          }
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          disabled={busy}
+                          onClick={() =>
+                            void call(
+                              action(
+                                'DELETE',
+                                { email: r.email },
+                                `Request from ${r.name ?? r.email} dismissed.`,
+                                { url: REQUESTS_API }
+                              )
                             )
-                          )
-                        }
-                      >
-                        Dismiss
-                      </button>
-                    </div>
+                          }
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <AccessPicker
                     idPrefix={`r-${r.email}`}
                     value={picks}
-                    disabled={busy}
+                    disabled={busy || !canEdit}
                     onChange={next =>
                       setRequestPicks({ ...requestPicks, [r.email]: next })
                     }
@@ -420,9 +476,11 @@ export default function UsersAdmin() {
         </div>
         <p className={adminStyles.sectionHint}>
           Each person signs in with the Google account shown and sees only the
-          tabs ticked here. Ticking or unticking a tab applies on their next
-          click; removing someone signs them out immediately. Built-in rows live
-          in the code and can&apos;t be changed from this page.
+          tabs ticked here. A tab on its own is for looking; &ldquo;can
+          edit&rdquo; also lets them change things from it, which on these tabs
+          means the live site. Ticking or unticking applies on their next click;
+          removing someone signs them out immediately. Built-in rows live in the
+          code and can&apos;t be changed from this page.
         </p>
         {data && (
           <div className={styles.people}>
@@ -447,7 +505,7 @@ export default function UsersAdmin() {
                       </span>
                     )}
                   </div>
-                  {!u.builtIn && !u.isMe && (
+                  {canEdit && !u.builtIn && !u.isMe && (
                     <div className={styles.rowActions}>
                       {removing === u.email ? (
                         <>
@@ -495,7 +553,7 @@ export default function UsersAdmin() {
                 <AccessPicker
                   idPrefix={`u-${u.email}`}
                   value={u.access}
-                  disabled={busy || u.builtIn}
+                  disabled={busy || u.builtIn || !canEdit}
                   onChange={next => setAccess(u, next)}
                 />
                 <div className={styles.cardMeta}>
@@ -513,49 +571,51 @@ export default function UsersAdmin() {
         {!data && loading && <p className={styles.notice}>Loading…</p>}
       </div>
 
-      <div className={adminStyles.editorBlock}>
-        <div className={adminStyles.editorBlockHeader}>
-          <h2 className={adminStyles.editorBlockTitle}>Add someone</h2>
+      {canEdit && (
+        <div className={adminStyles.editorBlock}>
+          <div className={adminStyles.editorBlockHeader}>
+            <h2 className={adminStyles.editorBlockTitle}>Add someone</h2>
+          </div>
+          <p className={adminStyles.sectionHint}>
+            Enter the address of the Google account they will sign in with and
+            tick the tabs they should see. They go to /admin/login, click Sign
+            in with Google, and allow the app once; their name is picked up from
+            Google then.
+          </p>
+          <form className={styles.form} onSubmit={add}>
+            <label className={`${styles.field} ${styles.emailField}`}>
+              <span className={styles.fieldLabel}>Google account email</span>
+              <input
+                type="email"
+                required
+                className={adminStyles.editorInput}
+                value={form.email}
+                disabled={busy}
+                placeholder="name@example.com"
+                onChange={e => setForm({ ...form, email: e.target.value })}
+              />
+            </label>
+            <div className={styles.field}>
+              <span className={styles.fieldLabel}>Tabs they can open</span>
+              <AccessPicker
+                idPrefix="new"
+                value={form.access}
+                disabled={busy}
+                onChange={access => setForm({ ...form, access })}
+              />
+            </div>
+            <div className={styles.formActions}>
+              <button
+                type="submit"
+                className={`${adminStyles.editorButtonPrimary} ${styles.addButton}`}
+                disabled={busy || !data}
+              >
+                {busy ? 'Saving…' : 'Add'}
+              </button>
+            </div>
+          </form>
         </div>
-        <p className={adminStyles.sectionHint}>
-          Enter the address of the Google account they will sign in with and
-          tick the tabs they should see. They go to /admin/login, click Sign in
-          with Google, and allow the app once; their name is picked up from
-          Google then.
-        </p>
-        <form className={styles.form} onSubmit={add}>
-          <label className={`${styles.field} ${styles.emailField}`}>
-            <span className={styles.fieldLabel}>Google account email</span>
-            <input
-              type="email"
-              required
-              className={adminStyles.editorInput}
-              value={form.email}
-              disabled={busy}
-              placeholder="name@example.com"
-              onChange={e => setForm({ ...form, email: e.target.value })}
-            />
-          </label>
-          <div className={styles.field}>
-            <span className={styles.fieldLabel}>Tabs they can open</span>
-            <AccessPicker
-              idPrefix="new"
-              value={form.access}
-              disabled={busy}
-              onChange={access => setForm({ ...form, access })}
-            />
-          </div>
-          <div className={styles.formActions}>
-            <button
-              type="submit"
-              className={`${adminStyles.editorButtonPrimary} ${styles.addButton}`}
-              disabled={busy || !data}
-            >
-              {busy ? 'Saving…' : 'Add'}
-            </button>
-          </div>
-        </form>
-      </div>
+      )}
 
       {data && !data.shared && (
         <p className={styles.notice}>

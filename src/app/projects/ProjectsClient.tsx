@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useMemo, useRef, useLayoutEffect, useCallback } from 'react'
-import FilterGroup from '@/components/FilterGroup'
-import FilterSidebar from '@/components/FilterSidebar'
+import { useState, useMemo, useRef, useLayoutEffect } from 'react'
+import FilterBar from '@/components/FilterBar'
+import FilterDropdown from '@/components/FilterDropdown'
+import ListingCard from '@/components/ListingCard'
+import { projectCardProps } from './card'
 import ContributeButtons from '@/components/ContributeButtons'
-import SearchBar from '@/components/SearchBar'
 import { Project } from '@/lib/data/projects'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
 
@@ -14,56 +15,50 @@ interface ProjectsClientProps {
 
 const statusOptions = ['Active', 'Paused', 'Seeking owner']
 
-export default function ProjectsClient({ projects }: ProjectsClientProps) {
-  const [searchQuery, setSearchQuery] = useState('')
-  const [selectedStatus, setSelectedStatus] = useState<string[]>([])
+const allPass = () => true
 
-  const searchPass = useCallback(
-    (project: Project) => {
-      if (!searchQuery) return true
-      const query = searchQuery.toLowerCase()
-      return (
-        project.name.toLowerCase().includes(query) ||
-        project.description.toLowerCase().includes(query)
-      )
-    },
-    [searchQuery]
-  )
+export default function ProjectsClient({ projects }: ProjectsClientProps) {
+  const [statusFilters, setStatusFilters] = useState<string[]>([])
 
   const groups = useMemo(
     () => ({
       status: {
-        selected: selectedStatus,
+        selected: statusFilters,
         matches: (project: Project, value: string) => project.status === value,
       },
     }),
-    [selectedStatus]
+    [statusFilters]
   )
 
   const filteredProjects = useMemo(
-    () => filterItems(projects, searchPass, groups),
-    [projects, searchPass, groups]
+    () => filterItems(projects, allPass, groups),
+    [projects, groups]
   )
 
-  const statusCounts = useMemo(
-    () =>
-      optionCounts(
-        filterItems(projects, searchPass, groups, 'status'),
+  const filterCounts = useMemo(
+    () => ({
+      status: optionCounts(
+        filterItems(projects, allPass, groups, 'status'),
         statusOptions,
         groups.status.matches
       ),
-    [projects, searchPass, groups]
+    }),
+    [projects, groups]
   )
 
   const savedScrollY = useRef<number | null>(null)
 
-  const toggleStatus = (status: string) => {
+  const toggleFilter = (
+    value: string,
+    current: string[],
+    setter: (v: string[]) => void
+  ) => {
     savedScrollY.current = window.scrollY
-    if (selectedStatus.includes(status)) {
-      setSelectedStatus(selectedStatus.filter(s => s !== status))
-    } else {
-      setSelectedStatus([...selectedStatus, status])
-    }
+    setter(
+      current.includes(value)
+        ? current.filter(v => v !== value)
+        : [...current, value]
+    )
   }
 
   useLayoutEffect(() => {
@@ -74,61 +69,43 @@ export default function ProjectsClient({ projects }: ProjectsClientProps) {
   }, [filteredProjects])
 
   return (
-    <div className="flex gap-56px">
-      <div className="width-9-col">
-        <div className="padding-bottom-40px">
-          <SearchBar
-            value={searchQuery}
-            onChange={setSearchQuery}
-            placeholder="Search projects by name or description"
-          />
-        </div>
+    <>
+      <FilterBar count={filteredProjects.length} noun="project">
+        <FilterDropdown
+          trackingPage="Projects"
+          title="Status"
+          icon="/images/icons/activity.svg"
+          options={statusOptions}
+          selected={statusFilters}
+          counts={filterCounts.status}
+          onToggle={v => toggleFilter(v, statusFilters, setStatusFilters)}
+        />
+      </FilterBar>
 
-        <div className="collection-list padding-bottom-40px">
+      <div className="flex gap-56px">
+        <div className="collection-list padding-bottom-40px width-9-col">
           {filteredProjects.map(project => (
-            <div key={project.id} className="card card-static">
-              <h3 className="padding-bottom-24px">{project.name}</h3>
-              <p className="paragraph-small padding-bottom-24px">
-                {project.description}
-              </p>
-              <p className="paragraph-xs-bold padding-bottom-4px color-teal-400">
-                Contact
-              </p>
-              <p className="paragraph-small">{project.contact}</p>
-              {project.email && (
-                <p className="paragraph-small">{project.email}</p>
-              )}
-              <p className="paragraph-xs-bold padding-top-16px padding-bottom-4px color-teal-400">
-                Status
-              </p>
-              <p className="paragraph-small">{project.status}</p>
-            </div>
+            <ListingCard
+              key={project.id}
+              {...projectCardProps(project)}
+              trackingPage="Projects"
+            />
           ))}
           {filteredProjects.length === 0 && (
             <p className="paragraph-small color-teal-300">Nothing found.</p>
           )}
         </div>
-      </div>
 
-      <div className="hide-mobile width-3-col">
-        <FilterSidebar>
-          <FilterGroup
+        <div className="hide-mobile width-3-col">
+          <ContributeButtons
             trackingPage="Projects"
-            title="Status"
-            options={statusOptions}
-            selected={selectedStatus}
-            counts={statusCounts}
-            onToggle={toggleStatus}
+            suggestEntryUrl="https://airtable.com/appF8XfZUGXtfi40E/pagudvyKXZISztcOI/form"
+            suggestCorrectionUrl="https://airtable.com/appF8XfZUGXtfi40E/pagndDvdya1DSqoxN/form"
+            noun="project"
+            airtableUrl="https://airtable.com/appF8XfZUGXtfi40E/shrSOZFEW790ANG0Q"
           />
-        </FilterSidebar>
-        <ContributeButtons
-          trackingPage="Projects"
-          suggestEntryUrl="https://airtable.com/appF8XfZUGXtfi40E/pagudvyKXZISztcOI/form"
-          suggestCorrectionUrl="https://airtable.com/appF8XfZUGXtfi40E/pagndDvdya1DSqoxN/form"
-          noun="project"
-          airtableUrl="https://airtable.com/appF8XfZUGXtfi40E/shrSOZFEW790ANG0Q"
-        />
+        </div>
       </div>
-    </div>
+    </>
   )
 }

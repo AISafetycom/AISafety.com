@@ -111,6 +111,7 @@ export const INTERNAL_TABLES: { tableId: string; tableName: string }[] = [
   { tableId: 'tblzTFjkQ4v7G6saq', tableName: 'Site feedback' },
   { tableId: 'tblKm44KngUDniaDR', tableName: 'Site corrections' },
   { tableId: 'tblHxEuvRUlQ5e3KQ', tableName: 'Contact' },
+  { tableId: 'tblonlKwIFJ7Aa8QN', tableName: 'Queue' },
 ]
 
 export interface CoverageResult {

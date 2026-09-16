@@ -13,6 +13,10 @@ import {
   useState,
 } from 'react'
 import { SearchButton, SearchProvider } from './SearchTrigger'
+import {
+  trackNavOverflowOpen,
+  type NavOverflowOpenMethod,
+} from '@/lib/analytics'
 import styles from './Navigation.module.css'
 
 const navItems = [
@@ -54,9 +58,9 @@ const navItems = [
 // (and the mobile menu, which always lists everything).
 const MIN_OVERFLOW = 6
 
-// How long the +N panel stays mounted after closing, for its fade-out.
+// How long the +N panel stays mounted after closing, for its exit animation.
 // Must match the transition on .nav-dropdown-closing in the CSS.
-const DROPDOWN_EXIT_MS = 80
+const DROPDOWN_EXIT_MS = 100
 
 export default function Navigation({
   counts,
@@ -87,6 +91,8 @@ export default function Navigation({
   // shut. Touch pointers are ignored here and keep tap-to-toggle.
   const closeTimer = useRef<number | null>(null)
   const lastPointerType = useRef('')
+  // How the current open happened, read by the analytics effect below.
+  const openVia = useRef<NavOverflowOpenMethod>('hover')
   const cancelDropdownClose = useCallback(() => {
     if (closeTimer.current !== null) {
       window.clearTimeout(closeTimer.current)
@@ -97,6 +103,7 @@ export default function Navigation({
     (e: ReactPointerEvent) => {
       if (e.pointerType === 'touch') return
       cancelDropdownClose()
+      openVia.current = 'hover'
       setIsDropdownOpen(true)
     },
     [cancelDropdownClose]
@@ -206,6 +213,13 @@ export default function Navigation({
     )
     return () => window.clearTimeout(timer)
   }, [isDropdownClosing])
+
+  // Analytics: one nav_overflow_open per closed→open transition, however it
+  // was opened. Hover jitter can't double-count — the 150 ms grace keeps the
+  // panel open while the pointer crosses into it.
+  useEffect(() => {
+    if (isDropdownOpen) trackNavOverflowOpen(openVia.current)
+  }, [isDropdownOpen])
 
   useLayoutEffect(() => {
     // A StickyBar toggle click announces its programmatic jump-to-top so the
@@ -378,11 +392,11 @@ export default function Navigation({
               }}
               // Mouse users already opened it by hovering, so a click keeps it
               // open; touch has no hover, so a tap still toggles.
-              onClick={() =>
-                setIsDropdownOpen(open =>
-                  lastPointerType.current === 'touch' ? !open : true
-                )
-              }
+              onClick={() => {
+                const touch = lastPointerType.current === 'touch'
+                if (touch) openVia.current = 'tap'
+                setIsDropdownOpen(open => (touch ? !open : true))
+              }}
             >
               <p className="paragraph-small-bold">+{overflowItems.length}</p>
               {(isDropdownOpen || isDropdownClosing) && (

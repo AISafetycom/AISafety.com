@@ -1,6 +1,6 @@
 /*
   Newsletter approval API. GET is open to anyone who may see the page
-  (canViewNewsletter: approvers and preview-only reviewers); POST needs an
+  (canViewNewsletter: approvers and view-only reviewers); POST needs an
   approver (canSendNewsletter) with a Google session under
   NEWSLETTER_FRESH_SECONDS old.
 
@@ -85,7 +85,10 @@ export async function GET() {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[newsletter] list failed: ${message}`)
-    return json({ error: message }, 502)
+    return json(
+      { error: 'Loading drafts failed; details are in the server log.' },
+      502
+    )
   }
 }
 
@@ -116,6 +119,9 @@ export async function POST(req: NextRequest) {
     }
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[newsletter] approve ${campaignId} failed: ${message}`)
-    return json({ error: message }, 502)
+    return json(
+      { error: 'Approving the draft failed; details are in the server log.' },
+      502
+    )
   }
 }

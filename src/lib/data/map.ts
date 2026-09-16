@@ -6,10 +6,11 @@ import {
   fieldString,
   fieldStringArray,
   publishedFormula,
+  type AirtableRawRecord,
 } from './airtable'
 import { fetchPublicData, hasAirtableCredentials } from './public-api'
 
-const TABLE_ID = 'tblvzbGL9q9dOO9Nc'
+export const TABLE_ID = 'tblvzbGL9q9dOO9Nc'
 const VIEW_ID = 'viwJgtDFDmaP8PyoI'
 
 const MAGIC_ROW_NAMES = [
@@ -141,6 +142,50 @@ function compareCategoryIndices(a: number[], b: number[]): number {
   return a.length - b.length
 }
 
+/** One Airtable row (fields keyed by field id) as the map shows it, or null
+ *  when the map would skip it (no title or no description). Shared with the
+ *  admin queue's card preview. */
+export function mapOrgFromRecord(record: AirtableRawRecord): MapOrg | null {
+  const f = record.fields
+
+  const title =
+    fieldString(f[FIELD.longNameForCards]) || fieldString(f[FIELD.longName])
+  const description = fieldString(f[FIELD.description])
+  if (!title || !description) return null
+
+  const isMagic = MAGIC_ROW_NAMES.includes(title)
+  const link = fieldString(f[FIELD.link])
+
+  const category =
+    fieldString(f[FIELD.categoryText]) ||
+    fieldStringArray(f[FIELD.category]).join(', ')
+
+  // QA: 'Long name for cards' includes acronyms in brackets (e.g. "CARMA"),
+  // which is correct for card titles but not for the map tooltip. The tooltip
+  // should use 'Long name' (without brackets), matching the live site's LongLabel.
+  const tooltipTitle = fieldString(f[FIELD.longName]) || title
+
+  return {
+    id: record.id,
+    dateAdded: record.createdTime?.slice(0, 10) ?? null,
+    lastModified: fieldDateOnly(f[FIELD.lastModified]),
+    title,
+    tooltipTitle,
+    shortName: fieldString(f[FIELD.shortName]),
+    description,
+    category,
+    status: fieldString(f[FIELD.status]) || 'Active',
+    logo: fieldAttachmentUrl(f[FIELD.logoForCards]),
+    mapLogo: fieldAttachmentUrl(f[FIELD.logoForMap]),
+    link: link || '#',
+    shortUrl: fieldString(f[FIELD.shortUrl]),
+    x: fieldNumber(f[FIELD.x]),
+    y: fieldNumber(f[FIELD.y]),
+    scale: fieldString(f[FIELD.scale]),
+    isMagic,
+  }
+}
+
 export async function getMapData(): Promise<MapData> {
   if (!hasAirtableCredentials()) {
     // The public collection excludes the magic control rows (Merch, Last
@@ -171,50 +216,14 @@ export async function getMapData(): Promise<MapData> {
   let suggestCorrectionLink = '#'
 
   for (const record of raw) {
-    const f = record.fields
-
-    const title =
-      fieldString(f[FIELD.longNameForCards]) || fieldString(f[FIELD.longName])
-    const description = fieldString(f[FIELD.description])
-    if (!title || !description) continue
-
-    const isMagic = MAGIC_ROW_NAMES.includes(title)
-
-    const link = fieldString(f[FIELD.link])
-    if (title === 'Suggest entry' && link) {
-      suggestEntryLink = link
-    } else if (title === 'Suggest correction' && link) {
-      suggestCorrectionLink = link
+    const org = mapOrgFromRecord(record)
+    if (!org) continue
+    if (org.title === 'Suggest entry' && org.link !== '#') {
+      suggestEntryLink = org.link
+    } else if (org.title === 'Suggest correction' && org.link !== '#') {
+      suggestCorrectionLink = org.link
     }
-
-    const category =
-      fieldString(f[FIELD.categoryText]) ||
-      fieldStringArray(f[FIELD.category]).join(', ')
-
-    // QA: 'Long name for cards' includes acronyms in brackets (e.g. "CARMA"),
-    // which is correct for card titles but not for the map tooltip. The tooltip
-    // should use 'Long name' (without brackets), matching the live site's LongLabel.
-    const tooltipTitle = fieldString(f[FIELD.longName]) || title
-
-    allRecords.push({
-      id: record.id,
-      dateAdded: record.createdTime?.slice(0, 10) ?? null,
-      lastModified: fieldDateOnly(f[FIELD.lastModified]),
-      title,
-      tooltipTitle,
-      shortName: fieldString(f[FIELD.shortName]),
-      description,
-      category,
-      status: fieldString(f[FIELD.status]) || 'Active',
-      logo: fieldAttachmentUrl(f[FIELD.logoForCards]),
-      mapLogo: fieldAttachmentUrl(f[FIELD.logoForMap]),
-      link: link || '#',
-      shortUrl: fieldString(f[FIELD.shortUrl]),
-      x: fieldNumber(f[FIELD.x]),
-      y: fieldNumber(f[FIELD.y]),
-      scale: fieldString(f[FIELD.scale]),
-      isMagic,
-    })
+    allRecords.push(org)
   }
 
   allRecords.sort((a, b) => {

@@ -1,31 +1,34 @@
 /*
-  Admin admin API — who can sign in with Google and which tabs they get
-  (sessions with the manageUsers area only).
+  Admin admin API — who can sign in with Google and which tabs they get.
+  GET needs the manageUsers area (canViewUsers); the writes need its edit
+  grant (canManageUsers).
 
-  GET    /api/admin/users  → { users, requests, shared }
+  GET    /api/admin/users  → { users, requests, shared, canEdit }
   POST   /api/admin/users  body { email, access }                → 201 { user }
   PATCH  /api/admin/users  body { email, access }                → { user }
   DELETE /api/admin/users  body { email }                        → 204
 
-  `access` is an object of booleans keyed by area (src/lib/admin/access.ts).
+  `access` is an object keyed by area (src/lib/admin/access.ts), each value
+  false, 'view' or 'edit'.
   Names are not entered here: Google supplies them at first sign-in, or with
   the access request when someone unknown tried to sign in. Adding an email
   that has a pending request approves it (its name is kept, the request goes).
   Writes additionally need a Google session under SENSITIVE_FRESH_SECONDS old
   and answer 401 { error: 'reauth' } otherwise; the page reacts by sending the
   browser through Google and back. Root admins (users.ts) can't be edited or
-  removed here, and nobody can remove their own login or untick their own
-  Admin admin access.
+  removed here, and nobody can remove their own login or take the edit grant
+  off their own Admin admin access.
 */
 
 import { after, NextRequest } from 'next/server'
 import {
   canManageUsers,
+  canViewUsers,
   currentAdmin,
   hasFreshSession,
   SENSITIVE_FRESH_SECONDS,
 } from '@/lib/admin/auth'
-import type { AccessFlags } from '@/lib/admin/access'
+import { canEdit, type AccessFlags } from '@/lib/admin/access'
 import { approvedMail, sendAdminMail } from '@/lib/admin/mail'
 import { publicOrigin } from '@/lib/admin/origin'
 import {
@@ -51,7 +54,8 @@ function json(body: unknown, status = 200): Response {
 }
 
 async function ensureAuth(write: boolean): Promise<Response | null> {
-  if (!(await canManageUsers())) return json({ error: 'unauthorized' }, 401)
+  const allowed = write ? await canManageUsers() : await canViewUsers()
+  if (!allowed) return json({ error: 'unauthorized' }, 401)
   if (write && !(await hasFreshSession(SENSITIVE_FRESH_SECONDS))) {
     return json({ error: 'reauth' }, 401)
   }
@@ -73,10 +77,11 @@ export async function GET() {
   const auth = await ensureAuth(false)
   if (auth) return auth
   const me = await currentAdmin()
-  const [managed, signIns, requests] = await Promise.all([
+  const [managed, signIns, requests, canEditHere] = await Promise.all([
     usersStore.list(),
     usersStore.lastSignIns().catch(() => ({}) as Record<string, string>),
     usersStore.listRequests().catch(() => []),
+    canManageUsers(),
   ])
   const users = [
     ...ROOT_ADMINS.map(u => ({
@@ -104,13 +109,14 @@ export async function GET() {
     users,
     requests: [...requests].sort((a, b) => (a.lastAt < b.lastAt ? 1 : -1)),
     shared: usersStoreIsShared,
+    canEdit: canEditHere,
   })
 }
 
 const summarise = (a: AccessFlags) =>
   Object.entries(a)
-    .filter(([, on]) => on)
-    .map(([k]) => k)
+    .filter(([, grant]) => grant)
+    .map(([k, grant]) => `${k}:${grant}`)
     .join(',')
 
 export async function POST(req: NextRequest) {
@@ -173,9 +179,9 @@ export async function PATCH(req: NextRequest) {
   const me = await currentAdmin()
   const checked = validateAccess(body.access)
   if (!checked.ok) return json({ error: checked.error }, 400)
-  if (me?.email === email && !checked.value.manageUsers) {
+  if (me?.email === email && !canEdit(checked.value, 'manageUsers')) {
     return json(
-      { error: "You can't remove your own access to this page." },
+      { error: "You can't take away your own ability to edit this page." },
       400
     )
   }

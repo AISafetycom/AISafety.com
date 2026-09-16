@@ -78,7 +78,8 @@ Read `docs/css-guidelines.md` (Melissa's rules) before writing any styles. In sh
 
 ## Admin area
 
-- Access is a cookie derived from one of several passwords, each with its own capabilities (`src/lib/admin/auth.ts`). A new admin page must check the specific capability it needs, not just `isAdmin()`.
+- People sign in with Google; each has one boolean per area (`src/lib/admin/access.ts`). A new admin page must check the specific capability it needs (`src/lib/admin/auth.ts`), not just `isAdmin()`.
+- `/admin/queue` is the owner's review inbox for proposed directory changes (docs/architecture.md, "Queue"). Bots write the rows on the owner's Mac; the site only decides them. Nothing there may ever auto-apply.
 - Keep admin writes narrow and explicit. The map editor accepts only x, y and Scale and rejects any other key; follow that pattern.
 
 ## Public Data API
@@ -95,8 +96,9 @@ npm test
 
 - `npm run build` runs the vitest suite first, then builds. Husky runs lint-staged on every commit.
 - Pure logic (ordering, formatting, parsing) goes in a dependency-free `src/lib` module with a vitest test next to it, following `training-order.ts` and `featured.ts`.
-- Verify visual changes in a real browser on localhost, at desktop and mobile widths. Compare against the design rules, not against the old Webflow site.
-- **There is no CI yet.** Nothing runs automatically on push, so these local checks are the only gate.
+- Browser smoke tests live in `e2e/` (Playwright): every public page renders without runtime errors and with its listings, and every Data API endpoint answers. Run them against a production build with `npm run build && npm run test:e2e`. They need no credentials.
+- Verify visual changes yourself in a real browser on localhost, at desktop and mobile widths. Compare against the design rules, not against the old Webflow site.
+- **CI** (`.github/workflows/ci.yml`) runs type-check, lint, unit tests, a production build and the smoke tests on every pull request and every push to `main`. A red check means the change is not ready; fix it rather than merging around it.
 
 ## Git and pull requests
 
@@ -104,12 +106,25 @@ npm test
 - Commit subjects describe the user-visible change, in the present tense, often prefixed with the page: "Jobs: show each location on its own line".
 - PR body: one or two plain-English sentences on what changes and why, then bullets for the details. No "Test plan" section. When a change goes beyond what was asked (a layout choice, dropped headings), say so and flag it for design review.
 - End the PR body with a single attribution line: 🤖 Generated with [Claude Code](https://claude.com/claude-code)
+- A PR merges only when both CI jobs are green and the branch is up to date with `main`. GitHub enforces this; use the "Update branch" button rather than merging by hand.
+
+## Contributing from a fork
+
+Most contributors, including everyone at the September 2026 hackathon, don't have write access. Work in your own fork and open a pull request against `main`. Several people are working at the same time, so these rules are about not stepping on each other.
+
+- **No secrets needed.** `nvm use && npm install && npm run dev` runs the site in contributor mode from the public Data API. You don't need the Airtable token, and nobody will send it.
+- **One change per pull request, kept small.** Branch from a fresh `main` for each one. A small PR merges in minutes; a large one waits and collects conflicts.
+- **Stay out of the shared files unless the task needs them.** That is where conflicts happen: `package.json` and `package-lock.json` (don't add a dependency without asking first), `src/app/globals.css`, `src/app/layout.tsx`, `src/components/Navigation.tsx`, `src/components/Footer.tsx`, `docs/architecture.md`. Styles go in a `.module.css` next to your component. If the task does need one of them, say so in the PR description.
+- **Off limits without asking:** `src/app/admin/`, `src/app/api/` (except a new v1 endpoint, per `docs/development-guide.md`), `src/lib/admin/`, `src/lib/assistant/` and `src/proxy.ts`. They carry sign-in, data writes and rate limits.
+- **Before opening the PR** run `npm run type-check`, `npm run lint`, `npm test` and `npm run build`. CI runs the same checks plus the browser smoke tests. If your GitHub account is brand new, a maintainer has to approve the CI run on your first PR; ask if it hasn't happened.
+- **Every PR gets a Vercel preview.** A maintainer authorizes the deployment for fork PRs, then the Vercel bot comments the URL. Reviewers look there rather than pulling your branch.
+- **A maintainer merges.** Keep the PR up to date with `main` and green, then ask.
 
 ## Reference
 
 - `docs/css-guidelines.md` — styling rules, current and authoritative
 - `docs/api.md`, `docs/api-changelog.md` — the public Data API
 - `docs/claude.md` — development philosophy: keep it simple, collocate, extract only on real reuse
-- `docs/architecture.md` — the admin map editor and newsletter sections are current; the overview at the top predates the data layer
-- `docs/development-guide.md` — setup and commands; its Airtable fetching examples predate `src/lib/data`
+- `docs/architecture.md` — how the pieces fit: data layer, freshness, Data API, chatbot, analytics, admin, crons, env vars
+- `docs/development-guide.md` — setup, commands, and recipes for adding a page or an Airtable table
 - `README.md` — contributor mode and team setup

@@ -1,14 +1,15 @@
 # Admin mail script
 
-The Google Apps Script web app that sends the admin's two emails (who asked for access → the owner; you're approved → the person). Same pattern as the hackathon forms (`docs/hackathon-signup.md`): a standalone script in the owner's Google account, deployed as a web app executing as the owner with access "Anyone", called by `src/lib/admin/mail.ts` with a shared secret. Env: `ADMIN_MAIL_SCRIPT_URL` (the /exec URL) and `ADMIN_MAIL_SECRET`.
+The Google Apps Script web app that sends the admin's three emails (who asked for access → the owner; you're approved → the person; the donation guide was published by someone else → the owner, at most once a day). Same pattern as the hackathon forms (`docs/hackathon-signup.md`): a standalone script in the owner's Google account, deployed as a web app executing as the owner with access "Anyone", called by `src/lib/admin/mail.ts` with a shared secret. Env: `ADMIN_MAIL_SCRIPT_URL` (the /exec URL) and `ADMIN_MAIL_SECRET`.
 
 The secret below is a placeholder; the deployed copy carries the real one. Redeploy after edits: paste, Cmd+S, Deploy → Manage deployments → new version (the URL stays the same).
 
 ```js
 // AISafety.com admin mail — Google Apps Script web app.
-// Sends the two emails the admin's sign-in flow needs, from the owner's Gmail:
+// Sends the admin's emails from the owner's Gmail:
 //   kind "request"  → to the OWNER only: someone asked for access
 //   kind "approved" → to the person: they can sign in now
+//   kind "digest"   → to the OWNER only: the donation guide was published
 // The site (src/lib/admin/mail.ts) POSTs JSON {secret, kind, to, subject, text,
 // html}. Anything without the shared secret is refused. Deployed as a web app
 // executing as the owner, "Anyone" may call it (the secret is the gate).
@@ -35,7 +36,7 @@ function doPost(e) {
     var subject = String(data.subject || '').slice(0, 200)
     var text = String(data.text || '').slice(0, 20000)
     var html = String(data.html || '').slice(0, 60000)
-    if (kind === 'request') {
+    if (kind === 'request' || kind === 'digest') {
       // Never anyone but the owner, whatever the request says.
       to = OWNER
     } else if (kind !== 'approved') {

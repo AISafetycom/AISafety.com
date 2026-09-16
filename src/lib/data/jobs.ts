@@ -130,6 +130,10 @@ export function jobSalary(raw: string): string {
   return raw.replace(/\s+-\s+/g, ' – ')
 }
 
+// The board holds vacancies only. The Airtable view ("Jobs AI Safety Only")
+// already excludes Fellowship, Funding, Course and Volunteering, so there is no
+// code-side filter — change the set there, then mirror it in the site's filter
+// options.
 export async function getJobs(): Promise<Job[]> {
   if (!hasAirtableCredentials()) return fetchPublicData<Job>('jobs')
   const raw = await fetchAirtableRecords({

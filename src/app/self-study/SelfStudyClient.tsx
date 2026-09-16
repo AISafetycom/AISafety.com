@@ -7,6 +7,7 @@ import ListingCard from '@/components/ListingCard'
 import ContributeButtons from '@/components/ContributeButtons'
 import type { Course } from '@/lib/data/self-study'
 import { placementsById } from '@/lib/placements'
+import { courseCardProps } from './card'
 
 interface SelfStudyClientProps {
   courses: Course[]
@@ -124,38 +125,7 @@ export default function SelfStudyClient({ courses }: SelfStudyClientProps) {
           {filteredCourses.map(course => (
             <ListingCard
               key={course.id}
-              href={course.url}
-              name={course.name}
-              description={course.description}
-              logo={course.image}
-              titleMeta={
-                course.organizer
-                  ? [
-                      {
-                        icon: '/images/icons/author.svg',
-                        value: `By ${course.organizer}`,
-                      },
-                    ]
-                  : undefined
-              }
-              meta={[
-                ...(course.category
-                  ? [
-                      {
-                        icon: '/images/icons/category.svg',
-                        value: course.category,
-                      },
-                    ]
-                  : []),
-                ...(course.courseType
-                  ? [
-                      {
-                        icon: '/images/icons/type.svg',
-                        value: course.courseType,
-                      },
-                    ]
-                  : []),
-              ]}
+              {...courseCardProps(course)}
               trackingPage="Self-study"
               listingId={course.id}
               placement={placements.get(course.id)}

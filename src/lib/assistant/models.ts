@@ -38,6 +38,11 @@ export const MODELS: AssistantModel[] = [
 
 export const DEFAULT_MODEL_ID = 'claude-opus-5'
 
+/** Whether an id names one of the models the playground may pick. */
+export function isKnownModelId(id: string): boolean {
+  return MODELS.some(m => m.id === id)
+}
+
 export function modelShortLabel(id: string): string {
   return MODELS.find(m => m.id === id)?.shortLabel ?? id
 }

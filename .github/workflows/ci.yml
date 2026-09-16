@@ -1,0 +1,60 @@
+# Runs on every pull request and on every push to main.
+#
+# Two jobs run in parallel:
+#   checks  type-check, lint, unit tests (fast, no network)
+#   smoke   production build, then a real Chromium opens every public page
+#           and calls every Data API endpoint (see e2e/smoke.spec.ts)
+#
+# No secrets are used. Without Airtable credentials the build runs in
+# contributor mode and reads data from the live site's public Data API, the
+# same path a fresh clone uses locally (see README.md).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Type-check, lint, unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx next typegen
+      - run: npm run type-check
+      - run: npm run lint
+      - run: npm test
+
+  smoke:
+    name: Build and smoke-test in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

@@ -49,12 +49,14 @@ describe('relabelled filter groups', () => {
     expect(trackedFilterGroup('Jobs', 'Remote or on-site')).toBe(
       'Work location'
     )
+    expect(trackedFilterGroup('Jobs', 'Type')).toBe('Role type')
   })
 
   it('shows the current title for a logged group', () => {
     expect(displayFilterGroup('Jobs', 'Work location')).toBe(
       'Remote or on-site'
     )
+    expect(displayFilterGroup('Jobs', 'Role type')).toBe('Type')
   })
 
   it('round-trips and leaves other groups alone', () => {
@@ -64,8 +66,8 @@ describe('relabelled filter groups', () => {
         trackedFilterGroup('Jobs', 'Remote or on-site')
       )
     ).toBe('Remote or on-site')
-    expect(trackedFilterGroup('Jobs', 'Type')).toBe('Type')
-    expect(displayFilterGroup('Jobs', 'Type')).toBe('Type')
+    expect(trackedFilterGroup('Jobs', 'Skill set')).toBe('Skill set')
+    expect(displayFilterGroup('Jobs', 'Skill set')).toBe('Skill set')
     expect(trackedFilterGroup('Funding', 'Remote or on-site')).toBe(
       'Remote or on-site'
     )

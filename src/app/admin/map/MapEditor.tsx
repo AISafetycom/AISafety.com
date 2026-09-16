@@ -98,7 +98,13 @@ function fmt(n: number): string {
   return n.toFixed(1)
 }
 
-export default function MapEditor() {
+export default function MapEditor({
+  canEdit,
+}: {
+  /** False for a view-only grant: the map as the editor draws it, with
+   *  nothing to drag or change. The API refuses those writes regardless. */
+  canEdit: boolean
+}) {
   const [records, setRecords] = useState<EditorRecord[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [fetchedAt, setFetchedAt] = useState<string | null>(null)
@@ -491,15 +497,18 @@ export default function MapEditor() {
 
   type History = { kind: QueuedMove['kind']; entry?: UndoEntry }
 
-  /** Show a change immediately and queue its save. */
+  /** Show a change immediately and queue its save. Every way of changing a
+   *  record (drag, place, nudge, the x/y fields, Scale, undo, redo) comes
+   *  through here, so a view-only session is stopped in one place. */
   const applyChange = useCallback(
     (id: string, change: Change, history: History = { kind: 'user' }) => {
+      if (!canEdit) return
       applyLocal(id, change)
       // A fresh change forks history: nothing to redo any more.
       if (history.kind === 'user') setRedoStack([])
       enqueue({ id, change, ...history })
     },
-    [enqueue, applyLocal]
+    [enqueue, applyLocal, canEdit]
   )
 
   const moveRecord = useCallback(
@@ -709,16 +718,24 @@ export default function MapEditor() {
       <div className={`${adminStyles.pageHeading} ${styles.heading}`}>
         <h1 className={adminStyles.pageTitle}>Map editor</h1>
         <span className={adminStyles.pageMeta}>
-          Drag a listing to move it · click to select · only x, y and Scale are
-          written
+          {canEdit
+            ? 'Drag a listing to move it · click to select · only x, y and Scale are written'
+            : 'Click a listing to see its details'}
         </span>
       </div>
 
-      <div className={`${adminStyles.notice} ${styles.liveWarning}`}>
-        <strong>This edits the live site.</strong> Every move is saved to
-        Airtable straight away and appears on the public /map within a few
-        minutes. Use with caution.
-      </div>
+      {canEdit ? (
+        <div className={`${adminStyles.notice} ${styles.liveWarning}`}>
+          <strong>This edits the live site.</strong> Every move is saved to
+          Airtable straight away and appears on the public /map within a few
+          minutes. Use with caution.
+        </div>
+      ) : (
+        <div className={adminStyles.notice}>
+          View only: you can look at every listing, placed or not, but moving
+          and resizing them stays with people who can edit the Map editor.
+        </div>
+      )}
 
       <div className={`${adminStyles.editorToolbar} ${styles.toolbar}`}>
         <span className={adminStyles.editorStatus}>
@@ -765,24 +782,28 @@ export default function MapEditor() {
           >
             Refresh
           </button>
-          <button
-            type="button"
-            className={adminStyles.editorButton}
-            onClick={undo}
-            disabled={undoStack.length === 0 || saving}
-            title="Cmd/Ctrl+Z"
-          >
-            Undo{undoStack.length ? ` (${undoStack.length})` : ''}
-          </button>
-          <button
-            type="button"
-            className={adminStyles.editorButton}
-            onClick={redo}
-            disabled={redoStack.length === 0 || saving}
-            title="Cmd/Ctrl+Shift+Z"
-          >
-            Redo{redoStack.length ? ` (${redoStack.length})` : ''}
-          </button>
+          {canEdit && (
+            <>
+              <button
+                type="button"
+                className={adminStyles.editorButton}
+                onClick={undo}
+                disabled={undoStack.length === 0 || saving}
+                title="Cmd/Ctrl+Z"
+              >
+                Undo{undoStack.length ? ` (${undoStack.length})` : ''}
+              </button>
+              <button
+                type="button"
+                className={adminStyles.editorButton}
+                onClick={redo}
+                disabled={redoStack.length === 0 || saving}
+                title="Cmd/Ctrl+Shift+Z"
+              >
+                Redo{redoStack.length ? ` (${redoStack.length})` : ''}
+              </button>
+            </>
+          )}
         </span>
       </div>
 
@@ -852,6 +873,7 @@ export default function MapEditor() {
               onPlaceClick={onPlaceClick}
               onDragStateChange={setDragging}
               controlsRef={controlsRef}
+              readOnly={!canEdit}
             />
           ) : (
             <div className={`${styles.canvas} ${styles.canvasLoading}`}>
@@ -875,6 +897,7 @@ export default function MapEditor() {
             onPick={onPick}
             onSetPosition={(id, x, y) => moveRecord(id, x, y)}
             onSetScale={setScale}
+            readOnly={!canEdit}
           />
         )}
       </div>

@@ -3,6 +3,7 @@ import { canViewConversationLog, currentAdmin } from '@/lib/admin/auth'
 import {
   REVIEW_VALUES,
   getConversation,
+  isRecordId,
   isConversationsTableConfigured,
   listAnnotationFacets,
   listConversationsPage,
@@ -200,6 +201,12 @@ export async function PATCH(req: NextRequest) {
       status: 400,
       headers: { 'Content-Type': 'application/json' },
     })
+  }
+  if (!isRecordId(body.id)) {
+    return new Response(
+      JSON.stringify({ error: 'id must be an Airtable record id' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } }
+    )
   }
   const patch: {
     notes?: string

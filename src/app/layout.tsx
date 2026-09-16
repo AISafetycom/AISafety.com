@@ -6,6 +6,7 @@ import './globals.css'
 import LayoutShell from '@/components/LayoutShell'
 import MatomoRouteTracker from '@/components/MatomoRouteTracker'
 import PreviewBanner from '@/components/PreviewBanner'
+import ScrollToHash from '@/components/ScrollToHash'
 import { fetchAllCounts } from '@/lib/data/counts'
 import { isPreviewRequest } from '@/lib/preview'
 
@@ -83,6 +84,7 @@ export default async function RootLayout({
           <MatomoRouteTracker />
         </Suspense>
         <LayoutShell counts={counts} preview={preview}>
+          <ScrollToHash />
           {children}
         </LayoutShell>
         <PreviewBanner />

@@ -6,10 +6,11 @@ import {
   fieldString,
   fieldText,
   publishedFormula,
+  type AirtableRawRecord,
 } from './airtable'
 import { fetchPublicData, hasAirtableCredentials } from './public-api'
 
-const TABLE_ID = 'tblRNYJ0m1cmJXKKk'
+export const TABLE_ID = 'tblRNYJ0m1cmJXKKk'
 const VIEW_ID = 'viwblgaia3x1gsqBo'
 
 // Permanent Airtable field IDs for the Self-study table. Fetching,
@@ -46,6 +47,33 @@ export interface Course {
   featuredTagline: string | null
 }
 
+/**
+ * One Self-study record (fields keyed by field id) → the listing the page
+ * renders, or null when the site would skip it (no name). Publish/Hide
+ * filtering stays in getCourses(), so an unpublished record can still be
+ * mapped — the admin Queue previews proposed records through this.
+ */
+export function courseFromRecord(record: AirtableRawRecord): Course | null {
+  const f = record.fields
+  const name = fieldString(f[FIELD.name])
+  if (!name) return null
+
+  return {
+    id: record.id,
+    dateAdded: record.createdTime?.slice(0, 10) ?? null,
+    lastModified: fieldDateOnly(f[FIELD.lastModified]),
+    name,
+    description: fieldString(f[FIELD.description]) || '',
+    category: fieldText(f[FIELD.focus]),
+    courseType: fieldText(f[FIELD.format]),
+    organizer: fieldString(f[FIELD.createdBy]) || '',
+    url: fieldString(f[FIELD.link]) || '#',
+    image: fieldAttachmentUrl(f[FIELD.logo]),
+    featured: fieldFeatured(f[FIELD.featured]),
+    featuredTagline: fieldString(f[FIELD.featuredTagline]),
+  }
+}
+
 export async function getCourses(): Promise<Course[]> {
   if (!hasAirtableCredentials()) return fetchPublicData<Course>('courses')
   const raw = await fetchAirtableRecords({
@@ -58,24 +86,9 @@ export async function getCourses(): Promise<Course[]> {
 
   const results: Course[] = []
   for (const record of raw) {
-    const f = record.fields
-    const name = fieldString(f[FIELD.name])
-    if (!name) continue
-
-    results.push({
-      id: record.id,
-      dateAdded: record.createdTime?.slice(0, 10) ?? null,
-      lastModified: fieldDateOnly(f[FIELD.lastModified]),
-      name,
-      description: fieldString(f[FIELD.description]) || '',
-      category: fieldText(f[FIELD.focus]),
-      courseType: fieldText(f[FIELD.format]),
-      organizer: fieldString(f[FIELD.createdBy]) || '',
-      url: fieldString(f[FIELD.link]) || '#',
-      image: fieldAttachmentUrl(f[FIELD.logo]),
-      featured: fieldFeatured(f[FIELD.featured]),
-      featuredTagline: fieldString(f[FIELD.featuredTagline]),
-    })
+    const course = courseFromRecord(record)
+    if (!course) continue
+    results.push(course)
   }
 
   return results

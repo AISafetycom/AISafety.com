@@ -60,7 +60,7 @@ export default function AssistantAdmin({
   return (
     <>
       <div className={styles.pageHeading}>
-        <h1 className={styles.pageTitle}>Playground</h1>
+        <h1 className={styles.pageTitle}>Bot playground</h1>
         <div className={styles.pageMeta}>
           Production prompt:{' '}
           <span className={styles.pageMetaValue}>{promptVersion}</span>

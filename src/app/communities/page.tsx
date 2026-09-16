@@ -6,6 +6,7 @@ import CommunitiesMap from './CommunitiesMap'
 import CardsViewTracker from '@/components/CardsViewTracker'
 import styles from './page.module.css'
 import { getCommunities } from '@/lib/data/communities'
+import { activityIcon } from './activity-icon'
 import { pageMetadata } from '@/lib/page-metadata'
 import { SITE_PAGES } from '@/lib/site-pages'
 
@@ -69,7 +70,7 @@ export default async function CommunitiesPage() {
                 ...(community.activityLevel
                   ? [
                       {
-                        icon: '/images/icons/activity.svg',
+                        icon: activityIcon(community.activityLevel),
                         value: community.activityLevel,
                       },
                     ]

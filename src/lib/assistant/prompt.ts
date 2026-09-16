@@ -3,7 +3,7 @@ import { MAP_AREA_BY_CATEGORY } from '@/lib/data/map-areas'
 
 /** Stamp on every conversation log row. Bump manually when you ship a
  *  meaningful prompt change so historical conversations stay attributable. */
-export const PROMPT_VERSION = '2026-09-04-01'
+export const PROMPT_VERSION = '2026-09-15-01'
 
 /** "Category → **Area**" lines for the Field map section, generated from the
  *  same table the catalog uses to compute each org's \`mapArea\`, so the prompt
@@ -155,7 +155,7 @@ Filter keys + complete value lists per type. Values are exact catalog labels:
 - **community**:
   - \`platform\`: "Discord", "Facebook", "Forum", "Gather", "Reddit", "Slack", "Telegram", "WhatsApp", "Other", "Local" (in-person communities are tagged "Local")
   - \`type\`: "Online", "In person"
-  - \`activityLevel\`: "Very active", "Active", "Semi-active", "Inactive"
+  - \`activityLevel\`: "Active", "Semi-active", "Inactive"
   - \`focus\`: "Main focus is AI safety", "Partial focus on AI safety"
   - \`location\`: free-text city or country (prefer \`near\` over this)
   - **Language matters – match it to the user.** Most AI safety communities run in English, but some are language- or country-specific, which the description makes clear (e.g. "Russian group…", "German-speaking", or a localized \`.ru\`/\`.de\` site). A community is fine to recommend when it runs in: English; the language the user is writing to you in; OR an official/common language of the user's location (e.g. a German-language community for someone in Germany). Otherwise do NOT recommend it – a community in a language the user is unlikely to read is no use to them. Only surface an off-language community if the user writes in that language, says they speak it, or explicitly asks about that country/language. (A Russian-language hub recommended to someone messaging you in English from Germany is exactly the mistake to avoid – though a German-language one for that same user would be fine.) **Never assert a language ability the user hasn't stated or shown.** Their location vouches only for that country's own language(s) – it is never evidence they read anything else, and you must not invent a claim like "since you read French" to justify carding an off-language community. This exact failure has happened: a user in Italy writing in English asked about Discord servers, and the reply carded a French-language server with "Since you're in Italy and read French" – nothing in the conversation supported that. If the user hasn't demonstrated the language, the community doesn't qualify: leave it out, however active it is.
@@ -227,7 +227,7 @@ Common patterns:
 - Donor wanting to give ("I have $X to donate", "where should I give?"): answer from the donation guide content in your context – it has recommendations broken down by amount – and link to [Donation guide](/donation-guide). Only card a fund or platform the guide itself recommends donating to (e.g. a regranting fund or donation platform like Manifund). Do NOT blanket-search \`type='funder'\` and present those listings as places to donate – [Funding](/funding) lists grantmakers for people SEEKING funding, most of which aren't donation destinations. Donation ≠ funding.
 - Founder questions: two calls, one with type='funder', one with type='founder-resource' (filter type to "Incubator" or "Fiscal sponsor" as relevant).
 - Community near a city: \`search_listings({ type: 'community', near: { city: 'Berlin', radiusKm: 500 } })\`
-- Active in-person communities anywhere: \`search_listings({ type: 'community', filters: { type: 'In person', activityLevel: ['Very active', 'Active'] } })\`
+- Active in-person communities anywhere: \`search_listings({ type: 'community', filters: { type: 'In person', activityLevel: ['Active'] } })\`
 - Intro learning: \`search_listings({ type: 'course', filters: { category: 'General intro' } })\`
 - Podcasts and newsletters together: \`search_listings({ type: 'media-channel', filters: { type: ['Podcast', 'Newsletter'] } })\`
 - Find research labs: \`search_listings({ type: 'org', filters: { category: ['Empirical research', 'Conceptual research'], status: 'Active' } })\`
