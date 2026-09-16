@@ -106,6 +106,19 @@ npm test
 - Commit subjects describe the user-visible change, in the present tense, often prefixed with the page: "Jobs: show each location on its own line".
 - PR body: one or two plain-English sentences on what changes and why, then bullets for the details. No "Test plan" section. When a change goes beyond what was asked (a layout choice, dropped headings), say so and flag it for design review.
 - End the PR body with a single attribution line: 🤖 Generated with [Claude Code](https://claude.com/claude-code)
+- A PR merges only when both CI jobs are green and the branch is up to date with `main`. GitHub enforces this; use the "Update branch" button rather than merging by hand.
+
+## Contributing from a fork
+
+Most contributors, including everyone at the September 2026 hackathon, don't have write access. Work in your own fork and open a pull request against `main`. Several people are working at the same time, so these rules are about not stepping on each other.
+
+- **No secrets needed.** `nvm use && npm install && npm run dev` runs the site in contributor mode from the public Data API. You don't need the Airtable token, and nobody will send it.
+- **One change per pull request, kept small.** Branch from a fresh `main` for each one. A small PR merges in minutes; a large one waits and collects conflicts.
+- **Stay out of the shared files unless the task needs them.** That is where conflicts happen: `package.json` and `package-lock.json` (don't add a dependency without asking first), `src/app/globals.css`, `src/app/layout.tsx`, `src/components/Navigation.tsx`, `src/components/Footer.tsx`, `docs/architecture.md`. Styles go in a `.module.css` next to your component. If the task does need one of them, say so in the PR description.
+- **Off limits without asking:** `src/app/admin/`, `src/app/api/` (except a new v1 endpoint, per `docs/development-guide.md`), `src/lib/admin/`, `src/lib/assistant/` and `src/proxy.ts`. They carry sign-in, data writes and rate limits.
+- **Before opening the PR** run `npm run type-check`, `npm run lint`, `npm test` and `npm run build`. CI runs the same checks plus the browser smoke tests. If your GitHub account is brand new, a maintainer has to approve the CI run on your first PR; ask if it hasn't happened.
+- **Every PR gets a Vercel preview.** A maintainer authorizes the deployment for fork PRs, then the Vercel bot comments the URL. Reviewers look there rather than pulling your branch.
+- **A maintainer merges.** Keep the PR up to date with `main` and green, then ask.
 
 ## Reference
 
