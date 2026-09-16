@@ -823,6 +823,11 @@ export async function approveAndSend(
     status: 1,
     public: 0,
     tracklinks: 'all',
+    // Off: ActiveCampaign's Google Analytics link tracking would append its
+    // own utm_source/medium/content/campaign after the ones the renderer has
+    // already put on every aisafety.com link (issue #20, 16 Sept 2026: two
+    // utm_source values on one URL). Same flag in ac.py.
+    tracklinksanalytics: 0,
     sdate,
     [`p[${listId}]`]: listId,
     [`m[${messageId}]`]: 100,
