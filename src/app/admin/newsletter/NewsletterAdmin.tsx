@@ -60,6 +60,13 @@ interface Payload {
   recent: Recent[]
 }
 
+/** How often the page rereads ActiveCampaign on its own, so an approved
+ *  issue turns from "scheduled" into "sent" (and the opens move) without a
+ *  click (Bryce, 16 Sept 2026: "this should automatically update without me
+ *  needing to refresh"). A read is several AC calls and takes a few seconds,
+ *  so no faster than this; the Refresh button is still there for right now. */
+const POLL_MS = 30_000
+
 function when(iso: string | null): string {
   if (!iso) return '—'
   const d = new Date(iso)
@@ -94,23 +101,63 @@ export default function NewsletterAdmin({
     text: string
   } | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setLoadError(null)
+  /** A read in progress, and when the last one started: the timer skips a
+   *  tick rather than stacking reads, and a tab coming back into view only
+   *  rereads when its data is older than a tick. */
+  const inFlight = useRef(false)
+  const lastStarted = useRef(0)
+
+  /** `quiet` = the timer's own reread: no "Refreshing…" on the button and
+   *  skipped while a read is already running. A click or an approval reads
+   *  the ordinary way. */
+  const load = useCallback(async ({ quiet = false } = {}) => {
+    if (quiet && inFlight.current) return
+    inFlight.current = true
+    lastStarted.current = Date.now()
+    if (!quiet) {
+      setLoading(true)
+      setLoadError(null)
+    }
     try {
       const res = await fetch('/api/admin/newsletter', { cache: 'no-store' })
       const body = (await res.json()) as Payload & { error?: string }
       if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`)
       setData(body)
+      setLoadError(null)
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : String(err))
     } finally {
-      setLoading(false)
+      inFlight.current = false
+      if (!quiet) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
     void load()
+  }, [load])
+
+  // Reread every POLL_MS while the tab is visible, and as soon as it becomes
+  // visible again if the data has gone stale meanwhile. A hidden tab reads
+  // nothing.
+  useEffect(() => {
+    let timer = 0
+    const tick = () => {
+      if (document.visibilityState === 'visible') void load({ quiet: true })
+      timer = window.setTimeout(tick, POLL_MS)
+    }
+    timer = window.setTimeout(tick, POLL_MS)
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return
+      if (Date.now() - lastStarted.current < POLL_MS) return
+      void load({ quiet: true })
+      window.clearTimeout(timer)
+      timer = window.setTimeout(tick, POLL_MS)
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.clearTimeout(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [load])
 
   async function send(draft: Draft) {
@@ -184,6 +231,7 @@ export default function NewsletterAdmin({
               <span className={adminStyles.pageMetaValue}>
                 {when(data.fetchedAt)}
               </span>
+              {' · '}updates every {Math.round(POLL_MS / 1000)} seconds
             </>
           ) : (
             <>
