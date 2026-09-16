@@ -610,6 +610,15 @@ function doneLabel(item: QueueItem): string {
   return 'Applied'
 }
 
+/** The toast and the row while a decision is on its way to Airtable. */
+function workingLabel(item: QueueItem, action: Decision): string {
+  if (action === 'reject') return 'Rejecting…'
+  const label = acceptLabel(item)
+  if (label === 'Publish') return 'Publishing…'
+  if (label === 'Accept flag') return 'Accepting…'
+  return 'Applying…'
+}
+
 interface Draft {
   mode: 'idle' | 'reject'
   edits: Record<string, string>
@@ -637,9 +646,17 @@ const FRESH: Draft = {
 
 interface Toast {
   item: QueueItem
+  /** A rejection: the mark is a cross in the danger colour. */
+  no: boolean
+  /** working: the decision is still on its way to Airtable (the toast
+   *  stays up, U queues an undo). done: it landed. failed: the item is
+   *  still in the list, with Retry. */
+  state: 'working' | 'done' | 'failed'
   text: string
   /** A second line that fills in later: what happened to the reply draft. */
   sub?: string
+  /** What Retry sends again after a failure. */
+  retry?: { action: Decision; extra: Record<string, unknown> }
 }
 
 /** What the page tells the Mac agent to do after an accept. */
@@ -705,7 +722,8 @@ async function callAgent(
 const WORKER_NOTE = 'the Mac saves the reply draft within five minutes'
 const OFFLINE_SUB = `Mac agent not reachable · ${WORKER_NOTE}`
 
-type Action = 'accept' | 'reject' | 'undo'
+type Decision = 'accept' | 'reject'
+type Action = Decision | 'undo'
 
 export default function QueueAdmin({
   canEdit,
@@ -723,6 +741,23 @@ export default function QueueAdmin({
   const [toastLeaving, setToastLeaving] = useState(false)
   // The last decision, kept for U after the toast has gone.
   const [undoable, setUndoable] = useState<QueueItem | null>(null)
+  // Decisions still being written to Airtable, by item id. The page moves
+  // on the moment Accept or Reject is clicked and the toast says when each
+  // one lands (Bryce, 16 Sept 2026: waiting on every click was too slow).
+  const [pending, setPending] = useState<Record<string, Decision>>({})
+  const pendingRef = useRef(pending)
+  // Decisions whose Undo was pressed before they landed: undone on arrival.
+  const undoAfterRef = useRef<Set<string>>(new Set())
+  // The last decision clicked is the only one U can target, in whatever
+  // order the writes land.
+  const lastDecidedRef = useRef<string | null>(null)
+  const actRef = useRef<
+    (
+      item: QueueItem,
+      action: Action,
+      extra?: Record<string, unknown>
+    ) => Promise<void>
+  >(async () => {})
   // The local agent on the owner's Mac: its port + a token from the API
   // (null when the secret is not configured), and whether it answered a
   // ping. Reply drafts go through it the moment an emailed request is
@@ -1196,6 +1231,36 @@ export default function QueueAdmin({
       const reply = drafts[item.id]?.reply ?? null
       const replyDraft =
         action === 'accept' && reply !== null ? { replyDraft: reply } : {}
+      const decision = action === 'accept' || action === 'reject'
+      if (decision) {
+        // The page moves on now; the write lands behind it. The previous
+        // decision stops being U's target (the Done list still has it).
+        lastDecidedRef.current = item.id
+        setUndoable(null)
+        pendingRef.current = { ...pendingRef.current, [item.id]: action }
+        setPending(pendingRef.current)
+        setToast({
+          item,
+          no: action === 'reject',
+          state: 'working',
+          text: workingLabel(item, action),
+        })
+        // Auto-advance to the next open item that is not itself on its way.
+        const flat = ordered.flat
+        const i = flat.findIndex(x => x.id === item.id)
+        const free = (x: QueueItem) =>
+          x.id !== item.id && !pendingRef.current[x.id]
+        const next =
+          flat.slice(i + 1).find(free) ??
+          flat.slice(0, Math.max(0, i)).reverse().find(free)
+        if (next) select(next.id)
+      }
+      const forget = () => {
+        const rest = { ...pendingRef.current }
+        delete rest[item.id]
+        pendingRef.current = rest
+        setPending(rest)
+      }
       try {
         const res = await fetch(API, {
           method: 'POST',
@@ -1222,28 +1287,49 @@ export default function QueueAdmin({
           delete next[item.id]
           return next
         })
-        if (action === 'accept' || action === 'reject') {
+        if (decision) {
+          forget()
           const draftPending = action === 'accept' && wantsDraft(updated)
-          setUndoable(updated)
-          setToast({
-            item: updated,
-            text:
-              action === 'reject'
-                ? `Rejected · ${updated.rejectReason ?? ''}`
-                : doneLabel(updated),
-            sub: draftPending
-              ? agent
-                ? 'Saving the reply draft in Gmail…'
-                : `Reply draft: ${WORKER_NOTE}`
-              : updated.source === 'Discord' && updated.replyDraft
-                ? 'Reply drafted · copy it and send it yourself on Discord'
-                : undefined,
-          })
-          // Auto-advance to the next open item.
-          const flat = ordered.flat
-          const i = flat.findIndex(x => x.id === item.id)
-          const next = flat[i + 1] ?? flat[i - 1]
-          if (next) select(next.id)
+          const text =
+            action === 'reject'
+              ? `Rejected · ${updated.rejectReason ?? ''}`
+              : doneLabel(updated)
+          if (undoAfterRef.current.delete(item.id)) {
+            // U was pressed while it was on its way: straight back.
+            setToast(prev =>
+              prev && prev.item.id === item.id
+                ? {
+                    ...prev,
+                    item: updated,
+                    state: 'done',
+                    text,
+                    sub: 'Undoing…',
+                  }
+                : prev
+            )
+            void actRef.current(updated, 'undo')
+            return
+          }
+          if (lastDecidedRef.current === item.id) setUndoable(updated)
+          // A newer decision owns the toast; an older one lands quietly and
+          // its row moves to Done.
+          setToast(prev =>
+            prev && prev.item.id === item.id
+              ? {
+                  item: updated,
+                  no: action === 'reject',
+                  state: 'done',
+                  text,
+                  sub: draftPending
+                    ? agent
+                      ? 'Saving the reply draft in Gmail…'
+                      : `Reply draft: ${WORKER_NOTE}`
+                    : updated.source === 'Discord' && updated.replyDraft
+                      ? 'Reply drafted · copy it and send it yourself on Discord'
+                      : undefined,
+                }
+              : prev
+          )
           if (draftPending) void saveReply(updated)
         } else if (action === 'undo') {
           setToast(null)
@@ -1251,17 +1337,42 @@ export default function QueueAdmin({
           select(updated.id)
         }
       } catch (e) {
-        setDraft(item.id, {
-          busy: false,
-          error: e instanceof Error ? e.message : String(e),
-        })
+        const message = e instanceof Error ? e.message : String(e)
+        setDraft(item.id, { busy: false, error: message })
+        if (decision) {
+          forget()
+          undoAfterRef.current.delete(item.id)
+          // A failure takes the toast whatever it shows, and keeps it up
+          // until Retry, Dismiss or the next decision. The item is still in
+          // the list, with the error on it.
+          setToast({
+            item,
+            no: action === 'reject',
+            state: 'failed',
+            text: `${action === 'reject' ? 'Reject' : acceptLabel(item)} failed · ${message}`,
+            sub: 'Still in the list',
+            retry: { action, extra },
+          })
+        }
       }
     },
     [ordered.flat, select, setDraft, drafts, agent, saveReply, canEdit]
   )
+  actRef.current = act
+
+  // Undo pressed on a decision still on its way: undone the moment it lands.
+  const queueUndo = useCallback((id: string) => {
+    undoAfterRef.current.add(id)
+    setToast(prev =>
+      prev && prev.item.id === id
+        ? { ...prev, sub: 'Undoing as soon as it lands…' }
+        : prev
+    )
+  }, [])
 
   useEffect(() => {
-    if (!toast) return
+    // A decision on its way, or one that failed, stays up until dealt with.
+    if (!toast || toast.state !== 'done') return
     const leave = setTimeout(
       () => setToastLeaving(true),
       TOAST_MS - TOAST_OUT_MS
@@ -1378,6 +1489,9 @@ export default function QueueAdmin({
           if (undoable && !draft(undoable.id).busy) {
             e.preventDefault()
             void act(undoable, 'undo')
+          } else if (toast?.state === 'working') {
+            e.preventDefault()
+            queueUndo(toast.item.id)
           }
           break
         case '?':
@@ -1401,6 +1515,8 @@ export default function QueueAdmin({
     move,
     act,
     undoable,
+    toast,
+    queueUndo,
     showHelp,
     setDraft,
     live,
@@ -1410,6 +1526,7 @@ export default function QueueAdmin({
   const waiting = ordered.open
   const doneToday = ordered.done.length
   const total = waiting + doneToday
+  const toastRetry = toast?.retry ?? null
 
   return (
     <div
@@ -1535,6 +1652,10 @@ export default function QueueAdmin({
                         key={item.id}
                         item={item}
                         active={item.id === selectedId && !showDone}
+                        working={pending[item.id] ?? null}
+                        failed={
+                          !pending[item.id] && Boolean(draft(item.id).error)
+                        }
                         onClick={() => select(item.id)}
                       />
                     ))
@@ -1580,18 +1701,22 @@ export default function QueueAdmin({
       {toast && (
         // Laid out like a list row (logo, name, the muted line) with a
         // bold tick or cross in front, so the eye reads it the same way.
+        // While the decision is on its way the mark is a spinning ring.
         <div
           key={toast.item.id}
           className={`${styles.toast} ${toastLeaving ? styles.toastLeaving : ''}`}
           role="status"
         >
           <span
-            className={`${styles.toastMark} ${toast.item.status === 'Rejected' ? styles.toastMarkNo : ''}`}
+            className={`${styles.toastMark} ${toast.no ? styles.toastMarkNo : ''} ${
+              toast.state === 'working' ? styles.toastMarkWorking : ''
+            } ${toast.state === 'failed' ? styles.toastMarkFailed : ''}`}
           >
-            <Icon
-              src={toast.item.status === 'Rejected' ? ICON.x : ICON.check}
-              size={16}
-            />
+            {toast.state === 'failed' ? (
+              '!'
+            ) : toast.state === 'done' ? (
+              <Icon src={toast.no ? ICON.x : ICON.check} size={16} />
+            ) : null}
           </span>
           {toast.item.logo ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -1609,9 +1734,10 @@ export default function QueueAdmin({
               {toast.sub && <span>{toast.sub}</span>}
             </span>
           </span>
-          {toast.item.source === 'Discord' &&
+          {toast.state === 'done' &&
+            toast.item.source === 'Discord' &&
             toast.item.replyDraft &&
-            toast.item.status !== 'Rejected' && (
+            !toast.no && (
               <>
                 <CopyReply
                   text={toast.item.replyDraft}
@@ -1625,14 +1751,47 @@ export default function QueueAdmin({
                 )}
               </>
             )}
-          <button
-            className={styles.toastUndo}
-            disabled={draft(toast.item.id).busy}
-            onClick={() => void act(toast.item, 'undo')}
-          >
-            <Icon src={ICON.undo} size={12} className={styles.undoIcon} />
-            Undo <kbd>U</kbd>
-          </button>
+          {toast.state === 'failed' ? (
+            <>
+              {toastRetry && (
+                <button
+                  className={styles.toastUndo}
+                  onClick={() =>
+                    void act(toast.item, toastRetry.action, toastRetry.extra)
+                  }
+                >
+                  <Icon src={ICON.undo} size={12} className={styles.undoIcon} />
+                  Retry
+                </button>
+              )}
+              <button
+                className={styles.toastUndo}
+                onClick={() => select(toast.item.id)}
+              >
+                Open
+              </button>
+              <button
+                className={styles.toastClose}
+                aria-label="Dismiss"
+                onClick={() => setToast(null)}
+              >
+                <Icon src={ICON.x} size={12} />
+              </button>
+            </>
+          ) : (
+            <button
+              className={styles.toastUndo}
+              disabled={toast.state === 'done' && draft(toast.item.id).busy}
+              onClick={() =>
+                toast.state === 'working'
+                  ? queueUndo(toast.item.id)
+                  : void act(toast.item, 'undo')
+              }
+            >
+              <Icon src={ICON.undo} size={12} className={styles.undoIcon} />
+              Undo <kbd>U</kbd>
+            </button>
+          )}
         </div>
       )}
 
@@ -1679,16 +1838,22 @@ export default function QueueAdmin({
 function Row({
   item,
   active,
+  working,
+  failed,
   onClick,
 }: {
   item: QueueItem
   active: boolean
+  /** The decision on its way to Airtable, if one is. */
+  working: Decision | null
+  /** The last decision on it did not land; the error is on the detail. */
+  failed: boolean
   onClick: () => void
 }) {
   return (
     <button
       data-id={item.id}
-      className={`${styles.row} ${active ? styles.rowActive : ''}`}
+      className={`${styles.row} ${active ? styles.rowActive : ''} ${working ? styles.rowBusy : ''}`}
       onClick={onClick}
     >
       {item.logo ? (
@@ -1731,6 +1896,18 @@ function Row({
             <span className={styles.withIcon}>
               <Icon src={ICON.timer} size={12} />
               revising
+            </span>
+          )}
+          {working && (
+            <span className={styles.withIcon}>
+              <span className={styles.spinner} />
+              {workingLabel(item, working).replace('…', '').toLowerCase()}
+            </span>
+          )}
+          {failed && !working && (
+            <span className={`${styles.withIcon} ${styles.no}`}>
+              <Icon src={ICON.x} size={12} />
+              failed
             </span>
           )}
         </span>
