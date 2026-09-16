@@ -484,6 +484,33 @@ function ReorderPanel({
   const [fitError, setFitError] = useState<string | null>(null)
   const editable = groups.some(g => g.cards.some(c => c.fit !== null))
 
+  // Chrome doesn't always fire dragend on a row React moved in the DOM while
+  // it was being dragged, which left that row dimmed after the drop (Bryce,
+  // 16 Sept 2026). So any end of a drag clears the state: dragend or a drop
+  // anywhere in the window, the first mouse movement afterwards (no mouse
+  // events arrive during a drag), or a second without a dragover (the
+  // browser fires one every ~350 ms for as long as a drag is in progress).
+  useEffect(() => {
+    if (!drag) return
+    const clear = () => setDrag(null)
+    let timer = window.setTimeout(clear, 1000)
+    const tick = () => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(clear, 1000)
+    }
+    window.addEventListener('dragend', clear)
+    window.addEventListener('drop', clear)
+    window.addEventListener('mousemove', clear)
+    window.addEventListener('dragover', tick)
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('dragend', clear)
+      window.removeEventListener('drop', clear)
+      window.removeEventListener('mousemove', clear)
+      window.removeEventListener('dragover', tick)
+    }
+  }, [drag])
+
   function openEditor(gid: string, card: CardInfo) {
     setEditing({ gid, key: card.key })
     setFitText(card.fit ?? '')
