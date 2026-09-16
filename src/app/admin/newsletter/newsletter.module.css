@@ -238,6 +238,10 @@
   border: 1px solid var(--teal-800);
   border-radius: 8px;
   background: var(--teal-900);
+  /* The editor block hands down a fixed 27px line-height (sized for its
+     17px text); at 13px a wrapped title looked double-spaced (Bryce, 16
+     Sept 2026). */
+  line-height: 1.4;
 }
 
 .reorderGroup {
@@ -398,6 +402,7 @@
   background: var(--teal-900);
   color: var(--white);
   font-size: 14px;
+  line-height: 1.4;
 }
 
 .loading strong {
