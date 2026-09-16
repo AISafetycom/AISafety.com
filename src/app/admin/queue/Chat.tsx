@@ -105,6 +105,27 @@ const LINK_RE = /https?:\/\/[^\s<>)\]]+/g
 const INLINE_RE = /(\*\*[^*\n]+\*\*|`[^`\n]+`|https?:\/\/[^\s<>)\]]+)/g
 const BULLET_RE = /^\s*(?:[-•*]|\d+[.)])\s+/
 
+/** The Description length cap for the item's page – the numbers in
+ *  ~/Comb/description-rules.md section 1 (events and training 150–220,
+ *  every other page at most 180), shown on the edits card so an
+ *  over-long proposal is visible at once (16 Sept 2026: a /funding
+ *  description arrived at 244 characters and Bryce had to ask). The
+ *  Projects table calls the field "Description (short)". */
+interface DescCap {
+  field: string
+  cap: number
+}
+const PROJECTS_TABLE = 'tblHT29QNgMYKB8iW'
+function descriptionCap(item: QueueItem): DescCap {
+  return {
+    field:
+      item.targetTable === PROJECTS_TABLE
+        ? 'Description (short)'
+        : 'Description',
+    cap: item.page === '/events' || item.page === '/training' ? 220 : 180,
+  }
+}
+
 export default function Chat({
   item,
   agent,
@@ -163,6 +184,7 @@ export default function Chat({
   // The page's current values, readable from inside stream handlers.
   const editsRef = useRef(edits)
   editsRef.current = edits
+  const cap = descriptionCap(item)
   const replyRef = useRef(reply)
   replyRef.current = reply
   // Per reply (by its time stamp): what applying it changed, for Undo.
@@ -515,6 +537,7 @@ export default function Chat({
                   onSetEdits={onSetEdits}
                   onSetReply={onSetReply}
                   undo={undoFor(m)}
+                  cap={cap}
                 />
               </div>
             )
@@ -531,6 +554,7 @@ export default function Chat({
                 onSetEdits={onSetEdits}
                 onSetReply={onSetReply}
                 streaming
+                cap={cap}
               />
               <p className={styles.chatStatus}>{statusLine(live)}</p>
             </div>
@@ -682,6 +706,7 @@ function Parts({
   onSetReply,
   undo,
   streaming,
+  cap,
 }: {
   parts: Part[]
   edits: Record<string, string>
@@ -691,6 +716,7 @@ function Parts({
   onSetReply: (text: string | null) => void
   undo?: () => void
   streaming?: boolean
+  cap: DescCap
 }) {
   return (
     <div className={styles.chatFable}>
@@ -710,6 +736,7 @@ function Parts({
             onSetReply={onSetReply}
             undo={undo}
             caret={Boolean(streaming) && i === lastText(parts)}
+            cap={cap}
           />
         )
       )}
@@ -726,6 +753,7 @@ function Prose({
   onSetReply,
   undo,
   caret,
+  cap,
 }: {
   text: string
   edits: Record<string, string>
@@ -735,6 +763,7 @@ function Prose({
   onSetReply: (text: string | null) => void
   undo?: () => void
   caret: boolean
+  cap: DescCap
 }) {
   const out: React.ReactNode[] = []
   let last = 0
@@ -764,6 +793,7 @@ function Prose({
             canEditField={canEditField}
             onSet={onSetEdits}
             undo={undo}
+            cap={cap}
           />
         ) : (
           <pre key={`e${n}`} className={styles.chatPre}>
@@ -794,12 +824,14 @@ function EditsCard({
   canEditField,
   onSet,
   undo,
+  cap,
 }: {
   proposed: Record<string, string>
   edits: Record<string, string>
   canEditField: (field: string) => boolean
   onSet: (edits: Record<string, string>) => void
   undo?: () => void
+  cap: DescCap
 }) {
   // Only what the page can take: a formula or housekeeping field Fable
   // named is dropped rather than shown and silently skipped.
@@ -820,12 +852,28 @@ function EditsCard({
       <span className={styles.chatWho}>
         {applied ? 'Changed on the listing' : 'Suggested edits'}
       </span>
-      {keys.map(k => (
-        <div key={k} className={styles.chatEditRow}>
-          <span className={styles.label}>{k}</span>
-          <span>{usable[k]}</span>
-        </div>
-      ))}
+      {keys.map(k => {
+        const n = k === cap.field ? usable[k].trim().length : null
+        return (
+          <div key={k} className={styles.chatEditRow}>
+            <span className={styles.label}>{k}</span>
+            <span>
+              {usable[k]}
+              {n !== null && (
+                <span
+                  className={
+                    n > cap.cap ? styles.chatCountOver : styles.chatCount
+                  }
+                >
+                  {n > cap.cap
+                    ? `${n} characters – over the ${cap.cap} cap`
+                    : `${n} / ${cap.cap} characters`}
+                </span>
+              )}
+            </span>
+          </div>
+        )
+      })}
       <CardFoot
         applied={applied}
         appliedText="Applied – goes with Accept"

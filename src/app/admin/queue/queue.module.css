@@ -1734,6 +1734,20 @@ select.input {
   overflow-wrap: anywhere;
 }
 
+/* The Description's length against the page's cap, on the edits card. */
+.chatCount,
+.chatCountOver {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--q-muted);
+}
+
+.chatCountOver {
+  color: var(--q-danger);
+  font-weight: 600;
+}
+
 .chatInputRow {
   position: sticky;
   bottom: 0;
