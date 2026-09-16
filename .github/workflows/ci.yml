@@ -10,6 +10,10 @@
 # same path a fresh clone uses locally (see README.md).
 name: CI
 
+# No job writes to GitHub, so the workflow token only needs to read the repo.
+permissions:
+  contents: read
+
 on:
   pull_request:
   push:
