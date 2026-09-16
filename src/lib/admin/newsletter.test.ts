@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   cardGroups,
   contentDigest,
+  FitError,
   formatLocal,
   previewText,
   ReorderError,
   reorderHtml,
+  setFitHtml,
 } from './newsletter'
 
 // Fixtures generated with the pipeline's own function
@@ -88,9 +90,27 @@ describe('cardGroups', () => {
         id: 'g0',
         label: 'New events',
         cards: [
-          { key: 'a', title: 'Title a', logo: null },
-          { key: 'b', title: 'Title b', logo: null },
-          { key: 'c', title: 'Title c', logo: null },
+          {
+            key: 'a',
+            title: 'Title a',
+            logo: null,
+            fit: null,
+            pipelineFit: null,
+          },
+          {
+            key: 'b',
+            title: 'Title b',
+            logo: null,
+            fit: null,
+            pipelineFit: null,
+          },
+          {
+            key: 'c',
+            title: 'Title c',
+            logo: null,
+            fit: null,
+            pipelineFit: null,
+          },
         ],
       },
     ])
@@ -159,5 +179,155 @@ describe('previewText', () => {
   })
   it('is null without a preheader', () => {
     expect(previewText('<p>no preheader</p>')).toBeNull()
+  })
+})
+
+/* ─── "Consider applying if" (mirrors ~/Newsletter/render.py set_fit) ── */
+
+const FIT = (html: string) =>
+  `<div style="margin-top:12px;"><span style="font-weight:600;">Consider applying if</span>: ${html}</div>`
+const SUB =
+  '<div style="margin-top:8px;"><a href="https://x.test/t">Track</a>: a track</div>'
+
+/** A funding issue the way render.py writes it: description block with the
+ *  fit line (and maybe sub-links), a manifest whose cards carry Pen's fit. */
+function fundingIssue(
+  cards: Array<{ key: string; fit: string | null; sub?: boolean }>
+) {
+  const card = (c: (typeof cards)[number]) =>
+    `<!--card:g0:${c.key}--><table><tr><td><div class="pb" style="margin-bottom:24px;">Desc of ${c.key}.${
+      c.fit ? FIT(c.fit) : ''
+    }${c.sub ? SUB : ''}</div><div class="meta">rows</div></td></tr></table><!--/card-->`
+  const seg = (c: (typeof cards)[number]) => ({
+    c: `g0:${c.key}`,
+    t:
+      `* Title ${c.key}\n  Desc of ${c.key}.\n` +
+      (c.fit
+        ? `  Consider applying if: ${c.fit.replace(/<[^>]+>/g, '')}\n`
+        : '') +
+      (c.sub ? '  - Track: a track  https://x.test/t\n' : '') +
+      `  https://x.test/${c.key}\n\n`,
+  })
+  const manifest = {
+    v: 1,
+    groups: [
+      {
+        id: 'g0',
+        label: 'Newly announced',
+        cards: cards.map(c => ({
+          key: c.key,
+          title: `Title ${c.key}`,
+          fit: c.fit ?? '',
+        })),
+      },
+    ],
+    text: [{ t: 'HEAD\n' }, ...cards.map(seg), { t: 'TAIL\n' }],
+  }
+  const b64 = Buffer.from(JSON.stringify(manifest)).toString('base64')
+  return `<html><body><p>intro</p>${cards.map(card).join('')}<p>footer</p><!--aisafety-cards:${b64}-->\n</body></html>`
+}
+
+describe('cardGroups: fit fields', () => {
+  it('reads the current line and Pen’s original as plain text', () => {
+    const html = fundingIssue([
+      { key: 'a', fit: 'you run a <em>lab</em> &amp; need compute' },
+      { key: 'b', fit: null },
+    ])
+    const cards = cardGroups(html)![0].cards
+    expect(cards[0].fit).toBe('you run a lab & need compute')
+    expect(cards[0].pipelineFit).toBe('you run a lab & need compute')
+    // A funding card Pen gave no line: editable (''), original ''.
+    expect(cards[1].fit).toBe('')
+    expect(cards[1].pipelineFit).toBe('')
+  })
+  it('older funding drafts (no fit in the manifest) still expose the line', () => {
+    const html = fundingIssue([{ key: 'a', fit: 'old' }]).replace(
+      /<!--aisafety-cards:[^>]+-->/,
+      () => {
+        const m = {
+          v: 1,
+          groups: [{ id: 'g0', label: 'x', cards: [{ key: 'a', title: 'A' }] }],
+          text: [{ c: 'g0:a', t: '* A\n' }],
+        }
+        return `<!--aisafety-cards:${Buffer.from(JSON.stringify(m)).toString('base64')}-->`
+      }
+    )
+    expect(cardGroups(html)![0].cards[0]).toMatchObject({
+      fit: 'old',
+      pipelineFit: null,
+    })
+  })
+})
+
+describe('setFitHtml', () => {
+  const html = fundingIssue([
+    { key: 'a', fit: 'you run a lab' },
+    { key: 'b', fit: null },
+    { key: 'c', fit: null, sub: true },
+  ])
+  it('replaces the line in the card, the manifest and the text', () => {
+    const out = setFitHtml(html, 'g0', 'a', '  you  have <5 people & a plan ')
+    expect(out.html).toContain(FIT('you have &lt;5 people &amp; a plan'))
+    expect(out.html).not.toContain('you run a lab')
+    const cards = cardGroups(out.html)![0].cards
+    expect(cards[0].fit).toBe('you have <5 people & a plan')
+    expect(cards[0].pipelineFit).toBe('you run a lab')
+    expect(out.text).toBe(
+      'HEAD\n* Title a\n  Desc of a.\n  Consider applying if: you have <5 people & a plan\n  https://x.test/a\n\n' +
+        '* Title b\n  Desc of b.\n  https://x.test/b\n\n' +
+        '* Title c\n  Desc of c.\n  - Track: a track  https://x.test/t\n  https://x.test/c\n\nTAIL\n'
+    )
+    // Only that card and the manifest changed.
+    expect(out.html.replace(/<!--aisafety-cards:[^>]+-->/, '')).toBe(
+      html
+        .replace(/<!--aisafety-cards:[^>]+-->/, '')
+        .replace(
+          FIT('you run a lab'),
+          FIT('you have &lt;5 people &amp; a plan')
+        )
+    )
+  })
+  it('adds the line to a card without one, before any sub-links', () => {
+    const plain = setFitHtml(html, 'g0', 'b', 'new line')
+    expect(plain.html).toContain(`Desc of b.${FIT('new line')}</div>`)
+    expect(plain.text).toContain(
+      '* Title b\n  Desc of b.\n  Consider applying if: new line\n  https://x.test/b\n'
+    )
+    const sub = setFitHtml(html, 'g0', 'c', 'with tracks')
+    expect(sub.html).toContain(`Desc of c.${FIT('with tracks')}${SUB}</div>`)
+    expect(sub.text).toContain(
+      '* Title c\n  Desc of c.\n  Consider applying if: with tracks\n  - Track: a track'
+    )
+  })
+  it('removes the line when the text is empty', () => {
+    const out = setFitHtml(html, 'g0', 'a', '  ')
+    expect(out.html).not.toContain('Consider applying if')
+    expect(out.text).not.toContain('Consider applying if')
+    expect(cardGroups(out.html)![0].cards[0]).toMatchObject({
+      fit: '',
+      pipelineFit: 'you run a lab',
+    })
+  })
+  it('keeps a manual card order in the rebuilt text', () => {
+    const moved = reorderHtml(html, { g0: ['c', 'a', 'b'] })
+    const out = setFitHtml(moved.html, 'g0', 'a', 'later')
+    expect(cardGroups(out.html)![0].cards.map(c => c.key)).toEqual([
+      'c',
+      'a',
+      'b',
+    ])
+    expect(out.text.indexOf('* Title c')).toBeLessThan(
+      out.text.indexOf('* Title a')
+    )
+    expect(out.text).toContain('  Consider applying if: later\n')
+    // A later reorder still sees the edited text (the manifest was updated).
+    const back = reorderHtml(out.html, { g0: ['a', 'b', 'c'] })
+    expect(back.text).toContain('  Consider applying if: later\n')
+    expect(back.text).not.toContain('you run a lab')
+  })
+  it('refuses unknown cards and emails without a manifest', () => {
+    expect(() => setFitHtml(html, 'g0', 'zz', 'x')).toThrow(FitError)
+    expect(() => setFitHtml(html, 'g9', 'a', 'x')).toThrow(FitError)
+    expect(() => setFitHtml('<p>x</p>', 'g0', 'a', 'x')).toThrow(FitError)
   })
 })

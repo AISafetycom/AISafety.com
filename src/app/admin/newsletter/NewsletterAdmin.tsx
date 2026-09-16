@@ -8,6 +8,11 @@ interface CardInfo {
   key: string
   title: string
   logo: string | null
+  /** "Consider applying if" as plain text ('' = none yet); null when the
+   *  card can't carry one (events/training, or an older funding draft). */
+  fit: string | null
+  /** Pen's original line, to show what changed and offer it back. */
+  pipelineFit: string | null
 }
 
 interface CardGroup {
@@ -153,7 +158,9 @@ export default function NewsletterAdmin({
     }
   }
 
-  function reordered(draftId: string, cards: CardGroup[]) {
+  /** A reorder or a text edit was written into the draft: keep the cards,
+   *  reload the preview, say so. */
+  function draftChanged(draftId: string, cards: CardGroup[], text: string) {
     setData(d =>
       d
         ? {
@@ -163,7 +170,7 @@ export default function NewsletterAdmin({
         : d
     )
     setPreviewNonce(n => n + 1)
-    setNotice({ kind: 'ok', text: 'Order saved to the draft.' })
+    setNotice({ kind: 'ok', text })
   }
 
   return (
@@ -331,14 +338,18 @@ export default function NewsletterAdmin({
                       <ReorderPanel
                         key={draft.id}
                         draft={draft}
-                        onSaved={cards => reordered(draft.id, cards)}
+                        onSaved={(cards, text) =>
+                          draftChanged(draft.id, cards, text)
+                        }
                       />
                     </div>
                   )}
                   <iframe
                     title={`Preview of ${draft.subject}`}
                     className={styles.previewFrame}
-                    sandbox=""
+                    // Links in the email open in a new, ordinary tab (the
+                    // preview sets <base target="_blank">); nothing else.
+                    sandbox="allow-popups allow-popups-to-escape-sandbox"
                     src={`/api/admin/newsletter/preview?draft=${draft.id}&v=${previewNonce}`}
                   />
                 </div>
@@ -415,13 +426,15 @@ const keysOf = (groups: CardGroup[]) => groups.map(g => g.cards.map(c => c.key))
 /** Drag-and-drop ordering of a draft's cards, one list per section (a card
  *  never leaves its section). Saving rewrites the draft inside
  *  ActiveCampaign; nothing is sent. Arrow keys on a focused row are the
- *  keyboard route (Bryce, 11 Sept 2026: no visible arrow buttons). */
+ *  keyboard route (Bryce, 11 Sept 2026: no visible arrow buttons). Funding
+ *  rows also open an editor for the card's "Consider applying if" line
+ *  (Bryce, 16 Sept 2026); that saves on its own, straight into the draft. */
 function ReorderPanel({
   draft,
   onSaved,
 }: {
   draft: Draft
-  onSaved: (cards: CardGroup[]) => void
+  onSaved: (cards: CardGroup[], notice: string) => void
 }) {
   const original = draft.cards ?? []
   const [groups, setGroups] = useState<CardGroup[]>(() =>
@@ -432,6 +445,73 @@ function ReorderPanel({
   const [error, setError] = useState<string | null>(null)
   const dirty =
     JSON.stringify(keysOf(groups)) !== JSON.stringify(keysOf(original))
+  /** The card whose fit line is open for editing, and the text in the box. */
+  const [editing, setEditing] = useState<{ gid: string; key: string } | null>(
+    null
+  )
+  const [fitText, setFitText] = useState('')
+  const [savingFit, setSavingFit] = useState(false)
+  const [fitError, setFitError] = useState<string | null>(null)
+  const editable = groups.some(g => g.cards.some(c => c.fit !== null))
+
+  function openEditor(gid: string, card: CardInfo) {
+    setEditing({ gid, key: card.key })
+    setFitText(card.fit ?? '')
+    setFitError(null)
+  }
+
+  async function saveFit(gid: string, card: CardInfo) {
+    setSavingFit(true)
+    setFitError(null)
+    try {
+      const res = await fetch('/api/admin/newsletter/fit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaign: draft.id,
+          group: gid,
+          key: card.key,
+          fit: fitText,
+        }),
+      })
+      const body = (await res.json()) as {
+        error?: string
+        problems?: string[]
+        cards?: CardGroup[]
+      }
+      if (!res.ok || !body.cards) {
+        throw new Error(
+          body.problems?.length
+            ? body.problems.join('; ')
+            : (body.error ?? `HTTP ${res.status}`)
+        )
+      }
+      // Take the saved text, keep any unsaved drag order as it is.
+      const saved = new Map(
+        body.cards.flatMap(g => g.cards.map(c => [`${g.id}:${c.key}`, c]))
+      )
+      setGroups(gs =>
+        gs.map(g => ({
+          ...g,
+          cards: g.cards.map(c => {
+            const s = saved.get(`${g.id}:${c.key}`)
+            return s ? { ...c, fit: s.fit, pipelineFit: s.pipelineFit } : c
+          }),
+        }))
+      )
+      setEditing(null)
+      onSaved(
+        body.cards,
+        fitText.trim()
+          ? `Text saved to the draft for ${card.title}.`
+          : `Line removed from the draft for ${card.title}.`
+      )
+    } catch (err) {
+      setFitError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSavingFit(false)
+    }
+  }
 
   function move(gid: string, from: number, to: number) {
     if (from === to) return
@@ -482,7 +562,7 @@ function ReorderPanel({
         )
       }
       setGroups(body.cards.map(g => ({ ...g, cards: [...g.cards] })))
-      onSaved(body.cards)
+      onSaved(body.cards, 'Order saved to the draft.')
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -493,8 +573,9 @@ function ReorderPanel({
   return (
     <div className={styles.reorder}>
       <p className={adminStyles.sectionHint}>
-        Drag a listing to move it. Cards stay within their section. Save writes
-        the new order into the draft (the preview updates); it sends nothing.
+        Drag a listing to move it. Cards stay within their section.
+        {editable && ' Edit changes a card’s “Consider applying if” line.'}{' '}
+        Saving writes into the draft (the preview updates); it sends nothing.
       </p>
       {groups.map(g => (
         <div key={g.id} className={styles.reorderGroup}>
@@ -502,57 +583,136 @@ function ReorderPanel({
             <div className={styles.reorderGroupLabel}>{g.label}</div>
           )}
           <ol className={styles.reorderList}>
-            {g.cards.map((c, i) => (
-              <li
-                key={c.key}
-                className={`${styles.reorderRow}${
-                  drag?.gid === g.id && drag.key === c.key
-                    ? ` ${styles.reorderRowDragging}`
-                    : ''
-                }`}
-                draggable={!saving}
-                tabIndex={0}
-                aria-label={`${c.title}, position ${i + 1} of ${g.cards.length}. Arrow keys move it.`}
-                onKeyDown={e => {
-                  if (saving) return
-                  if (e.key === 'ArrowUp' && i > 0) {
-                    e.preventDefault()
-                    move(g.id, i, i - 1)
-                  } else if (e.key === 'ArrowDown' && i < g.cards.length - 1) {
-                    e.preventDefault()
-                    move(g.id, i, i + 1)
-                  }
-                }}
-                onDragStart={e => {
-                  e.dataTransfer.effectAllowed = 'move'
-                  e.dataTransfer.setData('text/plain', c.key)
-                  setDrag({ gid: g.id, key: c.key })
-                }}
-                onDragEnter={() => enter(g.id, c.key)}
-                onDragOver={e => e.preventDefault()}
-                onDrop={e => e.preventDefault()}
-                onDragEnd={() => setDrag(null)}
-              >
-                <span className={styles.reorderHandle} aria-hidden="true">
-                  ⋮⋮
-                </span>
-                <span className={styles.reorderIndex}>{i + 1}</span>
-                {c.logo ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={c.logo}
-                    alt=""
-                    width={28}
-                    height={28}
-                    className={styles.reorderLogo}
-                    draggable={false}
-                  />
-                ) : (
-                  <span className={styles.reorderLogo} aria-hidden="true" />
-                )}
-                <span className={styles.reorderTitle}>{c.title}</span>
-              </li>
-            ))}
+            {g.cards.map((c, i) => {
+              const open = editing?.gid === g.id && editing.key === c.key
+              const edited = c.pipelineFit != null && c.fit !== c.pipelineFit
+              return [
+                <li
+                  key={c.key}
+                  className={`${styles.reorderRow}${
+                    drag?.gid === g.id && drag.key === c.key
+                      ? ` ${styles.reorderRowDragging}`
+                      : ''
+                  }`}
+                  draggable={!saving && !open}
+                  tabIndex={0}
+                  aria-label={`${c.title}, position ${i + 1} of ${g.cards.length}. Arrow keys move it.`}
+                  onKeyDown={e => {
+                    if (saving) return
+                    if (e.key === 'ArrowUp' && i > 0) {
+                      e.preventDefault()
+                      move(g.id, i, i - 1)
+                    } else if (
+                      e.key === 'ArrowDown' &&
+                      i < g.cards.length - 1
+                    ) {
+                      e.preventDefault()
+                      move(g.id, i, i + 1)
+                    }
+                  }}
+                  onDragStart={e => {
+                    e.dataTransfer.effectAllowed = 'move'
+                    e.dataTransfer.setData('text/plain', c.key)
+                    setDrag({ gid: g.id, key: c.key })
+                  }}
+                  onDragEnter={() => enter(g.id, c.key)}
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={e => e.preventDefault()}
+                  onDragEnd={() => setDrag(null)}
+                >
+                  <span className={styles.reorderHandle} aria-hidden="true">
+                    ⋮⋮
+                  </span>
+                  <span className={styles.reorderIndex}>{i + 1}</span>
+                  {c.logo ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={c.logo}
+                      alt=""
+                      width={28}
+                      height={28}
+                      className={styles.reorderLogo}
+                      draggable={false}
+                    />
+                  ) : (
+                    <span className={styles.reorderLogo} aria-hidden="true" />
+                  )}
+                  <span className={styles.reorderTitle}>
+                    {c.title}
+                    {edited && !open && (
+                      <span className={styles.rowEdited}> · edited</span>
+                    )}
+                  </span>
+                  {c.fit !== null && (
+                    <button
+                      type="button"
+                      className={styles.rowButton}
+                      disabled={saving || savingFit}
+                      aria-expanded={open}
+                      onClick={() =>
+                        open ? setEditing(null) : openEditor(g.id, c)
+                      }
+                    >
+                      {open ? 'Close' : 'Edit'}
+                    </button>
+                  )}
+                </li>,
+                open && (
+                  <li key={`${c.key}-fit`} className={styles.fitEditor}>
+                    <label className={styles.fitLabel}>
+                      Consider applying if
+                      <textarea
+                        className={styles.fitTextarea}
+                        value={fitText}
+                        rows={4}
+                        autoFocus
+                        disabled={savingFit}
+                        onChange={e => setFitText(e.target.value)}
+                      />
+                    </label>
+                    {fitError && (
+                      <p className={styles.noticeError}>
+                        Not saved: {fitError}
+                      </p>
+                    )}
+                    <div className={styles.actions}>
+                      <button
+                        type="button"
+                        className={styles.buttonPrimary}
+                        disabled={
+                          savingFit || fitText.trim() === (c.fit ?? '').trim()
+                        }
+                        onClick={() => void saveFit(g.id, c)}
+                      >
+                        {savingFit ? 'Saving…' : 'Save text'}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.button}
+                        disabled={savingFit}
+                        onClick={() => setEditing(null)}
+                      >
+                        Cancel
+                      </button>
+                      {c.pipelineFit != null &&
+                        fitText.trim() !== c.pipelineFit.trim() && (
+                          <button
+                            type="button"
+                            className={styles.button}
+                            disabled={savingFit}
+                            title={
+                              c.pipelineFit || 'Pen wrote no line for this card'
+                            }
+                            onClick={() => setFitText(c.pipelineFit ?? '')}
+                          >
+                            Pen’s text
+                          </button>
+                        )}
+                    </div>
+                  </li>
+                ),
+              ]
+            })}
           </ol>
         </div>
       ))}

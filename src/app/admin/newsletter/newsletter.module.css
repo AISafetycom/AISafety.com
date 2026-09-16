@@ -315,3 +315,73 @@
   outline: 2px solid var(--bright-teal-300);
   outline-offset: 1px;
 }
+
+/* "Consider applying if" editor under a funding row (Bryce, 16 Sept 2026). */
+.rowButton {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  border: 1px solid var(--teal-700);
+  border-radius: 6px;
+  background: var(--teal-900);
+  color: var(--teal-200);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.rowButton:hover:not(:disabled) {
+  background: var(--teal-800);
+  color: var(--white);
+}
+
+.rowButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.rowEdited {
+  font-size: 11px;
+  color: var(--bright-teal-300);
+  white-space: nowrap;
+}
+
+.fitEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 2px 0 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--teal-700);
+  border-radius: 6px;
+  background: var(--teal-900);
+}
+
+.fitLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--teal-300);
+}
+
+.fitTextarea {
+  width: 100%;
+  min-height: 96px;
+  padding: 8px 10px;
+  border: 1px solid var(--teal-700);
+  border-radius: 6px;
+  background: var(--teal-850);
+  color: var(--white);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.fitTextarea:focus-visible {
+  outline: 2px solid var(--bright-teal-300);
+  outline-offset: 1px;
+}

@@ -29,6 +29,14 @@
   rebuilds the text from the manifest, re-stamps the marker and writes the
   message back through the v3 API (which returns HTML byte-identical, checked
   10 Sept 2026). Same algorithm as ~/Newsletter/render.py `reorder_cards()`.
+
+  Editing (16 Sept 2026): a funding card's "Consider applying if" line can be
+  rewritten from the same panel. `setFitHtml()` swaps the line inside the
+  card, updates the manifest's text segment for it, rebuilds the plain text
+  in the cards' current order and the draft is written back the same way.
+  The manifest also carries Pen's original line per card (`fit`), so the page
+  can show what was edited and offer it back. Mirrors render.py `set_fit()`;
+  `issue.py build` carries edits over to a rebuild.
 */
 
 import { createHash } from 'node:crypto'
@@ -321,7 +329,14 @@ const PREHEADER_RE = /<div style="display:none[^"]*"[^>]*>([\s\S]*?)<\/div>/
 export function previewText(html: string): string | null {
   const m = PREHEADER_RE.exec(html)
   if (!m) return null
-  const text = m[1]
+  const text = stripHtml(m[1])
+  return text || null
+}
+
+/** An HTML fragment as one line of plain text: tags dropped, the entities
+ *  the renderer writes resolved, whitespace collapsed. */
+function stripHtml(fragment: string): string {
+  return fragment
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;|&zwnj;|&#8204;|\u00a0|\u200c/g, ' ')
     .replace(/&rsquo;/g, '\u2019')
@@ -335,7 +350,10 @@ export function previewText(html: string): string | null {
     .replace(/&amp;/g, '&')
     .replace(/\s+/g, ' ')
     .trim()
-  return text || null
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 /** The most recent sends (and anything scheduled or stuck), newest first. */
@@ -378,6 +396,13 @@ export interface CardInfo {
   title: string
   /** Hosted logo PNG (the same one the email shows), when the listing has one. */
   logo: string | null
+  /** The card's "Consider applying if" line as plain text ('' when the card
+   *  has none yet). Null when the card cannot carry one (events, training,
+   *  or a funding draft built before the manifest recorded it). */
+  fit: string | null
+  /** Pen's original line as plain text, from the manifest, so an edit can
+   *  be recognised and undone. Null for drafts built before 16 Sept 2026. */
+  pipelineFit: string | null
 }
 
 export interface CardGroup {
@@ -389,9 +414,17 @@ export interface CardGroup {
   cards: CardInfo[]
 }
 
+interface ManifestCard {
+  key: string
+  title: string
+  logo?: string | null
+  /** Funding cards: Pen's "Consider applying if" HTML ('' when none). */
+  fit?: string
+}
+
 interface Manifest {
   v: number
-  groups: CardGroup[]
+  groups: Array<{ id: string; label: string; cards: ManifestCard[] }>
   /** The plain-text email as segments; card segments carry `c` = `gN:KEY`. */
   text: Array<{ t: string; c?: string }>
 }
@@ -442,12 +475,16 @@ function cardBlocks(html: string): Block[] {
 export function cardGroups(html: string): CardGroup[] | null {
   const manifest = readManifest(html)
   if (!manifest) return null
-  const info = new Map<string, { title: string; logo: string | null }>()
+  const info = new Map<
+    string,
+    { title: string; logo: string | null; fit: string | null }
+  >()
   for (const g of manifest.groups)
     for (const c of g.cards)
       info.set(`${g.id}:${c.key}`, {
         title: c.title,
         logo: typeof c.logo === 'string' && c.logo ? c.logo : null,
+        fit: typeof c.fit === 'string' ? c.fit : null,
       })
   const groups = new Map<string, CardGroup>(
     manifest.groups.map(g => [g.id, { id: g.id, label: g.label, cards: [] }])
@@ -456,10 +493,14 @@ export function cardGroups(html: string): CardGroup[] | null {
     const g = groups.get(b.gid)
     if (!g) continue
     const meta = info.get(`${b.gid}:${b.key}`)
+    const fit = FIT_HTML_RE.exec(b.raw)
+    const pipelineFit = meta?.fit ?? null
     g.cards.push({
       key: b.key,
       title: meta?.title ?? b.key,
       logo: meta?.logo ?? null,
+      fit: fit ? stripHtml(fit[1]) : pipelineFit != null ? '' : null,
+      pipelineFit: pipelineFit != null ? stripHtml(pipelineFit) : null,
     })
   }
   const out = [...groups.values()].filter(g => g.cards.length > 0)
@@ -505,12 +546,21 @@ export function reorderHtml(
       html.slice(last.end)
     blocks = cardBlocks(html)
   }
+  return { html, text: rebuildText(manifest, order) }
+}
+
+/** The plain-text email from the manifest's segments, with each listed
+ *  group's card segments in `order`. */
+function rebuildText(
+  manifest: Manifest,
+  order: Record<string, string[]>
+): string {
   const textByKey = new Map<string, string>()
   for (const seg of manifest.text) if (seg.c) textByKey.set(seg.c, seg.t)
   const slots = new Map<string, string[]>(
     Object.entries(order).map(([gid, keys]) => [gid, [...keys]])
   )
-  const text = manifest.text
+  return manifest.text
     .map(seg => {
       if (!seg.c) return seg.t
       const gid = seg.c.split(':', 1)[0]
@@ -519,7 +569,108 @@ export function reorderHtml(
       return textByKey.get(`${gid}:${queue.shift()}`) ?? seg.t
     })
     .join('')
-  return { html, text }
+}
+
+/* ─── "Consider applying if" on funding cards ────────────────────────── */
+
+// Exactly what render.py funding_card() writes under the description, and
+// the matching plain-text line — change both sides together.
+const FIT_HTML_RE =
+  /<div style="margin-top:12px;"><span style="font-weight:600;">Consider applying if<\/span>: ([\s\S]*?)<\/div>/
+const FIT_TEXT_PREFIX = '  Consider applying if: '
+/** A program sub-link line; a new fit line goes in front of the first one. */
+const SUBLINK_OPEN = '<div style="margin-top:8px;">'
+/** The description block the fit line lives in. */
+const DESCRIPTION_OPEN_RE = /<div class="pb"[^>]*>/
+
+export class FitError extends Error {}
+
+function fitDiv(fitHtml: string): string {
+  return `<div style="margin-top:12px;"><span style="font-weight:600;">Consider applying if</span>: ${fitHtml}</div>`
+}
+
+/** Index of the `</div>` closing the div whose opening tag ends at `from`. */
+function divEnd(html: string, from: number): number {
+  const re = /<div\b|<\/div>/g
+  re.lastIndex = from
+  let depth = 1
+  for (let m = re.exec(html); m; m = re.exec(html)) {
+    depth += m[0] === '</div>' ? -1 : 1
+    if (depth === 0) return m.index
+  }
+  return -1
+}
+
+/** A card with no fit line yet: put `line` at the end of its description
+ *  block, ahead of any program sub-links (where the renderer puts it). */
+function insertFit(card: string, line: string): string {
+  const open = DESCRIPTION_OPEN_RE.exec(card)
+  if (!open)
+    throw new FitError('this card has no description to add the line to')
+  const start = open.index + open[0].length
+  const end = divEnd(card, start)
+  if (end < 0) throw new FitError('malformed description block')
+  const sub = card.indexOf(SUBLINK_OPEN, start)
+  const at = sub >= 0 && sub < end ? sub : end
+  return card.slice(0, at) + line + card.slice(at)
+}
+
+/** The card's plain-text segment with its fit line replaced, removed
+ *  (`plain` empty) or added after the description. */
+function setFitLine(segment: string, plain: string): string {
+  const lines = segment.split('\n')
+  const at = lines.findIndex(l => l.startsWith(FIT_TEXT_PREFIX))
+  if (at >= 0) {
+    if (plain) lines[at] = FIT_TEXT_PREFIX + plain
+    else lines.splice(at, 1)
+  } else if (plain) {
+    let i = lines.findIndex(
+      (l, n) => n > 0 && (/^  (- |https?:\/\/)/.test(l) || l === '')
+    )
+    if (i < 0) i = lines.length
+    lines.splice(i, 0, FIT_TEXT_PREFIX + plain)
+  }
+  return lines.join('\n')
+}
+
+/** Pure: the email with one card's "Consider applying if" line set to `fit`
+ *  (plain text; empty removes the line), the manifest's text segment for
+ *  the card updated to match, and the plain-text email rebuilt in the
+ *  cards' current order. Throws FitError for an unknown card or one the
+ *  line cannot be added to. Mirrors render.py `set_fit()`. */
+export function setFitHtml(
+  html: string,
+  gid: string,
+  key: string,
+  fit: string
+): { html: string; text: string } {
+  const manifest = readManifest(html)
+  if (!manifest) throw new FitError('no card manifest in this email')
+  const block = cardBlocks(html).find(b => b.gid === gid && b.key === key)
+  if (!block) throw new FitError(`unknown card ${gid}:${key}`)
+  const plain = fit.replace(/\s+/g, ' ').trim()
+  const line = plain ? fitDiv(escapeHtml(plain)) : ''
+  let card: string
+  if (FIT_HTML_RE.test(block.raw)) {
+    card = block.raw.replace(FIT_HTML_RE, () => line)
+  } else if (!plain) {
+    card = block.raw
+  } else {
+    card = insertFit(block.raw, line)
+  }
+  const seg = manifest.text.find(s => s.c === `${gid}:${key}`)
+  if (seg) seg.t = setFitLine(seg.t, plain)
+  const encoded = Buffer.from(JSON.stringify(manifest), 'utf8').toString(
+    'base64'
+  )
+  const out = (
+    html.slice(0, block.start) +
+    card +
+    html.slice(block.end)
+  ).replace(MANIFEST_RE, () => `<!--aisafety-cards:${encoded}-->`)
+  const order: Record<string, string[]> = {}
+  for (const b of cardBlocks(out)) (order[b.gid] ??= []).push(b.key)
+  return { html: out, text: rebuildText(manifest, order) }
 }
 
 /** Move the cards of a draft into `order` ({ groupId: keys }) inside
@@ -529,6 +680,39 @@ export function reorderHtml(
 export async function reorderDraft(
   draftId: string,
   order: Record<string, string[]>
+): Promise<{ cards: CardGroup[] }> {
+  return rewriteDraft(
+    draftId,
+    body => reorderHtml(body, order),
+    `reordered: ${Object.entries(order)
+      .map(([g, k]) => `${g}=${k.join(',')}`)
+      .join(' ')}`
+  )
+}
+
+/** Set one funding card's "Consider applying if" line inside a draft
+ *  (plain text; empty removes it), the same way as a reorder: verify, rewrite
+ *  HTML + text, re-stamp, write back, re-check. Returns the cards. */
+export async function editDraftFit(
+  draftId: string,
+  gid: string,
+  key: string,
+  fit: string
+): Promise<{ cards: CardGroup[] }> {
+  return rewriteDraft(
+    draftId,
+    body => setFitHtml(body, gid, key, fit),
+    `fit line of ${gid}:${key} ${fit.trim() ? 'set' : 'removed'}`
+  )
+}
+
+/** The write path shared by every edit: verify the draft (same checks as
+ *  approval), apply `change` to the message body, re-stamp the content
+ *  marker, write it back through the v3 API and re-check the live message. */
+async function rewriteDraft(
+  draftId: string,
+  change: (body: string) => { html: string; text: string },
+  logLine: string
 ): Promise<{ cards: CardGroup[] }> {
   const campaigns = await allCampaigns()
   const draft = campaigns.find(c => c.id === draftId)
@@ -540,7 +724,7 @@ export async function reorderDraft(
     )
   }
   const body = (msg.html ?? '').replace(MARKER_RE, '')
-  const { html, text } = reorderHtml(body, order)
+  const { html, text } = change(body)
   const stamped = `<!--aisafety-issue:${contentDigest(html)}-->` + html
   await v3put(`messages/${messageId}`, { message: { html: stamped, text } })
   const live = await message(messageId)
@@ -548,16 +732,12 @@ export async function reorderDraft(
   const m = MARKER_RE.exec(liveHtml)
   if (!m || m[1] !== contentDigest(liveHtml)) {
     throw new Error(
-      `message ${messageId} failed verification after the reorder — check the ActiveCampaign dashboard`
+      `message ${messageId} failed verification after the edit — check the ActiveCampaign dashboard`
     )
   }
   const cards = cardGroups(liveHtml)
-  if (!cards) throw new Error('card markers missing after the reorder')
-  console.info(
-    `[newsletter] draft ${draftId} reordered: ${Object.entries(order)
-      .map(([g, k]) => `${g}=${k.join(',')}`)
-      .join(' ')}`
-  )
+  if (!cards) throw new Error('card markers missing after the edit')
+  console.info(`[newsletter] draft ${draftId} ${logLine}`)
   return { cards }
 }
 
