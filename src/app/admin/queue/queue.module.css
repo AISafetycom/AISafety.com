@@ -340,6 +340,21 @@
   color: var(--q-danger);
 }
 
+/* A row whose decision is on its way to Airtable fades until it lands. */
+.rowBusy {
+  opacity: 0.55;
+}
+
+.spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  animation: spin 0.8s linear infinite;
+}
+
 /* ─── Detail ─────────────────────────────────────────────────────────── */
 
 .detail {
@@ -1440,6 +1455,60 @@ select.input {
 
 .toastMarkNo {
   background: var(--q-danger);
+}
+
+/* On its way to Airtable: a spinning ring in the verdict's colour. */
+.toastMarkWorking,
+.toastMarkWorking.toastMarkNo {
+  background: transparent;
+  border: 3px solid var(--q-accent);
+  border-top-color: transparent;
+  animation: spin 0.8s linear infinite;
+}
+
+.toastMarkWorking.toastMarkNo {
+  border-color: var(--q-danger);
+  border-top-color: transparent;
+}
+
+/* Did not land: a warning mark, whichever way the decision went. */
+.toastMarkFailed,
+.toastMarkFailed.toastMarkNo {
+  background: var(--q-warn);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.toastClose {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--q-muted);
+  cursor: pointer;
+}
+
+.toastClose:hover {
+  color: var(--q-text);
+  border-color: var(--q-border-strong);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toastMarkWorking,
+  .spinner {
+    animation: none;
+  }
 }
 
 .toastBody {
