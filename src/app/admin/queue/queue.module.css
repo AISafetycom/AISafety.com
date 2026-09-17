@@ -1272,6 +1272,37 @@
   margin-right: 5px;
 }
 
+/* A training or event Type as the site's pill: the type's colour (the
+   site's own variable, set per pill as --pill) as text, a 30% border and a
+   12% wash. The site's colours are made for its dark cards, so on the light
+   panel the text is darkened to read while the wash keeps the hue. */
+.typePills {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  vertical-align: middle;
+}
+
+.typePill {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  color: color-mix(in srgb, var(--pill) 45%, #1f2328);
+  border: 1px solid color-mix(in srgb, var(--pill) 60%, transparent);
+  background: color-mix(in srgb, var(--pill) 18%, transparent);
+}
+
+.dark .typePill {
+  color: var(--pill);
+  border-color: color-mix(in srgb, var(--pill) 30%, transparent);
+  background: color-mix(in srgb, var(--pill) 12%, transparent);
+}
+
 /* The empty fields, one line of names: click one to fill it in. */
 .unset {
   display: flex;

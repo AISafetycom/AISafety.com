@@ -14,6 +14,8 @@ import type {
 import Icon from '@/components/Icon'
 import { activityIcon } from '@/app/communities/activity-icon'
 import { isAcceptingApplications } from '@/lib/funding-status'
+import { trainingTypeColor } from '@/lib/training-types'
+import { eventTypeColor } from '@/lib/event-types'
 import SitePreview, {
   forgetPreviews,
   prefetchPreview,
@@ -229,6 +231,13 @@ function verdictRank(v: QueueItem['verdict']): number {
 
 /** Sizes a text box to what is typed in it, on open and on every keystroke,
  *  so a long description is never hidden behind a scrollbar. */
+/** Cmd+Enter (Ctrl+Enter elsewhere) finishes a text box the way clicking
+ *  away does: the words are kept and the box closes (Bryce, 17 Sept 2026:
+ *  "CMD ENTER should exit the box (saving)"). */
+function isDoneKey(e: React.KeyboardEvent): boolean {
+  return e.key === 'Enter' && (e.metaKey || e.ctrlKey)
+}
+
 function fitToText(el: HTMLTextAreaElement | null) {
   if (!el) return
   el.style.height = 'auto'
@@ -2218,6 +2227,10 @@ export default function QueueAdmin({
               </dt>
               <dd>undo the last decision</dd>
               <dt>
+                <kbd>⌘</kbd> <kbd>Enter</kbd>
+              </dt>
+              <dd>finish a text box, keeping what you typed</dd>
+              <dt>
                 <kbd>Esc</kbd>
               </dt>
               <dd>cancel</dd>
@@ -2434,6 +2447,9 @@ function Detail({
             if (e.key === 'Escape') {
               e.preventDefault()
               setD({ editingReply: false })
+            } else if (isDoneKey(e)) {
+              e.preventDefault()
+              e.currentTarget.blur()
             }
           }}
           onBlur={e => setD({ editingReply: false, reply: e.target.value })}
@@ -2670,6 +2686,9 @@ function Detail({
                             if (e.key === 'Escape') {
                               e.preventDefault()
                               setD({ editing: null })
+                            } else if (isDoneKey(e)) {
+                              e.preventDefault()
+                              e.currentTarget.blur()
                             }
                           }}
                           onBlur={e => {
@@ -2961,6 +2980,47 @@ function fieldIcon(
   return file ? `/images/icons/${file}.svg` : null
 }
 
+/** A training or event Type as the site's card shows it: one pill per
+ *  type in the page's own colour (Bryce, 17 Sept 2026: "colour this the
+ *  same way as the site"). Undefined for every other field, which stays
+ *  plain text. */
+function typePills(
+  page: string | null,
+  name: string,
+  value: string
+): React.ReactNode | undefined {
+  if (name.trim().toLowerCase() !== 'type' || !value.trim()) return undefined
+  const color =
+    page === '/training'
+      ? trainingTypeColor
+      : page === '/events'
+        ? eventTypeColor
+        : null
+  if (!color) return undefined
+  const types = value
+    .split(',')
+    .map(t => t.trim())
+    .filter(Boolean)
+  return (
+    <span className={styles.typePills}>
+      {types.map(t => (
+        // The site's colour class names its variable: color-orange → --orange.
+        <span
+          key={t}
+          className={styles.typePill}
+          style={
+            {
+              '--pill': `var(--${color(t).replace(/^color-/, '')})`,
+            } as React.CSSProperties
+          }
+        >
+          {t}
+        </span>
+      ))}
+    </span>
+  )
+}
+
 /** The site's icon for a field, or nothing when the site draws none. */
 function FieldIcon({
   page,
@@ -3129,6 +3189,7 @@ function Fields({
       <EditableValue
         text={friendly(value)}
         href={isUrl ? (v as string) : undefined}
+        body={typePills(item.page, k, value)}
         edited={edited}
         canEdit={!revising && isEditable(v) && !isAttachment}
         onEdit={() => setD({ editing: k })}
@@ -3547,7 +3608,13 @@ function FieldEditor({
       rows={value.length > 120 ? 5 : 2}
       autoFocus
       defaultValue={value}
-      onKeyDown={esc}
+      onKeyDown={e => {
+        esc(e)
+        if (isDoneKey(e)) {
+          e.preventDefault()
+          save(e.currentTarget.value)
+        }
+      }}
       onBlur={e => save(e.target.value)}
     />
   )
@@ -3558,6 +3625,7 @@ function FieldEditor({
 function EditableValue({
   text,
   href,
+  body,
   edited,
   canEdit,
   muted,
@@ -3565,19 +3633,21 @@ function EditableValue({
 }: {
   text: string
   href?: string
+  /** Shown in place of the text (e.g. the site's coloured type pills). */
+  body?: React.ReactNode
   edited: boolean
   canEdit: boolean
   muted?: boolean
   onEdit: () => void
 }) {
-  const body = href ? (
+  const shown = href ? (
     <a href={href} target="_blank" rel="noreferrer">
       {text}
     </a>
   ) : (
-    <span className={muted ? styles.empty : undefined}>{text}</span>
+    (body ?? <span className={muted ? styles.empty : undefined}>{text}</span>)
   )
-  if (!canEdit) return body
+  if (!canEdit) return shown
   return (
     <span
       className={styles.editable}
@@ -3596,7 +3666,7 @@ function EditableValue({
         }
       }}
     >
-      {body}
+      {shown}
       {edited && <em className={styles.edited}>edited</em>}
       <span className={styles.editHint}>
         <Icon src={ICON.pencil} size={12} />
