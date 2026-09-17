@@ -249,8 +249,24 @@ export default function SitePreview({
   // Bumped by forgetPreviews: the record changed, so look again.
   const gen = useSyncExternalStore(subscribe, generationNow, generationNow)
   const known = ready.get(key)
-  const preview = result?.key === key ? result.preview : known
+  const fresh = result?.key === key ? result.preview : known
   const error = result?.key === key ? result.error : undefined
+  // While the card for the SAME record is rebuilt after an edit, the card
+  // as it was stays up, so nothing on the page jumps (Bryce, 17 Sept 2026:
+  // "the card disappears for a moment, making the content on the page
+  // jump"). A different record still shows "Building the card…".
+  const target = `${table}/${record}`
+  const [shown, setShown] = useState<{
+    target: string
+    preview: Preview
+  } | null>(null)
+  // Remembered during render (the documented way to keep the previous
+  // render's value), so the stale card is there in the very same frame.
+  if (fresh && (shown?.preview !== fresh || shown.target !== target)) {
+    setShown({ target, preview: fresh })
+  }
+  const preview =
+    fresh ?? (!error && shown?.target === target ? shown.preview : undefined)
 
   useEffect(() => {
     const cached = ready.get(key)
