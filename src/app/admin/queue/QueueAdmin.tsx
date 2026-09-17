@@ -5,12 +5,17 @@ import Image from 'next/image'
 import type { SaidBy } from '@/lib/admin/queue'
 import type {
   AgentInfo,
+  AttachmentInfo,
   FieldInfo,
   PreviewKind,
   QueueItem,
 } from '@/lib/admin/queue'
 import Icon from '@/components/Icon'
-import SitePreview, { prefetchPreview, seedPreviews } from './SitePreview'
+import SitePreview, {
+  forgetPreviews,
+  prefetchPreview,
+  seedPreviews,
+} from './SitePreview'
 import Chat from './Chat'
 import styles from './queue.module.css'
 
@@ -449,6 +454,51 @@ function Picture({ url, name }: { url: string | null; name: string | null }) {
     </span>
   )
 }
+
+/** What the record's pictures are (file name, size, type), by the link the
+ *  field list holds for them – from the live read and from an upload.
+ *  Module-wide, so the picture slot can look its own links up. */
+const attachmentMeta = new Map<string, AttachmentInfo>()
+function rememberAttachments(
+  byField: Record<string, AttachmentInfo[]> | undefined
+): void {
+  if (!byField) return
+  for (const list of Object.values(byField)) {
+    for (const a of list) attachmentMeta.set(a.url, a)
+  }
+}
+
+const TYPE_LABEL: Record<string, string> = {
+  'image/png': 'PNG',
+  'image/jpeg': 'JPEG',
+  'image/webp': 'WebP',
+  'image/gif': 'GIF',
+  'image/svg+xml': 'SVG',
+}
+
+/** "250 × 63 · 2 KB · WebP" for a picture the record holds. */
+function attachmentMetaLine(a: AttachmentInfo): string {
+  return [
+    a.width && a.height ? `${a.width} × ${a.height}` : null,
+    a.size !== null ? fileSize(a.size) : null,
+    a.type
+      ? (TYPE_LABEL[a.type] ?? a.type.replace(/^image\//, '').toUpperCase())
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+/** The cached card no longer speaks for this record: it changed. */
+function forgetCard(item: QueueItem): void {
+  if (item.targetTable && item.targetRecord) {
+    forgetPreviews(item.targetTable, item.targetRecord)
+  }
+}
+
+// Row pictures whose link has failed: never shown again, however often the
+// server hands the same link back.
+const deadLogos = new Set<string>()
 
 const NAME_KEYS = /\b(name|title)\b|^organi[sz]ation$/i
 const URL_KEYS = /^(url|website|link|join link|apply link|application link)$/i
@@ -1287,11 +1337,13 @@ export default function QueueAdmin({
         })
         const data = (await res.json()) as {
           fields?: Record<string, unknown>
+          attachments?: Record<string, AttachmentInfo[]>
           schema?: FieldInfo[]
         }
         if (!cancelled && res.ok && data.fields) {
           const fields = data.fields
           const schema = data.schema ?? []
+          rememberAttachments(data.attachments)
           setLive(prev => ({ ...prev, [id]: { fields, schema } }))
         }
       } catch {
@@ -1325,6 +1377,21 @@ export default function QueueAdmin({
       const next = { ...prev }
       delete next[id]
       return next
+    })
+  }, [])
+
+  // A row's picture link has stopped working (Airtable links last a few
+  // hours): show the plain box and ask for a fresh link.
+  const logoDied = useCallback((item: QueueItem) => {
+    if (item.logo) deadLogos.add(item.logo)
+    const setLogo = (logo: string | null) =>
+      setItems(prev =>
+        prev ? prev.map(i => (i.id === item.id ? { ...i, logo } : i)) : prev
+      )
+    setLogo(null)
+    void loadLogos([{ ...item, logo: null }]).then(logos => {
+      const url = item.targetRecord ? logos[item.targetRecord] : undefined
+      if (url && !deadLogos.has(url)) setLogo(url)
     })
   }, [])
 
@@ -1506,6 +1573,9 @@ export default function QueueAdmin({
         // The decision comes back without a logo lookup (kept quick); the
         // picture already on the page stays.
         const updated = { ...data.item, logo: data.item.logo ?? item.logo }
+        // Accept wrote the edits and the flag, undo took them back: the
+        // card built before either is out of date.
+        forgetCard(updated)
         setItems(prev =>
           prev ? prev.map(i => (i.id === updated.id ? updated : i)) : prev
         )
@@ -1908,6 +1978,7 @@ export default function QueueAdmin({
                                   }
                                   showPage={false}
                                   onClick={() => select(item.id)}
+                                  onLogoError={() => logoDied(item)}
                                 />
                               ))}
                         </div>
@@ -1924,6 +1995,7 @@ export default function QueueAdmin({
                           !pending[item.id] && Boolean(draft(item.id).error)
                         }
                         onClick={() => select(item.id)}
+                        onLogoError={() => logoDied(item)}
                       />
                     ))
                   )}
@@ -1944,10 +2016,14 @@ export default function QueueAdmin({
               <Detail
                 item={selected}
                 live={live[selected.id] ?? null}
-                onImage={(field, urls) =>
+                onImage={(field, urls) => {
                   setLiveField(selected.id, field, urls)
-                }
-                onWrote={() => forgetLive(selected.id)}
+                  forgetCard(selected)
+                }}
+                onWrote={() => {
+                  forgetLive(selected.id)
+                  forgetCard(selected)
+                }}
                 d={draft(selected.id)}
                 setD={patch => setDraft(selected.id, patch)}
                 act={(action, extra) => void act(selected, action, extra)}
@@ -2109,6 +2185,7 @@ function Row({
   failed,
   showPage = true,
   onClick,
+  onLogoError,
 }: {
   item: QueueItem
   active: boolean
@@ -2119,6 +2196,8 @@ function Row({
   /** Off under a page sub-head, which already names the page. */
   showPage?: boolean
   onClick: () => void
+  /** The picture's link has stopped working. */
+  onLogoError: () => void
 }) {
   return (
     <button
@@ -2132,15 +2211,9 @@ function Row({
           className={styles.rowLogo}
           src={item.logo}
           alt=""
-          onError={e => {
-            // an expired link: show the plain box rather than a broken image
-            const img = e.currentTarget
-            img.replaceWith(
-              Object.assign(document.createElement('span'), {
-                className: `${styles.rowLogo} ${styles.rowLogoEmpty}`,
-              })
-            )
-          }}
+          // An expired link: the list drops the picture (the plain box
+          // shows) and asks for a fresh one.
+          onError={onLogoError}
         />
       ) : (
         <span
@@ -2879,8 +2952,9 @@ function Fields({
   )
 }
 
-/** The pictures in an attachment field, and a drop target: drag an image in
- *  or click to choose one, and it goes onto the record right away. */
+/** The pictures in an attachment field – each with its file name, pixel
+ *  size, bytes and type beside it – and a drop target: drag an image in or
+ *  click to choose one, and it goes onto the record right away. */
 function ImageSlot({
   itemId,
   field,
@@ -2931,9 +3005,14 @@ function ImageSlot({
           data: base64,
         }),
       })
-      const data = (await res.json()) as { urls?: string[]; error?: string }
+      const data = (await res.json()) as {
+        urls?: string[]
+        attachments?: AttachmentInfo[]
+        error?: string
+      }
       if (!res.ok || !data.urls)
         throw new Error(data.error ?? `HTTP ${res.status}`)
+      rememberAttachments({ [field]: data.attachments ?? [] })
       onDone(data.urls)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -2968,19 +3047,33 @@ function ImageSlot({
       }
       {...dragProps}
     >
-      {urls.map(src => (
-        <span key={src} className={styles.thumbWrap}>
-          <Image
-            src={src}
-            alt=""
-            width={56}
-            height={56}
-            unoptimized
-            className={styles.thumb}
-          />
-          {over && <span className={styles.thumbOverlay}>Replace</span>}
-        </span>
-      ))}
+      {urls.map(src => {
+        const meta = attachmentMeta.get(src)
+        const line = meta ? attachmentMetaLine(meta) : ''
+        return (
+          <span key={src} className={styles.thumbItem}>
+            <span className={styles.thumbWrap}>
+              <Image
+                src={src}
+                alt=""
+                width={56}
+                height={56}
+                unoptimized
+                className={styles.thumb}
+              />
+              {over && <span className={styles.thumbOverlay}>Replace</span>}
+            </span>
+            {meta && (meta.filename || line) && (
+              <span className={styles.thumbDetails}>
+                {meta.filename && (
+                  <span className={styles.pictureName}>{meta.filename}</span>
+                )}
+                {line && <span className={styles.pictureMeta}>{line}</span>}
+              </span>
+            )}
+          </span>
+        )
+      })}
       {canUpload && (
         <span
           className={`${styles.dropZone} ${over ? styles.dropZoneOver : ''} ${

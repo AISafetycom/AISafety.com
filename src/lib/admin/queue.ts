@@ -30,6 +30,7 @@ import {
   type AirtableRow,
 } from './airtable'
 import { sealToken } from './session'
+import { isExpiredAttachment } from './attachment-url'
 
 export const QUEUE_TABLE_ID = 'tblonlKwIFJ7Aa8QN'
 const BROOM_ISSUES_TABLE_ID = 'tblntD3WITPEgjHRK'
@@ -214,11 +215,6 @@ async function catalogLogos(): Promise<Map<string, string>> {
  *  path segment and answer 410 after it. The site's cached data can hold
  *  such links for hours, so anything expiring within ten minutes is
  *  treated as gone and read afresh. */
-function isExpiredAttachment(url: string): boolean {
-  const m = /airtableusercontent\.com\/.*?\/(\d{13})\//.exec(url)
-  return m ? Number(m[1]) < Date.now() + 10 * 60 * 1000 : false
-}
-
 const logoCache = new Map<string, { url: string | null; at: number }>()
 const LOGO_TTL_MS = 5 * 60 * 1000
 
@@ -569,10 +565,44 @@ export async function getTableSchema(table: string): Promise<FieldInfo[]> {
  *  Airtable made one, else the file); Publish?/Hide? are dropped. Used for
  *  the focused item, because the snapshot on the queue row was taken when
  *  the row was written and Airtable's attachment URLs expire within hours. */
+/** What the page shows beside a picture in an attachment field: the link
+ *  the field list carries for it (the large thumbnail when Airtable made
+ *  one), and the file's own name, pixel size, bytes and type. */
+export interface AttachmentInfo {
+  url: string
+  filename: string | null
+  width: number | null
+  height: number | null
+  size: number | null
+  type: string | null
+}
+
+function attachmentInfo(x: Record<string, unknown>): AttachmentInfo | null {
+  if (typeof x.url !== 'string') return null
+  const large =
+    isRecord(x.thumbnails) && isRecord(x.thumbnails.large)
+      ? x.thumbnails.large.url
+      : null
+  return {
+    url: typeof large === 'string' ? large : x.url,
+    filename: typeof x.filename === 'string' ? x.filename : null,
+    width: typeof x.width === 'number' ? x.width : null,
+    height: typeof x.height === 'number' ? x.height : null,
+    size: typeof x.size === 'number' ? x.size : null,
+    type: typeof x.type === 'string' ? x.type : null,
+  }
+}
+
+export interface TargetRead {
+  fields: Record<string, unknown>
+  /** The pictures behind each attachment field, by field name. */
+  attachments: Record<string, AttachmentInfo[]>
+}
+
 export async function getTargetFields(
   table: string,
   record: string
-): Promise<Record<string, unknown> | null> {
+): Promise<TargetRead | null> {
   if (!TABLE_ID_RE.test(table) || !isRecordId(record)) return null
   const res = await airtableRequest(`${table}/${record}`)
   if (res.status === 404 || res.status === 403) return null
@@ -584,6 +614,7 @@ export async function getTargetFields(
   }
   const data = (await res.json()) as { fields: RawFields }
   const out: Record<string, unknown> = {}
+  const attachments: Record<string, AttachmentInfo[]> = {}
   for (const [k, v] of Object.entries(data.fields)) {
     if (PROTECTED_FIELDS.has(k)) continue
     if (
@@ -592,13 +623,11 @@ export async function getTargetFields(
       v.every(isRecord) &&
       v.every(x => typeof x.url === 'string')
     ) {
-      out[k] = v.map(x => {
-        const large =
-          isRecord(x.thumbnails) && isRecord(x.thumbnails.large)
-            ? x.thumbnails.large.url
-            : null
-        return typeof large === 'string' ? large : (x.url as string)
-      })
+      const infos = v
+        .map(attachmentInfo)
+        .filter((a): a is AttachmentInfo => a !== null)
+      out[k] = infos.map(a => a.url)
+      attachments[k] = infos
     } else if (
       v === null ||
       typeof v === 'string' ||
@@ -609,7 +638,7 @@ export async function getTargetFields(
       out[k] = v
     }
   }
-  return out
+  return { fields: out, attachments }
 }
 
 // ─── Preview through the site's own code ────────────────────────────────────
@@ -801,7 +830,7 @@ export async function uploadImage(
   record: string,
   field: string,
   file: { filename: string; contentType: string; base64: string }
-): Promise<string[]> {
+): Promise<{ urls: string[]; attachments: AttachmentInfo[] }> {
   if (!TABLE_ID_RE.test(table) || !isRecordId(record)) {
     throw new QueueError('This item has no valid target record.', 400)
   }
@@ -868,8 +897,12 @@ export async function uploadImage(
     // A logo slot holds one picture: keep only the one just dropped.
     await patchRecord(table, record, { [field]: [{ id: newest.id }] })
   }
-  if (!newest) return []
-  return [newest.thumbnails?.large?.url ?? newest.url]
+  if (!newest) return { urls: [], attachments: [] }
+  const picture = attachmentInfo(newest as Record<string, unknown>)
+  return {
+    urls: [picture?.url ?? newest.url],
+    attachments: picture ? [picture] : [],
+  }
 }
 
 // ─── Airtable helpers ───────────────────────────────────────────────────────

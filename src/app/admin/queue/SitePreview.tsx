@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import ListingCard, { type CardProps } from '@/components/ListingCard'
 import { communityCardProps } from '@/app/communities/card'
 import { eventCardProps } from '@/app/events/card'
@@ -26,6 +26,7 @@ import type { MediaChannel } from '@/lib/data/media-channels'
 import type { Project } from '@/lib/data/projects'
 import type { MapOrg } from '@/lib/data/map'
 import type { PreviewKind } from '@/lib/admin/queue'
+import { isExpiredAttachment } from '@/lib/admin/attachment-url'
 import styles from './queue.module.css'
 
 // "How it will look on the site": the record is read live, the page's edits
@@ -48,6 +49,40 @@ const previews = new Map<string, Promise<Preview>>()
 // cached card paints it in the very first frame (no placeholder flash).
 const ready = new Map<string, Preview>()
 
+// A card holds Airtable picture links, which last a few hours. A cached card
+// whose links have run out is built again the next time it is wanted – or
+// its logo would quietly vanish, the way it did on a page left open all day
+// (Bryce, 17 Sept 2026: "pressing undo doesn't bring back the logo").
+function stale(preview: Preview): boolean {
+  return listingImages(preview.listing).some(url => isExpiredAttachment(url))
+}
+
+// The cards for a record are dropped when the record changes under them (a
+// picture dropped in, a write from the chat, a decision or its undo); every
+// preview on the page hears of it and asks again.
+const listeners = new Set<() => void>()
+let generation = 0
+function subscribe(fn: () => void): () => void {
+  listeners.add(fn)
+  return () => {
+    listeners.delete(fn)
+  }
+}
+function generationNow(): number {
+  return generation
+}
+export function forgetPreviews(table: string, record: string): void {
+  const prefix = `${table}/${record}|`
+  for (const key of [...previews.keys()]) {
+    if (key.startsWith(prefix)) previews.delete(key)
+  }
+  for (const key of [...ready.keys()]) {
+    if (key.startsWith(prefix)) ready.delete(key)
+  }
+  generation++
+  for (const fn of listeners) fn()
+}
+
 function previewKey(table: string, record: string, editsKey: string): string {
   return `${table}/${record}|${editsKey}`
 }
@@ -58,6 +93,11 @@ async function fetchPreview(
   editsKey: string
 ): Promise<Preview> {
   const key = previewKey(table, record, editsKey)
+  const known = ready.get(key)
+  if (known && stale(known)) {
+    previews.delete(key)
+    ready.delete(key)
+  }
   const hit = previews.get(key)
   if (hit) return hit
   const p = (async () => {
@@ -136,7 +176,8 @@ export function seedPreviews(
 ): void {
   for (const e of entries) {
     const key = previewKey(e.table, e.record, JSON.stringify(e.edits))
-    if (!previews.has(key)) {
+    const cur = ready.get(key)
+    if (!previews.has(key) || (cur && stale(cur))) {
       previews.set(key, Promise.resolve(e.preview))
       ready.set(key, e.preview)
     }
@@ -205,12 +246,15 @@ export default function SitePreview({
     preview?: Preview
     error?: string
   } | null>(null)
+  // Bumped by forgetPreviews: the record changed, so look again.
+  const gen = useSyncExternalStore(subscribe, generationNow, generationNow)
   const known = ready.get(key)
   const preview = result?.key === key ? result.preview : known
   const error = result?.key === key ? result.error : undefined
 
   useEffect(() => {
-    if (ready.has(key)) return
+    const cached = ready.get(key)
+    if (cached && !stale(cached)) return
     let live = true
     // Edits arrive keystroke by keystroke; wait for a pause before asking.
     const t = setTimeout(
@@ -235,13 +279,19 @@ export default function SitePreview({
       live = false
       clearTimeout(t)
     }
-  }, [table, record, editsKey, key])
+  }, [table, record, editsKey, key, gen])
 
   return (
     <section className={styles.block}>
       {preview?.kind && preview.listing ? (
         <div className={styles.siteFrame}>
-          <Card kind={preview.kind} listing={preview.listing} />
+          {/* Keyed by its picture links: a fresh card is a fresh element,
+              so an image hidden after a failed load does not stay hidden. */}
+          <Card
+            key={listingImages(preview.listing).join(' ')}
+            kind={preview.kind}
+            listing={preview.listing}
+          />
         </div>
       ) : preview && !preview.kind ? (
         <p className={styles.note}>

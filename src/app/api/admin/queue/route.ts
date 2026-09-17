@@ -10,7 +10,7 @@
        Airtable itself – what the Mac worker does every five minutes, done
        now for the page's refreshes. A write, so it takes the edit grant;
        a viewer gets the plain list.
-  GET  /api/admin/queue?target=<tbl>/<rec>     → { fields, schema } (live)
+  GET  /api/admin/queue?target=<tbl>/<rec>     → { fields, attachments, schema } (live)
   POST /api/admin/queue  body { id, action, edits?, reason?, replyDraft? } → { item }
        action: accept | reject | edit | undo
        (edit keeps the page's pending edits, and the reply draft as
@@ -81,12 +81,16 @@ export async function GET(req: NextRequest) {
     const target = req.nextUrl.searchParams.get('target')
     if (target) {
       const [table = '', record = ''] = target.split('/')
-      const [fields, schema] = await Promise.all([
+      const [read, schema] = await Promise.all([
         getTargetFields(table, record),
         getTableSchema(table),
       ])
-      if (!fields) return json({ error: 'That record no longer exists.' }, 404)
-      return json({ fields, schema })
+      if (!read) return json({ error: 'That record no longer exists.' }, 404)
+      return json({
+        fields: read.fields,
+        attachments: read.attachments,
+        schema,
+      })
     }
     const me = await currentAdmin()
     let items = await listQueue()

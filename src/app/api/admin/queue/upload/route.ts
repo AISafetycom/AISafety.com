@@ -3,7 +3,7 @@
 
   POST /api/admin/queue/upload
        body { id, field, filename, contentType, data }   data = base64
-       → { urls }
+       → { urls, attachments }
 
   Drops one image into an attachment field of the item's target record,
   replacing what was there. The record is unpublished, so the site does not
@@ -51,16 +51,17 @@ export async function POST(req: NextRequest) {
     if (!item.targetTable || !item.targetRecord) {
       return json({ error: 'This item has no record to attach to.' }, 400)
     }
-    const urls = await uploadImage(item.targetTable, item.targetRecord, field, {
-      filename,
-      contentType,
-      base64: data,
-    })
+    const stored = await uploadImage(
+      item.targetTable,
+      item.targetRecord,
+      field,
+      { filename, contentType, base64: data }
+    )
     const me = await currentAdmin()
     console.log(
       `[admin-queue] image ${field} on ${item.targetRecord} (${item.title}) by ${me?.name ?? '?'}`
     )
-    return json({ urls })
+    return json(stored)
   } catch (e) {
     if (e instanceof QueueError) return json({ error: e.detail }, e.status)
     const msg = e instanceof Error ? e.message : String(e)

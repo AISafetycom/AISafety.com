@@ -875,6 +875,39 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* A picture in the field list: the thumbnail with its file name, pixel
+   size, bytes and type beside it. The row sits at the top, not on the
+   picture's bottom edge. */
+.thumbItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.thumbDetails {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* With details beside the picture, a long file name wraps rather than
+   pushing the Replace button onto its own line. */
+.imageSlot:has(.thumbDetails) {
+  flex-wrap: nowrap;
+}
+
+.imageSlot:has(.thumbDetails) .dropZone {
+  flex: 0 0 auto;
+}
+
+.fieldRow:has(.imageSlot) {
+  align-items: start;
+}
+
 .editable {
   display: inline-flex;
   align-items: baseline;
