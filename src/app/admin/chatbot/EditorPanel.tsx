@@ -249,6 +249,7 @@ export default function EditorPanel({
             {MODELS.map(m => (
               <option key={m.id} value={m.id}>
                 {m.longLabel}
+                {m.id === DEFAULT_MODEL_ID ? ' (production)' : ''}
               </option>
             ))}
           </select>

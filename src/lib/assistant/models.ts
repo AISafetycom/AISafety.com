@@ -15,28 +15,38 @@ export const MODELS: AssistantModel[] = [
     longLabel: 'Haiku 4.5 — fast',
   },
   {
-    id: 'claude-sonnet-4-6',
-    shortLabel: 'Sonnet 4.6',
-    longLabel: 'Sonnet 4.6 — balanced',
-  },
-  {
-    id: 'claude-opus-4-7',
-    shortLabel: 'Opus 4.7',
-    longLabel: 'Opus 4.7',
-  },
-  {
-    id: 'claude-opus-4-8',
-    shortLabel: 'Opus 4.8',
-    longLabel: 'Opus 4.8',
+    id: 'claude-sonnet-5',
+    shortLabel: 'Sonnet 5',
+    longLabel: 'Sonnet 5 — balanced',
   },
   {
     id: 'claude-opus-5',
     shortLabel: 'Opus 5',
-    longLabel: 'Opus 5 — most capable',
+    longLabel: 'Opus 5',
+  },
+  {
+    id: 'claude-fable-5-1',
+    shortLabel: 'Fable 5.1',
+    longLabel: 'Fable 5.1 — most capable',
   },
 ]
 
 export const DEFAULT_MODEL_ID = 'claude-opus-5'
+
+/** Fable-tier models think whether asked or not: the API rejects
+ *  `thinking: { type: 'disabled' }` for them with a 400. */
+export function thinkingAlwaysOn(id: string): boolean {
+  return /^claude-(fable|mythos)-/.test(id)
+}
+
+/** The `thinking` request field for a model. The assistant reasons in visible
+ *  text (ending with the [[/thinking]] marker) rather than in API thinking
+ *  blocks, so thinking is switched off wherever the API allows it. For models
+ *  that can't have it off the field is left out (the API then runs adaptive
+ *  thinking) and the stream loop echoes their thinking blocks back. */
+export function thinkingParam(id: string): { type: 'disabled' } | undefined {
+  return thinkingAlwaysOn(id) ? undefined : { type: 'disabled' }
+}
 
 /** Whether an id names one of the models the playground may pick. */
 export function isKnownModelId(id: string): boolean {

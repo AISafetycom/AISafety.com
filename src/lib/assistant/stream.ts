@@ -4,7 +4,7 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import { auditCardCitations, extractCitations } from './citations'
-import { modelDisplayName } from './models'
+import { modelDisplayName, thinkingAlwaysOn, thinkingParam } from './models'
 import { looksLikeAnswerText, splitAnswerRedoMessage } from './split-answer'
 import { TOOL_DEFINITIONS, executeTool } from './tools'
 import type { Catalog, ChatMessage, CitationRef, Listing } from './types'
@@ -421,14 +421,14 @@ export async function runAssistantStream(
       const response = await client.messages.create(
         {
           model,
-          max_tokens: MAX_TOKENS,
-          // Opus 5 turns API-level thinking ON when this field is omitted
-          // (earlier models defaulted to off). The assistant does its reasoning
-          // in visible text ending with the [[/thinking]] marker, and this loop
-          // only reconstructs text/tool_use blocks — API thinking blocks would
-          // be dropped from the echoed assistant turn, breaking tool rounds. So
-          // keep it explicitly off.
-          thinking: { type: 'disabled' },
+          // A model that always thinks spends part of the budget on thinking
+          // tokens before the visible answer, so it gets more room.
+          max_tokens: thinkingAlwaysOn(model) ? MAX_TOKENS * 4 : MAX_TOKENS,
+          // Off wherever the API allows it: the assistant does its reasoning in
+          // visible text ending with the [[/thinking]] marker. Fable-tier
+          // models can't have it off (a 400), so for them the field is left
+          // out and the thinking blocks they return are echoed back below.
+          thinking: thinkingParam(model),
           system: [
             { type: 'text', text: systemPrompt },
             { type: 'text', text: pagesBlock },
@@ -462,6 +462,10 @@ export async function runAssistantStream(
         name: string
         inputJson: string
       } | null = null
+      // A thinking block in progress (always-on-thinking models only). It
+      // must go back to the API exactly as received — empty text and all —
+      // or the next tool round is rejected.
+      let currentThinking: { thinking: string; signature: string } | null = null
       let stopReason: string | null = null
       // This generation's text, forwarded to the client through a gate that
       // holds back a tail that might still become a [[/thinking]] marker. When
@@ -491,6 +495,13 @@ export async function runAssistantStream(
         } else if (event.type === 'content_block_start') {
           if (event.content_block.type === 'text') {
             currentTextBlock = ''
+          } else if (event.content_block.type === 'thinking') {
+            currentThinking = { thinking: '', signature: '' }
+          } else if (event.content_block.type === 'redacted_thinking') {
+            blocks.push({
+              type: 'redacted_thinking',
+              data: event.content_block.data,
+            })
           } else if (event.content_block.type === 'tool_use') {
             // Any held-back text belongs before this tool call — flush it now
             // so the client's event order matches the model's output order.
@@ -562,9 +573,19 @@ export async function runAssistantStream(
             currentToolUse
           ) {
             currentToolUse.inputJson += event.delta.partial_json
+          } else if (event.delta.type === 'thinking_delta' && currentThinking) {
+            currentThinking.thinking += event.delta.thinking
+          } else if (
+            event.delta.type === 'signature_delta' &&
+            currentThinking
+          ) {
+            currentThinking.signature += event.delta.signature
           }
         } else if (event.type === 'content_block_stop') {
-          if (currentToolUse) {
+          if (currentThinking) {
+            blocks.push({ type: 'thinking', ...currentThinking })
+            currentThinking = null
+          } else if (currentToolUse) {
             let parsedInput: Record<string, unknown> = {}
             try {
               parsedInput = currentToolUse.inputJson
