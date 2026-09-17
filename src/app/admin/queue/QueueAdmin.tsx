@@ -630,6 +630,21 @@ function editsAsText(edits: Record<string, unknown>): Record<string, string> {
   return out
 }
 
+/** The draft an item starts from: its saved edits, when it is still open. */
+function draftOfRow(items: QueueItem[] | null | undefined, id: string): Draft {
+  const item = items?.find(i => i.id === id)
+  if (!item || !item.edits || !isOpen(item)) return FRESH
+  return { ...FRESH, edits: editsAsText(item.edits) }
+}
+
+function sameEdits(
+  a: Record<string, string>,
+  b: Record<string, string>
+): boolean {
+  const ka = Object.keys(a)
+  return ka.length === Object.keys(b).length && ka.every(k => a[k] === b[k])
+}
+
 function isOpen(item: QueueItem): boolean {
   return (
     item.status === 'Pending' ||
@@ -939,6 +954,13 @@ export default function QueueAdmin({
   // The last decision clicked is the only one U can target, in whatever
   // order the writes land.
   const lastDecidedRef = useRef<string | null>(null)
+  // What Cmd+Z takes back: each change to an item's edits or reply, with
+  // the draft as it was, and when the last decision was made, so the more
+  // recent of the two is the one undone (Bryce, 17 Sept 2026: "CMD Z in
+  // general should undo the last action (i.e. changing a field)"). A logo
+  // swap is written to Airtable at once and is not taken back here.
+  const historyRef = useRef<{ id: string; before: Draft; at: number }[]>([])
+  const decidedAtRef = useRef(0)
   const actRef = useRef<
     (
       item: QueueItem,
@@ -1457,44 +1479,52 @@ export default function QueueAdmin({
 
   // A fresh draft starts from the edits saved on the row, so what was
   // applied (by hand or from the chat) is still there after a reload.
-  const draft = (id: string): Draft => {
-    const d = drafts[id]
-    if (d) return d
-    const item = items?.find(i => i.id === id)
-    if (!item || !item.edits || !isOpen(item)) return FRESH
-    return { ...FRESH, edits: editsAsText(item.edits) }
-  }
+  const draft = (id: string): Draft => drafts[id] ?? draftOfRow(items, id)
   // Edits and the reply draft as edited are kept on the row a moment after
   // they change (one save per item, the last one wins), so they are still
   // there after a reload. The live base is untouched until Accept.
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const draftsRef = useRef(drafts)
   draftsRef.current = drafts
-  const setDraft = useCallback((id: string, patch: Partial<Draft>) => {
-    setDrafts(prev => ({ ...prev, [id]: { ...(prev[id] ?? FRESH), ...patch } }))
-    if (!patch.edits && patch.reply === undefined) return
-    const merged = { ...(draftsRef.current[id] ?? FRESH), ...patch }
-    const row = itemsRef.current?.find(i => i.id === id)
-    const body: Record<string, unknown> = {
-      id,
-      action: 'edit',
-      edits: merged.edits,
-    }
-    if (patch.reply !== undefined && row?.replyDraft !== null) {
-      // Back to "as it came" means the row's own draft is saved again.
-      body.replyDraft = merged.reply ?? row?.replyDraft ?? ''
-    }
-    clearTimeout(saveTimers.current[id])
-    saveTimers.current[id] = setTimeout(() => {
-      void fetch(API, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      }).catch(() => {
-        // best effort: the edits are still on the page and go with Accept
-      })
-    }, 800)
-  }, [])
+  const setDraft = useCallback(
+    (id: string, patch: Partial<Draft>, record = true) => {
+      const was = draftsRef.current[id] ?? draftOfRow(itemsRef.current, id)
+      const changed =
+        (patch.edits !== undefined && !sameEdits(patch.edits, was.edits)) ||
+        (patch.reply !== undefined && patch.reply !== was.reply)
+      if (record && changed) {
+        historyRef.current.push({ id, before: was, at: Date.now() })
+        if (historyRef.current.length > 50) historyRef.current.shift()
+      }
+      setDrafts(prev => ({
+        ...prev,
+        [id]: { ...(prev[id] ?? FRESH), ...patch },
+      }))
+      if (!patch.edits && patch.reply === undefined) return
+      const merged = { ...(draftsRef.current[id] ?? FRESH), ...patch }
+      const row = itemsRef.current?.find(i => i.id === id)
+      const body: Record<string, unknown> = {
+        id,
+        action: 'edit',
+        edits: merged.edits,
+      }
+      if (patch.reply !== undefined && row?.replyDraft !== null) {
+        // Back to "as it came" means the row's own draft is saved again.
+        body.replyDraft = merged.reply ?? row?.replyDraft ?? ''
+      }
+      clearTimeout(saveTimers.current[id])
+      saveTimers.current[id] = setTimeout(() => {
+        void fetch(API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }).catch(() => {
+          // best effort: the edits are still on the page and go with Accept
+        })
+      }, 800)
+    },
+    []
+  )
 
   const select = useCallback((id: string) => {
     setSelectedId(id)
@@ -1586,6 +1616,7 @@ export default function QueueAdmin({
         // The page moves on now; the write lands behind it. The previous
         // decision stops being U's target (the Done list still has it).
         lastDecidedRef.current = item.id
+        decidedAtRef.current = Date.now()
         setUndoable(null)
         pendingRef.current = { ...pendingRef.current, [item.id]: action }
         setPending(pendingRef.current)
@@ -1761,6 +1792,40 @@ export default function QueueAdmin({
         (t.tagName === 'INPUT' ||
           t.tagName === 'TEXTAREA' ||
           t.isContentEditable)
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        e.key === 'z' &&
+        !typing
+      ) {
+        // Cmd+Z: the last edit on any open item, or the last decision when
+        // that came later (what U does). Inside a text box the browser's own
+        // undo keeps working.
+        e.preventDefault()
+        const h = historyRef.current
+        while (h.length) {
+          const row = items?.find(i => i.id === h[h.length - 1].id)
+          if (row && isOpen(row) && !draft(row.id).busy) break
+          h.pop()
+        }
+        const top = h[h.length - 1]
+        const decision = undoable && !draft(undoable.id).busy ? undoable : null
+        if (top && (!decision || top.at > decidedAtRef.current)) {
+          h.pop()
+          setDraft(
+            top.id,
+            { edits: top.before.edits, reply: top.before.reply, editing: null },
+            false
+          )
+          select(top.id)
+        } else if (decision) {
+          void act(decision, 'undo')
+        } else if (toast?.state === 'working') {
+          queueUndo(toast.item.id)
+        }
+        return
+      }
       if (e.metaKey || e.ctrlKey || e.altKey) return
       if (typing) {
         if (e.key === 'Escape') (t as HTMLElement).blur()
@@ -1878,6 +1943,8 @@ export default function QueueAdmin({
     setDraft,
     live,
     agentChat,
+    items,
+    select,
   ])
 
   const waiting = ordered.open
@@ -2226,6 +2293,13 @@ export default function QueueAdmin({
                 <kbd>U</kbd>
               </dt>
               <dd>undo the last decision</dd>
+              <dt>
+                <kbd>⌘</kbd> <kbd>Z</kbd>
+              </dt>
+              <dd>
+                undo the last change to a field or reply, or the last decision
+                if that came later
+              </dd>
               <dt>
                 <kbd>⌘</kbd> <kbd>Enter</kbd>
               </dt>
