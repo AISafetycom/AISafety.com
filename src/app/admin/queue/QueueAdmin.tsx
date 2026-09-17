@@ -11,6 +11,7 @@ import type {
   PreviewKind,
   QueueItem,
 } from '@/lib/admin/queue'
+import { missingFields } from '@/lib/admin/queue-needed'
 import Icon from '@/components/Icon'
 import { activityIcon } from '@/app/communities/activity-icon'
 import { isAcceptingApplications } from '@/lib/funding-status'
@@ -3233,6 +3234,17 @@ function Fields({
   } else {
     Object.assign(all, fields)
   }
+  // What the page cannot do without and the record – with the edits typed
+  // here – still leaves empty (Bryce, 17 Sept 2026: two events went out
+  // with no Cost, "I had missed that"). Its name goes orange and bold where
+  // it sits; and it is listed even before the table's field list arrives.
+  const current: Record<string, unknown> = { ...all }
+  for (const [k, v] of Object.entries(d.edits)) {
+    current[k] = v === 'false' ? false : v
+  }
+  const missing = missingFields(item.page, current)
+  const missingSet = new Set(missing)
+  for (const k of missing) if (!(k in all)) all[k] = null
   const entries = Object.entries(all)
   const pick = (re: RegExp) => entries.filter(([k]) => re.test(k))
   const main = [...pick(NAME_KEYS), ...pick(URL_KEYS), ...pick(DESC_KEYS)]
@@ -3346,7 +3358,11 @@ function Fields({
   }
   const row = (e: [string, unknown]) => (
     <div key={e[0]} className={styles.fieldRow}>
-      <span className={styles.label}>{e[0]}</span>
+      <span
+        className={`${styles.label} ${missingSet.has(e[0]) ? styles.labelMissing : ''}`}
+      >
+        {e[0]}
+      </span>
       <span className={styles.value}>{valueOf(e)}</span>
     </div>
   )
@@ -3390,7 +3406,7 @@ function Fields({
               <button
                 key={k}
                 type="button"
-                className={styles.unsetChip}
+                className={`${styles.unsetChip} ${missingSet.has(k) ? styles.unsetMissing : ''}`}
                 disabled={revising}
                 title={box ? `Tick ${k}` : `Fill in ${k}`}
                 onClick={() =>

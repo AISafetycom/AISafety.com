@@ -1345,6 +1345,27 @@
   cursor: default;
 }
 
+/* A field the page cannot do without, still empty: its name is orange and
+   bold where it sits – the row's label, or its chip in the "Not set" line
+   (Bryce, 17 Sept 2026: two events went out with no Cost). */
+.unsetMissing {
+  border-style: solid;
+  border-color: var(--q-warn);
+  color: var(--q-warn);
+  font-weight: 600;
+}
+
+.unsetMissing:hover:not(:disabled) {
+  border-color: var(--q-warn);
+  color: var(--q-warn);
+  background: var(--q-warn-soft);
+}
+
+.labelMissing {
+  color: var(--q-warn);
+  font-weight: 600;
+}
+
 .reasons {
   margin: 0;
   padding-left: 18px;
