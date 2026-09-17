@@ -288,6 +288,16 @@
   color: var(--bright-teal-300);
 }
 
+/* One-paragraph explainer under a page title, for people new to the tool. */
+.pageIntro {
+  max-width: 720px;
+  margin: -10px 0 22px;
+  font-size: 13px;
+  line-height: 1.55;
+  letter-spacing: -0.1px;
+  color: var(--teal-300);
+}
+
 /* ─── Playground split ───────────────────────────────────────────────── */
 
 .consoleSplit {
