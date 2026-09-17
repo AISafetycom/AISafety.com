@@ -313,6 +313,30 @@ function show(v: unknown): string {
   return JSON.stringify(v)
 }
 
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/
+const DATE_TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/
+
+/** An Airtable date as people write it: "1 February 2027", or with the
+ *  time after a comma when the field carries one. Anything else comes
+ *  back untouched. Only what is SHOWN goes through here; the value kept
+ *  for editing and saving stays in Airtable's own YYYY-MM-DD (Bryce,
+ *  17 Sept 2026: "show dates in friendly format"). */
+function friendly(text: string): string {
+  if (DATE_ONLY_RE.test(text)) {
+    const [y, m, d] = text.split('-').map(Number)
+    const date = new Date(Date.UTC(y, m - 1, d))
+    if (Number.isNaN(date.getTime())) return text
+    return date.toLocaleDateString('en-GB', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC',
+    })
+  }
+  if (DATE_TIME_RE.test(text)) return whenLabel(text) || text
+  return text
+}
+
 /** An attachment value as the queue sees it: Airtable's own shape (an
  *  object or list with `url`), the site's snapshot (a list of URLs), or
  *  Broom's proposal (`{url, filename}`). The old side of a change often
@@ -2605,7 +2629,7 @@ function Detail({
                       return pic ? (
                         <Picture key={pic.url ?? ''} {...pic} />
                       ) : (
-                        show(c.from)
+                        friendly(show(c.from))
                       )
                     })()}
                   </span>
@@ -2650,9 +2674,9 @@ function Detail({
                         />
                       ) : (
                         <EditableValue
-                          text={
+                          text={friendly(
                             c.field in d.edits ? d.edits[c.field] : show(c.to)
-                          }
+                          )}
                           edited={c.field in d.edits}
                           canEdit={!revising}
                           onEdit={() => setD({ editing: c.field })}
@@ -2854,6 +2878,28 @@ const COMPUTED_TYPES = new Set([
   'button',
 ])
 
+/** Editors that fit in a grid cell; a textarea or a chip picker wants
+ *  the full row. */
+const NARROW_EDITORS = new Set([
+  'singleSelect',
+  'date',
+  'number',
+  'url',
+  'email',
+])
+const LONG_TEXT_TYPES = new Set(['multilineText', 'richText'])
+
+/** Nothing there: no value, an empty list, or an unticked box. */
+function isBlank(v: unknown): boolean {
+  return (
+    v === null ||
+    v === undefined ||
+    v === '' ||
+    v === false ||
+    (Array.isArray(v) && v.length === 0)
+  )
+}
+
 function Fields({
   item,
   fields,
@@ -2891,7 +2937,23 @@ function Fields({
     !HOUSEKEEPING.test(k) && !COMPUTED_TYPES.has(types.get(k) ?? '')
   const rest = entries.filter(e => !seen.has(e[0]) && editable(e))
   const revising = item.status === 'Revising' || readOnly
-  const row = ([k, v]: [string, unknown]) => {
+
+  // Name, link and description keep a row each, and so does every picture
+  // (an empty logo slot is the point). Every other filled field sits in a
+  // compact grid, and the empty ones fold into one line of names, each a
+  // click from being set (Bryce, 17 Sept 2026: "overwhelmed by all the
+  // fields"). An unticked box counts as empty; a field being edited, or
+  // edited to empty, stays in the grid with its "edited" mark.
+  const isPicture = ([k, v]: [string, unknown]) =>
+    types.get(k) === 'multipleAttachments' || isImageList(v)
+  const pictures = rest.filter(isPicture)
+  const details = rest.filter(e => !isPicture(e))
+  const inGrid = ([k, v]: [string, unknown]) =>
+    !isBlank(v) || k in d.edits || d.editing === k
+  const filled = details.filter(inGrid)
+  const unset = details.filter(e => !inGrid(e))
+
+  const valueOf = ([k, v]: [string, unknown]) => {
     const info = infos.get(k)
     const isAttachment = types.get(k) === 'multipleAttachments'
     const empty =
@@ -2902,76 +2964,131 @@ function Fields({
     const edited = k in d.edits
     const value = edited ? d.edits[k] : show(v)
     const isUrl = typeof v === 'string' && /^https?:\/\//.test(v) && !edited
+    if (d.editing === k) {
+      return (
+        <FieldEditor
+          info={info}
+          value={empty && !edited ? '' : value}
+          onSave={text => {
+            // Saving what was already there is not an edit.
+            const same = text === (empty ? '' : show(v))
+            const edits = { ...d.edits }
+            if (same) delete edits[k]
+            else edits[k] = text
+            setD({ editing: null, edits })
+          }}
+          onCancel={() => setD({ editing: null })}
+        />
+      )
+    }
+    if (isAttachment || isImageList(v)) {
+      return (
+        <ImageSlot
+          itemId={item.id}
+          field={k}
+          urls={isImageList(v) ? v : []}
+          canUpload={isAttachment && !revising}
+          onDone={urls => onImage(k, urls)}
+        />
+      )
+    }
+    if (info?.type === 'checkbox') {
+      const on = edited ? d.edits[k] === 'true' : v === true
+      return (
+        <label className={styles.check}>
+          <input
+            type="checkbox"
+            checked={on}
+            disabled={revising}
+            onChange={e => {
+              // Back to how it was is not an edit.
+              const edits = { ...d.edits }
+              if (e.target.checked === (v === true)) delete edits[k]
+              else edits[k] = e.target.checked ? 'true' : 'false'
+              setD({ edits })
+            }}
+          />
+          {on ? 'Yes' : 'No'}
+          {edited && <em className={styles.edited}>edited</em>}
+        </label>
+      )
+    }
+    if (empty && !edited) {
+      return (
+        <EditableValue
+          text="—"
+          muted
+          edited={false}
+          canEdit={!revising}
+          onEdit={() => setD({ editing: k })}
+        />
+      )
+    }
     return (
-      <div key={k} className={styles.fieldRow}>
+      <EditableValue
+        text={friendly(value)}
+        href={isUrl ? (v as string) : undefined}
+        edited={edited}
+        canEdit={!revising && isEditable(v) && !isAttachment}
+        onEdit={() => setD({ editing: k })}
+      />
+    )
+  }
+  const row = (e: [string, unknown]) => (
+    <div key={e[0]} className={styles.fieldRow}>
+      <span className={styles.label}>{e[0]}</span>
+      <span className={styles.value}>{valueOf(e)}</span>
+    </div>
+  )
+  const cell = (e: [string, unknown]) => {
+    const [k, v] = e
+    const text = k in d.edits ? d.edits[k] : show(v)
+    const type = types.get(k) ?? ''
+    const wide =
+      LONG_TEXT_TYPES.has(type) ||
+      text.length > 40 ||
+      (d.editing === k && !NARROW_EDITORS.has(type))
+    return (
+      <div
+        key={k}
+        className={`${styles.fieldCell} ${wide ? styles.fieldWide : ''}`}
+      >
         <span className={styles.label}>{k}</span>
-        <span className={styles.value}>
-          {d.editing === k ? (
-            <FieldEditor
-              info={info}
-              value={empty && !edited ? '' : value}
-              onSave={text => {
-                // Saving what was already there is not an edit.
-                const same = text === (empty ? '' : show(v))
-                const edits = { ...d.edits }
-                if (same) delete edits[k]
-                else edits[k] = text
-                setD({ editing: null, edits })
-              }}
-              onCancel={() => setD({ editing: null })}
-            />
-          ) : isAttachment || isImageList(v) ? (
-            <ImageSlot
-              itemId={item.id}
-              field={k}
-              urls={isImageList(v) ? v : []}
-              canUpload={isAttachment && !revising}
-              onDone={urls => onImage(k, urls)}
-            />
-          ) : info?.type === 'checkbox' ? (
-            <label className={styles.check}>
-              <input
-                type="checkbox"
-                checked={edited ? d.edits[k] === 'true' : v === true}
-                disabled={revising}
-                onChange={e =>
-                  setD({
-                    edits: {
-                      ...d.edits,
-                      [k]: e.target.checked ? 'true' : 'false',
-                    },
-                  })
-                }
-              />
-              {(edited ? d.edits[k] === 'true' : v === true) ? 'Yes' : 'No'}
-              {edited && <em className={styles.edited}>edited</em>}
-            </label>
-          ) : empty && !edited ? (
-            <EditableValue
-              text="—"
-              muted
-              edited={false}
-              canEdit={!revising}
-              onEdit={() => setD({ editing: k })}
-            />
-          ) : (
-            <EditableValue
-              text={value}
-              href={isUrl ? (v as string) : undefined}
-              edited={edited}
-              canEdit={!revising && isEditable(v) && !isAttachment}
-              onEdit={() => setD({ editing: k })}
-            />
-          )}
-        </span>
+        <span className={styles.value}>{valueOf(e)}</span>
       </div>
     )
   }
   return (
     <div className={styles.fields}>
       {main.map(row)}
-      {rest.length > 0 && (
-        <div className={styles.fieldsRest}>{rest.map(row)}</div>
+      {pictures.map(row)}
+      {filled.length > 0 && (
+        <div className={styles.fieldGrid}>{filled.map(cell)}</div>
+      )}
+      {unset.length > 0 && (
+        <div className={styles.unset}>
+          <span className={styles.label}>Not set</span>
+          {unset.map(([k]) => {
+            const box = infos.get(k)?.type === 'checkbox'
+            return (
+              <button
+                key={k}
+                type="button"
+                className={styles.unsetChip}
+                disabled={revising}
+                title={box ? `Tick ${k}` : `Fill in ${k}`}
+                onClick={() =>
+                  box
+                    ? setD({ edits: { ...d.edits, [k]: 'true' } })
+                    : setD({ editing: k })
+                }
+              >
+                <Icon src={ICON.plus} size={12} />
+                {k}
+              </button>
+            )
+          })}
+        </div>
       )}
     </div>
   )
