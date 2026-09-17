@@ -410,6 +410,10 @@ interface Props {
   chips?: string[]
   /** Greeting bubble for the empty state. */
   greeting?: string
+  /** Small note under the greeting in the empty state. Omit for the site's
+   *  "may be reviewed" line; pass a string to replace it, or null to hide it
+   *  (the admin sandbox, whose turns are never logged, shows its own). */
+  privacyNote?: string | null
   /** sessionStorage key for persisting messages (omit to disable). */
   storageKey?: string
   /** Fires when the visitor presses a "Suggest a listing" button in a reply.
@@ -461,6 +465,7 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
     bodyExtras,
     chips,
     greeting,
+    privacyNote,
     storageKey,
     onSuggest,
     onCitationClick,
@@ -959,10 +964,12 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
             {greeting && (
               <div className={styles.greetingBubble}>{greeting}</div>
             )}
-            <div className={styles.privacyNote}>
-              This conversation may be reviewed by the AISafety.com team and
-              trusted partners to improve the chatbot.
-            </div>
+            {privacyNote !== null && (
+              <div className={styles.privacyNote}>
+                {privacyNote ??
+                  'This conversation may be reviewed by the AISafety.com team and trusted partners to improve the chatbot.'}
+              </div>
+            )}
             {chips && chips.length > 0 && (
               <div className={styles.chipsRow}>
                 {chips.map(chip => (

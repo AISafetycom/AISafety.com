@@ -83,6 +83,7 @@ export default function AdminChatHost({ prompt, model, context }: Props) {
         bodyExtras={buildExtras}
         chips={chips}
         greeting={greeting}
+        privacyNote="Sandbox: test chats aren't saved to the Bot log."
         onHasMessagesChange={setHasMessages}
         onSuggest={handleSuggest}
       />
