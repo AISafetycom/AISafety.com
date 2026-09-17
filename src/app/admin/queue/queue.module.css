@@ -920,15 +920,21 @@
   align-items: start;
 }
 
+/* One flex item holds the whole value as running text: the box's baseline
+   is then the value's first line, so a row's label stays level with it,
+   while inside, the icon, text, "edited" mark and pencil wrap like a
+   paragraph. */
 .editable {
   display: inline-flex;
-  align-items: baseline;
-  gap: 8px;
   max-width: 100%;
   padding: 2px 8px;
   margin: -2px -8px;
   border-radius: 6px;
   cursor: text;
+}
+
+.editText {
+  min-width: 0;
 }
 
 .editable:hover,
@@ -939,7 +945,8 @@
 
 .editHint {
   display: inline-flex;
-  align-self: center;
+  vertical-align: middle;
+  margin-left: 6px;
   color: var(--q-muted);
   opacity: 0.55;
 }

@@ -3257,7 +3257,7 @@ function Fields({
   const filled = details.filter(inGrid)
   const unset = details.filter(e => !inGrid(e))
 
-  const valueOf = ([k, v]: [string, unknown]) => {
+  const valueOf = ([k, v]: [string, unknown], icon?: React.ReactNode) => {
     const info = infos.get(k)
     const isAttachment = types.get(k) === 'multipleAttachments'
     const empty =
@@ -3299,28 +3299,32 @@ function Fields({
     if (info?.type === 'checkbox') {
       const on = edited ? d.edits[k] === 'true' : v === true
       return (
-        <label className={styles.check}>
-          <input
-            type="checkbox"
-            checked={on}
-            disabled={revising}
-            onChange={e => {
-              // Back to how it was is not an edit.
-              const edits = { ...d.edits }
-              if (e.target.checked === (v === true)) delete edits[k]
-              else edits[k] = e.target.checked ? 'true' : 'false'
-              setD({ edits })
-            }}
-          />
-          {on ? 'Yes' : 'No'}
-          {edited && <em className={styles.edited}>edited</em>}
-        </label>
+        <>
+          {icon}
+          <label className={styles.check}>
+            <input
+              type="checkbox"
+              checked={on}
+              disabled={revising}
+              onChange={e => {
+                // Back to how it was is not an edit.
+                const edits = { ...d.edits }
+                if (e.target.checked === (v === true)) delete edits[k]
+                else edits[k] = e.target.checked ? 'true' : 'false'
+                setD({ edits })
+              }}
+            />
+            {on ? 'Yes' : 'No'}
+            {edited && <em className={styles.edited}>edited</em>}
+          </label>
+        </>
       )
     }
     if (empty && !edited) {
       return (
         <EditableValue
           text="—"
+          icon={icon}
           muted
           edited={false}
           canEdit={!revising}
@@ -3333,6 +3337,7 @@ function Fields({
         text={friendly(value)}
         href={isUrl ? (v as string) : undefined}
         body={typePills(item.page, k, value)}
+        icon={icon}
         edited={edited}
         canEdit={!revising && isEditable(v) && !isAttachment}
         onEdit={() => setD({ editing: k })}
@@ -3353,18 +3358,19 @@ function Fields({
       LONG_TEXT_TYPES.has(type) ||
       text.length > 40 ||
       (d.editing === k && !NARROW_EDITORS.has(type))
+    // The icon is part of the value, so a long value wraps beside it
+    // instead of dropping to the line below it.
+    const icon =
+      d.editing !== k ? (
+        <FieldIcon page={item.page} name={k} value={text} size={16} />
+      ) : undefined
     return (
       <div
         key={k}
         className={`${styles.fieldCell} ${wide ? styles.fieldWide : ''}`}
       >
         <span className={styles.label}>{k}</span>
-        <span className={styles.value}>
-          {d.editing !== k && (
-            <FieldIcon page={item.page} name={k} value={text} size={16} />
-          )}
-          {valueOf(e)}
-        </span>
+        <span className={styles.value}>{valueOf(e, icon)}</span>
       </div>
     )
   }
@@ -3764,11 +3770,16 @@ function FieldEditor({
 }
 
 /** A value you can click to edit: a visible pencil, a hover tint, and a link
- *  that still opens when it is one. */
+ *  that still opens when it is one. The field's icon, the value, its
+ *  "edited" mark and the pencil run as one line of text, so a long value
+ *  wraps with the icon at its start and the pencil after its last word
+ *  (Bryce, 17 Sept 2026: the icon alone on the first line with the pencil
+ *  floating beside two lines of text was "ugly"). */
 function EditableValue({
   text,
   href,
   body,
+  icon,
   edited,
   canEdit,
   muted,
@@ -3778,6 +3789,8 @@ function EditableValue({
   href?: string
   /** Shown in place of the text (e.g. the site's coloured type pills). */
   body?: React.ReactNode
+  /** The site's icon for the field, drawn before the value. */
+  icon?: React.ReactNode
   edited: boolean
   canEdit: boolean
   muted?: boolean
@@ -3790,7 +3803,13 @@ function EditableValue({
   ) : (
     (body ?? <span className={muted ? styles.empty : undefined}>{text}</span>)
   )
-  if (!canEdit) return shown
+  if (!canEdit)
+    return (
+      <>
+        {icon}
+        {shown}
+      </>
+    )
   return (
     <span
       className={styles.editable}
@@ -3809,10 +3828,13 @@ function EditableValue({
         }
       }}
     >
-      {shown}
-      {edited && <em className={styles.edited}>edited</em>}
-      <span className={styles.editHint}>
-        <Icon src={ICON.pencil} size={12} />
+      <span className={styles.editText}>
+        {icon}
+        {shown}
+        {edited && <em className={styles.edited}>edited</em>}
+        <span className={styles.editHint}>
+          <Icon src={ICON.pencil} size={12} />
+        </span>
       </span>
     </span>
   )
