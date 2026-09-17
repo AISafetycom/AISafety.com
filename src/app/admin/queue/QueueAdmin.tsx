@@ -562,6 +562,21 @@ const NAME_KEYS = /\b(name|title)\b|^organi[sz]ation$/i
 const URL_KEYS = /^(url|website|link|join link|apply link|application link)$/i
 const DESC_KEYS = /description/i
 
+/** The listing's own link: the row's, else the first link-like field of
+ *  the record as read live (or as proposed). */
+function listingLink(
+  item: QueueItem,
+  fields: Record<string, unknown> | null | undefined
+): string | null {
+  if (item.url) return item.url
+  for (const [k, v] of Object.entries(fields ?? item.fields ?? {})) {
+    if (URL_KEYS.test(k) && typeof v === 'string' && /^https?:\/\//.test(v)) {
+      return v
+    }
+  }
+  return null
+}
+
 function linkLabel(url: string): string {
   if (hostOf(url) === 'mail.google.com') return 'Open email'
   if (onHost(url, 'discord.com')) return 'Open Discord'
@@ -1952,6 +1967,16 @@ export default function QueueAdmin({
             queueUndo(toast.item.id)
           }
           break
+        case 's': {
+          // The shown listing's own link, in a new tab (Bryce, 17 Sept
+          // 2026: "make S open the link for the currently shown listing").
+          const href = item ? listingLink(item, live[item.id]?.fields) : null
+          if (href) {
+            e.preventDefault()
+            window.open(href, '_blank', 'noopener')
+          }
+          break
+        }
         case '?':
           e.preventDefault()
           setShowHelp(v => !v)
@@ -2325,6 +2350,10 @@ export default function QueueAdmin({
                 <kbd>F</kbd>
               </dt>
               <dd>talk to Fable about the item, or tell it what to change</dd>
+              <dt>
+                <kbd>S</kbd>
+              </dt>
+              <dd>open the listing&apos;s link in a new tab</dd>
               <dt>
                 <kbd>U</kbd>
               </dt>
