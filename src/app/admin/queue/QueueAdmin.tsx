@@ -55,6 +55,59 @@ const SECTION_LABEL: Record<Section, string> = {
   comb: 'Comb',
 }
 
+// Inside a section the items sit under their resource page, in the site's
+// own nav order, so one page can be judged at a stretch with the rest folded
+// away. Bryce, 17 Sept 2026: "I need to be able to sub-group by resource
+// page". A section on a single page shows no sub-heads.
+const PAGE_ORDER = [
+  '/training',
+  '/events',
+  '/map',
+  '/communities',
+  '/self-study',
+  '/jobs',
+  '/funding',
+  '/media-channels',
+  '/advisors',
+  '/projects',
+  '/founders',
+  '/donation-guide',
+]
+const NO_PAGE_LABEL = 'No page'
+
+/** One resource page's items within a section. `key` is the page label
+ *  ('/training', '/training (recurring)', '' for no page). */
+type PageGroup = { key: string; label: string; items: QueueItem[] }
+
+function pageRank(group: PageGroup): number {
+  if (!group.key) return PAGE_ORDER.length + 1
+  const page = group.items[0]?.page ?? ''
+  const i = PAGE_ORDER.indexOf(page)
+  return i === -1 ? PAGE_ORDER.length : i
+}
+
+/** The site's nav order, unknown pages after it by name, recurring programs
+ *  right behind /training, items with no page last. */
+function byPageOrder(a: PageGroup, b: PageGroup): number {
+  return pageRank(a) - pageRank(b) || a.key.localeCompare(b.key)
+}
+
+/** Split a section's (already sorted) items by resource page, keeping each
+ *  page's items in the order they came. */
+function splitByPage(list: QueueItem[]): PageGroup[] {
+  const byKey = new Map<string, PageGroup>()
+  for (const item of list) {
+    const key = pageLabel(item) ?? ''
+    let group = byKey.get(key)
+    if (!group) {
+      group = { key, label: key || NO_PAGE_LABEL, items: [] }
+      byKey.set(key, group)
+    }
+    group.items.push(item)
+  }
+  return [...byKey.values()].sort(byPageOrder)
+}
+
 // Library icons (public/images/icons), rendered through the site's <Icon>.
 const ICON = {
   requests: '/images/icons/speech-bubble.svg',
@@ -131,6 +184,7 @@ function linkIcon(url: string): string {
 type Theme = 'light' | 'dark'
 const THEME_KEY = 'aisafety-admin-queue:theme'
 const COLLAPSED_KEY = 'aisafety-admin-queue:collapsed'
+const FOLDED_PAGES_KEY = 'aisafety-admin-queue:folded-pages'
 const KIND_KEY = 'aisafety-admin-queue:kind'
 
 function sectionOf(item: QueueItem): Section {
@@ -797,6 +851,8 @@ export default function QueueAdmin({
     rules: false,
     comb: false,
   })
+  // Folded page sub-groups, keyed "<section>:<page label>".
+  const [foldedPages, setFoldedPages] = useState<Record<string, boolean>>({})
   const listRef = useRef<HTMLDivElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const detailRef = useRef<HTMLDivElement>(null)
@@ -836,6 +892,14 @@ export default function QueueAdmin({
           return next
         })
       }
+      const pages = JSON.parse(localStorage.getItem(FOLDED_PAGES_KEY) ?? '{}')
+      if (pages && typeof pages === 'object' && !Array.isArray(pages)) {
+        const next: Record<string, boolean> = {}
+        for (const [key, value] of Object.entries(pages)) {
+          if (value === true) next[key] = true
+        }
+        setFoldedPages(next)
+      }
       const k = localStorage.getItem(KIND_KEY)
       if (k === 'additions' || k === 'changes' || k === 'rules') setKind(k)
     } catch {
@@ -848,6 +912,20 @@ export default function QueueAdmin({
       const next = { ...prev, [section]: !prev[section] }
       try {
         localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next))
+      } catch {
+        // ignore
+      }
+      return next
+    })
+  }
+
+  const togglePage = (foldKey: string) => {
+    setFoldedPages(prev => {
+      const next = { ...prev }
+      if (next[foldKey]) delete next[foldKey]
+      else next[foldKey] = true
+      try {
+        localStorage.setItem(FOLDED_PAGES_KEY, JSON.stringify(next))
       } catch {
         // ignore
       }
@@ -980,7 +1058,8 @@ export default function QueueAdmin({
   }, [agent])
 
   // One flat, ordered list of open items: requests, Broom, rules, then Comb
-  // with Fable's Publish verdicts first. Keyboard navigation walks it.
+  // with Fable's Publish verdicts first, each section split by resource
+  // page. Keyboard navigation walks it, skipping folded sections and pages.
   const ordered = useMemo(() => {
     const groups: Record<Section, QueueItem[]> = {
       requests: [],
@@ -1018,9 +1097,27 @@ export default function QueueAdmin({
     groups.rules.sort(newest)
     groups.comb.sort(byVerdict)
     done.sort((a, b) => ((a.decidedAt ?? '') < (b.decidedAt ?? '') ? 1 : -1))
-    const flat = SECTIONS.filter(s => !collapsed[s]).flatMap(s => groups[s])
-    return { groups, done, flat, open, perKind }
-  }, [items, collapsed, kind, dayStart, selectedId])
+    // Sub-heads only where a section spans more than one page; a section on
+    // a single page lists its items as they are.
+    const pages: Record<Section, PageGroup[]> = {
+      requests: [],
+      broom: [],
+      rules: [],
+      comb: [],
+    }
+    for (const s of SECTIONS) {
+      const split = splitByPage(groups[s])
+      pages[s] = split.length > 1 ? split : []
+    }
+    const flat = SECTIONS.filter(s => !collapsed[s]).flatMap(s =>
+      pages[s].length
+        ? pages[s]
+            .filter(p => !foldedPages[`${s}:${p.key}`])
+            .flatMap(p => p.items)
+        : groups[s]
+    )
+    return { groups, pages, done, flat, open, perKind }
+  }, [items, collapsed, foldedPages, kind, dayStart, selectedId])
 
   const selected = useMemo(() => {
     if (!items) return null
@@ -1646,6 +1743,46 @@ export default function QueueAdmin({
                   </button>
                   {collapsed[section] ? null : list.length === 0 ? (
                     <div className={styles.groupEmpty}>Nothing waiting</div>
+                  ) : ordered.pages[section].length ? (
+                    ordered.pages[section].map(page => {
+                      const foldKey = `${section}:${page.key}`
+                      const folded = foldedPages[foldKey] === true
+                      return (
+                        <div key={page.key} className={styles.pageGroup}>
+                          <button
+                            className={styles.pageHead}
+                            onClick={() => togglePage(foldKey)}
+                            aria-expanded={!folded}
+                          >
+                            {page.label}
+                            <span className={styles.groupCount}>
+                              {page.items.length}
+                            </span>
+                            <span
+                              className={`${styles.groupChevron} ${folded ? styles.groupChevronClosed : ''}`}
+                            >
+                              <Icon src={ICON.chevron} size={12} />
+                            </span>
+                          </button>
+                          {folded
+                            ? null
+                            : page.items.map(item => (
+                                <Row
+                                  key={item.id}
+                                  item={item}
+                                  active={item.id === selectedId && !showDone}
+                                  working={pending[item.id] ?? null}
+                                  failed={
+                                    !pending[item.id] &&
+                                    Boolean(draft(item.id).error)
+                                  }
+                                  showPage={false}
+                                  onClick={() => select(item.id)}
+                                />
+                              ))}
+                        </div>
+                      )
+                    })
                   ) : (
                     list.map(item => (
                       <Row
@@ -1840,6 +1977,7 @@ function Row({
   active,
   working,
   failed,
+  showPage = true,
   onClick,
 }: {
   item: QueueItem
@@ -1848,6 +1986,8 @@ function Row({
   working: Decision | null
   /** The last decision on it did not land; the error is on the detail. */
   failed: boolean
+  /** Off under a page sub-head, which already names the page. */
+  showPage?: boolean
   onClick: () => void
 }) {
   return (
@@ -1885,7 +2025,7 @@ function Row({
         </span>
         <span className={styles.rowMeta}>
           {item.source !== 'Comb' && <span>{item.source}</span>}
-          {item.page && <span>{pageLabel(item)}</span>}
+          {showPage && item.page && <span>{pageLabel(item)}</span>}
           {item.verdict && (
             <span className={`${styles.withIcon} ${verdictClass(item)}`}>
               <Icon src={verdictIcon(item)} size={12} />
