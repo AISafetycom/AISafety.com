@@ -537,6 +537,18 @@
   color: var(--q-muted);
 }
 
+/* Where Comb found the listing: the Source line of its Airtable comment. */
+.found {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--q-muted);
+}
+
+.foundLabel {
+  font-weight: 600;
+}
+
 .title {
   margin: 0;
   font-size: 22px;

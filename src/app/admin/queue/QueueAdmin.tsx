@@ -260,6 +260,18 @@ function hashId(): string | null {
   return /^#(rec[A-Za-z0-9]{14})$/.exec(window.location.hash)?.[1] ?? null
 }
 
+/** The "Source:" line of Comb's Airtable comment, minus the clock time and
+ *  zone on a posting date ("posted 15 September 2026 19:57 UTC+01:00" →
+ *  "posted 15 September 2026"): the day is what places it. */
+function foundLabel(text: string): string {
+  return text
+    .replace(
+      /(\d{1,2} [A-Z][a-z]+ \d{4}) \d{1,2}:\d{2}(?: UTC[+\-\u2212]\d{2}:\d{2})?/,
+      '$1'
+    )
+    .trim()
+}
+
 function ago(iso: string | null): string {
   if (!iso) return ''
   const ms = Date.now() - new Date(iso).getTime()
@@ -2235,31 +2247,33 @@ function Detail({
   const showsCard =
     hasCard ||
     (item.type === 'Add' && Boolean(item.targetTable && item.targetRecord))
-  const excerptBlock = item.sourceExcerpt ? (
+  // A Comb row's excerpt is where Comb found the listing, which the head
+  // shows as its Source line; every other intake's is the words that
+  // opened the item.
+  const excerpt = item.source === 'Comb' ? null : item.sourceExcerpt
+  const excerptBlock = excerpt ? (
     <section className={styles.block}>
       <h3 className={styles.h3}>
         {item.source === 'Broom' ? 'What Broom found' : 'What they wrote'}
       </h3>
       {item.source === 'Broom' ? (
         <div className={styles.finding}>
-          <p className={styles.findingLead}>
-            {splitExcerpt(item.sourceExcerpt).lead}
-          </p>
-          {splitExcerpt(item.sourceExcerpt).detail && (
+          <p className={styles.findingLead}>{splitExcerpt(excerpt).lead}</p>
+          {splitExcerpt(excerpt).detail && (
             // Broom's evidence, folded away: the summary is what gets
             // read (Bryce, 11 Sept 2026); the rest is there on a click.
             <details className={styles.findingMore}>
               <summary>Details</summary>
               <p className={styles.findingDetail}>
-                {splitExcerpt(item.sourceExcerpt).detail}
+                {splitExcerpt(excerpt).detail}
               </p>
             </details>
           )}
         </div>
       ) : item.saidBy ? (
-        <Said by={item.saidBy} text={item.sourceExcerpt} />
+        <Said by={item.saidBy} text={excerpt} />
       ) : (
-        <blockquote className={styles.quote}>{item.sourceExcerpt}</blockquote>
+        <blockquote className={styles.quote}>{excerpt}</blockquote>
       )}
     </section>
   ) : null
@@ -2404,6 +2418,15 @@ function Detail({
               )}
             </div>
           </div>
+          {/* Where Comb found the listing: the "Source:" line of its own
+              Airtable comment, read here as it is in Airtable (Bryce,
+              17 Sept 2026). */}
+          {item.source === 'Comb' && item.sourceExcerpt && (
+            <p className={styles.found}>
+              <span className={styles.foundLabel}>Source</span>{' '}
+              {foundLabel(item.sourceExcerpt)}
+            </p>
+          )}
           {/* With a card on show the heading only repeats what Broom found
               (or the record's name), so it is left out. */}
           {!showsCard && (
