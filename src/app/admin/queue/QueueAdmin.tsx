@@ -1412,6 +1412,8 @@ export default function QueueAdmin({
         prev ? prev.map(i => (i.id === item.id ? { ...i, logo } : i)) : prev
       )
     setLogo(null)
+    // The load-time lookup already asked for this record; ask once more.
+    if (item.targetRecord) askedLogos.delete(item.targetRecord)
     void loadLogos([{ ...item, logo: null }]).then(logos => {
       const url = item.targetRecord ? logos[item.targetRecord] : undefined
       if (url && !deadLogos.has(url)) setLogo(url)
