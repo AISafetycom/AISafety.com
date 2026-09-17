@@ -961,6 +961,10 @@ export default function QueueAdmin({
   // swap is written to Airtable at once and is not taken back here.
   const historyRef = useRef<{ id: string; before: Draft; at: number }[]>([])
   const decidedAtRef = useRef(0)
+  // What Cmd+Shift+Z puts back: the edits Cmd+Z took away, newest last. A
+  // fresh change after an undo empties it, as in any editor. An undone
+  // decision is not redone this way (A or R makes it again).
+  const redoRef = useRef<{ id: string; after: Draft }[]>([])
   const actRef = useRef<
     (
       item: QueueItem,
@@ -1487,14 +1491,19 @@ export default function QueueAdmin({
   const draftsRef = useRef(drafts)
   draftsRef.current = drafts
   const setDraft = useCallback(
-    (id: string, patch: Partial<Draft>, record = true) => {
+    (
+      id: string,
+      patch: Partial<Draft>,
+      why: 'edit' | 'undo' | 'redo' = 'edit'
+    ) => {
       const was = draftsRef.current[id] ?? draftOfRow(itemsRef.current, id)
       const changed =
         (patch.edits !== undefined && !sameEdits(patch.edits, was.edits)) ||
         (patch.reply !== undefined && patch.reply !== was.reply)
-      if (record && changed) {
+      if (why !== 'undo' && changed) {
         historyRef.current.push({ id, before: was, at: Date.now() })
         if (historyRef.current.length > 50) historyRef.current.shift()
+        if (why === 'edit') redoRef.current = []
       }
       setDrafts(prev => ({
         ...prev,
@@ -1794,9 +1803,35 @@ export default function QueueAdmin({
           t.isContentEditable)
       if (
         (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === 'z' &&
+        !typing
+      ) {
+        // Cmd+Shift+Z: the last edit Cmd+Z took away comes back.
+        e.preventDefault()
+        const r = redoRef.current
+        while (r.length) {
+          const row = items?.find(i => i.id === r[r.length - 1].id)
+          if (row && isOpen(row) && !draft(row.id).busy) break
+          r.pop()
+        }
+        const top = r.pop()
+        if (top) {
+          setDraft(
+            top.id,
+            { edits: top.after.edits, reply: top.after.reply, editing: null },
+            'redo'
+          )
+          select(top.id)
+        }
+        return
+      }
+      if (
+        (e.metaKey || e.ctrlKey) &&
         !e.shiftKey &&
         !e.altKey &&
-        e.key === 'z' &&
+        e.key.toLowerCase() === 'z' &&
         !typing
       ) {
         // Cmd+Z: the last edit on any open item, or the last decision when
@@ -1813,10 +1848,11 @@ export default function QueueAdmin({
         const decision = undoable && !draft(undoable.id).busy ? undoable : null
         if (top && (!decision || top.at > decidedAtRef.current)) {
           h.pop()
+          redoRef.current.push({ id: top.id, after: draft(top.id) })
           setDraft(
             top.id,
             { edits: top.before.edits, reply: top.before.reply, editing: null },
-            false
+            'undo'
           )
           select(top.id)
         } else if (decision) {
@@ -2300,6 +2336,10 @@ export default function QueueAdmin({
                 undo the last change to a field or reply, or the last decision
                 if that came later
               </dd>
+              <dt>
+                <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>Z</kbd>
+              </dt>
+              <dd>put back the change that was just undone</dd>
               <dt>
                 <kbd>⌘</kbd> <kbd>Enter</kbd>
               </dt>
