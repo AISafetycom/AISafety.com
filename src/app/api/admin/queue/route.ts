@@ -5,6 +5,11 @@
   GET  /api/admin/queue                        → { items, agent }
        (the rows only, no logo lookup, so the list lands in about a second;
        the page then asks /api/admin/queue/logos for the pictures)
+  GET  /api/admin/queue?sync=1                 → the same, after closing the
+       open Add rows whose record was deleted, published or hidden in
+       Airtable itself – what the Mac worker does every five minutes, done
+       now for the page's refreshes. A write, so it takes the edit grant;
+       a viewer gets the plain list.
   GET  /api/admin/queue?target=<tbl>/<rec>     → { fields, schema } (live)
   POST /api/admin/queue  body { id, action, edits?, reason?, replyDraft? } → { item }
        action: accept | reject | edit | undo
@@ -26,6 +31,7 @@ import { canReviewQueue, canViewQueue, currentAdmin } from '@/lib/admin/auth'
 import {
   acceptItem,
   agentInfo,
+  closeHandledRows,
   getQueueItem,
   getTableSchema,
   getTargetFields,
@@ -83,10 +89,15 @@ export async function GET(req: NextRequest) {
       return json({ fields, schema })
     }
     const me = await currentAdmin()
-    return json({
-      items: await listQueue(),
-      agent: agentInfo(me?.email ?? ''),
-    })
+    let items = await listQueue()
+    if (
+      req.nextUrl.searchParams.get('sync') === '1' &&
+      (await canReviewQueue())
+    ) {
+      const closed = new Set(await closeHandledRows(items))
+      if (closed.size) items = items.filter(i => !closed.has(i.id))
+    }
+    return json({ items, agent: agentInfo(me?.email ?? '') })
   } catch (e) {
     return failure(e)
   }

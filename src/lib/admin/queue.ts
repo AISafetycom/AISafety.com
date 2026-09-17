@@ -1007,6 +1007,110 @@ function requireOpen(item: QueueItem): void {
   }
 }
 
+// ─── Handled in Airtable directly ───────────────────────────────────────────
+
+/** The tables whose rows carry the Publish?/Hide? pair – the ones that hold
+ *  suggestions. Jobs has neither (its rows come from a feed and are never
+ *  suggested). Mirrors SUGGESTION_TABLES in ~/Queue/queue_lib.py. */
+const SUGGESTION_TABLES = new Set([
+  EVENTS_TABLE,
+  TRAINING_TABLE,
+  RECURRING_TABLE,
+  MAP_TABLE,
+  COMMUNITIES_TABLE,
+  SELF_STUDY_TABLE,
+  FUNDING_TABLE,
+  MEDIA_TABLE,
+  ADVISORS_TABLE,
+  PROJECTS_TABLE,
+  FOUNDERS_TABLE,
+])
+const UNPUBLISHED_FORMULA = 'AND(NOT({Publish?}), NOT({Hide?}))'
+
+/** Why an open Add row is done with, read off its target record as it is
+ *  now (null for a record that is gone): nothing while the record is still
+ *  an unpublished, unhidden suggestion. The wording is the Mac worker's. */
+export function handledOutside(
+  record: { fields: Record<string, unknown> } | null
+): string | null {
+  if (!record) return 'Deleted outside the queue'
+  if (record.fields['Hide?']) return 'Hidden outside the queue'
+  if (record.fields['Publish?']) return 'Published outside the queue'
+  return null
+}
+
+/** Close the open Add rows whose record was deleted, published or hidden
+ *  in Airtable itself – the Mac worker's sync, done here when the page asks
+ *  so the list is right the moment the admin looks rather than on the
+ *  worker's next five-minute pass (Bryce, 17 Sept 2026: suggestions he had
+ *  just deleted still counted). One read per table of its unpublished
+ *  records; a row whose record is not among them is read once more before
+ *  it closes, in case the listing raced a record just added. Accepted rows
+ *  and Broom flags stay with the worker. Never throws: a table that cannot
+ *  be read is left for the worker. Answers with the ids it closed. */
+export async function closeHandledRows(items: QueueItem[]): Promise<string[]> {
+  const byTable = new Map<string, QueueItem[]>()
+  for (const i of items) {
+    if (i.type !== 'Add') continue
+    if (i.status !== 'Pending' && i.status !== 'Revising') continue
+    if (!i.targetTable || !i.targetRecord) continue
+    if (!SUGGESTION_TABLES.has(i.targetTable) || !isRecordId(i.targetRecord)) {
+      continue
+    }
+    const rows = byTable.get(i.targetTable) ?? []
+    rows.push(i)
+    byTable.set(i.targetTable, rows)
+  }
+  const closed: string[] = []
+  const tables = [...byTable]
+  // A few tables at a time: Airtable allows five requests a second.
+  for (let at = 0; at < tables.length; at += 3) {
+    await Promise.all(
+      tables.slice(at, at + 3).map(async ([table, rows]) => {
+        try {
+          const params = new URLSearchParams()
+          params.set('filterByFormula', UNPUBLISHED_FORMULA)
+          params.append('fields[]', 'Publish?')
+          const live = new Set(
+            (await listAll<RawFields>(table, params)).map(r => r.id)
+          )
+          for (const row of rows) {
+            const record = row.targetRecord as string
+            if (live.has(record)) continue
+            const res = await airtableRequest(`${table}/${record}`)
+            let why: string | null
+            if (res.status === 404 || res.status === 403) {
+              why = handledOutside(null)
+            } else if (!res.ok) {
+              console.error(
+                `[admin-queue] sync: reading ${table}/${record} failed: ${res.status}`
+              )
+              continue
+            } else {
+              why = handledOutside((await res.json()) as { fields: RawFields })
+            }
+            if (!why) continue
+            await patchQueueRow(row.id, {
+              [F.status]: 'Closed',
+              [F.error]: why,
+            })
+            console.log(
+              `[admin-queue] sync: closed ${row.id} "${row.title}" – ${why.toLowerCase()}`
+            )
+            closed.push(row.id)
+          }
+        } catch (e) {
+          console.error(
+            `[admin-queue] sync: ${rows[0]?.page ?? table}`,
+            e instanceof Error ? e.message : e
+          )
+        }
+      })
+    )
+  }
+  return closed
+}
+
 // ─── Decisions ──────────────────────────────────────────────────────────────
 
 export async function acceptItem(

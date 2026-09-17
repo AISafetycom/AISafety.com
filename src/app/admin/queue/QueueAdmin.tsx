@@ -24,6 +24,12 @@ import styles from './queue.module.css'
 const API = '/api/admin/queue'
 const UPLOAD_API = '/api/admin/queue/upload'
 
+// The list reads Airtable again this often while the tab is in view, and
+// the moment it comes back into view. Two refreshes closer together than
+// the gap (a tab flicked back and forth) are one.
+const REFRESH_MS = 60 * 1000
+const REFRESH_MIN_GAP_MS = 5 * 1000
+
 // The list shows one kind of work at a time (additions to judge whole,
 // changes to judge as a diff, or rules for the bots), grouped by where each
 // item came from. Bryce, 11 Sept 2026: "to be in the headspace for one of
@@ -524,13 +530,16 @@ function proposedEdits(item: QueueItem): Record<string, unknown> {
  *  the pictures of the rows that came without one (the site's catalog,
  *  then the records themselves for unpublished targets) and answers with
  *  a URL by target record. Best effort: no logo is not worth an error. */
+/** Records whose picture has been asked for already, so a refresh of the
+ *  list asks only for the rows that are new to it. */
+const askedLogos = new Set<string>()
+
 async function loadLogos(items: QueueItem[]): Promise<Record<string, string>> {
-  const seen = new Set<string>()
   const targets: { table: string; record: string }[] = []
   for (const i of items) {
     if (i.logo || !i.targetTable || !i.targetRecord) continue
-    if (seen.has(i.targetRecord)) continue
-    seen.add(i.targetRecord)
+    if (askedLogos.has(i.targetRecord)) continue
+    askedLogos.add(i.targetRecord)
     targets.push({ table: i.targetTable, record: i.targetRecord })
   }
   if (!targets.length) return {}
@@ -541,10 +550,12 @@ async function loadLogos(items: QueueItem[]): Promise<Record<string, string>> {
       body: JSON.stringify({ targets }),
     })
     const data = (await res.json()) as { logos?: Record<string, string> }
-    return res.ok && data.logos ? data.logos : {}
+    if (res.ok && data.logos) return data.logos
   } catch {
-    return {}
+    // not answered: asked again below
   }
+  for (const t of targets) askedLogos.delete(t.record)
+  return {}
 }
 
 /** Build every open item's card in one request and hold them ready, so
@@ -787,6 +798,9 @@ export default function QueueAdmin({
   canEdit: boolean
 }) {
   const [items, setItems] = useState<QueueItem[] | null>(null)
+  // The list as it is now, for callbacks that must not go stale.
+  const itemsRef = useRef(items)
+  itemsRef.current = items
   const [loadError, setLoadError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
@@ -959,10 +973,23 @@ export default function QueueAdmin({
     }
   }
 
-  const load = useCallback(async () => {
+  // Each read of the list is numbered; an answer that is not the newest
+  // read's – or that began before a decision landed – is dropped, so the
+  // page never steps back to an older list.
+  const loadSeq = useRef(0)
+  const lastRefreshRef = useRef(0)
+  /** Read the list. `sync` has the API first close the rows whose record
+   *  was deleted, published or hidden in Airtable itself (a moment slower,
+   *  so the first read skips it). Once a list is on screen, a read that
+   *  fails leaves it be. */
+  const load = useCallback(async (opts: { sync?: boolean } = {}) => {
+    const seq = ++loadSeq.current
+    if (opts.sync) lastRefreshRef.current = Date.now()
     setLoadError(null)
     try {
-      const res = await fetch(API, { cache: 'no-store' })
+      const res = await fetch(opts.sync ? `${API}?sync=1` : API, {
+        cache: 'no-store',
+      })
       const data = (await res.json()) as {
         items?: QueueItem[]
         agent?: AgentInfo | null
@@ -971,11 +998,27 @@ export default function QueueAdmin({
       if (!res.ok || !data.items) {
         throw new Error(data.error ?? `HTTP ${res.status}`)
       }
-      setItems(data.items)
+      if (seq !== loadSeq.current) return
+      const before = itemsRef.current
+      const known = new Map((before ?? []).map(i => [i.id, i]))
+      const fresh: QueueItem[] = []
+      const next = data.items.map(i => {
+        const was = known.get(i.id)
+        if (!was) {
+          fresh.push(i)
+          return i
+        }
+        // A decision still on its way: the page's own version stands.
+        if (pendingRef.current[i.id]) return was
+        // The list comes without most pictures; the one on the page stays.
+        return i.logo || !was.logo ? i : { ...i, logo: was.logo }
+      })
+      setItems(next)
       setAgent(data.agent ?? null)
       // The list is on screen now; the pictures and the cards follow in
-      // the background, each filled in as it arrives.
-      void loadLogos(data.items).then(logos => {
+      // the background, each filled in as it arrives. A refresh asks only
+      // for what is new to it.
+      void loadLogos(next).then(logos => {
         if (!Object.keys(logos).length) return
         setItems(prev =>
           prev
@@ -987,15 +1030,39 @@ export default function QueueAdmin({
             : prev
         )
       })
-      void preloadCards(data.items)
+      void preloadCards(before ? fresh : next)
     } catch (e) {
+      if (itemsRef.current) return
       setLoadError(e instanceof Error ? e.message : String(e))
     }
   }, [])
 
+  // The first read is the quick one, so the list is on screen at once;
+  // the synced one follows right behind it and corrects the count.
   useEffect(() => {
     wantedRef.current = hashId()
-    void load()
+    void load().then(() => load({ sync: true }))
+  }, [load])
+
+  // The list keeps itself current: again the moment the tab or window
+  // comes back into view (Bryce, 17 Sept 2026: he deletes suggestions in
+  // Airtable, switches back, and the count should have moved), and once a
+  // minute while it is in view – synced, so nothing waits on the Mac
+  // worker's five-minute pass.
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return
+      if (Date.now() - lastRefreshRef.current < REFRESH_MIN_GAP_MS) return
+      void load({ sync: true })
+    }
+    document.addEventListener('visibilitychange', refresh)
+    window.addEventListener('focus', refresh)
+    const timer = setInterval(refresh, REFRESH_MS)
+    return () => {
+      document.removeEventListener('visibilitychange', refresh)
+      window.removeEventListener('focus', refresh)
+      clearInterval(timer)
+    }
   }, [load])
 
   // A "#rec…" in the address (the Secretary note's "Queued:" link, or one
@@ -1264,8 +1331,6 @@ export default function QueueAdmin({
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const draftsRef = useRef(drafts)
   draftsRef.current = drafts
-  const itemsRef = useRef(items)
-  itemsRef.current = items
   const setDraft = useCallback((id: string, patch: Partial<Draft>) => {
     setDrafts(prev => ({ ...prev, [id]: { ...(prev[id] ?? FRESH), ...patch } }))
     if (!patch.edits && patch.reply === undefined) return
@@ -1423,6 +1488,9 @@ export default function QueueAdmin({
         if (!res.ok || !data.item) {
           throw new Error(data.error ?? `HTTP ${res.status}`)
         }
+        // A read of the list that began before this landed would show the
+        // row as it was: stale now.
+        loadSeq.current++
         // The decision comes back without a logo lookup (kept quick); the
         // picture already on the page stays.
         const updated = { ...data.item, logo: data.item.logo ?? item.logo }
