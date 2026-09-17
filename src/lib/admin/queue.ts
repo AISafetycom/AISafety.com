@@ -825,12 +825,69 @@ const MAX_UPLOAD_BYTES = 5 * 1024 * 1024
  *  whatever was there (a logo slot holds one picture). Goes through
  *  Airtable's upload endpoint, so no public URL is needed. The record is
  *  unpublished, so nothing reaches the site until Accept. */
-export async function uploadImage(
+/** A picture that Replace or Undo took off a record, handed back to the
+ *  page so Undo can put it back. Airtable keeps nothing extra – the page
+ *  holds the bytes (Bryce, 17 Sept 2026: "not if it's stored in Airtable,
+ *  since that would be messy"). */
+export interface PreviousImage {
+  filename: string
+  contentType: string
+  base64: string
+}
+
+export interface ImageWrite {
+  urls: string[]
+  attachments: AttachmentInfo[]
+  /** What the write took off the record, when it can be put back. */
+  previous: PreviousImage | null
+}
+
+interface StoredAttachment {
+  id: string
+  url: string
+  filename?: string
+  type?: string
+  size?: number
+  thumbnails?: { large?: { url?: string } }
+}
+
+function isStoredAttachment(x: unknown): x is StoredAttachment {
+  return isRecord(x) && typeof x.id === 'string' && typeof x.url === 'string'
+}
+
+/** The bytes of a picture on a record, read from Airtable's own link (the
+ *  only host this fetches from). Null when it is too big to come back
+ *  through the upload route, or cannot be read. */
+async function fetchImage(x: StoredAttachment): Promise<PreviousImage | null> {
+  if (typeof x.size === 'number' && x.size > MAX_UPLOAD_BYTES) return null
+  try {
+    const host = new URL(x.url).hostname
+    if (!/(^|\.)airtableusercontent\.com$|(^|\.)airtable\.com$/.test(host)) {
+      return null
+    }
+    const res = await fetch(x.url, { cache: 'no-store' })
+    if (!res.ok) return null
+    const buf = Buffer.from(await res.arrayBuffer())
+    if (buf.length > MAX_UPLOAD_BYTES) return null
+    const type = (x.type ?? res.headers.get('content-type') ?? '').split(';')[0]
+    if (!IMAGE_TYPE_RE.test(type)) return null
+    return {
+      filename: x.filename ?? 'image',
+      contentType: type,
+      base64: buf.toString('base64'),
+    }
+  } catch {
+    return null
+  }
+}
+
+const IMAGE_TYPE_RE = /^image\/(png|jpe?g|webp|gif|svg\+xml)$/
+
+async function checkImageField(
   table: string,
   record: string,
-  field: string,
-  file: { filename: string; contentType: string; base64: string }
-): Promise<{ urls: string[]; attachments: AttachmentInfo[] }> {
+  field: string
+): Promise<void> {
   if (!TABLE_ID_RE.test(table) || !isRecordId(record)) {
     throw new QueueError('This item has no valid target record.', 400)
   }
@@ -839,7 +896,44 @@ export async function uploadImage(
   if (!info || info.type !== 'multipleAttachments') {
     throw new QueueError(`"${field}" is not an image field.`, 400)
   }
-  if (!/^image\/(png|jpe?g|webp|gif|svg\+xml)$/.test(file.contentType)) {
+}
+
+/** The pictures an attachment field holds right now. */
+async function storedImages(
+  table: string,
+  record: string,
+  field: string
+): Promise<StoredAttachment[]> {
+  const res = await airtableRequest(`${table}/${record}`)
+  if (!res.ok) {
+    throw new QueueError(`Airtable read failed: ${res.status}`, 502)
+  }
+  const stored = ((await res.json()) as { fields: RawFields }).fields[field]
+  return Array.isArray(stored) ? stored.filter(isStoredAttachment) : []
+}
+
+/** Empties an attachment field, handing back the picture that was there
+ *  (Undo after a first drop, or Redo of an undone clear). */
+export async function clearImage(
+  table: string,
+  record: string,
+  field: string
+): Promise<ImageWrite> {
+  await checkImageField(table, record, field)
+  const before = await storedImages(table, record, field)
+  const previous = before[0] ? await fetchImage(before[0]) : null
+  await patchRecord(table, record, { [field]: [] })
+  return { urls: [], attachments: [], previous }
+}
+
+export async function uploadImage(
+  table: string,
+  record: string,
+  field: string,
+  file: { filename: string; contentType: string; base64: string }
+): Promise<ImageWrite> {
+  await checkImageField(table, record, field)
+  if (!IMAGE_TYPE_RE.test(file.contentType)) {
     throw new QueueError('Only PNG, JPEG, WebP, GIF or SVG images.', 400)
   }
   const bytes = Math.floor((file.base64.length * 3) / 4)
@@ -872,36 +966,21 @@ export async function uploadImage(
     )
   }
   // The upload reply keys fields by id, so re-read the record by name.
-  const after = await airtableRequest(`${table}/${record}`)
-  if (!after.ok) {
-    throw new QueueError(
-      `Airtable read failed after upload: ${after.status}`,
-      502
-    )
-  }
-  const stored = ((await after.json()) as { fields: RawFields }).fields[field]
-  const list = Array.isArray(stored)
-    ? stored.filter(
-        (
-          x
-        ): x is {
-          id: string
-          url: string
-          thumbnails?: { large?: { url?: string } }
-        } =>
-          isRecord(x) && typeof x.id === 'string' && typeof x.url === 'string'
-      )
-    : []
+  const list = await storedImages(table, record, field)
   const newest = list[list.length - 1]
+  // A logo slot holds one picture: keep only the one just dropped, after
+  // reading the old one's bytes so the page can offer Undo.
+  const old = list.length > 1 ? list[list.length - 2] : undefined
+  const previous = old ? await fetchImage(old) : null
   if (newest && list.length > 1) {
-    // A logo slot holds one picture: keep only the one just dropped.
     await patchRecord(table, record, { [field]: [{ id: newest.id }] })
   }
-  if (!newest) return { urls: [], attachments: [] }
-  const picture = attachmentInfo(newest as Record<string, unknown>)
+  if (!newest) return { urls: [], attachments: [], previous }
+  const picture = attachmentInfo(newest as unknown as Record<string, unknown>)
   return {
     urls: [picture?.url ?? newest.url],
     attachments: picture ? [picture] : [],
+    previous,
   }
 }
 

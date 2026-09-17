@@ -904,6 +904,18 @@
   flex: 0 0 auto;
 }
 
+/* Undo / Redo of a Replace, beside the drop zone. */
+.imageUndo {
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+
+.imageUndo:disabled {
+  color: var(--q-muted);
+  cursor: default;
+  text-decoration: none;
+}
+
 .fieldRow:has(.imageSlot) {
   align-items: start;
 }

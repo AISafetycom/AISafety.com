@@ -7,6 +7,7 @@ import type {
   AgentInfo,
   AttachmentInfo,
   FieldInfo,
+  PreviousImage,
   PreviewKind,
   QueueItem,
 } from '@/lib/admin/queue'
@@ -499,6 +500,28 @@ function forgetCard(item: QueueItem): void {
 // Row pictures whose link has failed: never shown again, however often the
 // server hands the same link back.
 const deadLogos = new Set<string>()
+
+/** The picture that Replace, Undo or Redo took off a record, held in the
+ *  page – never in Airtable – so the next Undo can put it back. By item and
+ *  field, so it is still there after moving to another item and back. A
+ *  null file means the field was empty before the drop, so Undo empties
+ *  it again. `redo` is set after an Undo: the next press puts the
+ *  replacement back. */
+interface ImageStash {
+  file: PreviousImage | null
+  redo: boolean
+}
+const imageStash = new Map<string, ImageStash>()
+const STASH_LIMIT = 12
+function stashImage(key: string, stash: ImageStash): void {
+  imageStash.delete(key)
+  imageStash.set(key, stash)
+  while (imageStash.size > STASH_LIMIT) {
+    const oldest = imageStash.keys().next().value
+    if (oldest === undefined) break
+    imageStash.delete(oldest)
+  }
+}
 
 const NAME_KEYS = /\b(name|title)\b|^organi[sz]ation$/i
 const URL_KEYS = /^(url|website|link|join link|apply link|application link)$/i
@@ -2954,7 +2977,9 @@ function Fields({
 
 /** The pictures in an attachment field – each with its file name, pixel
  *  size, bytes and type beside it – and a drop target: drag an image in or
- *  click to choose one, and it goes onto the record right away. */
+ *  click to choose one, and it goes onto the record right away. Undo puts
+ *  the picture it replaced back (the page held its bytes); Redo undoes
+ *  the Undo. */
 function ImageSlot({
   itemId,
   field,
@@ -2969,9 +2994,50 @@ function ImageSlot({
   onDone: (urls: string[]) => void
 }) {
   const [over, setOver] = useState(false)
-  const [busy, setBusy] = useState(false)
+  // What is on its way: a drop, or an undo/redo of one.
+  const [busy, setBusy] = useState<'upload' | 'undo' | 'redo' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const stashKey = `${itemId}/${field}`
+  const stash = imageStash.get(stashKey) ?? null
+  // Re-render after the stash (module state) changes.
+  const [, setTick] = useState(0)
+
+  /** One write to the field: a picture, or `clear` to empty it. What the
+   *  write takes off the record is stashed for the next Undo. */
+  const write = async (
+    body: Record<string, unknown>,
+    what: 'upload' | 'undo' | 'redo'
+  ) => {
+    setError(null)
+    setBusy(what)
+    try {
+      const res = await fetch(UPLOAD_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: itemId, field, ...body }),
+      })
+      const data = (await res.json()) as {
+        urls?: string[]
+        attachments?: AttachmentInfo[]
+        previous?: PreviousImage | null
+        error?: string
+      }
+      if (!res.ok || !data.urls)
+        throw new Error(data.error ?? `HTTP ${res.status}`)
+      rememberAttachments({ [field]: data.attachments ?? [] })
+      stashImage(stashKey, {
+        file: data.previous ?? null,
+        redo: what === 'undo',
+      })
+      setTick(t => t + 1)
+      onDone(data.urls)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
 
   const send = async (file: File) => {
     setError(null)
@@ -2983,9 +3049,9 @@ function ImageSlot({
       setError('Over 5 MB.')
       return
     }
-    setBusy(true)
+    let base64: string
     try {
-      const base64 = await new Promise<string>((resolve, reject) => {
+      base64 = await new Promise<string>((resolve, reject) => {
         const r = new FileReader()
         r.onload = () => {
           const s = String(r.result)
@@ -2994,30 +3060,26 @@ function ImageSlot({
         r.onerror = () => reject(new Error('Could not read the file.'))
         r.readAsDataURL(file)
       })
-      const res = await fetch(UPLOAD_API, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: itemId,
-          field,
-          filename: file.name,
-          contentType: file.type,
-          data: base64,
-        }),
-      })
-      const data = (await res.json()) as {
-        urls?: string[]
-        attachments?: AttachmentInfo[]
-        error?: string
-      }
-      if (!res.ok || !data.urls)
-        throw new Error(data.error ?? `HTTP ${res.status}`)
-      rememberAttachments({ [field]: data.attachments ?? [] })
-      onDone(data.urls)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
+      return
+    }
+    await write(
+      { filename: file.name, contentType: file.type, data: base64 },
+      'upload'
+    )
+  }
+
+  /** Undo puts the stashed picture back (or empties the field when there
+   *  was none); Redo is the same move the other way. */
+  const undo = () => {
+    if (!stash) return
+    const what = stash.redo ? 'redo' : 'undo'
+    if (stash.file) {
+      const { filename, contentType, base64 } = stash.file
+      void write({ filename, contentType, data: base64 }, what)
+    } else {
+      void write({ clear: true }, what)
     }
   }
 
@@ -3087,7 +3149,11 @@ function ImageSlot({
             if (e.key === 'Enter') inputRef.current?.click()
           }}
         >
-          {busy ? 'Uploading…' : urls.length ? 'Replace' : 'Drop image'}
+          {busy === 'upload'
+            ? 'Uploading…'
+            : urls.length
+              ? 'Replace'
+              : 'Drop image'}
           <input
             ref={inputRef}
             type="file"
@@ -3100,6 +3166,29 @@ function ImageSlot({
             }}
           />
         </span>
+      )}
+      {canUpload && stash && (
+        <button
+          type="button"
+          className={`${styles.linkButton} ${styles.imageUndo}`}
+          disabled={busy !== null}
+          title={
+            stash.redo
+              ? 'Put the replacement back'
+              : stash.file
+                ? `Put ${stash.file.filename} back`
+                : 'Take the picture off again'
+          }
+          onClick={undo}
+        >
+          {busy === 'undo'
+            ? 'Undoing…'
+            : busy === 'redo'
+              ? 'Redoing…'
+              : stash.redo
+                ? 'Redo'
+                : 'Undo'}
+        </button>
       )}
       {!canUpload && urls.length === 0 && (
         <span className={styles.noImage}>none</span>
