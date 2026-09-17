@@ -919,11 +919,12 @@ export default function QueueAdmin({
     })
   }
 
-  const togglePage = (foldKey: string) => {
+  const foldPage = useCallback((foldKey: string, folded: boolean) => {
     setFoldedPages(prev => {
+      if (Boolean(prev[foldKey]) === folded) return prev
       const next = { ...prev }
-      if (next[foldKey]) delete next[foldKey]
-      else next[foldKey] = true
+      if (folded) next[foldKey] = true
+      else delete next[foldKey]
       try {
         localStorage.setItem(FOLDED_PAGES_KEY, JSON.stringify(next))
       } catch {
@@ -931,7 +932,10 @@ export default function QueueAdmin({
       }
       return next
     })
-  }
+  }, [])
+
+  const togglePage = (foldKey: string) =>
+    foldPage(foldKey, !foldedPages[foldKey])
 
   const chooseKind = (next: Kind) => {
     setKind(next)
@@ -1059,7 +1063,8 @@ export default function QueueAdmin({
 
   // One flat, ordered list of open items: requests, Broom, rules, then Comb
   // with Fable's Publish verdicts first, each section split by resource
-  // page. Keyboard navigation walks it, skipping folded sections and pages.
+  // page. W/Q and auto-advance walk it, opening a folded page as they
+  // reach it; a folded section is passed over.
   const ordered = useMemo(() => {
     const groups: Record<Section, QueueItem[]> = {
       requests: [],
@@ -1109,14 +1114,27 @@ export default function QueueAdmin({
       const split = splitByPage(groups[s])
       pages[s] = split.length > 1 ? split : []
     }
-    const flat = SECTIONS.filter(s => !collapsed[s]).flatMap(s =>
-      pages[s].length
-        ? pages[s]
-            .filter(p => !foldedPages[`${s}:${p.key}`])
-            .flatMap(p => p.items)
-        : groups[s]
-    )
-    return { groups, pages, done, flat, open, perKind }
+    // `walk` is every item in the open sections in list order, folded pages
+    // included, with the page fold each one sits under; `flat` is what is
+    // on screen.
+    const walk: QueueItem[] = []
+    const foldOf = new Map<string, string>()
+    for (const s of SECTIONS) {
+      if (collapsed[s]) continue
+      if (!pages[s].length) {
+        walk.push(...groups[s])
+        continue
+      }
+      for (const p of pages[s]) {
+        const foldKey = `${s}:${p.key}`
+        for (const item of p.items) {
+          walk.push(item)
+          foldOf.set(item.id, foldKey)
+        }
+      }
+    }
+    const flat = walk.filter(i => !foldedPages[foldOf.get(i.id) ?? ''])
+    return { groups, pages, done, flat, walk, foldOf, open, perKind }
   }, [items, collapsed, foldedPages, kind, dayStart, selectedId])
 
   const selected = useMemo(() => {
@@ -1137,22 +1155,37 @@ export default function QueueAdmin({
       wantedRef.current = null
       return
     }
-    if (selectedId && ordered.flat.some(i => i.id === selectedId)) return
+    if (selectedId && ordered.walk.some(i => i.id === selectedId)) return
     if (selected && isOpen(selected)) return
     if (selected && !isOpen(selected) && showDone) return
-    setSelectedId(ordered.flat[0]?.id ?? null)
-  }, [items, ordered.flat, selectedId, selected, showDone])
+    // The first item on screen; with every page folded, the first there
+    // is, with its page opened.
+    const first = ordered.flat[0] ?? ordered.walk[0]
+    const foldKey = first && ordered.foldOf.get(first.id)
+    if (foldKey && foldedPages[foldKey]) foldPage(foldKey, false)
+    setSelectedId(first?.id ?? null)
+  }, [
+    items,
+    ordered.flat,
+    ordered.walk,
+    ordered.foldOf,
+    foldedPages,
+    foldPage,
+    selectedId,
+    selected,
+    showDone,
+  ])
 
-  // The card of the item after this one is fetched now, so J/auto-advance
-  // shows it at once.
+  // The card of the item after this one is fetched now, so W/auto-advance
+  // shows it at once, whether or not its page is folded.
   useEffect(() => {
     if (!selected) return
-    const flat = ordered.flat
-    const next = flat[flat.findIndex(i => i.id === selected.id) + 1]
+    const walk = ordered.walk
+    const next = walk[walk.findIndex(i => i.id === selected.id) + 1]
     if (!next?.targetTable || !next.targetRecord) return
     if (next.type !== 'Add' && next.type !== 'Change') return
     prefetchPreview(next.targetTable, next.targetRecord, proposedEdits(next))
-  }, [selected, ordered.flat])
+  }, [selected, ordered.walk])
 
   useEffect(() => {
     if (!selected) return
@@ -1263,19 +1296,35 @@ export default function QueueAdmin({
     setSelectedId(id)
     setShowDone(false)
     if (detailRef.current) detailRef.current.scrollTop = 0
-    const row = listRef.current?.querySelector<HTMLElement>(`[data-id="${id}"]`)
-    row?.scrollIntoView({ block: 'nearest' })
+    // After the render, so a row inside a page just unfolded is there too.
+    requestAnimationFrame(() => {
+      listRef.current
+        ?.querySelector<HTMLElement>(`[data-id="${id}"]`)
+        ?.scrollIntoView({ block: 'nearest' })
+    })
   }, [])
+
+  /** Put an item in focus, opening the page it sits under if that is
+   *  folded: W/Q and auto-advance walk into folded pages rather than past
+   *  them (Bryce, 17 Sept 2026). */
+  const reveal = useCallback(
+    (item: QueueItem) => {
+      const foldKey = ordered.foldOf.get(item.id)
+      if (foldKey && foldedPages[foldKey]) foldPage(foldKey, false)
+      select(item.id)
+    },
+    [ordered.foldOf, foldedPages, foldPage, select]
+  )
 
   const move = useCallback(
     (delta: number) => {
-      const flat = ordered.flat
-      if (flat.length === 0) return
-      const i = flat.findIndex(x => x.id === selectedId)
-      const next = flat[Math.min(flat.length - 1, Math.max(0, i + delta))]
-      if (next) select(next.id)
+      const walk = ordered.walk
+      if (walk.length === 0) return
+      const i = walk.findIndex(x => x.id === selectedId)
+      const next = walk[Math.min(walk.length - 1, Math.max(0, i + delta))]
+      if (next) reveal(next)
     },
-    [ordered.flat, selectedId, select]
+    [ordered.walk, selectedId, reveal]
   )
 
   // After an accept: have the Mac agent save the reply draft in Gmail now,
@@ -1342,15 +1391,16 @@ export default function QueueAdmin({
           state: 'working',
           text: workingLabel(item, action),
         })
-        // Auto-advance to the next open item that is not itself on its way.
-        const flat = ordered.flat
-        const i = flat.findIndex(x => x.id === item.id)
+        // Auto-advance to the next open item that is not itself on its way,
+        // opening its page if that is folded.
+        const walk = ordered.walk
+        const i = walk.findIndex(x => x.id === item.id)
         const free = (x: QueueItem) =>
           x.id !== item.id && !pendingRef.current[x.id]
         const next =
-          flat.slice(i + 1).find(free) ??
-          flat.slice(0, Math.max(0, i)).reverse().find(free)
-        if (next) select(next.id)
+          walk.slice(i + 1).find(free) ??
+          walk.slice(0, Math.max(0, i)).reverse().find(free)
+        if (next) reveal(next)
       }
       const forget = () => {
         const rest = { ...pendingRef.current }
@@ -1453,7 +1503,7 @@ export default function QueueAdmin({
         }
       }
     },
-    [ordered.flat, select, setDraft, drafts, agent, saveReply, canEdit]
+    [ordered.walk, reveal, select, setDraft, drafts, agent, saveReply, canEdit]
   )
   actRef.current = act
 
