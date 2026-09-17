@@ -453,6 +453,18 @@
   border-top-color: var(--q-danger);
 }
 
+/* Where Comb found the listing, at the head of the panel above the verdict
+   (Bryce, 17 Sept 2026). */
+.asideFound {
+  display: grid;
+  gap: 2px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--q-border);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--q-text);
+}
+
 .verdictHead {
   display: grid;
   gap: 2px;

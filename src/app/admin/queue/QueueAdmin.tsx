@@ -2357,6 +2357,12 @@ function Detail({
   // with Fable (when the Mac agent is up), which is there for every item.
   const hasVerdict = Boolean(item.verdict) || item.reasons.length > 0
   const showAside = hasVerdict || chatAgent !== null
+  // Where Comb found the listing: the "Source:" line of its own Airtable
+  // comment, read here as it is in Airtable (Bryce, 17 Sept 2026).
+  const found =
+    item.source === 'Comb' && item.sourceExcerpt
+      ? foundLabel(item.sourceExcerpt)
+      : null
 
   return (
     <div
@@ -2418,13 +2424,11 @@ function Detail({
               )}
             </div>
           </div>
-          {/* Where Comb found the listing: the "Source:" line of its own
-              Airtable comment, read here as it is in Airtable (Bryce,
-              17 Sept 2026). */}
-          {item.source === 'Comb' && item.sourceExcerpt && (
+          {/* Where Comb found the listing heads the panel on the right;
+              with no panel it sits here instead. */}
+          {found && !showAside && (
             <p className={styles.found}>
-              <span className={styles.foundLabel}>Source</span>{' '}
-              {foundLabel(item.sourceExcerpt)}
+              <span className={styles.foundLabel}>Source</span> {found}
             </p>
           )}
           {/* With a card on show the heading only repeats what Broom found
@@ -2586,6 +2590,12 @@ function Detail({
           className={`${styles.detailAside} ${hasVerdict ? verdictClass(item) : ''}`}
           data-chat-scroll
         >
+          {found && (
+            <div className={styles.asideFound}>
+              <span className={styles.verdictKicker}>Source</span>
+              <span>{found}</span>
+            </div>
+          )}
           {item.verdict && (
             <div className={styles.verdictHead}>
               <span className={styles.verdictKicker}>Fable says</span>
