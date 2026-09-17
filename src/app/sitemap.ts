@@ -14,6 +14,7 @@ const ROUTES = [
   '/hackathon',
   '/jobs',
   '/map',
+  '/media',
   '/media-channels',
   '/privacy',
   '/projects',

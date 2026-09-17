@@ -105,7 +105,8 @@ export default function Footer() {
           </div>
           <p className={`paragraph-xs opacity-80 ${styles.links}`}>
             (ɔ) 2026 · This site is released under a CC BY-SA license ·{' '}
-            <Link href="/privacy">Privacy</Link>
+            <Link href="/privacy">Privacy</Link> ·{' '}
+            <Link href="/media">Press</Link>
           </p>
         </div>
       </div>

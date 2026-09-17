@@ -107,6 +107,10 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   // `source` is the column heading, `label` the link text, `page` the path
   // the footer was on.
   'footer_click',
+  // The press and media page (/media): `source` is what was done ('copy' a
+  // boilerplate block, 'download' a logo/screenshot/kit, 'contact' = the
+  // press email link), `label` says which one, `url` the file or mailto.
+  'press_action',
   'chatbot_open',
   'chatbot_message',
   'chatbot_click',

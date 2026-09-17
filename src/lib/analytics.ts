@@ -301,6 +301,32 @@ export function trackAirtableView(page: string, url: string): void {
   })
 }
 
+/** What a press-page click did: copied a boilerplate block, downloaded an
+ *  asset, or opened the press email. */
+export type PressAction = 'copy' | 'download' | 'contact'
+
+/**
+ * Track an action on the press and media page (/media). `label` names the
+ * thing ('Copied short boilerplate', 'Downloaded press kit'), `url` is the
+ * file or mailto link when there is one.
+ */
+export function trackPressAction(
+  action: PressAction,
+  label: string,
+  url?: string
+): void {
+  if (typeof window === 'undefined') return
+  if (isTrackingOptedOut()) return
+  window._paq?.push(['trackEvent', 'Press', action, label])
+  sendTrackEvent({
+    type: 'press_action',
+    page: 'Press',
+    source: action,
+    label,
+    url,
+  })
+}
+
 /**
  * Track a page visit. Fired on every route change, initial load included (see
  * MatomoRouteTracker). Matomo records its own page views via its snippet —
