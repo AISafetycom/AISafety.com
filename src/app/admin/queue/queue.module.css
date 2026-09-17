@@ -1260,6 +1260,18 @@
   grid-column: 1 / -1;
 }
 
+/* The site's own icon for the field, drawn the way its card draws it. */
+.fieldIcon {
+  vertical-align: -3px;
+  margin-right: 6px;
+  color: var(--q-muted);
+}
+
+.label .fieldIcon {
+  vertical-align: -2px;
+  margin-right: 5px;
+}
+
 /* The empty fields, one line of names: click one to fill it in. */
 .unset {
   display: flex;

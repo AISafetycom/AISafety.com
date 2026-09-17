@@ -12,6 +12,8 @@ import type {
   QueueItem,
 } from '@/lib/admin/queue'
 import Icon from '@/components/Icon'
+import { activityIcon } from '@/app/communities/activity-icon'
+import { isAcceptingApplications } from '@/lib/funding-status'
 import SitePreview, {
   forgetPreviews,
   prefetchPreview,
@@ -2622,7 +2624,15 @@ function Detail({
             <div className={styles.diff}>
               {item.changes.map(c => (
                 <div key={c.field} className={styles.diffRow}>
-                  <span className={styles.label}>{c.field}</span>
+                  <span className={styles.label}>
+                    <FieldIcon
+                      page={item.page}
+                      name={c.field}
+                      value={show(c.to)}
+                      size={12}
+                    />
+                    {c.field}
+                  </span>
                   <span className={styles.from}>
                     {(() => {
                       const pic = pictureOf(c.from, live?.fields[c.field])
@@ -2878,6 +2888,97 @@ const COMPUTED_TYPES = new Set([
   'button',
 ])
 
+// The icon the site's own card draws beside a field's value, so the grid
+// reads the way the card does (Bryce, 17 Sept 2026: "where we have icons
+// from the live site available for a field, let's put it next to it").
+// Field names in lower case; a page's own entry beats the shared one; a
+// few icons follow the value the way the card's do (src/app/<page>/card.ts).
+const SHARED_ICONS: Record<string, string> = {
+  location: 'pin',
+  'location (if in-person)': 'pin',
+  platform: 'computer',
+  'start date': 'calendar',
+  'start date (approximate)': 'calendar',
+  'end date': 'calendar',
+  'typical length': 'calendar',
+  deadline: 'paper',
+  'deadline type': 'paper',
+  'applications not yet open?': 'paper-closed',
+  'applications/registrations not yet open?': 'paper-closed',
+  focus: 'target',
+  host: 'person',
+  'host name': 'person',
+  'contact name': 'person',
+  'contact email': 'mail',
+  cost: 'tag',
+  status: 'activity',
+  organizer: 'author',
+  category: 'category',
+}
+const PAGE_ICONS: Record<string, Record<string, string>> = {
+  '/funding': { type: 'tag' },
+  '/founders': { type: 'tag' },
+  '/media-channels': { type: 'computer' },
+  '/self-study': { type: 'type', 'course type': 'type' },
+}
+
+function fieldIcon(
+  page: string | null,
+  name: string,
+  value: string
+): string | null {
+  const key = name.trim().toLowerCase()
+  // The card folds Mode into its location row: a screen for online, a pin
+  // for a place.
+  if (key === 'mode') {
+    return value === 'Online'
+      ? '/images/icons/computer.svg'
+      : '/images/icons/pin.svg'
+  }
+  if (key === 'entry bar') {
+    const bar = value.toLowerCase()
+    return ['low', 'mid', 'high'].includes(bar)
+      ? `/images/icons/entry-${bar}.svg`
+      : null
+  }
+  if (key === 'activity level') return activityIcon(value)
+  if (key === 'stipend') {
+    return value === 'No stipend'
+      ? '/images/icons/money-off.svg'
+      : '/images/icons/money.svg'
+  }
+  if (key === 'time commitment') {
+    return value === 'Part-time'
+      ? '/images/icons/timer-half.svg'
+      : '/images/icons/timer.svg'
+  }
+  if (key === 'accepting applications?') {
+    return isAcceptingApplications(value)
+      ? '/images/icons/form-check.svg'
+      : '/images/icons/form-pause.svg'
+  }
+  const file = PAGE_ICONS[page ?? '']?.[key] ?? SHARED_ICONS[key]
+  return file ? `/images/icons/${file}.svg` : null
+}
+
+/** The site's icon for a field, or nothing when the site draws none. */
+function FieldIcon({
+  page,
+  name,
+  value,
+  size,
+}: {
+  page: string | null
+  name: string
+  value: string
+  size: 12 | 16
+}) {
+  const src = fieldIcon(page, name, value)
+  return src ? (
+    <Icon src={src} size={size} className={styles.fieldIcon} />
+  ) : null
+}
+
 /** Editors that fit in a grid cell; a textarea or a chip picker wants
  *  the full row. */
 const NARROW_EDITORS = new Set([
@@ -3054,7 +3155,12 @@ function Fields({
         className={`${styles.fieldCell} ${wide ? styles.fieldWide : ''}`}
       >
         <span className={styles.label}>{k}</span>
-        <span className={styles.value}>{valueOf(e)}</span>
+        <span className={styles.value}>
+          {d.editing !== k && (
+            <FieldIcon page={item.page} name={k} value={text} size={16} />
+          )}
+          {valueOf(e)}
+        </span>
       </div>
     )
   }
