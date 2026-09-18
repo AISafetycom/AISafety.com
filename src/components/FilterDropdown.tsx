@@ -3,6 +3,7 @@
 import Icon from './Icon'
 import { useEffect, useRef, useState } from 'react'
 import { trackFilterApply } from '@/lib/analytics'
+import { trackedFilterGroup, trackedFilterValue } from '@/lib/filter-tracking'
 import styles from './FilterDropdown.module.css'
 
 interface FilterDropdownProps {
@@ -14,7 +15,9 @@ interface FilterDropdownProps {
   /** Optional 16×16 svg icon (path in /images) shown before the label. */
   icon?: string
   /** Analytics page name (e.g. 'Training'). When set, turning a value on
-   *  records a filter_apply event under this page and the dropdown's title. */
+   *  records a filter_apply event under this page and the dropdown's title.
+   *  Renamed titles and options keep logging their original names via
+   *  lib/filter-tracking, so history stays in one line. */
   trackingPage?: string
 }
 
@@ -116,8 +119,14 @@ export default function FilterDropdown({
                   type="checkbox"
                   checked={selected.includes(option)}
                   onChange={() => {
-                    if (trackingPage && !selected.includes(option))
-                      trackFilterApply(trackingPage, title, option)
+                    if (trackingPage && !selected.includes(option)) {
+                      const group = trackedFilterGroup(trackingPage, title)
+                      trackFilterApply(
+                        trackingPage,
+                        group,
+                        trackedFilterValue(trackingPage, group, option)
+                      )
+                    }
                     onToggle(option)
                   }}
                   className="checkbox"

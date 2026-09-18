@@ -9,12 +9,15 @@ import { Funder } from '@/lib/data/funding'
 import { isAcceptingApplications } from '@/lib/funding-status'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
 import { placementsById } from '@/lib/placements'
+import { funderCardProps } from './card'
 
 interface FundingClientProps {
   funders: Funder[]
 }
 
-const acceptingOptions = ['Yes', 'No']
+// Were "Yes" / "No" until 6 September 2026; analytics still log those values
+// so the filter's history stays in one line (see lib/filter-tracking).
+const acceptingOptions = ['Open', 'Closed']
 const typeOptions = ['Fund', 'Grant program', 'Platform']
 
 // No search box on this page, so every funder passes the base filter.
@@ -33,12 +36,12 @@ export default function FundingClient({ funders }: FundingClientProps) {
       accepting: {
         selected: acceptingFilters,
         // Airtable values are full sentences ("Applications on a rolling
-        // basis", "Not accepting applications"); bucket them into Yes/No
+        // basis", "Not accepting applications"); bucket them into Open/Closed
         // via the shared status helper.
         matches: (funder: Funder, value: string) => {
           const status = funder.acceptingApplications || ''
           if (!status) return false
-          return value === 'Yes'
+          return value === 'Open'
             ? isAcceptingApplications(status)
             : !isAcceptingApplications(status)
         },
@@ -128,27 +131,7 @@ export default function FundingClient({ funders }: FundingClientProps) {
           {filteredFunders.map(funder => (
             <ListingCard
               key={funder.id}
-              href={funder.url !== '#' ? funder.url : undefined}
-              name={funder.name}
-              description={funder.description}
-              logo={funder.logo}
-              meta={[
-                ...(funder.acceptingApplications
-                  ? [
-                      {
-                        icon: isAcceptingApplications(
-                          funder.acceptingApplications
-                        )
-                          ? '/images/icons/form-check.svg'
-                          : '/images/icons/form-pause.svg',
-                        value: funder.acceptingApplications,
-                      },
-                    ]
-                  : []),
-                ...(funder.type
-                  ? [{ icon: '/images/icons/tag.svg', value: funder.type }]
-                  : []),
-              ]}
+              {...funderCardProps(funder)}
               trackingPage="Funding"
               listingId={funder.id}
               placement={placements.get(funder.id)}

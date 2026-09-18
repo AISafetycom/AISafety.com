@@ -268,114 +268,89 @@ async function getTrainingEntries(): Promise<SearchEntry[]> {
   return entries
 }
 
-export async function buildSearchIndex(): Promise<SearchEntry[]> {
-  const [
-    advisors,
-    communities,
-    courses,
-    eventEntries,
-    trainingEntries,
-    founders,
-    funders,
-    jobs,
-    mapData,
-    media,
-    projects,
-  ] = await Promise.all([
-    getAdvisors(),
-    getCommunities(),
-    getCourses(),
-    getEventEntries(),
-    getTrainingEntries(),
-    getFounderResources(),
-    getFunders(),
-    getJobs(),
-    getMapData(),
-    getMediaChannels(),
-    getProjects(),
-  ])
+async function getAdvisorEntries(): Promise<SearchEntry[]> {
+  const advisors = await getAdvisors()
+  return advisors.map(a => ({
+    type: 'advisor' as const,
+    title: a.name,
+    subtitle: '',
+    description: a.description,
+    category: a.focus,
+    url: a.url || '/advisors',
+    logo: a.logo,
+  }))
+}
 
+async function getCommunityEntries(): Promise<SearchEntry[]> {
+  const communities = await getCommunities()
+  return communities.map(c => ({
+    type: 'community' as const,
+    title: c.name,
+    subtitle: '',
+    description: c.description,
+    category: [c.platformText, c.focus, c.location ?? '']
+      .filter(Boolean)
+      .join(' · '),
+    url: c.joinLink !== '#' ? c.joinLink : '/communities',
+    logo: c.logo,
+  }))
+}
+
+async function getCourseEntries(): Promise<SearchEntry[]> {
+  const courses = await getCourses()
+  return courses.map(c => ({
+    type: 'course' as const,
+    title: c.name,
+    subtitle: '',
+    description: c.description,
+    category: [c.category, c.courseType].filter(Boolean).join(' · '),
+    url: c.url || '/self-study',
+    logo: c.image,
+  }))
+}
+
+async function getFounderEntries(): Promise<SearchEntry[]> {
+  const founders = await getFounderResources()
+  return founders.map(f => ({
+    type: 'founder' as const,
+    title: f.name,
+    subtitle: '',
+    description: f.description,
+    category: f.type,
+    url: f.website || '/founders',
+    logo: f.image,
+  }))
+}
+
+async function getFunderEntries(): Promise<SearchEntry[]> {
+  const funders = await getFunders()
+  return funders.map(f => ({
+    type: 'funder' as const,
+    title: f.name,
+    subtitle: '',
+    description: f.description,
+    category: [f.type, f.acceptingApplications].filter(Boolean).join(' · '),
+    url: f.url || '/funding',
+    logo: f.logo,
+  }))
+}
+
+async function getJobEntries(): Promise<SearchEntry[]> {
+  const jobs = await getJobs()
+  return jobs.map(j => ({
+    type: 'job' as const,
+    title: j.name,
+    subtitle: j.organization,
+    description: j.description,
+    category: [j.location, j.roleType, j.skillSet].filter(Boolean).join(' · '),
+    url: j.url || '/jobs',
+    logo: j.logo,
+  }))
+}
+
+async function getMapEntries(): Promise<SearchEntry[]> {
+  const mapData = await getMapData()
   const entries: SearchEntry[] = []
-
-  for (const a of advisors) {
-    entries.push({
-      type: 'advisor',
-      title: a.name,
-      subtitle: '',
-      description: a.description,
-      category: a.focus,
-      url: a.url || '/advisors',
-      logo: a.logo,
-    })
-  }
-
-  for (const c of communities) {
-    entries.push({
-      type: 'community',
-      title: c.name,
-      subtitle: '',
-      description: c.description,
-      category: [c.platformText, c.focus, c.location ?? '']
-        .filter(Boolean)
-        .join(' · '),
-      url: c.joinLink !== '#' ? c.joinLink : '/communities',
-      logo: c.logo,
-    })
-  }
-
-  for (const c of courses) {
-    entries.push({
-      type: 'course',
-      title: c.name,
-      subtitle: '',
-      description: c.description,
-      category: [c.category, c.courseType].filter(Boolean).join(' · '),
-      url: c.url || '/self-study',
-      logo: c.image,
-    })
-  }
-
-  entries.push(...eventEntries)
-  entries.push(...trainingEntries)
-
-  for (const f of founders) {
-    entries.push({
-      type: 'founder',
-      title: f.name,
-      subtitle: '',
-      description: f.description,
-      category: f.type,
-      url: f.website || '/founders',
-      logo: f.image,
-    })
-  }
-
-  for (const f of funders) {
-    entries.push({
-      type: 'funder',
-      title: f.name,
-      subtitle: '',
-      description: f.description,
-      category: [f.type, f.acceptingApplications].filter(Boolean).join(' · '),
-      url: f.url || '/funding',
-      logo: f.logo,
-    })
-  }
-
-  for (const j of jobs) {
-    entries.push({
-      type: 'job',
-      title: j.name,
-      subtitle: j.organization,
-      description: j.description,
-      category: [j.location, j.roleType, j.skillSet]
-        .filter(Boolean)
-        .join(' · '),
-      url: j.url || '/jobs',
-      logo: j.logo,
-    })
-  }
-
   for (const o of mapData.records) {
     if (o.isMagic) continue
     // Already covered by STATIC_PAGES.
@@ -390,32 +365,72 @@ export async function buildSearchIndex(): Promise<SearchEntry[]> {
       logo: o.logo,
     })
   }
-
-  for (const m of media) {
-    entries.push({
-      type: 'media',
-      title: m.name,
-      subtitle: '',
-      description: m.description,
-      category: m.type,
-      url: m.url || '/media-channels',
-      logo: m.logo,
-    })
-  }
-
-  for (const p of projects) {
-    entries.push({
-      type: 'project',
-      title: p.name,
-      subtitle: '',
-      description: p.description,
-      category: p.status,
-      url: p.email ? `mailto:${p.email}` : '/projects',
-      logo: p.logo,
-    })
-  }
-
-  entries.push(...STATIC_PAGES)
-
   return entries
+}
+
+async function getMediaEntries(): Promise<SearchEntry[]> {
+  const media = await getMediaChannels()
+  return media.map(m => ({
+    type: 'media' as const,
+    title: m.name,
+    subtitle: '',
+    description: m.description,
+    category: m.type,
+    url: m.url || '/media-channels',
+    logo: m.logo,
+  }))
+}
+
+async function getProjectEntries(): Promise<SearchEntry[]> {
+  const projects = await getProjects()
+  return projects.map(p => ({
+    type: 'project' as const,
+    title: p.name,
+    subtitle: '',
+    description: p.description,
+    category: p.status,
+    url: p.email ? `mailto:${p.email}` : '/projects',
+    logo: p.logo,
+  }))
+}
+
+/** Every search type with listings behind it — all but the static pages. */
+export type ListingSearchType = Exclude<SearchType, 'page'>
+
+// One builder per resource page, in the order the index lists them.
+const ENTRY_BUILDERS: Record<ListingSearchType, () => Promise<SearchEntry[]>> =
+  {
+    advisor: getAdvisorEntries,
+    community: getCommunityEntries,
+    course: getCourseEntries,
+    event: getEventEntries,
+    training: getTrainingEntries,
+    founder: getFounderEntries,
+    funder: getFunderEntries,
+    job: getJobEntries,
+    map: getMapEntries,
+    media: getMediaEntries,
+    project: getProjectEntries,
+  }
+
+export function isListingSearchType(type: string): type is ListingSearchType {
+  return (Object.keys(ENTRY_BUILDERS) as string[]).includes(type)
+}
+
+/** The index entries for one resource page's listings, built from whatever
+ *  the data layer returns for this request: live Airtable in preview mode
+ *  (src/lib/preview.ts), the hourly cache otherwise. Preview mode's search
+ *  uses this to re-read just the page being looked at
+ *  (/api/admin/preview/search-entries). */
+export async function buildSearchEntries(
+  type: ListingSearchType
+): Promise<SearchEntry[]> {
+  return ENTRY_BUILDERS[type]()
+}
+
+export async function buildSearchIndex(): Promise<SearchEntry[]> {
+  const sections = await Promise.all(
+    (Object.keys(ENTRY_BUILDERS) as ListingSearchType[]).map(buildSearchEntries)
+  )
+  return [...sections.flat(), ...STATIC_PAGES]
 }

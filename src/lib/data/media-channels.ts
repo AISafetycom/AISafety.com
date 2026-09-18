@@ -6,10 +6,11 @@ import {
   fieldString,
   fieldText,
   publishedFormula,
+  type AirtableRawRecord,
 } from './airtable'
 import { fetchPublicData, hasAirtableCredentials } from './public-api'
 
-const TABLE_ID = 'tblCTOMzyH3vILL5I'
+export const TABLE_ID = 'tblCTOMzyH3vILL5I'
 const VIEW_ID = 'viwT8KTwupcVyGKLZ'
 
 // Permanent Airtable field IDs for the Media channels table. Fetching,
@@ -42,6 +43,33 @@ export interface MediaChannel {
   featuredTagline: string | null
 }
 
+/**
+ * One Media channels record (fields keyed by field id) → the listing the page
+ * renders, or null when the site would skip it (no name). Publish/Hide
+ * filtering stays in getMediaChannels(), so an unpublished record can still be
+ * mapped — the admin Queue previews proposed records through this.
+ */
+export function mediaChannelFromRecord(
+  record: AirtableRawRecord
+): MediaChannel | null {
+  const f = record.fields
+  const name = fieldString(f[FIELD.name])
+  if (!name) return null
+
+  return {
+    id: record.id,
+    dateAdded: record.createdTime?.slice(0, 10) ?? null,
+    lastModified: fieldDateOnly(f[FIELD.lastModified]),
+    name,
+    description: fieldString(f[FIELD.description]) || '',
+    logo: fieldAttachmentUrl(f[FIELD.image]),
+    type: fieldText(f[FIELD.type]),
+    url: fieldString(f[FIELD.link]) || '#',
+    featured: fieldFeatured(f[FIELD.featured]),
+    featuredTagline: fieldString(f[FIELD.featuredTagline]),
+  }
+}
+
 export async function getMediaChannels(): Promise<MediaChannel[]> {
   if (!hasAirtableCredentials())
     return fetchPublicData<MediaChannel>('media-channels')
@@ -55,22 +83,9 @@ export async function getMediaChannels(): Promise<MediaChannel[]> {
 
   const results: MediaChannel[] = []
   for (const record of raw) {
-    const f = record.fields
-    const name = fieldString(f[FIELD.name])
-    if (!name) continue
-
-    results.push({
-      id: record.id,
-      dateAdded: record.createdTime?.slice(0, 10) ?? null,
-      lastModified: fieldDateOnly(f[FIELD.lastModified]),
-      name,
-      description: fieldString(f[FIELD.description]) || '',
-      logo: fieldAttachmentUrl(f[FIELD.image]),
-      type: fieldText(f[FIELD.type]),
-      url: fieldString(f[FIELD.link]) || '#',
-      featured: fieldFeatured(f[FIELD.featured]),
-      featuredTagline: fieldString(f[FIELD.featuredTagline]),
-    })
+    const channel = mediaChannelFromRecord(record)
+    if (!channel) continue
+    results.push(channel)
   }
 
   return results

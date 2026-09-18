@@ -11,7 +11,7 @@ export default async function ConversationsPage() {
   return (
     <div className={styles.convPage}>
       <div className={styles.pageHeading}>
-        <h1 className={styles.pageTitle}>Conversation Log</h1>
+        <h1 className={styles.pageTitle}>Bot log</h1>
       </div>
       {configured ? (
         <ConversationList />

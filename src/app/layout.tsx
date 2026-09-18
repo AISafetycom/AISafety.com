@@ -6,7 +6,9 @@ import './globals.css'
 import LayoutShell from '@/components/LayoutShell'
 import MatomoRouteTracker from '@/components/MatomoRouteTracker'
 import PreviewBanner from '@/components/PreviewBanner'
+import ScrollToHash from '@/components/ScrollToHash'
 import { fetchAllCounts } from '@/lib/data/counts'
+import { isPreviewRequest } from '@/lib/preview'
 
 const inter = Inter({
   subsets: ['latin'],
@@ -46,6 +48,7 @@ export default async function RootLayout({
   children: React.ReactNode
 }>) {
   const counts = await fetchAllCounts()
+  const preview = await isPreviewRequest()
 
   return (
     <html lang="en" suppressHydrationWarning>
@@ -80,7 +83,10 @@ export default async function RootLayout({
         <Suspense fallback={null}>
           <MatomoRouteTracker />
         </Suspense>
-        <LayoutShell counts={counts}>{children}</LayoutShell>
+        <LayoutShell counts={counts} preview={preview}>
+          <ScrollToHash />
+          {children}
+        </LayoutShell>
         <PreviewBanner />
       </body>
     </html>

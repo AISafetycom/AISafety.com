@@ -1,0 +1,190 @@
+// The only way untrusted input becomes a Guide. Every key is checked, unknown
+// keys are refused, and the result is a fresh object built from what was
+// checked (never the input itself), so nothing the browser sent can reach
+// the store or the page uncounted.
+import {
+  LIMITS,
+  type Block,
+  type Guide,
+  type Inline,
+  type RichText,
+} from './types'
+
+export type Validation =
+  | { ok: true; guide: Guide }
+  | { ok: false; error: string }
+
+class Invalid extends Error {}
+
+function fail(path: string, what: string): never {
+  throw new Invalid(`${path}: ${what}`)
+}
+
+function obj(
+  v: unknown,
+  path: string,
+  keys: string[]
+): Record<string, unknown> {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) {
+    fail(path, 'must be an object')
+  }
+  const o = v as Record<string, unknown>
+  for (const k of Object.keys(o)) {
+    if (!keys.includes(k)) fail(path, `unknown key "${k}"`)
+  }
+  return o
+}
+
+// Tabs, newlines and carriage returns are fine (they collapse); the other
+// C0 controls never belong in prose. Written as escapes so the source file
+// holds no invisible bytes.
+const CONTROL_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F]/
+
+function str(v: unknown, path: string, max: number, min = 0): string {
+  if (typeof v !== 'string') fail(path, 'must be text')
+  if (v.length < min) fail(path, 'must not be empty')
+  if (v.length > max) fail(path, `longer than ${max} characters`)
+  if (CONTROL_RE.test(v)) fail(path, 'has control characters')
+  return v
+}
+
+function list(v: unknown, path: string, max: number, min = 0): unknown[] {
+  if (!Array.isArray(v)) fail(path, 'must be a list')
+  if (v.length < min) fail(path, 'must not be empty')
+  if (v.length > max) fail(path, `more than ${max} entries`)
+  return v
+}
+
+const ID_RE = /^[a-z0-9][a-z0-9-]*$/
+
+function id(v: unknown, path: string, seen: Set<string>): string {
+  const s = str(v, path, LIMITS.id, 1)
+  if (!ID_RE.test(s)) fail(path, 'id may only use a-z, 0-9 and hyphens')
+  if (seen.has(s)) fail(path, `duplicate id "${s}"`)
+  seen.add(s)
+  return s
+}
+
+/** Links are web addresses or site paths; anything else (javascript:,
+ *  data:, protocol-relative) is refused. */
+export function validHref(s: string): boolean {
+  if (s.length > LIMITS.href) return false
+  if (s.startsWith('/')) return !s.startsWith('//') && !/[\s\\]/.test(s)
+  let u: URL
+  try {
+    u = new URL(s)
+  } catch {
+    return false
+  }
+  return (
+    (u.protocol === 'http:' || u.protocol === 'https:') && Boolean(u.hostname)
+  )
+}
+
+function inline(v: unknown, path: string): Inline {
+  const o = obj(v, path, ['text', 'bold', 'href'])
+  const out: Inline = {
+    text: str(o.text, `${path}.text`, LIMITS.inlineText, 1),
+  }
+  if (o.bold !== undefined) {
+    if (o.bold !== true) fail(`${path}.bold`, 'must be true or absent')
+    out.bold = true
+  }
+  if (o.href !== undefined) {
+    const href = str(o.href, `${path}.href`, LIMITS.href, 1)
+    if (!validHref(href)) {
+      fail(`${path}.href`, 'must be a web address or a site path')
+    }
+    out.href = href
+  }
+  return out
+}
+
+function inlines(v: unknown, path: string): Inline[] {
+  return list(v, path, LIMITS.inlinesPerBlock).map((x, i) =>
+    inline(x, `${path}[${i}]`)
+  )
+}
+
+function block(v: unknown, path: string, allowLists: boolean): Block {
+  const o = obj(v, path, ['type', 'inlines', 'items'])
+  if (o.type === 'paragraph') {
+    if (o.items !== undefined) fail(path, 'a paragraph has no items')
+    return { type: 'paragraph', inlines: inlines(o.inlines, `${path}.inlines`) }
+  }
+  if (o.type === 'bullets' || o.type === 'numbers') {
+    if (!allowLists) fail(path, 'no lists here')
+    if (o.inlines !== undefined) fail(path, 'a list has no inlines')
+    const items = list(o.items, `${path}.items`, LIMITS.itemsPerList, 1).map(
+      (it, i) => inlines(it, `${path}.items[${i}]`)
+    )
+    return { type: o.type, items }
+  }
+  fail(`${path}.type`, 'must be paragraph, bullets or numbers')
+}
+
+function richText(
+  v: unknown,
+  path: string,
+  maxBlocks: number,
+  allowLists: boolean
+): RichText {
+  const o = obj(v, path, ['blocks'])
+  return {
+    blocks: list(o.blocks, `${path}.blocks`, maxBlocks).map((b, i) =>
+      block(b, `${path}.blocks[${i}]`, allowLists)
+    ),
+  }
+}
+
+function parse(input: unknown): Guide {
+  const g = obj(input, 'guide', ['intro', 'tabs'])
+  const intro = richText(g.intro, 'intro', LIMITS.introBlocks, false)
+  if (intro.blocks.length !== 1) fail('intro', 'must be exactly one paragraph')
+  const tabIds = new Set<string>()
+  const sectionIds = new Set<string>()
+  const tabs = list(g.tabs, 'tabs', LIMITS.tabs, 1).map((t, i) => {
+    const path = `tabs[${i}]`
+    const o = obj(t, path, ['id', 'amount', 'lead', 'sections'])
+    return {
+      id: id(o.id, `${path}.id`, tabIds),
+      amount: str(o.amount, `${path}.amount`, LIMITS.amount, 1),
+      lead: str(o.lead, `${path}.lead`, LIMITS.lead),
+      sections: list(o.sections, `${path}.sections`, LIMITS.sections).map(
+        (s, j) => {
+          const sp = `${path}.sections[${j}]`
+          const so = obj(s, sp, ['id', 'time', 'body'])
+          return {
+            id: id(so.id, `${sp}.id`, sectionIds),
+            time: str(so.time, `${sp}.time`, LIMITS.time, 1),
+            body: richText(
+              so.body,
+              `${sp}.body`,
+              LIMITS.blocksPerSection,
+              true
+            ),
+          }
+        }
+      ),
+    }
+  })
+  return { intro, tabs }
+}
+
+/** Check untrusted input and return a clean copy, or say what is wrong. */
+export function validateGuide(input: unknown): Validation {
+  try {
+    const guide = parse(input)
+    const bytes = Buffer.byteLength(JSON.stringify(guide), 'utf8')
+    if (bytes > LIMITS.totalBytes) {
+      return {
+        ok: false,
+        error: `guide: ${bytes} bytes is over the ${LIMITS.totalBytes} cap`,
+      }
+    }
+    return { ok: true, guide }
+  } catch (err) {
+    if (err instanceof Invalid) return { ok: false, error: err.message }
+    throw err
+  }
+}

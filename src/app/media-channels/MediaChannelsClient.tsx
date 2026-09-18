@@ -1,15 +1,13 @@
 'use client'
 
-import { useState, useMemo, useRef, useLayoutEffect, useCallback } from 'react'
-import Image from 'next/image'
-import FilterGroup from '@/components/FilterGroup'
-import FilterSidebar from '@/components/FilterSidebar'
+import { useState, useMemo, useRef, useLayoutEffect } from 'react'
+import FilterBar from '@/components/FilterBar'
+import FilterDropdown from '@/components/FilterDropdown'
+import ListingCard from '@/components/ListingCard'
+import { mediaChannelCardProps } from './card'
 import ContributeButtons from '@/components/ContributeButtons'
-import SearchBar from '@/components/SearchBar'
 import { MediaChannel } from '@/lib/data/media-channels'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
-import { trackListingClick } from '@/lib/analytics'
-import { withUtm } from '@/lib/utm'
 import { placementsById } from '@/lib/placements'
 
 interface MediaChannelsClientProps {
@@ -27,32 +25,21 @@ const typeOptions = [
   'YouTube channel',
 ]
 
+const allPass = () => true
+
 export default function MediaChannelsClient({
   channels,
 }: MediaChannelsClientProps) {
-  const [searchQuery, setSearchQuery] = useState('')
-  const [selectedTypes, setSelectedTypes] = useState<string[]>([])
+  const [typeFilters, setTypeFilters] = useState<string[]>([])
 
   // Each channel's slot in the full page order, stamped onto a click so the
   // dashboard can tie clicks to page position even after later reordering.
   const placements = useMemo(() => placementsById(channels), [channels])
 
-  const searchPass = useCallback(
-    (channel: MediaChannel) => {
-      if (!searchQuery) return true
-      const query = searchQuery.toLowerCase()
-      return (
-        channel.name.toLowerCase().includes(query) ||
-        channel.description.toLowerCase().includes(query)
-      )
-    },
-    [searchQuery]
-  )
-
   const groups = useMemo(
     () => ({
       type: {
-        selected: selectedTypes,
+        selected: typeFilters,
         matches: (channel: MediaChannel, value: string) =>
           channel.type
             .split(',')
@@ -60,33 +47,38 @@ export default function MediaChannelsClient({
             .includes(value),
       },
     }),
-    [selectedTypes]
+    [typeFilters]
   )
 
   const filteredChannels = useMemo(
-    () => filterItems(channels, searchPass, groups),
-    [channels, searchPass, groups]
+    () => filterItems(channels, allPass, groups),
+    [channels, groups]
   )
 
-  const typeCounts = useMemo(
-    () =>
-      optionCounts(
-        filterItems(channels, searchPass, groups, 'type'),
+  const filterCounts = useMemo(
+    () => ({
+      type: optionCounts(
+        filterItems(channels, allPass, groups, 'type'),
         typeOptions,
         groups.type.matches
       ),
-    [channels, searchPass, groups]
+    }),
+    [channels, groups]
   )
 
   const savedScrollY = useRef<number | null>(null)
 
-  const toggleType = (type: string) => {
+  const toggleFilter = (
+    value: string,
+    current: string[],
+    setter: (v: string[]) => void
+  ) => {
     savedScrollY.current = window.scrollY
-    if (selectedTypes.includes(type)) {
-      setSelectedTypes(selectedTypes.filter(t => t !== type))
-    } else {
-      setSelectedTypes([...selectedTypes, type])
-    }
+    setter(
+      current.includes(value)
+        ? current.filter(v => v !== value)
+        : [...current, value]
+    )
   }
 
   useLayoutEffect(() => {
@@ -97,87 +89,46 @@ export default function MediaChannelsClient({
   }, [filteredChannels])
 
   return (
-    <div className="flex gap-56px">
-      <div className="width-9-col">
-        <div className="padding-bottom-40px">
-          <SearchBar
-            value={searchQuery}
-            onChange={setSearchQuery}
-            placeholder="Search sources by name or description"
-          />
-        </div>
+    <>
+      <FilterBar count={filteredChannels.length} noun="media source">
+        <FilterDropdown
+          trackingPage="Media channels"
+          title="Type"
+          icon="/images/icons/computer.svg"
+          options={typeOptions}
+          selected={typeFilters}
+          counts={filterCounts.type}
+          onToggle={v => toggleFilter(v, typeFilters, setTypeFilters)}
+        />
+      </FilterBar>
 
-        <div className="collection-list padding-bottom-40px">
+      <div className="flex gap-56px">
+        <div className="collection-list padding-bottom-40px width-9-col">
           {filteredChannels.map(channel => (
-            <a
+            <ListingCard
               key={channel.id}
-              href={withUtm(channel.url, 'Media channels')}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="card"
-              onClick={() =>
-                trackListingClick(
-                  'Media channels',
-                  channel.name,
-                  channel.url,
-                  channel.id,
-                  placements.get(channel.id)
-                )
-              }
-            >
-              <div className="flex items-center gap-16px padding-bottom-24px">
-                <div className="featured-img">
-                  {channel.logo && (
-                    <Image
-                      src={channel.logo}
-                      alt=""
-                      className="card-image"
-                      width={64}
-                      height={64}
-                      unoptimized
-                      loading="eager"
-                      onError={e => {
-                        ;(e.target as HTMLImageElement).style.display = 'none'
-                      }}
-                    />
-                  )}
-                </div>
-                <h3>{channel.name}</h3>
-              </div>
-              <p className="paragraph-small padding-bottom-24px">
-                {channel.description}
-              </p>
-              <p className="paragraph-xs-bold padding-bottom-4px color-teal-400">
-                Type
-              </p>
-              <p className="paragraph-small">{channel.type}</p>
-            </a>
+              {...mediaChannelCardProps(channel)}
+              trackingPage="Media channels"
+              listingId={channel.id}
+              placement={placements.get(channel.id)}
+              trackingSource="cards"
+            />
           ))}
           {filteredChannels.length === 0 && (
             <p className="paragraph-small color-teal-300">Nothing found.</p>
           )}
         </div>
-      </div>
 
-      <div className="hide-mobile width-3-col">
-        <FilterSidebar>
-          <FilterGroup
+        <div className="hide-mobile width-3-col">
+          <ContributeButtons
             trackingPage="Media channels"
-            title="Type"
-            options={typeOptions}
-            selected={selectedTypes}
-            counts={typeCounts}
-            onToggle={toggleType}
+            suggestEntryUrl="https://airtable.com/appF8XfZUGXtfi40E/pagSZ7vJj9MHyYmtS/form"
+            suggestCorrectionUrl="https://airtable.com/appF8XfZUGXtfi40E/pagndDvdya1DSqoxN/form"
+            noun="media source"
+            airtableUrl="https://airtable.com/appF8XfZUGXtfi40E/shrK0YGL591cGcAE1"
           />
-        </FilterSidebar>
-        <ContributeButtons
-          trackingPage="Media channels"
-          suggestEntryUrl="https://airtable.com/appF8XfZUGXtfi40E/pagSZ7vJj9MHyYmtS/form"
-          suggestCorrectionUrl="https://airtable.com/appF8XfZUGXtfi40E/pagndDvdya1DSqoxN/form"
-          noun="media source"
-          airtableUrl="https://airtable.com/appF8XfZUGXtfi40E/shrK0YGL591cGcAE1"
-        />
+        </div>
       </div>
-    </div>
+    </>
   )
 }

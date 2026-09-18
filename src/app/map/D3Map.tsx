@@ -10,6 +10,7 @@ import type { MapSearchControl } from './MapSearch'
 import { trackListingClick, trackListingHover } from '@/lib/analytics'
 import { withUtm } from '@/lib/utm'
 import { positionTooltip } from '@/lib/mapTooltip'
+import { MAP_BACKGROUND_URL } from '@/lib/map-images'
 import styles from './page.module.css'
 
 interface MapOrg {
@@ -39,7 +40,6 @@ const PADDING_FACTOR = 1.1
 const PADDED_WIDTH = MAP_WIDTH * PADDING_FACTOR
 const PADDED_HEIGHT = MAP_HEIGHT * PADDING_FACTOR
 const GRID_SIZE = MAP_WIDTH / 60
-const BACKGROUND_IMAGE_URL = '/images/map-1.5.1.svg'
 
 // Logo size scales (handle both cases)
 const SIZE_TO_SCALE: Record<string, number> = {
@@ -248,7 +248,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
     // Add background image
     svgGroup
       .append('image')
-      .attr('xlink:href', BACKGROUND_IMAGE_URL)
+      .attr('xlink:href', MAP_BACKGROUND_URL)
       .attr('width', MAP_WIDTH)
       .attr('height', MAP_HEIGHT)
       .attr('x', 0)

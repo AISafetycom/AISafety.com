@@ -8,12 +8,12 @@
                           → body { id, scale, expected? }
                              writes ONLY Scale (Small/Medium/Large)
 
-  Owner-password sessions only (canEditMap). Never revalidates any cache or
-  path: the public /map keeps refreshing on its own schedule.
+  GET needs the mapEditor area (canViewMap); PATCH needs its edit grant
+  (canEditMap). Never revalidates any cache or path: the public /map keeps refreshing on its own schedule.
 */
 
 import { NextRequest } from 'next/server'
-import { canEditMap } from '@/lib/admin/auth'
+import { canEditMap, canViewMap } from '@/lib/admin/auth'
 import {
   getMapState,
   isMapEditorConfigured,
@@ -42,8 +42,9 @@ function json(body: unknown, status = 200): Response {
   })
 }
 
-async function ensureAuth(): Promise<Response | null> {
-  if (!(await canEditMap())) return json({ error: 'unauthorized' }, 401)
+async function ensureAuth(write: boolean): Promise<Response | null> {
+  const allowed = write ? await canEditMap() : await canViewMap()
+  if (!allowed) return json({ error: 'unauthorized' }, 401)
   if (!isMapEditorConfigured()) {
     return json({ error: 'AIRTABLE_TOKEN / AIRTABLE_BASE_ID not set' }, 503)
   }
@@ -51,7 +52,7 @@ async function ensureAuth(): Promise<Response | null> {
 }
 
 export async function GET() {
-  const auth = await ensureAuth()
+  const auth = await ensureAuth(false)
   if (auth) return auth
   try {
     const records = await listMapRecordsLive()
@@ -59,7 +60,10 @@ export async function GET() {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[map-editor] list failed: ${message}`)
-    return json({ error: message }, 502)
+    return json(
+      { error: 'Airtable read failed; details are in the server log.' },
+      502
+    )
   }
 }
 
@@ -71,11 +75,20 @@ function airtableFailure(id: string, what: string, err: unknown): Response {
   const message = err instanceof Error ? err.message : String(err)
   console.error(`[map-editor] ${what} failed for ${id}: ${message}`)
   const rateLimited = /\b429\b/.test(message) && /RATE_LIMIT/.test(message)
-  return json({ error: message }, rateLimited ? 429 : 502)
+  // Airtable's own error text stays in the log: it can name tables and
+  // fields, and the editor only needs the status to decide what to do.
+  return json(
+    {
+      error: rateLimited
+        ? 'Airtable is rate-limiting; try again in about 30 seconds.'
+        : `Airtable ${what} failed; details are in the server log.`,
+    },
+    rateLimited ? 429 : 502
+  )
 }
 
 export async function PATCH(req: NextRequest) {
-  const auth = await ensureAuth()
+  const auth = await ensureAuth(true)
   if (auth) return auth
 
   let body: unknown

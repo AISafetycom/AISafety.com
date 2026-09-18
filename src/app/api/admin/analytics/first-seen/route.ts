@@ -26,10 +26,16 @@ export async function POST() {
       headers: { 'Content-Type': 'application/json' },
     })
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    return new Response(JSON.stringify({ error: message }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    })
+    // The detail stays in the server log; the client gets a plain summary.
+    console.error('[analytics] first-seen backfill failed:', err)
+    return new Response(
+      JSON.stringify({
+        error: 'Backfill failed; details are in the server log.',
+      }),
+      {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    )
   }
 }

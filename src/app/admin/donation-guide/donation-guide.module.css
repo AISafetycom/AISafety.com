@@ -1,0 +1,696 @@
+/* The Donation guide editor (/admin/donation-guide) and its preview page. */
+
+/* ─── Top bar ─────────────────────────────────────────────────────────── */
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.topLeft {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.status {
+  font-size: 12px;
+  color: var(--teal-400);
+}
+
+.statusLive {
+  color: var(--bright-teal-300);
+}
+
+.statusError {
+  color: var(--pink);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.iconButton:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ─── Banners ─────────────────────────────────────────────────────────── */
+
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  border: 1px solid var(--teal-700);
+  background-color: var(--teal-850);
+}
+
+.bannerWarn {
+  border-color: var(--pink);
+}
+
+.bannerOk {
+  border-color: var(--bright-teal-500);
+}
+
+/* ─── Outline + editor split ──────────────────────────────────────────── */
+
+.split {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.outline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  background-color: var(--teal-850);
+  border: 1px solid var(--teal-800);
+  border-radius: 10px;
+  position: sticky;
+  top: 76px;
+}
+
+.outlineHint {
+  font-size: 11px;
+  color: var(--teal-400);
+  padding: 2px 8px 6px;
+}
+
+.node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--white);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.node:hover {
+  background-color: var(--teal-800);
+}
+
+.nodeActive {
+  background-color: var(--teal-800);
+  border-color: var(--teal-700);
+}
+
+.nodeTab {
+  font-weight: 600;
+  margin-top: 6px;
+}
+
+.nodeSection {
+  margin-left: 18px;
+  color: var(--teal-300);
+}
+
+.nodeSection.nodeActive,
+.nodeSection:hover {
+  color: var(--white);
+}
+
+.nodeDragOver {
+  border-top-color: var(--bright-teal-300);
+}
+
+.nodeHandle {
+  color: var(--teal-500);
+  font-size: 12px;
+  cursor: grab;
+  flex-shrink: 0;
+}
+
+.nodeLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.nodeAdd {
+  color: var(--teal-400);
+  font-size: 12px;
+}
+
+.nodeAdd:hover {
+  color: var(--white);
+}
+
+.nodeAddSection {
+  margin-left: 18px;
+}
+
+/* ─── The editing pane ────────────────────────────────────────────────── */
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  background-color: var(--teal-850);
+  border: 1px solid var(--teal-800);
+  border-radius: 10px;
+  min-height: 320px;
+}
+
+.paneTitle {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+}
+
+.paneCrumb {
+  font-size: 12px;
+  color: var(--teal-400);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fieldLabel {
+  font-size: 12px;
+  color: var(--teal-300);
+}
+
+.fieldHint {
+  font-size: 11px;
+  color: var(--teal-400);
+}
+
+.input {
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--teal-700);
+  background-color: var(--teal-900);
+  color: var(--white);
+  font: inherit;
+  font-size: 14px;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--bright-teal-300);
+}
+
+.input:disabled {
+  opacity: 0.7;
+}
+
+.paneActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 6px;
+  border-top: 1px solid var(--teal-800);
+}
+
+.paneHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* Delete buttons: the red the Queue uses for danger in its dark theme. */
+.danger {
+  --dg-danger: #ff8b8b;
+  color: var(--dg-danger);
+  border-color: var(--dg-danger);
+}
+
+.danger:hover {
+  background-color: var(--dg-danger);
+  color: var(--teal-900);
+}
+
+.danger:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.danger:disabled:hover {
+  background-color: transparent;
+  color: var(--dg-danger);
+}
+
+/* The tab's own fields, side by side. */
+.tabFields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 14px;
+  align-items: start;
+}
+
+/* One "If you have" section: the label on the left, the text on the right,
+   like the live page; a rule between sections like the page's divider. */
+.sectionBlock {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--teal-800);
+  scroll-margin-top: 76px;
+}
+
+.sectionBlockActive {
+  border-top-color: var(--bright-teal-300);
+}
+
+.sectionBlockDragOver {
+  border-top: 2px solid var(--bright-teal-300);
+}
+
+/* The grip down the right of a section: drag it to reorder. */
+.sectionBlockEditable {
+  grid-template-columns: 200px minmax(0, 1fr) 32px;
+}
+
+.sectionGrip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  border-radius: 6px;
+  color: var(--teal-500);
+  cursor: grab;
+  user-select: none;
+}
+
+.sectionGrip:hover {
+  color: var(--white);
+  background-color: var(--teal-800);
+}
+
+.sectionGrip:active {
+  cursor: grabbing;
+}
+
+.sectionSide {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.sectionSide .field {
+  width: 100%;
+}
+
+/* ─── Rich text editor ────────────────────────────────────────────────── */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tbButton {
+  padding: 5px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--teal-700);
+  background: transparent;
+  color: var(--white);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tbButton:hover {
+  background-color: var(--teal-800);
+}
+
+.tbIcon {
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tbButtonOn {
+  background-color: var(--bright-teal-300);
+  border-color: var(--bright-teal-300);
+  color: var(--teal-900);
+}
+
+.tbButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.linkPop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--teal-700);
+  background-color: var(--teal-900);
+}
+
+.linkPop .input {
+  width: 360px;
+  max-width: 100%;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.linkHint {
+  font-size: 11px;
+  color: var(--teal-400);
+}
+
+.prose {
+  border: 1px solid var(--teal-700);
+  border-radius: 6px;
+  background-color: var(--teal-900);
+}
+
+.prose:focus-within {
+  border-color: var(--bright-teal-300);
+}
+
+.prose.proseIntro :global(.ProseMirror) {
+  min-height: 0;
+}
+
+.prose :global(.ProseMirror) {
+  min-height: 96px;
+  padding: 12px 14px;
+  outline: none;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.prose :global(.ProseMirror p) {
+  margin: 0 0 12px;
+}
+
+.prose :global(.ProseMirror p:last-child) {
+  margin-bottom: 0;
+}
+
+.prose :global(.ProseMirror ul),
+.prose :global(.ProseMirror ol) {
+  margin: 0 0 12px;
+  padding-left: 24px;
+}
+
+.prose :global(.ProseMirror ul) {
+  list-style: disc;
+}
+
+.prose :global(.ProseMirror ol) {
+  list-style: decimal;
+}
+
+.prose :global(.ProseMirror li) {
+  margin-bottom: 6px;
+}
+
+.prose :global(.ProseMirror li p) {
+  margin: 0;
+}
+
+.prose :global(.ProseMirror a) {
+  color: var(--bright-teal-300);
+  text-decoration: underline;
+}
+
+.prose :global(.ProseMirror strong) {
+  font-weight: 700;
+}
+
+.prose.proseIntro :global(.ProseMirror strong) {
+  color: var(--bright-teal-300);
+  font-weight: inherit;
+}
+
+.prose :global(.ProseMirror[contenteditable='false']) {
+  opacity: 0.8;
+}
+
+/* ─── Preview ─────────────────────────────────────────────────────────── */
+
+.preview {
+  margin-top: 20px;
+  border: 1px solid var(--teal-800);
+  border-radius: 10px;
+  background-color: var(--teal-850);
+  overflow: hidden;
+}
+
+.previewHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--teal-300);
+}
+
+.previewFrame {
+  position: relative;
+  height: 760px;
+  overflow: hidden;
+  background-color: var(--teal-900);
+}
+
+.previewFrame iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1280px;
+  border: 0;
+  transform-origin: 0 0;
+}
+
+.previewPage {
+  min-height: 100vh;
+  background: var(--teal-900) url('/images/bg.svg') top center / 2028px 944px
+    no-repeat;
+}
+
+/* ─── History drawer + dialogs ────────────────────────────────────────── */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background-color: rgba(0, 25, 27, 0.6);
+}
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 520px;
+  max-width: 100vw;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--teal-850);
+  border-left: 1px solid var(--teal-700);
+  box-shadow: 0 12px 24px rgba(0, 25, 27, 0.5);
+}
+
+.drawerHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--teal-800);
+  font-weight: 600;
+}
+
+.drawerBody {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 18px 24px;
+  font-size: 13px;
+}
+
+.versionRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--white);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.versionRow:hover,
+.versionRowActive {
+  background-color: var(--teal-800);
+  border-color: var(--teal-700);
+}
+
+.versionNum {
+  font-weight: 600;
+  min-width: 34px;
+}
+
+.versionMeta {
+  color: var(--teal-300);
+  font-size: 12px;
+}
+
+.versionLive {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--bright-teal-300);
+}
+
+.diffList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.diffItem {
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--teal-800);
+  background-color: var(--teal-900);
+}
+
+.diffWhere {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.diffKind {
+  font-weight: 400;
+  color: var(--teal-400);
+  margin-left: 6px;
+}
+
+.diffText {
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 6px 8px;
+  border-radius: 4px;
+  margin-top: 4px;
+}
+
+.diffBefore {
+  background-color: rgba(255, 45, 149, 0.1);
+  color: var(--teal-300);
+  text-decoration: line-through;
+}
+
+.diffAfter {
+  background-color: rgba(166, 218, 217, 0.1);
+}
+
+.dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 100;
+  width: 560px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+  background-color: var(--teal-850);
+  border: 1px solid var(--teal-700);
+  border-radius: 10px;
+  box-shadow: 0 12px 24px rgba(0, 25, 27, 0.5);
+}
+
+.dialogBody {
+  overflow: auto;
+  padding: 0 18px 12px;
+  font-size: 13px;
+}
+
+/* The site's paragraph style sets a tall line-height; dialogs read at
+   their own size. */
+.dialogBody p {
+  margin: 0 0 10px;
+  line-height: 1.5;
+}
+
+.dialogFoot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid var(--teal-800);
+}
+
+.muted {
+  color: var(--teal-400);
+}
+
+.empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--teal-400);
+  font-size: 13px;
+}
+
+@media (max-width: 991px) {
+  .split,
+  .tabFields,
+  .sectionBlock,
+  .sectionBlockEditable {
+    grid-template-columns: 1fr;
+  }
+
+  .outline {
+    position: static;
+  }
+}

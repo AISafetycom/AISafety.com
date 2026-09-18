@@ -10,7 +10,7 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { Redis } from '@upstash/redis'
-import type { AccessFlags } from './access'
+import { NO_ACCESS, parseAccess, type AccessFlags } from './access'
 
 export interface ManagedUser {
   email: string
@@ -79,13 +79,27 @@ interface Backend {
   writeRequests(list: AccessRequest[]): Promise<void>
 }
 
+/** The document as stored, with every access read through parseAccess: rows
+ *  written before grants had levels hold booleans, and they keep meaning what
+ *  they meant (a tick was everything the tab could do). The next write stores
+ *  the current shape. */
+async function readUsers(b: Backend): Promise<Doc> {
+  const doc = await b.readDoc()
+  return {
+    users: doc.users.map(u => ({
+      ...u,
+      access: parseAccess(u.access) ?? NO_ACCESS,
+    })),
+  }
+}
+
 function makeStore(b: Backend): UsersStore {
   return {
     async list() {
-      return (await b.readDoc()).users
+      return (await readUsers(b)).users
     },
     async add(user) {
-      const doc = await b.readDoc()
+      const doc = await readUsers(b)
       if (doc.users.some(u => u.email === user.email)) {
         throw new Error('duplicate')
       }
@@ -93,7 +107,7 @@ function makeStore(b: Backend): UsersStore {
       await b.writeDoc(doc)
     },
     async update(email, patch) {
-      const doc = await b.readDoc()
+      const doc = await readUsers(b)
       const user = doc.users.find(u => u.email === email)
       if (!user) return null
       if (patch.name !== undefined) user.name = patch.name
@@ -102,7 +116,7 @@ function makeStore(b: Backend): UsersStore {
       return user
     },
     async remove(email) {
-      const doc = await b.readDoc()
+      const doc = await readUsers(b)
       const before = doc.users.length
       doc.users = doc.users.filter(u => u.email !== email)
       if (doc.users.length === before) return false
@@ -113,7 +127,7 @@ function makeStore(b: Backend): UsersStore {
     async recordSignIn(email, at, name) {
       await b.writeSignIn(email, at)
       if (!name) return
-      const doc = await b.readDoc()
+      const doc = await readUsers(b)
       const user = doc.users.find(u => u.email === email)
       if (user && user.name !== name) {
         user.name = name

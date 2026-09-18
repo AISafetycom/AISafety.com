@@ -65,6 +65,8 @@ interface Props {
   onDragStateChange: (dragging: boolean) => void
   /** Filled in by the canvas so the parent (keyboard shortcuts) can zoom. */
   controlsRef: React.MutableRefObject<CanvasControls>
+  /** A view-only session: pins select on click but never drag or place. */
+  readOnly: boolean
 }
 
 const LOGO_CLIP_ID = 'editor-logo-circle-clip'
@@ -196,6 +198,7 @@ export default function MapEditorCanvas({
   onPlaceClick,
   onDragStateChange,
   controlsRef,
+  readOnly,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const hudRef = useRef<HTMLDivElement>(null)
@@ -491,7 +494,7 @@ export default function MapEditorCanvas({
     entered.each(function () {
       drawGlyph(d3.select<SVGGElement, EditorRecord>(this))
     })
-    entered.call(drag)
+    if (!readOnly) entered.call(drag)
 
     const all: PinSel = entered.merge(pins)
     all.each(function (d) {
@@ -532,7 +535,7 @@ export default function MapEditorCanvas({
           )
           .attr('stroke-width', 3)
       })
-  }, [records, selectedId, placeModeId, previewPublic])
+  }, [records, selectedId, placeModeId, previewPublic, readOnly])
 
   // Crosshair while placing.
   useEffect(() => {

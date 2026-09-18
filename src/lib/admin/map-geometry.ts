@@ -22,7 +22,10 @@ export const PADDED_HEIGHT = MAP_HEIGHT * PADDING_FACTOR
 /** One grid unit in SVG pixels: the map is 60 grid units wide. Airtable's x/y
  *  are in these units (e.g. Training Town's label sits at 22.2, 17.2). */
 export const GRID_SIZE = MAP_WIDTH / 60
-export const BACKGROUND_IMAGE_URL = '/images/map-1.5.1.svg'
+// The one constant that is shared rather than copied: the background URL also
+// feeds the sitewide preload of the map's images (src/lib/map-images.ts), and
+// that module is public-map code, not admin code.
+export { MAP_BACKGROUND_URL as BACKGROUND_IMAGE_URL } from '@/lib/map-images'
 
 /** The main group's translate inside the padded viewBox (public map values —
  *  note the /20 vertical offset, which differs from the poster map's /2). */

@@ -24,6 +24,7 @@ import { Redis } from '@upstash/redis'
 import { Ratelimit } from '@upstash/ratelimit'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { displayFilterGroup, displayFilterValue } from '@/lib/filter-tracking'
 
 export interface AnalyticsEvent {
   /** Event kind, e.g. 'listing_click'. Must be in ALLOWED_EVENT_TYPES. */
@@ -129,7 +130,17 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   'map_search_open',
   'map_search_query',
   'map_search_pick',
+  // The global nav's +N pill (the pages that don't fit the bar) opening its
+  // menu. `source` is how: 'hover' (mouse/trackpad) or 'tap' (touch screens);
+  // `page` the path it happened on. One per closed→open transition.
+  'nav_overflow_open',
 ])
+
+/** Dashboard labels for how the +N menu was opened (nav_overflow_open.source). */
+const NAV_OVERFLOW_OPEN_LABEL: Record<string, string> = {
+  hover: 'Hover',
+  tap: 'Tap',
+}
 
 // ─── Redis backend ───────────────────────────────────────────────────────────
 
@@ -636,6 +647,16 @@ export interface DashboardData {
   /** Clicks on the footer's external links, one row per link ('Donate',
    *  'AI Safety Funding', …), sitewide. */
   footerClicks: Counted[]
+  /** Opens of the global nav's +N menu, one row per method ('Hover' |
+   *  'Tap'), sitewide. */
+  navOverflowOpens: Counted[]
+  /** Per method: distinct visitors who opened the +N menu that way vs
+   *  distinct visitors site-wide — the nav is on every page, so the site is
+   *  the denominator. Keyed by the row names `navOverflowOpens` uses. */
+  navOverflowOpenShare: VisitorShare[]
+  /** The +N table's Total row: distinct visitors who opened the menu at all
+   *  vs distinct visitors site-wide. */
+  anyNavOverflowOpenShare: VisitorShare
   /** For pages with a map (Map, Communities): `selectedPage`'s most-hovered
    *  map listings — tooltip dwells (500 ms cursor rest on desktop, first tap
    *  on mobile), grouped like `topListings` and following the same unique/
@@ -729,6 +750,9 @@ const EMPTY: Omit<DashboardData, 'source'> = {
   contributeButtonShare: [],
   hoverShare: [],
   footerClicks: [],
+  navOverflowOpens: [],
+  navOverflowOpenShare: [],
+  anyNavOverflowOpenShare: { name: 'Any open', active: 0, visitors: 0 },
   topHovered: [],
   areaClicks: [],
   funnel: { opened: 0, typed: 0, clicked: 0 },
@@ -840,11 +864,40 @@ function tallyPositions(positions: string[]): Counted[] {
     .sort((a, b) => positionSortKey(a.name) - positionSortKey(b.name))
 }
 
+// ─── The dashboard's time zone ───────────────────────────────────────────────
+// Day boundaries, "today" and displayed times all use one fixed reporting
+// zone, the same for every viewer — the usual analytics convention (store
+// UTC, report in one configured zone). UTC was chosen on 6 September 2026 so
+// the definition of "a day" never depends on where the owner happens to be
+// living. Change it here and nowhere else; the page says which zone it is.
+export const DASHBOARD_TZ = 'UTC'
+
+/** "2026-09-05" — the dashboard-zone calendar day an instant falls on. */
+export function dashboardDay(ms: number): string {
+  return new Date(ms).toLocaleDateString('en-CA', { timeZone: DASHBOARD_TZ })
+}
+
+/** "+00:00" / "+01:00" — the dashboard zone's UTC offset on a given day, for
+ *  turning a calendar date into an epoch bound (DST-aware should the zone
+ *  ever be one that has it). */
+export function dashboardOffset(day: string): string {
+  const probe = new Date(`${day}T12:00:00Z`)
+  const part = new Intl.DateTimeFormat('en-GB', {
+    timeZone: DASHBOARD_TZ,
+    timeZoneName: 'longOffset',
+  })
+    .formatToParts(probe)
+    .find(p => p.type === 'timeZoneName')?.value
+  const m = /GMT([+-]\d{2}:\d{2})/.exec(part ?? '')
+  return m ? m[1] : '+00:00'
+}
+
 /** Collapse repeat events so a visitor counts once per listing per day: keep
  *  only the most recent event per (visitor, day, page, listing). Used for
  *  listing clicks, and by topHovered for map hovers — same key, same
- *  semantics, and the two types are always deduped separately. The day uses
- *  Bryce's timezone (UTC-5), matching the date-range bounds. Clicks with no id
+ *  semantics, and the two types are always deduped separately. The day is the
+ *  dashboard's (DASHBOARD_TZ, see dashboardDay), matching the date-range bounds.
+ *  Clicks with no id
  *  (e.g. private browsing, where we can't tell visitors apart) are each kept.
  *  Expects a newest-first list, so the first time a key is seen is the most
  *  recent click. */
@@ -857,9 +910,7 @@ function uniqueClicks(clicks: AnalyticsEvent[]): AnalyticsEvent[] {
       continue
     }
     const t = Date.parse(e.ts)
-    const day = Number.isNaN(t)
-      ? ''
-      : new Date(t - 5 * 3_600_000).toISOString().slice(0, 10)
+    const day = Number.isNaN(t) ? '' : dashboardDay(t)
     const key = `${e.vid}\x00${day}\x00${e.page ?? ''}\x00${listingMember(e)}`
     if (seen.has(key)) continue
     seen.add(key)
@@ -869,7 +920,7 @@ function uniqueClicks(clicks: AnalyticsEvent[]): AnalyticsEvent[] {
 }
 
 /** Unique-mode dedupe for filter activations: one per visitor per group+value
- *  per Bogotá day. The group (`source`) is part of the key — the same value
+ *  per dashboard-zone day. The group (`source`) is part of the key — the same value
  *  under two groups (e.g. 'Online') stays two activations. */
 function uniqueFilterApplies(events: AnalyticsEvent[]): AnalyticsEvent[] {
   const seen = new Set<string>()
@@ -880,9 +931,7 @@ function uniqueFilterApplies(events: AnalyticsEvent[]): AnalyticsEvent[] {
       continue
     }
     const t = Date.parse(e.ts)
-    const day = Number.isNaN(t)
-      ? ''
-      : new Date(t - 5 * 3_600_000).toISOString().slice(0, 10)
+    const day = Number.isNaN(t) ? '' : dashboardDay(t)
     const key = `${e.vid}\x00${day}\x00${e.page ?? ''}\x00${e.source ?? ''}\x00${e.label ?? ''}`
     if (seen.has(key)) continue
     seen.add(key)
@@ -1064,12 +1113,18 @@ function aggregate(
   const filterApplies = unique ? uniqueFilterApplies(filterHits) : filterHits
   const filtersByPage = tally(filterApplies.map(e => e.page as string))
   const pageFilters = filterApplies.filter(e => e.page === selectedPage)
-  const filterGroups = tally(pageFilters.map(e => e.source ?? '(unknown)'))
-  const filterValues = tally(
-    pageFilters.map(
-      e => `${e.source ?? '(unknown)'}: ${e.label ?? '(unknown)'}`
-    )
-  )
+  // Renamed filter titles and options are logged under their original names;
+  // show the current wording so old and new clicks land in one row.
+  const filterGroupName = (e: AnalyticsEvent) =>
+    displayFilterGroup(e.page ?? '', e.source ?? '(unknown)')
+  const filterValueName = (e: AnalyticsEvent) => {
+    const group = e.source ?? '(unknown)'
+    const label = e.label ?? '(unknown)'
+    const page = e.page ?? ''
+    return `${displayFilterGroup(page, group)}: ${displayFilterValue(page, group, label)}`
+  }
+  const filterGroups = tally(pageFilters.map(filterGroupName))
+  const filterValues = tally(pageFilters.map(filterValueName))
   const filterUsers = uniqueUsers(
     filterHits.filter(e => e.page === selectedPage)
   )
@@ -1143,14 +1198,8 @@ function aggregate(
     pageClicks.filter(e => e.position),
     e => e.position as string
   )
-  const filterGroupShare = shareOnPage(
-    pageFilters,
-    e => e.source ?? '(unknown)'
-  )
-  const filterValueShare = shareOnPage(
-    pageFilters,
-    e => `${e.source ?? '(unknown)'}: ${e.label ?? '(unknown)'}`
-  )
+  const filterGroupShare = shareOnPage(pageFilters, filterGroupName)
+  const filterValueShare = shareOnPage(pageFilters, filterValueName)
   const anyFilterShare = anyOnPage(pageFilters, 'Any filter')
 
   // Contribute-button and Airtable-card clicks. uniqueClicks dedupes on
@@ -1215,6 +1264,20 @@ function aggregate(
   const footerHits = inRange.filter(e => e.type === 'footer_click')
   const footerEvents = unique ? uniqueClicks(footerHits) : footerHits
   const footerClicks = tally(footerEvents.map(e => listingMember(e)))
+  // The global nav's +N menu: opens by method, sitewide, following the count
+  // mode (unique = one per visitor per method). Shares divide by all site
+  // visitors, since the nav is on every page.
+  const navOpens = inRange.filter(e => e.type === 'nav_overflow_open')
+  const navOpenMethod = (e: AnalyticsEvent) =>
+    NAV_OVERFLOW_OPEN_LABEL[e.source ?? ''] ?? 'Unknown'
+  const navOverflowOpens = tallyBy(navOpens, navOpenMethod, unique)
+  const navOverflowOpenShare = navOverflowOpens.map(row =>
+    anyOnSite(
+      navOpens.filter(e => navOpenMethod(e) === row.name),
+      row.name
+    )
+  )
+  const anyNavOverflowOpenShare = anyOnSite(navOpens, 'Any open')
 
   // Most-hovered map listings for the selected page — tooltip dwells
   // (listing_hover events), grouped exactly like topListings but with no
@@ -1320,6 +1383,9 @@ function aggregate(
     contributeButtonShare,
     hoverShare,
     footerClicks,
+    navOverflowOpens,
+    navOverflowOpenShare,
+    anyNavOverflowOpenShare,
     topHovered,
     areaClicks,
     funnel: {

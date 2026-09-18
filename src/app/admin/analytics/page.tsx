@@ -16,6 +16,9 @@ import {
   type SearchPanelData,
   type MapSearchPanelData,
   type VisitorShare,
+  DASHBOARD_TZ,
+  dashboardDay,
+  dashboardOffset,
 } from '@/lib/analytics/events'
 import {
   readConversationStats,
@@ -48,6 +51,7 @@ import Logo from './Logo'
 import SortableTable, { type SortColumn, type SortValue } from './SortableTable'
 import admin from '../admin.module.css'
 import styles from './analytics.module.css'
+import { displayFilterGroup, displayFilterValue } from '@/lib/filter-tracking'
 
 // Always render fresh — the dashboard reflects live event counts and the
 // selected date range comes from the query string.
@@ -97,8 +101,8 @@ const OVERVIEW_KEYS = new Set(OVERVIEW_TABS.map(t => t.key))
 // and only Map has areas, so the by-area rollup is Map-only.
 const MAP_PAGES = new Set(['Map', 'Communities'])
 
-// Bryce is in Colombia — fixed UTC-5, no DST — so day boundaries use -05:00.
-const TZ_OFFSET = '-05:00'
+// Day boundaries and displayed times use the dashboard's fixed reporting zone
+// (DASHBOARD_TZ in events.ts, UTC) — the same for every viewer.
 const DAY = 86_400_000
 
 interface ResolvedRange extends DateRange {
@@ -114,13 +118,15 @@ function first(v: string | string[] | undefined): string | undefined {
 }
 
 /** Translate the query string into concrete epoch-ms bounds. Defaults to the
- *  last 30 days. A custom from/to (inclusive, Bogotá day boundaries) wins. */
+ *  last 30 days. A custom from/to (inclusive, dashboard-zone day boundaries) wins. */
 function resolveRange(sp: SearchParams): ResolvedRange {
   const from = first(sp.from)
   const to = first(sp.to)
   if (from || to) {
-    const s = from ? Date.parse(`${from}T00:00:00${TZ_OFFSET}`) : NaN
-    const e = to ? Date.parse(`${to}T23:59:59.999${TZ_OFFSET}`) : NaN
+    const s = from
+      ? Date.parse(`${from}T00:00:00${dashboardOffset(from)}`)
+      : NaN
+    const e = to ? Date.parse(`${to}T23:59:59.999${dashboardOffset(to)}`) : NaN
     return {
       startMs: Number.isNaN(s) ? null : s,
       endMs: Number.isNaN(e) ? null : e,
@@ -133,9 +139,9 @@ function resolveRange(sp: SearchParams): ResolvedRange {
   const now = Date.now()
   switch (range) {
     case 'today': {
-      const today = new Date(now - 5 * 3_600_000).toISOString().slice(0, 10)
+      const today = dashboardDay(now)
       return {
-        startMs: Date.parse(`${today}T00:00:00${TZ_OFFSET}`),
+        startMs: Date.parse(`${today}T00:00:00${dashboardOffset(today)}`),
         endMs: null,
         key: 'today',
       }
@@ -343,7 +349,7 @@ function searchPageBadges(
 function formatTime(iso: string): string {
   try {
     return new Date(iso).toLocaleString('en-GB', {
-      timeZone: 'America/Bogota',
+      timeZone: DASHBOARD_TZ,
       day: 'numeric',
       month: 'short',
       hour: '2-digit',
@@ -387,6 +393,8 @@ function pillFor(e: { page?: string; type: string }): string | null {
   if (e.type.startsWith('search')) return 'Search'
   // Footer clicks carry the raw path they happened on; 'Footer' reads better.
   if (e.type === 'footer_click') return 'Footer'
+  // Likewise the +N menu: it belongs to the nav, whatever page it opened on.
+  if (e.type === 'nav_overflow_open') return 'Nav'
   if (e.page) return e.page
   return null
 }
@@ -396,7 +404,12 @@ function labelFor(e: {
   type: string
   source?: string
   query?: string
+  page?: string
 }): string {
+  if (e.type === 'nav_overflow_open')
+    return e.source === 'tap'
+      ? 'Opened the +N menu (tap)'
+      : 'Opened the +N menu'
   if (e.type === 'search_open')
     return SEARCH_OPEN_LABELS[e.source ?? ''] ?? 'Opened search'
   if (e.type === 'search_query')
@@ -413,8 +426,13 @@ function labelFor(e: {
     return e.label
       ? `Picked “${e.label}” from the map search`
       : 'Picked a map search result'
-  if (e.type === 'filter_apply')
-    return `Filtered by ${e.source ?? '?'}: ${e.label ?? '?'}`
+  if (e.type === 'filter_apply') {
+    // Renamed filters log their original names; show the current wording.
+    const page = e.page ?? ''
+    const group = e.source ?? '?'
+    const value = e.label ?? '?'
+    return `Filtered by ${displayFilterGroup(page, group)}: ${displayFilterValue(page, group, value)}`
+  }
   // A rating's label is the bare value ('up' | 'down' | 'removed'), so spell
   // it out.
   if (e.type === 'chatbot_rating') {
@@ -439,7 +457,7 @@ function pct1(part: number, total: number): string {
 function formatDay(iso: string): string {
   try {
     return new Date(iso).toLocaleDateString('en-GB', {
-      timeZone: 'America/Bogota',
+      timeZone: DASHBOARD_TZ,
       day: 'numeric',
       month: 'long',
       year: 'numeric',
@@ -642,6 +660,13 @@ export default async function AnalyticsPage({
     0
   )
   const footerTotal = data.footerClicks.reduce((sum, r) => sum + r.count, 0)
+  const navOpenTotal = data.navOverflowOpens.reduce(
+    (sum, r) => sum + r.count,
+    0
+  )
+  const navOpenShare = new Map(
+    data.navOverflowOpenShare.map(s => [s.name, s] as const)
+  )
   const newsletterTotalByPage = data.newsletterByPage.reduce(
     (sum, r) => sum + r.count,
     0
@@ -693,6 +718,12 @@ export default async function AnalyticsPage({
               data since {formatDay(data.oldestTs)}
             </span>
           )}
+          <span
+            className={styles.coverage}
+            title="Day boundaries and times on this page are in UTC, the same for everyone. The rest of the admin shows your own local time."
+          >
+            times in {DASHBOARD_TZ}
+          </span>
           <ExcludeToggle />
         </div>
       </div>
@@ -1245,6 +1276,23 @@ export default async function AnalyticsPage({
                   The footer&apos;s external links – the &quot;Help us out&quot;
                   and &quot;Newsletters&quot; columns. Recording since 29 July
                   2026.
+                </p>
+              </Panel>
+              <Panel title="+N menu opens">
+                <CountTable
+                  rows={data.navOverflowOpens}
+                  labelHead="Method"
+                  countHead={unique ? 'Users' : 'Opens'}
+                  total={navOpenTotal}
+                  shareFor={name => navOpenShare.get(name)}
+                  totalShare={data.anyNavOverflowOpenShare}
+                />
+                <p className={styles.caption}>
+                  The +N pill at the end of the global nav, which holds the
+                  pages that don&apos;t fit the bar. Hover = mouse or trackpad,
+                  tap = touch screens. % of visitors = the share of all visitors
+                  who opened it that way at least once; the Total row is the
+                  share who opened it at all. Recording since 7 September 2026.
                 </p>
               </Panel>
             </div>

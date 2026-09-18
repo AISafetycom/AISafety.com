@@ -36,6 +36,12 @@ import type {
   RecurringProgram,
   TrainingProgram,
 } from '@/lib/data/training'
+import {
+  bottomMetaFor,
+  recurringProgramCardProps,
+  titleMetaFor,
+  trainingCardProps,
+} from './card'
 
 // Each tab links to its own add form and share view; the correction form is
 // the sitewide one.
@@ -63,46 +69,6 @@ interface TrainingClientProps {
   recurring: RecurringProgram[]
 }
 
-function parseISO(date: string): Date {
-  return new Date(date + 'T00:00:00Z')
-}
-
-function formatShortDate(date: string): string {
-  const d = parseISO(date)
-  // en-US, not en-GB: en-GB abbreviates September as "Sept".
-  const month = new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    timeZone: 'UTC',
-  }).format(d)
-  return `${d.getUTCDate()} ${month} ${d.getUTCFullYear()}`
-}
-
-// "1 year", "3 months", "8 weeks", "6 days" — rounded to whichever unit
-// reads most naturally for the span.
-function durationLabel(
-  startDate: string | null,
-  endDate: string | null
-): string | null {
-  if (!startDate || !endDate || endDate < startDate) return null
-  const start = parseISO(startDate).getTime()
-  const end = parseISO(endDate).getTime()
-  const days = Math.round((end - start) / 86_400_000) + 1
-  if (days >= 330) {
-    const years = Math.max(1, Math.round(days / 365.25))
-    return years === 1 ? '1 year' : `${years} years`
-  }
-  const months = Math.round(days / 30.44)
-  // Anything over 8 weeks reads better in months ("33 weeks" -> "8 months");
-  // under that, use months only when the span is within days of a whole month.
-  if (days > 56 || (months >= 1 && Math.abs(days - months * 30.44) <= 4)) {
-    return months === 1 ? '1 month' : `${months} months`
-  }
-  if (days >= 14) {
-    return `${Math.round(days / 7)} weeks`
-  }
-  return days === 1 ? '1 day' : `${days} days`
-}
-
 // Online-or-in-person programs can be done either way, so they surface under
 // both the Online and In person filters. Hybrid programs (required online +
 // in-person parts, job-board sense) get their own filter option — they don't
@@ -113,86 +79,6 @@ function locationFacets(program: ProgramBase): string[] {
   return program.mode === 'Online or in person'
     ? ['Online', 'In person']
     : [program.mode]
-}
-
-function titleMetaFor(program: ProgramBase, upcoming?: TrainingProgram) {
-  const rows: { icon: string; value: string }[] = []
-  if (program.mode === 'Online') {
-    rows.push({ icon: '/images/icons/computer.svg', value: 'Online' })
-  } else if (program.location) {
-    rows.push({ icon: '/images/icons/pin.svg', value: program.location })
-  }
-  const startText =
-    upcoming?.startDateApprox ??
-    (upcoming?.startDate ? formatShortDate(upcoming.startDate) : null)
-  if (upcoming && startText) {
-    const duration = durationLabel(upcoming.startDate, upcoming.endDate)
-    const starts = `Starts ${startText}`
-    rows.push({
-      icon: '/images/icons/calendar.svg',
-      value: duration ? `${duration} · ${starts}` : starts,
-    })
-  } else {
-    // Recurring programs have no dates, but most run a consistent length.
-    const typical = (program as RecurringProgram).typicalLength
-    if (typical) {
-      rows.push({ icon: '/images/icons/calendar.svg', value: typical })
-    }
-  }
-  return rows
-}
-
-function bottomMetaFor(program: ProgramBase, upcoming?: TrainingProgram) {
-  const rows: { icon: string; value: string }[] = []
-  if (program.stipend) {
-    rows.push({
-      icon:
-        program.stipend === 'No stipend'
-          ? '/images/icons/money-off.svg'
-          : '/images/icons/money.svg',
-      value: program.stipend,
-    })
-  }
-  if (program.timeCommitment) {
-    rows.push({
-      icon:
-        program.timeCommitment === 'Part-time'
-          ? '/images/icons/timer-half.svg'
-          : '/images/icons/timer.svg',
-      value: program.timeCommitment,
-    })
-  }
-  if (program.entryBar) {
-    rows.push({
-      icon: `/images/icons/entry-${program.entryBar.toLowerCase()}.svg`,
-      value: `Entry bar: ${program.entryBar.toLowerCase()}`,
-    })
-  }
-  if (program.focus.length > 0) {
-    rows.push({
-      icon: '/images/icons/target.svg',
-      value: `Focus: ${program.focus.map(f => f.toLowerCase()).join(', ')}`,
-    })
-  }
-  if (upcoming) {
-    if (upcoming.notYetOpen) {
-      rows.push({
-        icon: '/images/icons/paper-closed.svg',
-        value: 'Applications not yet open',
-      })
-    } else if (upcoming.applicationsClose) {
-      const open = upcoming.applicationStatus === 'Open'
-      rows.push({
-        icon: open
-          ? '/images/icons/paper.svg'
-          : '/images/icons/paper-closed.svg',
-        value: open
-          ? `Apply by ${formatShortDate(upcoming.applicationsClose)}`
-          : 'Applications closed',
-      })
-    }
-  }
-  return rows
 }
 
 // The active set is shareable: the non-default tab writes ?view= to the
@@ -438,22 +324,9 @@ export default function TrainingClient({
   const renderCard = (program: ProgramBase) => (
     <ListingCard
       key={program.id}
-      href={program.url}
-      name={program.name}
-      description={program.description}
-      logo={program.logo}
-      pills={program.type.map(t => ({
-        label: t,
-        colorClass: trainingTypeColor(t),
-      }))}
-      titleMeta={titleMetaFor(
-        program,
-        mode === 'upcoming' ? (program as TrainingProgram) : undefined
-      )}
-      meta={bottomMetaFor(
-        program,
-        mode === 'upcoming' ? (program as TrainingProgram) : undefined
-      )}
+      {...(mode === 'upcoming'
+        ? trainingCardProps(program as TrainingProgram)
+        : recurringProgramCardProps(program as RecurringProgram))}
       trackingPage="Training"
       listingId={program.id}
       placement={placements.get(program.id)}

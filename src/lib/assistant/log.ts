@@ -1,4 +1,5 @@
 import {
+  DELIVERY_TEXT_MAX,
   isConversationsTableConfigured,
   recordCitationClick,
   recordMessageRating,
@@ -95,6 +96,10 @@ export interface AssistantDeliveryEvent {
   turnIndex: number
   /** Milliseconds from the visitor sending their message to this outcome. */
   ms: number
+  /** For 'error': what went wrong, as the browser saw it (the exception's
+   *  name and message, the server's error event, or 'empty reply'), and how
+   *  much of the reply had arrived by then. */
+  error?: string
   /** Whether the chat panel was open at the moment of the outcome. */
   panelOpen?: boolean
   /** Whether the tab was visible at the moment of the outcome. */
@@ -199,6 +204,13 @@ export async function logAssistantEvent(event: AssistantEvent): Promise<void> {
       if (typeof event.tabHiddenAtMs === 'number') {
         patch.tabHidden = event.tabHiddenAtMs
       }
+    }
+    if (
+      event.outcome === 'error' &&
+      typeof event.error === 'string' &&
+      event.error.trim() !== ''
+    ) {
+      patch.errorText = event.error.slice(0, DELIVERY_TEXT_MAX)
     }
     try {
       await recordTurnDelivery(event.sessionId, event.turnIndex, patch)

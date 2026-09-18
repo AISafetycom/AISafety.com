@@ -4,8 +4,12 @@ import {
   ACCESS_KEYS,
   accessFrom,
   ALL_ACCESS,
+  canEdit,
+  canOpen,
   DEFAULT_NEW_ACCESS,
+  describeAccess,
   hasAnyAccess,
+  isEditableArea,
   NO_ACCESS,
   parseAccess,
 } from './access'
@@ -23,39 +27,79 @@ describe('access flags', () => {
     for (const a of ACCESS_AREAS) expect(a.href).toMatch(/^\/admin\//)
   })
 
-  it('builds flags from keys', () => {
-    expect(accessFrom(['analytics']).analytics).toBe(true)
-    expect(accessFrom(['analytics']).newsletter).toBe(false)
+  it('builds grants from keys: view, and edit only where the tab writes', () => {
+    const a = accessFrom(['analytics', 'queue'], ['newsletter'])
+    expect(a.analytics).toBe('view')
+    expect(a.queue).toBe('view')
+    expect(a.newsletter).toBe('edit')
+    expect(a.mapEditor).toBe(false)
+    expect(canOpen(a, 'newsletter') && canEdit(a, 'newsletter')).toBe(true)
+    expect(canOpen(a, 'queue') && !canEdit(a, 'queue')).toBe(true)
+    // A view-only area can't be raised to edit.
+    expect(accessFrom([], ['analytics']).analytics).toBe('view')
+    expect(isEditableArea('analytics')).toBe(false)
+    expect(isEditableArea('queue')).toBe(true)
     expect(hasAnyAccess(ALL_ACCESS)).toBe(true)
     expect(hasAnyAccess(NO_ACCESS)).toBe(false)
   })
 
-  it('keeps the writing, sending and granting areas out of the default', () => {
-    expect(DEFAULT_NEW_ACCESS.mapEditor).toBe(false)
-    expect(DEFAULT_NEW_ACCESS.newsletter).toBe(false)
-    expect(DEFAULT_NEW_ACCESS.newsletterPreview).toBe(false)
-    expect(DEFAULT_NEW_ACCESS.manageUsers).toBe(false)
-    expect(DEFAULT_NEW_ACCESS.playground).toBe(true)
+  it('gives root admins the top grant everywhere', () => {
+    for (const area of ACCESS_AREAS) {
+      expect(ALL_ACCESS[area.key]).toBe(area.edit ? 'edit' : 'view')
+    }
   })
 
-  it('shows one Newsletters tab whether a session may send or only look', () => {
-    const both = adminTabs(accessFrom(['newsletter', 'newsletterPreview']))
-    expect(both.filter(t => t.href === '/admin/newsletter')).toHaveLength(1)
-    const viewer = adminTabs(accessFrom(['newsletterPreview']))
+  it('starts a new person with nothing ticked', () => {
+    expect(hasAnyAccess(DEFAULT_NEW_ACCESS)).toBe(false)
+  })
+
+  it('shows the same tab whether a session may edit or only look', () => {
+    const viewer = adminTabs(accessFrom(['newsletter']))
+    const editor = adminTabs(accessFrom([], ['newsletter']))
     expect(viewer).toEqual([
       { href: '/admin/newsletter', label: 'Newsletters', group: 'newsletter' },
     ])
-    expect(adminHomeHref(accessFrom(['newsletterPreview']))).toBe(
-      '/admin/newsletter'
-    )
+    expect(editor).toEqual(viewer)
+    expect(adminHomeHref(accessFrom(['newsletter']))).toBe('/admin/newsletter')
+    expect(adminHomeHref(NO_ACCESS)).toBe('/admin/login')
   })
 
   it('parses untrusted input strictly', () => {
     expect(
-      parseAccess({ analytics: true, bogus: true, newsletter: 'yes' })
-    ).toEqual(accessFrom(['analytics']))
+      parseAccess({
+        analytics: 'view',
+        queue: 'edit',
+        bogus: true,
+        newsletter: 'yes',
+        mapEditor: 'EDIT',
+      })
+    ).toEqual(accessFrom(['analytics'], ['queue']))
+    // 'edit' on a view-only area is clamped to view.
+    expect(parseAccess({ analytics: 'edit' })).toEqual(
+      accessFrom(['analytics'])
+    )
     expect(parseAccess(null)).toBeNull()
     expect(parseAccess('x')).toBeNull()
+  })
+
+  it('reads the booleans stored before grants had levels', () => {
+    // A tick used to mean everything the tab could do.
+    expect(parseAccess({ queue: true, analytics: true })).toEqual(
+      accessFrom(['analytics'], ['queue'])
+    )
+    // Newsletters was two booleans: send, or look only.
+    expect(parseAccess({ newsletterPreview: true })).toEqual(
+      accessFrom(['newsletter'])
+    )
+    expect(parseAccess({ newsletter: true, newsletterPreview: true })).toEqual(
+      accessFrom([], ['newsletter'])
+    )
+  })
+
+  it('describes grants in tab order', () => {
+    expect(
+      describeAccess(accessFrom(['analytics', 'queue'], ['newsletter']))
+    ).toEqual(['Queue', 'Analytics', 'Newsletters (can edit)'])
   })
 })
 

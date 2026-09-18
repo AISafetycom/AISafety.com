@@ -1,11 +1,13 @@
 import { NextRequest } from 'next/server'
-import { canViewConversationLog } from '@/lib/admin/auth'
+import { canViewConversationLog, currentAdmin } from '@/lib/admin/auth'
 import {
   REVIEW_VALUES,
   getConversation,
+  isRecordId,
   isConversationsTableConfigured,
   listAnnotationFacets,
   listConversationsPage,
+  NoteNotFoundError,
   updateConversation,
   type ReviewValue,
 } from '@/lib/admin/airtable'
@@ -181,7 +183,14 @@ export async function GET(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const auth = await ensureAuth()
   if (auth) return auth
-  let body: { id?: unknown; notes?: unknown; tags?: unknown; review?: unknown }
+  let body: {
+    id?: unknown
+    notes?: unknown
+    tags?: unknown
+    review?: unknown
+    addNote?: unknown
+    deleteNote?: unknown
+  }
   try {
     body = await req.json()
   } catch {
@@ -193,12 +202,24 @@ export async function PATCH(req: NextRequest) {
       headers: { 'Content-Type': 'application/json' },
     })
   }
+  if (!isRecordId(body.id)) {
+    return new Response(
+      JSON.stringify({ error: 'id must be an Airtable record id' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
   const patch: {
     notes?: string
     tags?: string[]
     review?: ReviewValue | null
+    addNote?: string
+    deleteNote?: { index: number; at: string; actor: string }
   } = {}
   if (typeof body.notes === 'string') patch.notes = body.notes
+  // A signed note: the server stamps it with the signed-in name and time.
+  if (typeof body.addNote === 'string' && body.addNote.trim()) {
+    patch.addNote = body.addNote.trim().slice(0, 4000)
+  }
   if (Array.isArray(body.tags) && body.tags.every(t => typeof t === 'string')) {
     patch.tags = (body.tags as string[]).map(t => t.trim()).filter(Boolean)
   }
@@ -210,6 +231,28 @@ export async function PATCH(req: NextRequest) {
   } else if (REVIEW_VALUES.includes(body.review as ReviewValue)) {
     patch.review = body.review as ReviewValue
   }
-  const updated = await updateConversation(body.id, patch)
+  if (body.deleteNote && typeof body.deleteNote === 'object') {
+    const d = body.deleteNote as Record<string, unknown>
+    if (
+      typeof d.index === 'number' &&
+      Number.isInteger(d.index) &&
+      d.index >= 0 &&
+      typeof d.at === 'string' &&
+      typeof d.actor === 'string'
+    ) {
+      patch.deleteNote = { index: d.index, at: d.at, actor: d.actor }
+    }
+  }
+  // The row's Review log names whoever made the change.
+  const who = await currentAdmin()
+  let updated
+  try {
+    updated = await updateConversation(body.id, patch, who?.name ?? 'unknown')
+  } catch (err) {
+    if (err instanceof NoteNotFoundError) {
+      return Response.json({ error: err.message }, { status: 409 })
+    }
+    throw err
+  }
   return Response.json({ conversation: updated })
 }

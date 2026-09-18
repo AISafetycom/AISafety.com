@@ -5,18 +5,15 @@ import { pendingRequestCount } from '@/lib/admin/users-store'
 import { adminTabs, adminHomeHref } from '../nav'
 import styles from '../admin.module.css'
 
-export const metadata = {
-  title: 'Admin admin – AISafety.com',
-  robots: { index: false, follow: false },
-}
-
 export default async function UsersAdminLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
   const access = await currentAccess()
-  // Changing who can sign in. Viewing needs no fresh session; the write routes do.
+  // Who can sign in. View-only sessions see the list; changing it needs the
+  // edit grant, which the page and the write routes check (the routes also
+  // want a fresh session).
   // Anyone signed in without it goes to the first area they do have;
   // signed-out sessions to login.
   if (!access.manageUsers) {

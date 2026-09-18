@@ -229,6 +229,17 @@ export default function EditorPanel({
             {statusText || (lastSavedRef.current ? 'draft saved' : '')}
           </span>
         </div>
+        <p className={styles.sectionHint}>
+          The prompt is the bot&apos;s instructions: what it is for, what it may
+          recommend, how it should answer. The live site runs the production
+          prompt shown at the top right, which is changed in code, so edits here
+          only affect this sandbox. Your draft saves itself in this browser as
+          you type. &ldquo;Save version&rdquo; keeps a snapshot under the name
+          below so you can reload it later; &ldquo;Reset to production&rdquo;
+          puts the live prompt back. Model picks which Claude answers, and
+          &ldquo;(production)&rdquo; marks the one visitors get. Once a version
+          works well, send it to Bryce to go live.
+        </p>
 
         <div className={styles.editorRow}>
           <label className={styles.editorRowLabel}>Name</label>
@@ -249,6 +260,7 @@ export default function EditorPanel({
             {MODELS.map(m => (
               <option key={m.id} value={m.id}>
                 {m.longLabel}
+                {m.id === DEFAULT_MODEL_ID ? ' (production)' : ''}
               </option>
             ))}
           </select>
@@ -351,8 +363,12 @@ export default function EditorPanel({
           <h2 className={styles.editorBlockTitle}>Context</h2>
         </div>
         <p className={styles.sectionHint}>
-          Sent with each test message — same shape production uses. Geo is
-          pre-filled from your IP; edit anything to simulate a different user.
+          Sent with each test message, in the same shape the live site sends.
+          Page is where the visitor is, which sets the greeting and the
+          suggestion chips. Page state is any filters they have set on that
+          page, as JSON. Referrer is the link they arrived from. Location is
+          pre-filled from your own IP. Edit anything to act as a different
+          visitor.
         </p>
 
         <div className={styles.editorRow}>

@@ -3,7 +3,7 @@
 
   The draft's email HTML, as a subscriber will see it (personalisation tags
   neutralised), for the sandboxed preview frame on /admin/newsletter.
-  Approvers and preview-only reviewers (canViewNewsletter). Never cached.
+  Approvers and view-only reviewers (canViewNewsletter). Never cached.
 */
 
 import { NextRequest } from 'next/server'
@@ -28,7 +28,14 @@ export async function GET(req: NextRequest) {
     const html = await previewHtml(id)
     if (html == null)
       return new Response('not a pipeline draft', { status: 404 })
-    return new Response(html, {
+    // Every link opens in a new tab: inside the sandboxed frame a click
+    // would otherwise try to load the site in the frame itself and land on
+    // a blank page (Bryce, 16 Sept 2026).
+    const framed = html.replace(
+      /<head[^>]*>/i,
+      m => `${m}<base target="_blank">`
+    )
+    return new Response(framed, {
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
         'Cache-Control': 'no-store',
@@ -36,14 +43,18 @@ export async function GET(req: NextRequest) {
         // sandboxed iframe has an opaque origin, which SAMEORIGIN would
         // refuse; frame-ancestors checks the embedding page instead.)
         // Belt and braces alongside the iframe's sandbox attribute: no scripts
-        // run in the preview, links can't navigate the admin.
+        // run in the preview, links can't navigate the admin — they may open
+        // a new tab, and that tab is an ordinary one (the target site needs
+        // its scripts).
         'Content-Security-Policy':
-          "frame-ancestors 'self'; sandbox; default-src 'none'; img-src https: data:; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com",
+          "frame-ancestors 'self'; sandbox allow-popups allow-popups-to-escape-sandbox; default-src 'none'; img-src https: data:; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com",
       },
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[newsletter] preview ${id} failed: ${message}`)
-    return new Response(message, { status: 502 })
+    return new Response('Preview failed; details are in the server log.', {
+      status: 502,
+    })
   }
 }

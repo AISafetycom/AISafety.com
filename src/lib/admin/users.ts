@@ -5,7 +5,7 @@
 //      or unreachable store can therefore never lock the owner out, and
 //      nothing on the "Admin admin" page can remove them.
 //   2. The managed list (users-store.ts), edited from /admin/users: a set of
-//      per-area checkboxes for each person. Looked up on every request, so
+//      per-area grants (none, view or edit) for each person. Looked up on every request, so
 //      removing someone or changing their access takes effect on their next
 //      click.
 import {

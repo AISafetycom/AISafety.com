@@ -1,6 +1,6 @@
 import { fetchLastUpdated } from '@/lib/data/last-updated'
 import PageHeader from '@/components/PageHeader'
-import FeaturedCard from '@/components/FeaturedCardLegacy'
+import FeaturedCard from '@/components/FeaturedCard'
 import AdvisorsClient from './AdvisorsClient'
 import { getAdvisors } from '@/lib/data/advisors'
 import { pageMetadata } from '@/lib/page-metadata'
@@ -13,6 +13,11 @@ export default async function AdvisorsPage() {
     getAdvisors(),
     fetchLastUpdated('advisors'),
   ])
+
+  const featured = [
+    advisors.find(a => a.featured === '1'),
+    advisors.find(a => a.featured === '2'),
+  ].filter((a): a is NonNullable<typeof a> => a != null)
 
   return (
     <div className="container-default">
@@ -30,35 +35,31 @@ export default async function AdvisorsPage() {
         }
       />
 
-      {/* Featured Cards + Related Resources */}
-      <div className="flex flex-col-mobile gap-56px padding-bottom-80px">
-        <div className="flex flex-col-mobile gap-40px">
-          {[
-            advisors.find(a => a.featured === '1'),
-            advisors.find(a => a.featured === '2'),
-          ]
-            .filter((a): a is NonNullable<typeof a> => a != null)
-            .map(advisor => (
-              <FeaturedCard
-                key={advisor.id}
-                href={advisor.url !== '#' ? advisor.url : undefined}
-                tagline={advisor.featuredTagline!}
-                name={advisor.name}
-                description={advisor.description}
-                logo={advisor.logo ?? undefined}
-                metadata={[
-                  { label: 'Focus', value: advisor.focus },
-                  { label: 'Status', value: advisor.status },
-                ]}
-                trackingPage="Advisors"
-                trackingId={advisor.id}
-                trackingPosition={`F${advisor.featured}`}
-              />
-            ))}
-        </div>
+      <div className="flex flex-wrap gap-56px padding-bottom-80px">
+        {featured.map((advisor, i) => (
+          <FeaturedCard
+            key={advisor.id}
+            className="width-6-col"
+            href={advisor.url !== '#' ? advisor.url : undefined}
+            tagline={advisor.featuredTagline!}
+            name={advisor.name}
+            description={advisor.description}
+            logo={advisor.logo ?? undefined}
+            meta={
+              advisor.focus
+                ? [{ icon: '/images/icons/target.svg', value: advisor.focus }]
+                : []
+            }
+            trackingPage="Advisors"
+            trackingId={advisor.id}
+            trackingPosition={`F${advisor.featured}`}
+            trackingSource="cards"
+            index={i}
+            count={featured.length}
+          />
+        ))}
       </div>
 
-      {/* Main Content with Search, Cards, and Filters */}
       <AdvisorsClient advisors={advisors} />
     </div>
   )

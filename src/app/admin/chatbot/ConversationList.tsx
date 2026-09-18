@@ -14,6 +14,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { parseLog, parseNotes, stampToDate } from '@/lib/admin/annotation-log'
 import styles from '../admin.module.css'
 import TranscriptMessage, {
   ClickedCardsContext,
@@ -165,6 +166,8 @@ interface TurnDelivery {
   received?: number
   stopped?: number
   error?: number
+  /** What the error was, as the browser saw it (set alongside `error`). */
+  errorText?: string
   left?: number
   panelClosed?: number
   tabHidden?: number
@@ -172,6 +175,11 @@ interface TurnDelivery {
   tabVisible?: boolean
   seen?: number
 }
+
+/** The label the chat endpoint puts on our own test chats. Must match
+ *  INTERNAL_TAG in src/lib/assistant/conversation-store.ts (not imported:
+ *  that module pulls in the server-side Airtable client). */
+const INTERNAL_LABEL = 'internal'
 
 /** The Review single select's options, as named in Airtable. */
 const REVIEW_VALUES = ['Good', 'Bad', 'Unsure'] as const
@@ -189,6 +197,10 @@ interface Conversation {
   /** Reviewer's verdict on the whole conversation ('' when not yet rated) —
    *  distinct from `ratings`, the visitor's own thumbs on individual replies. */
   review: ReviewValue | ''
+  /** Admin name behind the current verdict ('' when unrated). */
+  reviewedBy: string
+  /** One line per annotation change, oldest first (see annotation-log.ts). */
+  reviewLog: string
   data: ConversationData | null
   clickedCitations: string[]
   /** Visitor's thumbs ratings of the bot's replies (turn index → 'up' |
@@ -256,6 +268,20 @@ function formatTime(iso: string): string {
   return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
 }
 
+/** A stored "2026-09-05 11:42 UTC" annotation stamp, in the viewer's own time
+ *  zone like every other time on this page ("5 Sept 2026, 12:42"). */
+function formatStamp(stamp: string): string {
+  const d = stampToDate(stamp)
+  if (!d) return stamp
+  return d.toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 function formatLatency(ms: number): string {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
 }
@@ -293,11 +319,13 @@ function describeDelivery(
     }
   }
   if (d.error != null) {
+    const at = `failed in the browser at ${formatElapsed(d.error)}`
     return {
-      label: `failed in the browser at ${formatElapsed(d.error)}`,
+      label: d.errorText ? `${at} — ${d.errorText}` : at,
       warn: true,
       title:
-        "The visitor's browser hit an error before the reply finished (network drop, or the server sent an error) — they saw an error message",
+        "The visitor's browser hit an error before the reply finished (network drop, or the server sent an error) — they saw an error message" +
+        (d.errorText ? `\n\nWhat the browser reported: ${d.errorText}` : ''),
     }
   }
   if (d.received != null) {
@@ -354,6 +382,14 @@ function describeDelivery(
   return undefined
 }
 
+/** Tooltip for the row-header thumb badge. */
+function ratingTitle(value: 'up' | 'down', count: number): string {
+  const which = value === 'up' ? 'thumbs up' : 'thumbs down'
+  return count === 1
+    ? `The visitor rated a reply ${which}`
+    : `The visitor rated ${count} replies ${which}`
+}
+
 /** Row-header badge for the latest turn: only the cases worth flagging when
  *  skimming (the transcript carries the full note per reply). */
 function deliveryBadge(
@@ -374,7 +410,8 @@ function deliveryBadge(
     return {
       text: 'NOT DELIVERED',
       title:
-        "The visitor's browser hit an error before the reply finished — they saw an error message",
+        "The visitor's browser hit an error before the reply finished — they saw an error message" +
+        (d.errorText ? `\n\nWhat the browser reported: ${d.errorText}` : ''),
     }
   }
   if (
@@ -824,7 +861,8 @@ function ConversationRow({
   onToggle: () => void
   onUpdate: (c: Conversation) => void
 }) {
-  const [notes, setNotes] = useState(conv.notes)
+  const [noteDraft, setNoteDraft] = useState('')
+  const [deletingNote, setDeletingNote] = useState<number | null>(null)
   const [saveStatus, setSaveStatus] = useState('')
   const [labelInput, setLabelInput] = useState('')
   // Custom suggestion menu under the label input (a native <datalist> can't
@@ -833,6 +871,9 @@ function ConversationRow({
   const [labelHighlight, setLabelHighlight] = useState(-1)
   const [linkCopied, setLinkCopied] = useState(false)
   const data = conv.data
+  // Our own chats are not visitor traffic, so their rows are set back —
+  // they're the ones to skip over.
+  const internal = conv.tags.includes(INTERNAL_LABEL)
   // Visitor messages actually stored in the (windowed) history — what the
   // transcript below can show.
   const storedTurns = data?.history.filter(t => t.role === 'user').length ?? 0
@@ -894,6 +935,19 @@ function ConversationRow({
       }
     }
     return m
+  }, [conv.ratings])
+  // Header badge: how many replies the visitor rated each way, so a thumb is
+  // visible while skimming the list rather than only inside the transcript.
+  // Counted straight off the field (not via clientIndexOf) — a rating is worth
+  // flagging even when we can't pin it to a specific reply.
+  const ratingCounts = useMemo(() => {
+    let up = 0
+    let down = 0
+    for (const value of Object.values(conv.ratings)) {
+      if (value === 'up') up++
+      else if (value === 'down') down++
+    }
+    return { up, down }
   }, [conv.ratings])
   // Maps a stored-history index to the visitor's message-list position — the
   // indexing the delivery reports, thumbs ratings, and turn-scoped click keys
@@ -976,6 +1030,8 @@ function ConversationRow({
     notes?: string
     tags?: string[]
     review?: ReviewValue | null
+    addNote?: string
+    deleteNote?: { index: number; at: string; actor: string }
   }) => {
     setSaveStatus('saving…')
     try {
@@ -985,7 +1041,8 @@ function ConversationRow({
         body: JSON.stringify({ id: conv.id, ...patch }),
       })
       if (!res.ok) {
-        setSaveStatus('save failed')
+        const body = (await res.json().catch(() => ({}))) as { error?: string }
+        setSaveStatus(body.error ?? 'save failed')
         return
       }
       const updated = (await res.json()) as { conversation: Conversation }
@@ -1047,6 +1104,7 @@ function ConversationRow({
           styles.convRow,
           viewed ? styles.convRowViewed : '',
           expanded ? styles.convRowExpanded : '',
+          internal ? styles.convRowInternal : '',
         ]
           .filter(Boolean)
           .join(' ')}
@@ -1071,6 +1129,22 @@ function ConversationRow({
             </span>
             {turnCount > 1 && <span>{turnCount} turns</span>}
             {geo && <span>{geo}</span>}
+            {ratingCounts.up > 0 && (
+              <span
+                className={styles.convRowRating}
+                title={ratingTitle('up', ratingCounts.up)}
+              >
+                👍{ratingCounts.up > 1 ? ` ${ratingCounts.up}` : ''}
+              </span>
+            )}
+            {ratingCounts.down > 0 && (
+              <span
+                className={styles.convRowRating}
+                title={ratingTitle('down', ratingCounts.down)}
+              >
+                👎{ratingCounts.down > 1 ? ` ${ratingCounts.down}` : ''}
+              </span>
+            )}
             {conv.review && (
               <span
                 className={`${styles.convRowReview} ${styles[`convRowReview${conv.review}`]}`}
@@ -1365,11 +1439,16 @@ function ConversationRow({
                   type="button"
                   className={styles.convCopyLink}
                   onClick={() => void copyLink()}
-                  title="Copy a direct link to this conversation — opening it still needs the admin password"
+                  title="Copy a direct link to this conversation — opening it still needs an admin sign-in"
                 >
                   {linkCopied ? 'Link copied ✓' : '🔗 Copy link'}
                 </button>
               </div>
+              {conv.review && conv.reviewedBy && (
+                <div className={styles.convReviewedBy}>
+                  Rated {conv.review.toLowerCase()} by {conv.reviewedBy}
+                </div>
+              )}
             </div>
 
             <div className={styles.convDetailField}>
@@ -1478,16 +1557,129 @@ function ConversationRow({
 
             <div className={styles.convDetailField}>
               <div className={styles.convDetailLabel}>Notes</div>
+              {(() => {
+                const parsed = parseNotes(conv.notes)
+                return (
+                  <>
+                    {parsed.legacy && (
+                      <div className={styles.convNoteLegacy}>
+                        {parsed.legacy}
+                      </div>
+                    )}
+                    {parsed.entries.length > 0 && (
+                      <ul className={styles.convNoteList}>
+                        {parsed.entries.map((n, i) => (
+                          <li key={i} className={styles.convNoteEntry}>
+                            <div className={styles.convNoteMeta}>
+                              <span className={styles.convActivityWho}>
+                                {n.actor}
+                              </span>
+                              <span className={styles.convActivityWhen}>
+                                {formatStamp(n.at)}
+                              </span>
+                              <span className={styles.convNoteActions}>
+                                {deletingNote === i ? (
+                                  <>
+                                    <span className={styles.convNoteConfirm}>
+                                      Delete this note?
+                                    </span>
+                                    <button
+                                      type="button"
+                                      className={`${styles.convNoteDelete} ${styles.convNoteDanger}`}
+                                      onClick={() => {
+                                        setDeletingNote(null)
+                                        void persist({
+                                          deleteNote: {
+                                            index: i,
+                                            at: n.at,
+                                            actor: n.actor,
+                                          },
+                                        })
+                                      }}
+                                    >
+                                      Yes, delete
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className={styles.convNoteDelete}
+                                      onClick={() => setDeletingNote(null)}
+                                    >
+                                      Cancel
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className={styles.convNoteDelete}
+                                    onClick={() => setDeletingNote(i)}
+                                  >
+                                    Delete
+                                  </button>
+                                )}
+                              </span>
+                            </div>
+                            <div className={styles.convNoteText}>{n.text}</div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </>
+                )
+              })()}
               <textarea
                 className={styles.convNotes}
-                value={notes}
-                onChange={e => setNotes(e.target.value)}
-                onBlur={() => {
-                  if (notes !== conv.notes) void persist({ notes })
+                value={noteDraft}
+                onChange={e => setNoteDraft(e.target.value)}
+                onKeyDown={e => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                    e.preventDefault()
+                    if (noteDraft.trim()) {
+                      void persist({ addNote: noteDraft })
+                      setNoteDraft('')
+                    }
+                  }
                 }}
-                placeholder="Notes for this conversation…"
+                placeholder="Add a note — it will be signed with your name and the time"
               />
+              <div className={styles.convAnnotRow}>
+                <button
+                  type="button"
+                  className={styles.convLabelAdd}
+                  disabled={!noteDraft.trim()}
+                  onClick={() => {
+                    void persist({ addNote: noteDraft })
+                    setNoteDraft('')
+                  }}
+                >
+                  Add note
+                </button>
+              </div>
             </div>
+
+            {conv.reviewLog.trim() && (
+              <div className={styles.convDetailField}>
+                <div className={styles.convDetailLabel}>Activity</div>
+                <ul className={styles.convActivity}>
+                  {parseLog(conv.reviewLog).map((e, i) => (
+                    <li key={i} className={styles.convActivityRow}>
+                      {e.actor ? (
+                        <>
+                          <span className={styles.convActivityWho}>
+                            {e.actor}
+                          </span>{' '}
+                          {e.what}
+                          <span className={styles.convActivityWhen}>
+                            {formatStamp(e.at)}
+                          </span>
+                        </>
+                      ) : (
+                        e.what
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {saveStatus && (
               <div className={styles.convStatus}>{saveStatus}</div>

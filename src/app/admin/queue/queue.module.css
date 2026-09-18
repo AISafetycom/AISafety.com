@@ -1,0 +1,2184 @@
+/* The Queue's own look. Bryce works in this page for long stretches, so it
+   is built for triage rather than to match the admin's teal card stack
+   (his call, 9 Sept 2026): a light, calm surface by default with a dark
+   option, one item in focus, short labels, generous spacing. The palette is
+   scoped to .queue so nothing here leaks into the rest of the admin. */
+
+.queue {
+  --q-bg: #f6f5f1;
+  --q-panel: #ffffff;
+  --q-panel-2: #faf9f6;
+  --q-border: #e7e4dc;
+  --q-border-strong: #d6d2c8;
+  --q-text: #1f2328;
+  --q-text-2: #4b5157;
+  --q-muted: #7a8188;
+  --q-accent: #0f766e;
+  --q-accent-text: #ffffff;
+  --q-accent-soft: #e4f3ef;
+  --q-danger: #b42318;
+  --q-danger-soft: #fdecea;
+  --q-warn: #9a5b00;
+  --q-warn-soft: #fff4e0;
+  --q-sel: #eaf4f1;
+  --q-shadow: 0 1px 2px rgba(20, 24, 28, 0.06);
+  --q-email: #c2410c;
+  --q-discord: #5b4bd6;
+  --q-broom: #b45309;
+  --q-rule: #6d28d9;
+  --q-comb: #0f766e;
+
+  margin: 0;
+  /* Height is set from JS to fill the viewport below the admin header. */
+  min-height: 320px;
+  overflow: hidden;
+  background: var(--q-bg);
+  color: var(--q-text);
+  font-family: var(--font-inter), Inter, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.dark {
+  --q-bg: #15171b;
+  --q-panel: #1d2025;
+  --q-panel-2: #22262c;
+  --q-border: #2b3036;
+  --q-border-strong: #3a4048;
+  --q-text: #e9eaec;
+  --q-text-2: #c3c7cc;
+  --q-muted: #8d949b;
+  --q-accent: #5ed1c1;
+  --q-accent-text: #0f1a18;
+  --q-accent-soft: #173a35;
+  --q-danger: #ff8b8b;
+  --q-danger-soft: #3a1f1f;
+  --q-warn: #f0b458;
+  --q-warn-soft: #3a2d14;
+  --q-sel: #1f2c2a;
+  --q-shadow: none;
+  --q-email: #fb923c;
+  --q-discord: #a78bfa;
+  --q-broom: #f59e0b;
+  --q-rule: #c084fc;
+  --q-comb: #5ed1c1;
+}
+
+.queue a {
+  color: var(--q-accent);
+  text-decoration: none;
+}
+
+.queue a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.queue kbd {
+  display: inline-block;
+  min-width: 16px;
+  padding: 0 4px;
+  border: 1px solid var(--q-border-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font:
+    11px/16px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  color: var(--q-muted);
+  text-align: center;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+
+/* ─── Top bar ────────────────────────────────────────────────────────── */
+
+.top {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 24px 12px;
+  border-bottom: 1px solid var(--q-border);
+  background: var(--q-panel);
+}
+
+.topLeft {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+
+.h1 {
+  margin: 0;
+  color: var(--q-text);
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.2px;
+}
+
+.topMeta {
+  font-size: 13px;
+  color: var(--q-muted);
+}
+
+.topRight {
+  display: flex;
+  gap: 8px;
+}
+
+/* By source / By kind */
+.segmented {
+  display: inline-flex;
+  margin-left: 14px;
+  padding: 2px;
+  border: 1px solid var(--q-border-strong);
+  border-radius: 8px;
+  background: var(--q-panel-2);
+}
+
+.segmented button {
+  padding: 3px 10px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--q-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.segmented button:hover {
+  color: var(--q-text);
+}
+
+.segCount {
+  margin-left: 6px;
+  font-weight: 400;
+  opacity: 0.75;
+}
+
+.segmented .segOn {
+  background: var(--q-panel);
+  color: var(--q-text);
+  box-shadow: var(--q-shadow);
+}
+
+.progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: transparent;
+}
+
+.progressBar {
+  height: 100%;
+  background: var(--q-accent);
+  transition: width 300ms ease;
+}
+
+/* ─── Split view ─────────────────────────────────────────────────────── */
+
+.split {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr);
+  min-height: 0;
+}
+
+.list {
+  border-right: 1px solid var(--q-border);
+  background: var(--q-panel-2);
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.group {
+  padding: 0 0 10px;
+}
+
+/* Stays put at the top of the list while its group scrolls under it. Its
+   height is fixed so a page sub-head can sit exactly beneath it. */
+.groupHead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  box-sizing: border-box;
+  width: 100%;
+  height: 34px;
+  padding: 12px 16px 8px;
+  line-height: 14px;
+  border: none;
+  background: var(--q-panel-2);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--q-muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+.groupHead:hover {
+  color: var(--q-text);
+}
+
+.groupChevron {
+  display: inline-flex;
+  margin-left: auto;
+  transition: transform 120ms;
+}
+
+.groupChevronClosed {
+  transform: rotate(-90deg);
+}
+
+.groupCount {
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.groupEmpty {
+  padding: 4px 16px 8px;
+  font-size: 13px;
+  color: var(--q-muted);
+}
+
+.pageGroup {
+  padding: 0 0 6px;
+}
+
+/* A resource page within a section: sticks just under the section's head
+   while its rows scroll past, so the page in hand is always named. */
+.pageHead {
+  position: sticky;
+  top: 34px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 16px 5px;
+  border: none;
+  background: var(--q-panel-2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--q-muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+.pageHead:hover {
+  color: var(--q-text);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 16px 9px 14px;
+  border: none;
+  border-left: 3px solid transparent;
+  background: none;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--q-sel);
+}
+
+.rowActive,
+.rowActive:hover {
+  background: var(--q-sel);
+  border-left-color: var(--q-accent);
+}
+
+.withIcon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.undoIcon {
+  margin-right: 2px;
+}
+
+.dotEmail {
+  color: var(--q-email);
+}
+
+.dotDiscord {
+  color: var(--q-discord);
+}
+
+.dotBroom {
+  color: var(--q-broom);
+}
+
+.dotRule {
+  color: var(--q-rule);
+}
+
+.dotComb {
+  color: var(--q-comb);
+}
+
+.rowBody {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rowTitle {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--q-text);
+}
+
+.rowMeta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--q-muted);
+}
+
+.yes {
+  color: var(--q-accent);
+}
+
+.maybe {
+  color: var(--q-warn);
+}
+
+.no {
+  color: var(--q-danger);
+}
+
+/* A row whose decision is on its way to Airtable fades until it lands. */
+.rowBusy {
+  opacity: 0.55;
+}
+
+.spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  animation: spin 0.8s linear infinite;
+}
+
+/* ─── Detail ─────────────────────────────────────────────────────────── */
+
+.detail {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 28px 40px 0;
+}
+
+.detailInner {
+  max-width: 760px;
+  display: grid;
+  gap: 22px;
+}
+
+/* Fable's reasons sit beside the item (as the review comment does in
+   Airtable's sidebar), so nothing has to be scrolled to. */
+.detailTwoCol {
+  max-width: 1240px;
+  grid-template-columns: minmax(0, 760px) minmax(300px, 420px);
+  column-gap: 40px;
+  align-items: start;
+}
+
+.detailMain {
+  min-width: 0;
+  display: grid;
+  gap: 22px;
+  /* lets .cardRow below ask how wide this column really is */
+  container-type: inline-size;
+}
+
+.detailAside {
+  --aside-bg: var(--q-panel);
+  position: sticky;
+  top: 0;
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid var(--q-border);
+  border-top: 5px solid var(--q-border-strong);
+  border-radius: 8px;
+  background: var(--aside-bg);
+  /* The chat below the verdict can run long: the panel scrolls on its
+     own, the box to type in stays at its foot. */
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+}
+
+/* The verdict colours the whole panel: teal go, amber unsure, red no. */
+.detailAside.yes {
+  --aside-bg: var(--q-accent-soft);
+  border-top-color: var(--q-accent);
+}
+
+.detailAside.maybe {
+  --aside-bg: var(--q-warn-soft);
+  border-top-color: var(--q-warn);
+}
+
+.detailAside.no {
+  --aside-bg: var(--q-danger-soft);
+  border-top-color: var(--q-danger);
+}
+
+/* Where Comb found the listing, at the head of the panel above the verdict
+   (Bryce, 17 Sept 2026). */
+.asideFound {
+  display: grid;
+  gap: 2px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--q-border);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--q-text);
+}
+
+.verdictHead {
+  display: grid;
+  gap: 2px;
+}
+
+.verdictKicker {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: inherit;
+  opacity: 0.85;
+}
+
+.verdictBig {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  line-height: 1.2;
+  color: inherit;
+}
+
+.detailAside .reasons {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--q-text);
+}
+
+.detailTwoCol .actions {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 1180px) {
+  .detailTwoCol {
+    grid-template-columns: minmax(0, 760px);
+  }
+  .detailAside {
+    position: static;
+  }
+}
+
+.emptyDetail {
+  padding: 80px 40px;
+  color: var(--q-muted);
+  font-size: 15px;
+}
+
+.detailHead {
+  display: grid;
+  gap: 10px;
+}
+
+.pills {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid currentColor;
+}
+
+/* The page, in the top row: the same small caps as the section headings. */
+.pageTag {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--q-muted);
+}
+
+.when {
+  font-size: 12px;
+  color: var(--q-muted);
+}
+
+/* Where Comb found the listing: the Source line of its Airtable comment. */
+.found {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--q-muted);
+}
+
+.foundLabel {
+  font-weight: 600;
+}
+
+.title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: -0.3px;
+  color: var(--q-text);
+}
+
+.rowLogo {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  object-fit: contain;
+  /* logos are drawn for the site's dark cards */
+  background: #1c3334;
+  padding: 2px;
+  /* most logos arrive a moment after the list: ease them in */
+  animation: logoIn 0.25s ease-out;
+}
+
+@keyframes logoIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.rowLogoEmpty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px dashed var(--q-border-strong);
+}
+
+.finding {
+  display: grid;
+  gap: 8px;
+  /* a grid item cannot shrink below its longest word unless told so; a
+     bare URL in the details used to push the whole block under the
+     verdict panel */
+  min-width: 0;
+}
+
+.findingMore {
+  min-width: 0;
+}
+
+.findingLead {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--q-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.findingMore summary {
+  width: fit-content;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--q-muted);
+  user-select: none;
+}
+
+.findingMore summary:hover {
+  color: var(--q-text);
+}
+
+.findingMore[open] summary {
+  margin-bottom: 6px;
+}
+
+.findingDetail {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--q-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The links sit at the right end of the pills row. */
+.links {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-left: auto;
+  font-size: 13px;
+}
+
+.quote {
+  margin: 0;
+  padding: 10px 14px;
+  border-left: 3px solid var(--q-border-strong);
+  background: var(--q-panel);
+  color: var(--q-text-2);
+  white-space: pre-wrap;
+  border-radius: 0 6px 6px 0;
+}
+
+/* A Discord message laid out as one: picture, name, handle, when, then
+   the words (Bryce, 14 Sept 2026: no "on Discord" – the badge says so). */
+.said {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.avatar {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--q-panel);
+}
+
+.avatarEmpty {
+  border: 1px dashed var(--q-border-strong);
+}
+
+.message {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.messageHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  line-height: 1.3;
+}
+
+.messageName {
+  font-weight: 600;
+  color: var(--q-text);
+}
+
+.messageHandle,
+.messageWhen {
+  font-size: 12px;
+  color: var(--q-muted);
+}
+
+.messageBody {
+  color: var(--q-text-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.messageBody a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--q-border-strong);
+  text-underline-offset: 2px;
+}
+
+.messageBody a:hover {
+  text-decoration-color: currentColor;
+}
+
+/* A request and its reply side by side, so the two read as one exchange
+   (Bryce, 14 Sept 2026); one column when the detail column is narrow. */
+.exchange {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+
+@container (max-width: 719px) {
+  .exchange {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.fields {
+  display: grid;
+  gap: 10px;
+}
+
+.fieldRow,
+.diffRow {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 14px;
+  align-items: baseline;
+}
+
+.diffRow {
+  grid-template-columns: 150px minmax(0, 1fr) 16px minmax(0, 1fr);
+  padding: 10px 14px;
+  background: var(--q-panel);
+  border: 1px solid var(--q-border);
+  border-radius: 8px;
+}
+
+.label {
+  font-size: 12px;
+  color: var(--q-muted);
+}
+
+.value {
+  color: var(--q-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 14.5px;
+}
+
+.value a {
+  overflow-wrap: anywhere;
+}
+
+.arrow {
+  display: inline-flex;
+  align-self: center;
+  color: var(--q-muted);
+}
+
+.from {
+  color: var(--q-muted);
+  text-decoration: line-through;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.to {
+  color: var(--q-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-weight: 500;
+}
+
+/* A change to a logo or image field: the picture itself, the site's dark
+   card colour behind it, a download button in its corner on hover, and the
+   file name and size in small type under it. */
+.picture {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.pictureFrame {
+  position: relative;
+  display: inline-block;
+  margin-bottom: 2px;
+}
+
+.pictureImg {
+  display: block;
+  width: 96px;
+  height: 96px;
+  border-radius: 8px;
+  object-fit: contain;
+  background: #1c3334;
+  padding: 6px;
+  box-sizing: border-box;
+}
+
+.pictureEmpty {
+  background: none;
+  border: 1px dashed var(--q-border-strong);
+}
+
+.pictureDownload {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #1c3334;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.pictureFrame:hover .pictureDownload,
+.pictureDownload:focus-visible {
+  opacity: 1;
+}
+
+.pictureName {
+  font-size: 12px;
+  color: var(--q-muted);
+  overflow-wrap: anywhere;
+}
+
+.pictureMeta {
+  font-size: 11px;
+  color: var(--q-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A picture in the field list: the thumbnail with its file name, pixel
+   size, bytes and type beside it. The row sits at the top, not on the
+   picture's bottom edge. */
+.thumbItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.thumbDetails {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* With details beside the picture, a long file name wraps rather than
+   pushing the Replace button onto its own line. */
+.imageSlot:has(.thumbDetails) {
+  flex-wrap: nowrap;
+}
+
+.imageSlot:has(.thumbDetails) .dropZone {
+  flex: 0 0 auto;
+}
+
+/* Undo / Redo of a Replace, beside the drop zone. */
+.imageUndo {
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+
+.imageUndo:disabled {
+  color: var(--q-muted);
+  cursor: default;
+  text-decoration: none;
+}
+
+.fieldRow:has(.imageSlot) {
+  align-items: start;
+}
+
+/* One flex item holds the whole value as running text: the box's baseline
+   is then the value's first line, so a row's label stays level with it,
+   while inside, the icon, text, "edited" mark and pencil wrap like a
+   paragraph. */
+.editable {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 2px 8px;
+  margin: -2px -8px;
+  border-radius: 6px;
+  cursor: text;
+}
+
+.editText {
+  min-width: 0;
+}
+
+.editable:hover,
+.editable:focus-visible {
+  background: var(--q-sel);
+  outline: none;
+}
+
+.editHint {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 6px;
+  color: var(--q-muted);
+  opacity: 0.55;
+}
+
+.editable:hover .editHint {
+  opacity: 1;
+}
+
+.edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--q-muted);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+
+.fieldRow:hover .edit,
+.diffRow:hover .edit,
+.edit:focus {
+  opacity: 1;
+}
+
+.edited {
+  margin-left: 8px;
+  font-size: 12px;
+  font-style: normal;
+  color: var(--q-accent);
+  white-space: nowrap;
+}
+
+.code,
+.draft {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--q-panel);
+  border: 1px solid var(--q-border);
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  color: var(--q-text-2);
+}
+
+.draft {
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.draftEditable {
+  position: relative;
+  padding-right: 44px;
+  cursor: text;
+}
+
+.draftCopy {
+  cursor: pointer;
+}
+
+.draftEditable:hover,
+.draftEditable:focus-visible {
+  border-color: var(--q-border-strong);
+  background: var(--q-panel-2);
+  outline: none;
+}
+
+.draftHint {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--q-muted);
+  opacity: 0.55;
+}
+
+.draftEditable:hover .draftHint {
+  opacity: 1;
+}
+
+.replyInput {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Mac agent status in the top bar: a dot and the word. */
+.agentDot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: center;
+  padding: 0 4px;
+  font-size: 12.5px;
+  color: var(--q-muted);
+  cursor: default;
+}
+
+.agentDot::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--q-border-strong);
+}
+
+.agentOn::before {
+  background: var(--q-accent);
+}
+
+.agentOff::before {
+  background: var(--q-danger);
+}
+
+.block {
+  display: grid;
+  gap: 8px;
+}
+
+.h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--q-muted);
+}
+
+.summary {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--q-text);
+}
+
+.siteFrame {
+  /* The site's own ground and column width (.collection-list is 369px), so
+     the card reads exactly as a visitor sees it. */
+  width: 409px;
+  max-width: 100%;
+  padding: 20px;
+  border-radius: 12px;
+  background: var(--teal-900);
+  color: var(--white);
+}
+
+/* The site's card is an <a>: the queue's link colour and hover underline
+   must not reach the text inside it. */
+.queue .siteFrame a,
+.queue .siteFrame a:hover {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Change items: the card sits beside what Broom found. */
+
+.cardRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+
+.cardRowText {
+  min-width: 0;
+  display: grid;
+  gap: 22px;
+}
+
+/* Beside the card the text needs room to read; when the column cannot
+   give it (the verdict panel takes the rest), the finding goes under the
+   card instead of being squeezed to a few words a line. */
+@container (max-width: 719px) {
+  .cardRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.siteFrame > * {
+  /* the site's list grid blockifies the card; on its own the <a> would be
+     inline and its padding would paint as a strip */
+  display: block;
+  width: 369px;
+  max-width: 100%;
+}
+
+.thumbs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.thumb {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: var(--q-panel);
+  border: 1px solid var(--q-border);
+}
+
+.imageSlot {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 4px;
+  margin: -4px;
+  border-radius: 10px;
+}
+
+.imageSlotOver {
+  background: var(--q-accent-soft);
+  outline: 2px dashed var(--q-accent);
+}
+
+.thumbWrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.thumbOverlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.dropZone {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 96px;
+  height: 56px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px dashed var(--q-border-strong);
+  color: var(--q-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    border-color 120ms,
+    background 120ms;
+}
+
+.dropZone:hover,
+.dropZoneOver {
+  border-color: var(--q-accent);
+  background: var(--q-accent-soft);
+  color: var(--q-text);
+}
+
+.dropZoneSmall {
+  height: 32px;
+  min-width: 0;
+}
+
+.noticeInline {
+  font-size: 12px;
+  color: var(--q-danger);
+}
+
+.noImage {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  border: 1px dashed var(--q-border-strong);
+  color: var(--q-muted);
+  font-size: 11px;
+}
+
+.empty {
+  color: var(--q-muted);
+}
+
+/* The filled fields after the name, link, description and pictures: a
+   compact grid, label over value. A long value or an open editor takes the
+   full row. */
+.fieldGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px 22px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--q-border);
+}
+
+.fieldCell {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  align-content: start;
+}
+
+.fieldCell .value {
+  font-size: 14px;
+}
+
+.fieldWide {
+  grid-column: 1 / -1;
+}
+
+/* The site's own icon for the field, drawn the way its card draws it. */
+.fieldIcon {
+  vertical-align: -3px;
+  margin-right: 6px;
+  color: var(--q-muted);
+}
+
+.label .fieldIcon {
+  vertical-align: -2px;
+  margin-right: 5px;
+}
+
+/* A training or event Type as the site's pill: the type's colour (the
+   site's own variable, set per pill as --pill) as text, a 30% border and a
+   12% wash. The site's colours are made for its dark cards, so on the light
+   panel the text is darkened to read while the wash keeps the hue. */
+.typePills {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  vertical-align: middle;
+}
+
+.typePill {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  color: color-mix(in srgb, var(--pill) 45%, #1f2328);
+  border: 1px solid color-mix(in srgb, var(--pill) 60%, transparent);
+  background: color-mix(in srgb, var(--pill) 18%, transparent);
+}
+
+.dark .typePill {
+  color: var(--pill);
+  border-color: color-mix(in srgb, var(--pill) 30%, transparent);
+  background: color-mix(in srgb, var(--pill) 12%, transparent);
+}
+
+/* The empty fields, one line of names: click one to fill it in. */
+.unset {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--q-border);
+}
+
+.unsetChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px 3px 7px;
+  border: 1px dashed var(--q-border-strong);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--q-muted);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.3;
+  cursor: pointer;
+}
+
+.unsetChip:hover:not(:disabled) {
+  border-color: var(--q-muted);
+  color: var(--q-text-2);
+}
+
+.unsetChip:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* A field the page cannot do without, still empty: its name is orange and
+   bold where it sits – the row's label, or its chip in the "Not set" line
+   (Bryce, 17 Sept 2026: two events went out with no Cost). */
+.unsetMissing {
+  border-style: solid;
+  border-color: var(--q-warn);
+  color: var(--q-warn);
+  font-weight: 600;
+}
+
+.unsetMissing:hover:not(:disabled) {
+  border-color: var(--q-warn);
+  color: var(--q-warn);
+  background: var(--q-warn-soft);
+}
+
+.labelMissing {
+  color: var(--q-warn);
+  font-weight: 600;
+}
+
+.reasons {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--q-text-2);
+  display: grid;
+  gap: 6px;
+}
+
+.note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--q-muted);
+}
+
+.error {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--q-danger);
+  background: var(--q-danger-soft);
+  border-radius: 6px;
+}
+
+/* ─── Actions ────────────────────────────────────────────────────────── */
+
+.actions {
+  position: sticky;
+  bottom: 0;
+  margin: 0 -40px 0;
+  padding: 14px 40px 22px;
+  background: var(--q-bg);
+  border-top: 1px solid var(--q-border);
+}
+
+.buttons {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.button,
+.ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid var(--q-border-strong);
+  background: var(--q-panel);
+  color: var(--q-text);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: var(--q-shadow);
+}
+
+.button:hover:not(:disabled),
+.ghost:hover:not(:disabled) {
+  border-color: var(--q-muted);
+}
+
+.button:disabled,
+.ghost:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ghost {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--q-text-2);
+}
+
+.primary {
+  background: var(--q-accent);
+  border-color: var(--q-accent);
+  color: var(--q-accent-text);
+}
+
+.primary kbd {
+  color: inherit;
+  border-color: rgba(255, 255, 255, 0.5);
+  opacity: 0.8;
+}
+
+.primary:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.danger {
+  color: var(--q-danger);
+}
+
+.panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  background: var(--q-panel);
+  border: 1px solid var(--q-border);
+  border-radius: 10px;
+  box-shadow: var(--q-shadow);
+}
+
+.chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* Fable's reasons run to a sentence or two, so a chip wraps rather than
+   overflowing the panel; the number stays on the first line. */
+.chip {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 6px 12px 6px 8px;
+  border: 1px solid var(--q-border-strong);
+  border-radius: 16px;
+  background: var(--q-panel);
+  color: var(--q-text-2);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+  cursor: pointer;
+}
+
+.chip kbd {
+  flex: none;
+  margin: 1px 0 0;
+}
+
+.chip:hover {
+  border-color: var(--q-muted);
+}
+
+.chipOn {
+  border-color: var(--q-accent);
+  background: var(--q-accent-soft);
+  color: var(--q-text);
+}
+
+.input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--q-border-strong);
+  border-radius: 8px;
+  background: var(--q-panel);
+  color: var(--q-text);
+  font: inherit;
+  font-size: 14px;
+  resize: vertical;
+}
+
+.input:focus {
+  outline: 2px solid var(--q-accent);
+  outline-offset: 1px;
+  border-color: transparent;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.check input {
+  accent-color: var(--q-accent);
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+select.input {
+  width: auto;
+  min-width: 220px;
+  height: 36px;
+  padding: 0 10px;
+  resize: none;
+}
+
+.other {
+  width: auto;
+  min-width: 240px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+}
+
+.linkButton {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--q-accent);
+  cursor: pointer;
+}
+
+.linkButton:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.linkButtonOn {
+  font-weight: 600;
+}
+
+/* ─── Done list ──────────────────────────────────────────────────────── */
+
+.doneList {
+  display: grid;
+  gap: 6px;
+}
+
+/* The same shape as a list row (logo, name, meta), plus Undo. */
+.doneRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px 9px 14px;
+  background: var(--q-panel);
+  border: 1px solid var(--q-border);
+  border-radius: 8px;
+}
+
+.doneRow .rowBody {
+  flex: 1;
+}
+
+.doneActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ─── Toast + help ───────────────────────────────────────────────────── */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(720px, calc(100vw - 48px));
+  padding: 10px 12px 10px 12px;
+  background: var(--q-panel);
+  color: var(--q-text);
+  border: 1px solid var(--q-border-strong);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  font-size: 13.5px;
+  z-index: 20;
+  /* slides up from below the window edge, and back down at the end */
+  animation: toastIn 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.toastLeaving {
+  animation: toastOut 0.22s ease-in both;
+}
+
+@keyframes toastIn {
+  from {
+    transform: translate(-50%, calc(100% + 24px));
+    opacity: 0;
+  }
+  to {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
+}
+
+@keyframes toastOut {
+  from {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
+  to {
+    transform: translate(-50%, calc(100% + 24px));
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast,
+  .toastLeaving {
+    animation: none;
+  }
+}
+
+/* The verdict mark: a filled circle in the accent (or the danger colour
+   for a rejection), so the outcome reads before the words do. */
+.toastMark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--q-accent);
+  color: var(--q-bg);
+}
+
+.toastMarkNo {
+  background: var(--q-danger);
+}
+
+/* On its way to Airtable: a spinning ring in the verdict's colour. */
+.toastMarkWorking,
+.toastMarkWorking.toastMarkNo {
+  background: transparent;
+  border: 3px solid var(--q-accent);
+  border-top-color: transparent;
+  animation: spin 0.8s linear infinite;
+}
+
+.toastMarkWorking.toastMarkNo {
+  border-color: var(--q-danger);
+  border-top-color: transparent;
+}
+
+/* Did not land: a warning mark, whichever way the decision went. */
+.toastMarkFailed,
+.toastMarkFailed.toastMarkNo {
+  background: var(--q-warn);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.toastClose {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--q-muted);
+  cursor: pointer;
+}
+
+.toastClose:hover {
+  color: var(--q-text);
+  border-color: var(--q-border-strong);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toastMarkWorking,
+  .spinner {
+    animation: none;
+  }
+}
+
+.toastBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  margin-right: 8px;
+}
+
+.toastUndo {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--q-border-strong);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.toastUndo kbd {
+  color: inherit;
+  border-color: var(--q-border-strong);
+}
+
+.help {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 30;
+}
+
+.helpCard {
+  width: 420px;
+  padding: 20px 22px;
+  background: var(--q-panel);
+  color: var(--q-text);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.3);
+}
+
+.helpTitle {
+  font-weight: 650;
+  margin-bottom: 12px;
+}
+
+.helpList {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 16px;
+  font-size: 13.5px;
+}
+
+.helpList dt kbd {
+  margin: 0 2px 0 0;
+}
+
+.helpList dd {
+  margin: 0;
+  color: var(--q-text-2);
+}
+
+@media (max-width: 900px) {
+  .split {
+    grid-template-columns: 1fr;
+  }
+
+  .list {
+    max-height: 40vh;
+    border-right: none;
+    border-bottom: 1px solid var(--q-border);
+  }
+
+  .detail {
+    padding: 20px 20px 0;
+  }
+
+  .actions {
+    margin: 0 -20px 0;
+    padding: 12px 20px 20px;
+  }
+
+  .fieldRow,
+  .diffRow {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .arrow {
+    transform: rotate(90deg);
+  }
+}
+
+/* ── Chat with Fable (phase 5, 14 Sept 2026) ─────────────────────────────
+   Under the verdict: the thread, then the box to type in, which sticks to
+   the foot of the panel while the thread scrolls. */
+.chat {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.chatThread {
+  display: grid;
+  gap: 14px;
+  padding-top: 4px;
+  border-top: 1px solid var(--q-border);
+}
+
+.chatMsg {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chatWho {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--q-muted);
+}
+
+.chatYou {
+  padding: 8px 10px;
+  border: 1px solid var(--q-border);
+  border-radius: 10px;
+  background: var(--q-panel);
+  color: var(--q-text);
+  font-size: 13.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chatFable {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--q-text);
+  overflow-wrap: anywhere;
+}
+
+.chatFable p {
+  margin: 0 0 8px;
+}
+
+.chatFable ul {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+
+.chatFable li {
+  margin: 2px 0;
+}
+
+.chatFable code {
+  font-size: 12.5px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--q-panel);
+  border: 1px solid var(--q-border);
+}
+
+.chatHead {
+  font-weight: 600;
+}
+
+.chatPre {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--q-panel);
+  border: 1px solid var(--q-border);
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chatTool {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--q-muted);
+}
+
+.chatTool::before {
+  content: '·';
+  margin-right: 6px;
+}
+
+.chatError {
+  margin: 0;
+  font-size: 13px;
+  color: var(--q-danger);
+}
+
+.chatEdits {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--q-border-strong);
+  border-radius: 8px;
+  background: var(--q-panel);
+}
+
+.chatEditRow {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+/* The Description's length against the page's cap, on the edits card. */
+.chatCount,
+.chatCountOver {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--q-muted);
+}
+
+.chatCountOver {
+  color: var(--q-danger);
+  font-weight: 600;
+}
+
+.chatInputRow {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  gap: 6px;
+  margin: 0 -18px -16px;
+  padding: 10px 18px 14px;
+  background: var(--aside-bg);
+  border-top: 1px solid var(--q-border);
+}
+
+.chatInput {
+  width: 100%;
+  min-height: 36px;
+  max-height: 180px;
+  padding: 8px 10px;
+  border: 1px solid var(--q-border-strong);
+  border-radius: 8px;
+  background: var(--q-panel);
+  color: var(--q-text);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.4;
+  resize: none;
+}
+
+.chatInput:focus {
+  outline: 2px solid var(--q-accent);
+  outline-offset: 1px;
+  border-color: transparent;
+}
+
+.chatInput:disabled {
+  opacity: 0.6;
+}
+
+.chatHint {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 16px;
+  font-size: 11.5px;
+  color: var(--q-muted);
+}
+
+.chatLink {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--q-muted);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.chatLink:hover {
+  color: var(--q-text);
+}
+
+/* A message typed while Fable was still answering: it waits its turn. */
+.chatQueued {
+  opacity: 0.7;
+}
+
+.chatQueued .chatLink {
+  justify-self: start;
+}
+
+.chatCaret {
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--q-accent);
+  animation: chatBlink 1s steps(2, start) infinite;
+}
+
+@keyframes chatBlink {
+  to {
+    visibility: hidden;
+  }
+}
+
+/* One line that changes while Fable answers: what it is doing now. */
+.chatStatus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: var(--q-muted);
+}
+
+.chatStatus::before {
+  content: '';
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--q-accent);
+  animation: chatPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes chatPulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Reply to a passage: the button by a selection, the quote on the message. */
+.chatReplyBtn {
+  position: fixed;
+  z-index: 20;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--q-border-strong);
+  border-radius: 14px;
+  background: var(--q-panel);
+  color: var(--q-text);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.chatReplyBtn:hover {
+  border-color: var(--q-accent);
+  color: var(--q-accent);
+}
+
+.chatQuoteChip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px 6px 10px;
+  border-left: 3px solid var(--q-accent);
+  border-radius: 6px;
+  background: var(--q-panel);
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--q-text-2);
+}
+
+.chatQuoteText {
+  flex: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chatQuoteX {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: -2px -2px 0 0;
+  border: 0;
+  border-radius: 11px;
+  background: none;
+  color: var(--q-muted);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chatQuoteX:hover {
+  background: var(--q-border);
+  color: var(--q-text);
+}
+
+.chatQuoteBlock {
+  margin: 0 0 6px;
+  padding: 2px 0 2px 10px;
+  border-left: 3px solid var(--q-accent);
+  color: var(--q-text-2);
+  font-size: 12.5px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.chatCardFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.chatCardFoot .chatTool {
+  margin: 0;
+}
+
+.chatCardFoot .chatTool::before {
+  content: '✓';
+}

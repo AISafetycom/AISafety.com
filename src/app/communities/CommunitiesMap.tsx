@@ -13,6 +13,7 @@ import {
   trackCardsButtonClick,
 } from '@/lib/analytics'
 import { withUtm } from '@/lib/utm'
+import { MAPBOX_GL_CSS_URL, MAPBOX_GL_JS_URL } from '@/lib/communities-map'
 
 interface CommunitiesMapProps {
   communities: Community[]
@@ -291,6 +292,7 @@ export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
         }
       })
 
+      // Escapes text for both attribute values and element content.
       function escapeAttr(value: string) {
         return value
           .replace(/&/g, '&amp;')
@@ -308,9 +310,9 @@ export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
           ? `<div class="tooltip-img"><img src="${escapeAttr(logo)}" alt="${escapeAttr(name)} logo" class="tooltip-image" fetchpriority="high" decoding="sync" onerror="this.style.display='none'" /></div>`
           : ''
         const locationLine = location
-          ? `<span class="location-text"><svg class="location-icon" width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M6 1C7 1 7.96 1.43 8.66 2.19C9.36 2.95 9.75 3.98 9.75 5.04C9.75 6.96 8.69 8.66 7.85 9.72C7.36 10.33 6.82 10.89 6.25 11.4C6.11 11.53 5.89 11.53 5.75 11.4C5.18 10.89 4.64 10.33 4.15 9.72C3.31 8.66 2.25 6.96 2.25 5.04C2.25 3.98 2.64 2.95 3.34 2.19C4.04 1.43 5 1 6 1Z" stroke="currentColor" stroke-linejoin="round"/><circle cx="6" cy="4.9" r="1.9" stroke="currentColor" stroke-linejoin="round"/></svg>${location}</span>`
+          ? `<span class="location-text"><svg class="location-icon" width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M6 1C7 1 7.96 1.43 8.66 2.19C9.36 2.95 9.75 3.98 9.75 5.04C9.75 6.96 8.69 8.66 7.85 9.72C7.36 10.33 6.82 10.89 6.25 11.4C6.11 11.53 5.89 11.53 5.75 11.4C5.18 10.89 4.64 10.33 4.15 9.72C3.31 8.66 2.25 6.96 2.25 5.04C2.25 3.98 2.64 2.95 3.34 2.19C4.04 1.43 5 1 6 1Z" stroke="currentColor" stroke-linejoin="round"/><circle cx="6" cy="4.9" r="1.9" stroke="currentColor" stroke-linejoin="round"/></svg>${escapeAttr(location)}</span>`
           : ''
-        return `<div class="tooltip-header">${headerImage}<div class="tooltip-title-block"><strong class="paragraph-small-bold">${name}</strong>${locationLine}</div></div>${description}`
+        return `<div class="tooltip-header">${headerImage}<div class="tooltip-title-block"><strong class="paragraph-small-bold">${escapeAttr(name)}</strong>${locationLine}</div></div>${escapeAttr(description)}`
       }
 
       function updateTooltipPosition(
@@ -395,6 +397,9 @@ export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
       // rather than a link click. Programmatically clicking a real <a>
       // bypasses that — it's what `target="_blank"` links already do.
       function openInNewTab(url: string) {
+        // Only web links: a listing's link comes from Airtable, and anything
+        // else (javascript:, data:) must never run from a pin click.
+        if (!/^https?:\/\//i.test(url)) return
         const a = document.createElement('a')
         a.href = url
         a.target = '_blank'
@@ -629,26 +634,19 @@ export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
       <link
         rel="preload"
         as="script"
-        href="https://api.mapbox.com/mapbox-gl-js/v3.8.0/mapbox-gl.js"
+        href={MAPBOX_GL_JS_URL}
         fetchPriority="high"
       />
-      <link
-        rel="preload"
-        as="style"
-        href="https://api.mapbox.com/mapbox-gl-js/v3.8.0/mapbox-gl.css"
-      />
+      <link rel="preload" as="style" href={MAPBOX_GL_CSS_URL} />
       <link
         rel="preload"
         as="image"
         href="/images/pin.svg"
         type="image/svg+xml"
       />
-      <link
-        href="https://api.mapbox.com/mapbox-gl-js/v3.8.0/mapbox-gl.css"
-        rel="stylesheet"
-      />
+      <link href={MAPBOX_GL_CSS_URL} rel="stylesheet" />
       <Script
-        src="https://api.mapbox.com/mapbox-gl-js/v3.8.0/mapbox-gl.js"
+        src={MAPBOX_GL_JS_URL}
         strategy="afterInteractive"
         onLoad={handleScriptLoad}
       />

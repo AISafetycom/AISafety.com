@@ -3,6 +3,22 @@
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useRef } from 'react'
 
+/** Fired on `window` whenever this component re-renders the page because its
+ *  records changed — `detail.pathname` says which page. Search listens, so
+ *  the entries for this page are re-read live in the same moment (and share
+ *  the page's own Airtable read). */
+export const PREVIEW_CHANGED_EVENT = 'preview:changed'
+/** Fired on `window` when the tab or window is returned to. Polling paused
+ *  meanwhile, and coming back from Airtable is when an edit to any page's
+ *  records may be waiting — search re-checks every listing type. */
+export const PREVIEW_RETURNED_EVENT = 'preview:returned'
+
+function notifyChanged(pathname: string) {
+  window.dispatchEvent(
+    new CustomEvent(PREVIEW_CHANGED_EVENT, { detail: { pathname } })
+  )
+}
+
 const POLL_MS = 2_000
 // The server keeps reporting an edit for several polls (it stays in its
 // look-back window); a re-render takes about a second, so rather than stack
@@ -71,12 +87,12 @@ export default function PreviewAutoRefresh({
           refreshedForBuildRef.current !== data.buildTime
         if (newBuild) refreshedForBuildRef.current = data.buildTime
         const now = Date.now()
-        if (
-          newBuild ||
-          (data.changed && now - lastPollRefresh >= MIN_REFRESH_GAP_MS)
-        ) {
+        const changed =
+          data.changed && now - lastPollRefresh >= MIN_REFRESH_GAP_MS
+        if (newBuild || changed) {
           lastPollRefresh = now
           router.refresh()
+          if (changed) notifyChanged(pathname)
         }
       } catch (err) {
         // Transient network failure — the next poll will try again.
@@ -96,6 +112,7 @@ export default function PreviewAutoRefresh({
       if (now - lastReturnRefresh < 1_000) return
       lastReturnRefresh = now
       router.refresh()
+      window.dispatchEvent(new Event(PREVIEW_RETURNED_EVENT))
     }
     window.addEventListener('focus', onReturn)
     document.addEventListener('visibilitychange', onReturn)

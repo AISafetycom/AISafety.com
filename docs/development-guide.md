@@ -32,20 +32,21 @@ The full list is in `docs/architecture.md`. Never commit `.env.local`.
 
 ## Commands
 
-| Command               | What it does                                              |
-| --------------------- | --------------------------------------------------------- |
-| `npm run dev`         | dev server                                                |
-| `npm test`            | unit tests (Vitest)                                       |
-| `npm run type-check`  | TypeScript, no output                                     |
-| `npm run lint`        | ESLint (`lint:fix` to auto-fix)                           |
-| `npm run format`      | Prettier (`format:check` to only check)                   |
-| `npm run check:icons` | every `<Icon>` is drawn at its file's native size         |
-| `npm run build`       | tests, icon check, preview-key pinning, then `next build` |
-| `npm run start`       | serve the production build                                |
+| Command               | What it does                                                             |
+| --------------------- | ------------------------------------------------------------------------ |
+| `npm run dev`         | dev server                                                               |
+| `npm test`            | unit tests (Vitest)                                                      |
+| `npm run type-check`  | TypeScript, no output                                                    |
+| `npm run lint`        | ESLint (`lint:fix` to auto-fix)                                          |
+| `npm run format`      | Prettier (`format:check` to only check)                                  |
+| `npm run check:icons` | every `<Icon>` is drawn at its file's native size                        |
+| `npm run build`       | tests, icon check, preview-key pinning, then `next build`                |
+| `npm run test:e2e`    | browser smoke tests against the production build (`npm run build` first) |
+| `npm run start`       | serve the production build                                               |
 
 ## Before you commit
 
-Run `npm run type-check`, `npm run lint` and `npm test`. Husky runs lint-staged (ESLint + Prettier) on the files you commit. **There is no CI**, so these local checks are the only gate before a change reaches `main`.
+Run `npm run type-check`, `npm run lint` and `npm test`. Husky runs lint-staged (ESLint + Prettier) on the files you commit. CI runs the same three plus a production build and the browser smoke tests on every pull request, so a red check on your PR means one of those failed; the job log says which.
 
 ## Where things live
 
@@ -80,7 +81,7 @@ See `CLAUDE.md` at the repo root for the map of `src/` and the project conventio
 
 3. Copy a sibling's `opengraph-image.tsx` and point it at your `SITE_PAGES` entry. That gives the page its link-preview card.
 4. Add the route to `src/app/sitemap.ts`, and to `Navigation.tsx` and `Footer.tsx` if it belongs in the nav.
-5. Give tracked links and filters a stable tracking name from the start (the `trackingPage` / `trackingTitle` props). Renaming them later splits the analytics history.
+5. Give tracked links and pages a stable tracking name from the start (the `trackingPage` prop). Renaming a filter's title or one of its options is fine: change the label in the page, then add one line to `src/lib/filter-tracking.ts` mapping the new wording to the value logged so far. The filter keeps logging its original name and the dashboard shows the new wording for old and new clicks alike.
 6. Never rename an existing slug. If a path must move, add a redirect in `next.config.ts`.
 
 ## Adding an Airtable table to the data layer
@@ -100,7 +101,9 @@ An icon file's native size is its only display size: a 16px icon renders at 16, 
 
 ## Tests
 
-Pure logic (ordering, parsing, formatting, validation) goes in a dependency-free module under `src/lib` with a `*.test.ts` next to it, following `training-order.ts` and `featured.ts`. Vitest runs in a node environment, so nothing that imports Next, d3 or the DOM. Visual changes are checked by hand in a browser, at desktop and mobile widths.
+Pure logic (ordering, parsing, formatting, validation) goes in a dependency-free module under `src/lib` with a `*.test.ts` next to it, following `training-order.ts` and `featured.ts`. Vitest runs in a node environment, so nothing that imports Next, d3 or the DOM.
+
+Browser smoke tests live in `e2e/` and run with Playwright against a production build: `npm run build && npm run test:e2e` (the first run needs `npx playwright install chromium`). They open every public page, fail on any runtime or console error, check that listings and the map render, and call every Data API endpoint. They find the pages themselves by scanning `src/app` for `page.tsx` files (everything outside `admin/`), so a new page is covered the moment it exists. They are deliberately broad and shallow; visual changes are still checked by hand in a browser, at desktop and mobile widths.
 
 ## Admin and preview mode locally
 

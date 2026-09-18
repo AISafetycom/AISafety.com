@@ -5,19 +5,15 @@ import { pendingRequestCount } from '@/lib/admin/users-store'
 import { adminTabs, adminHomeHref } from '../nav'
 import styles from '../admin.module.css'
 
-export const metadata = {
-  title: 'Map editor – AISafety.com',
-  robots: { index: false, follow: false },
-}
-
 export default async function MapEditorLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
   const access = await currentAccess()
-  // Moving logos writes to the live Airtable base.
-  // Anyone signed in without it goes to the first area they do have;
+  // Moving logos writes to the live Airtable base; view-only sessions may
+  // look, and the page and the API keep the writes behind the edit grant.
+  // Anyone signed in without the area goes to the first area they do have;
   // signed-out sessions to login.
   if (!access.mapEditor) {
     redirect(adminHomeHref(access))
