@@ -807,6 +807,23 @@
   color: var(--teal-300);
 }
 
+/* Our own test chats (the 'internal' label) are there to be skipped: the row
+   loses its fill and gets a dashed outline and a muted question. */
+.convRowInternal {
+  background-color: transparent;
+  border-style: dashed;
+  border-color: var(--teal-700);
+}
+
+.convRowInternal .convRowQuery {
+  color: var(--teal-500);
+}
+
+/* Open, the row is the header of a solid card — a dashed top would clash. */
+.convRowInternal.convRowExpanded {
+  border-style: solid;
+}
+
 /* While its detail is open, the row is the card's header (see .convDetail):
    stretched to the panel's width, bottom corners squared. */
 .convRowExpanded {
