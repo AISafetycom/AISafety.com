@@ -23,7 +23,7 @@ import {
   TRAINING_TYPES,
   trainingTypeColor,
 } from '@/lib/training-types'
-import { selectFeatured, withRandomStandIns } from '@/lib/featured'
+import { featuredProgramsFor } from '@/lib/featured'
 import { placementsById } from '@/lib/placements'
 import {
   compareByDeadline,
@@ -147,21 +147,12 @@ export default function TrainingClient({
   const modePrograms: ProgramBase[] =
     mode === 'upcoming' ? orderedPrograms : recurring
 
-  // Programs whose applications closed are never shown as featured
-  // (recurring programs have no applications and always count as open);
-  // when the queue can't fill both slots, the row is topped up with random
-  // stand-ins from the same set.
-  const featuredPrograms = useMemo(() => {
-    const isOpen = (p: ProgramBase) =>
-      'applicationStatus' in p
-        ? (p as TrainingProgram).applicationStatus === 'Open'
-        : true
-    return withRandomStandIns(
-      selectFeatured(modePrograms, isOpen),
-      modePrograms,
-      isOpen
-    )
-  }, [modePrograms])
+  // The tab's featured row (rules in featuredProgramsFor, shared with the
+  // nav's hover preview).
+  const featuredPrograms = useMemo(
+    () => featuredProgramsFor(modePrograms),
+    [modePrograms]
+  )
 
   // Each program's slot in the full (unfiltered) order of the active set, so a
   // click is tagged with the rank the visitor saw — not its position within an

@@ -343,6 +343,21 @@ export function trackNavOverflowOpen(method: NavOverflowOpenMethod): void {
 }
 
 /**
+ * Track a click that landed on a nav pill's hover preview (the panel with the
+ * page's description and featured cards) rather than on the pill itself.
+ * `target` is the page the preview belongs to and opens; `page` is stamped
+ * with the path it happened on.
+ */
+export function trackNavPreviewClick(target: string): void {
+  if (typeof window === 'undefined') return
+  sendTrackEvent({
+    type: 'nav_preview_click',
+    label: target,
+    page: window.location.pathname,
+  })
+}
+
+/**
  * Track a settled site-search query — fired once the visitor pauses typing,
  * or immediately if they click a result / close search before the pause.
  * `results` is how many results the query returned (0 = the site had nothing

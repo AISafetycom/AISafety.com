@@ -1,11 +1,15 @@
-"""Regenerate the nav-tooltip page thumbnails in public/images/page-previews.
+"""Regenerate the picture in the Field map's nav hover preview
+(public/images/page-previews/map.webp).
 
-Captures each resource page at 1200x750 with the nav bar and any floating
-elements hidden, at full resolution so the text stays legible when the
-tooltip shows it scaled down, saved as WebP. Run against a
-production server (`npm run build && npm run start`) so pages load fast:
+Every other page's preview shows its featured cards, so the map is the only
+capture. It is taken of the map itself (not the page around it) at 1200px
+wide, at full resolution so the labels stay legible when the preview shows it
+scaled down, and saved as WebP. Run against a running site:
 
     python3 scripts/capture-page-previews.py http://localhost:3000
+
+If the capture's size changes, update the width and height on the <Image> in
+src/components/Navigation.tsx to match.
 
 Needs `pip install playwright pillow` and `python3 -m playwright install chromium`.
 """
@@ -15,8 +19,8 @@ from playwright.sync_api import sync_playwright
 
 BASE = (sys.argv[1] if len(sys.argv) > 1 else 'http://localhost:3000').rstrip('/')
 OUT = os.path.join(os.path.dirname(__file__), '..', 'public', 'images', 'page-previews')
-SLUGS = ['training', 'events', 'map', 'communities', 'self-study', 'jobs', 'funding',
-         'media-channels', 'advisors', 'projects', 'founders', 'donation-guide']
+# Hide the nav bar and anything floating over the page (the chatbot bubble),
+# so only the map is left at the top.
 HIDE = """() => {
   const nav = document.querySelector('nav');
   if (nav) nav.parentElement.parentElement.style.setProperty('display', 'none', 'important');
@@ -29,16 +33,16 @@ HIDE = """() => {
 os.makedirs(OUT, exist_ok=True)
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
-    for slug in SLUGS:
-        page = browser.new_page(viewport={'width': 1200, 'height': 750}, device_scale_factor=1)
-        page.goto(f'{BASE}/{slug}', wait_until='networkidle', timeout=240000)
-        page.wait_for_timeout(1200)
-        page.evaluate(HIDE)
-        page.wait_for_timeout(300)
-        tmp = os.path.join(OUT, f'{slug}.jpg')
-        page.screenshot(path=tmp, type='jpeg', quality=88)
-        page.close()
-        Image.open(tmp).save(os.path.join(OUT, f'{slug}.webp'), 'WEBP', quality=85)
-        os.remove(tmp)
-        print('captured', slug)
+    page = browser.new_page(viewport={'width': 1200, 'height': 750}, device_scale_factor=1)
+    page.goto(f'{BASE}/map', wait_until='networkidle', timeout=240000)
+    page.wait_for_timeout(1200)
+    page.evaluate(HIDE)
+    page.wait_for_timeout(300)
+    tmp = os.path.join(OUT, 'map.png')
+    page.locator('[class*="map-container"]').first.screenshot(path=tmp)
     browser.close()
+
+image = Image.open(tmp).convert('RGB')
+image.save(os.path.join(OUT, 'map.webp'), 'WEBP', quality=85)
+os.remove(tmp)
+print('captured map', image.size)

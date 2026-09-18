@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { selectFeatured, withRandomStandIns } from './featured'
+import {
+  featuredEventsFor,
+  featuredProgramsFor,
+  selectFeatured,
+  withRandomStandIns,
+} from './featured'
 
 interface Item {
   id: string
@@ -62,5 +67,71 @@ describe('withRandomStandIns', () => {
     const first = withRandomStandIns([], pool, isOpen)
     const second = withRandomStandIns([], pool, isOpen)
     expect(first).toEqual(second)
+  })
+})
+
+describe('featuredEventsFor', () => {
+  const event = (
+    id: string,
+    featured: number | null,
+    mode: string,
+    applicationStatus = 'Open'
+  ) => ({ id, featured, mode, applicationStatus })
+
+  it('features in-person events only in the In person view', () => {
+    const events = [
+      event('hybrid', 1, 'Hybrid'),
+      event('online', 2, 'Online'),
+      event('a', 3, 'In person'),
+      event('b', 4, 'In person'),
+    ]
+    expect(featuredEventsFor(events, 'in-person').map(e => e.id)).toEqual([
+      'a',
+      'b',
+    ])
+  })
+
+  it('features online and hybrid events in the Online view', () => {
+    const events = [
+      event('hybrid', 1, 'Hybrid'),
+      event('a', 2, 'In person'),
+      event('online', 3, 'Online'),
+    ]
+    expect(featuredEventsFor(events, 'online').map(e => e.id)).toEqual([
+      'hybrid',
+      'online',
+    ])
+  })
+
+  it('skips closed events and tops the row up from the same view', () => {
+    const events = [
+      event('closed', 1, 'In person', 'Closed'),
+      event('a', 2, 'In person'),
+      event('standin', null, 'In person'),
+      event('online', null, 'Online'),
+    ]
+    expect(featuredEventsFor(events, 'in-person').map(e => e.id)).toEqual([
+      'a',
+      'standin',
+    ])
+  })
+})
+
+describe('featuredProgramsFor', () => {
+  it('never features a program whose applications closed', () => {
+    const programs = [
+      { id: 'closed', featured: 1, applicationStatus: 'Closed' },
+      { id: 'a', featured: 2, applicationStatus: 'Open' },
+      { id: 'b', featured: 3, applicationStatus: 'Open' },
+    ]
+    expect(featuredProgramsFor(programs).map(p => p.id)).toEqual(['a', 'b'])
+  })
+
+  it('counts recurring programs, which have no applications, as open', () => {
+    const recurring = [
+      { id: 'a', featured: 2 },
+      { id: 'b', featured: 1 },
+    ]
+    expect(featuredProgramsFor(recurring).map(p => p.id)).toEqual(['b', 'a'])
   })
 })
