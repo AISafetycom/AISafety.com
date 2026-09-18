@@ -8,9 +8,6 @@ scaled down, and saved as WebP. Run against a running site:
 
     python3 scripts/capture-page-previews.py http://localhost:3000
 
-If the capture's size changes, update the width and height on the <Image> in
-src/components/Navigation.tsx to match.
-
 Needs `pip install playwright pillow` and `python3 -m playwright install chromium`.
 """
 import os, sys

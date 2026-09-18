@@ -22,6 +22,10 @@ import {
   type NavOverflowOpenMethod,
 } from '@/lib/analytics'
 import styles from './Navigation.module.css'
+// Imported rather than referenced by path, so its address changes whenever
+// the capture is regenerated (no stale copy from an image cache) and its
+// dimensions come with it.
+import mapPreview from '../../public/images/page-previews/map.webp'
 
 const navItems = [
   {
@@ -138,10 +142,8 @@ function NavPreview({
       <p className="paragraph-small">{descriptionByPath[href]}</p>
       {href === VISUAL_PREVIEW_PATH && withVisual && (
         <Image
-          src={`/images/page-previews${href}.webp`}
+          src={mapPreview}
           alt=""
-          width={1200}
-          height={662}
           sizes="400px"
           loading="eager"
           className={`${styles['nav-preview-visual']} margin-top-12px`}
