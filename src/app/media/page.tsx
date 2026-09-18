@@ -36,6 +36,11 @@ const DIRECTORIES = [
   { path: '/advisors', label: 'Advisors' },
 ] as const
 
+/** Words in a block of copy, shown beside each boilerplate version. */
+function wordCount(text: string): number {
+  return text.trim().split(/\s+/).length
+}
+
 /** "17 May 2024" — the site's date order. */
 function formatDate(iso: string): string {
   return new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-GB', {
@@ -54,7 +59,7 @@ const ORGANIZATION_SCHEMA = {
   name: 'AISafety.com',
   url: 'https://aisafety.com',
   logo: 'https://aisafety.com/press/aisafety-com-logo-square-dark.png',
-  description: BOILERPLATE[1].text,
+  description: BOILERPLATE[0].text,
   foundingDate: '2017',
   nonprofitStatus: 'Nonprofit',
   email: PRESS_EMAIL,
@@ -102,8 +107,8 @@ export default async function MediaPage() {
             Writing about AISafety.com?
           </p>
           <p className="paragraph-small color-teal-300">
-            Boilerplate, key numbers, who to talk to and logos are below. For
-            anything else, email{' '}
+            Boilerplate, team bios, key numbers and logos are below. Press
+            contact:{' '}
             <PressLink
               href={mailto}
               action="contact"
@@ -137,19 +142,16 @@ export default async function MediaPage() {
       <section id="boilerplate" className={styles.section}>
         <h2>Boilerplate</h2>
         <p className={`paragraph-small ${styles.lead}`}>
-          Three lengths, each meant to be copied and pasted without editing.
+          Meant to be copied and pasted without editing.
         </p>
         <div className={styles.copyBlocks}>
           {BOILERPLATE.map(block => (
             <div key={block.id} className={styles.copyBlock}>
               <div className={`${styles.copyHead} paragraph-small-bold`}>
                 <div>
-                  {block.label} <span>· {block.words} words</span>
+                  {block.label} <span>· {wordCount(block.text)} words</span>
                 </div>
-                <CopyButton
-                  text={block.text}
-                  label={`${block.label.toLowerCase()} boilerplate`}
-                />
+                <CopyButton text={block.text} label={block.trackingName} />
               </div>
               <p className={`paragraph-small ${styles.copyText}`}>
                 {block.text}
@@ -169,8 +171,8 @@ export default async function MediaPage() {
         <dl className={`paragraph-small ${styles.facts}`}>
           <dt>Founded</dt>
           <dd>
-            Domain bought in 2017 by Søren Elverlin; relaunched as the current
-            resource hub in May 2024
+            Domain acquired in 2017 by Søren Elverlin; site in its current form
+            built out since 2023
           </dd>
           <dt>Legal status</dt>
           <dd>Nonprofit</dd>
@@ -254,6 +256,7 @@ export default async function MediaPage() {
                 <strong className="color-white">Can speak to: </strong>
                 {person.speaksTo}
               </p>
+              <p className="paragraph-small">{person.bio}</p>
             </div>
           ))}
         </div>
@@ -266,65 +269,107 @@ export default async function MediaPage() {
           Most of what we maintain is useful to you whether or not you ever
           mention us. Here is the short version of where to look.
         </p>
-        <div className={`paragraph-small ${styles.prose}`}>
-          <p>
-            <strong>You need someone to talk to.</strong> Our{' '}
-            <Link href="/map" className={styles.inlineLink}>
-              field map
-            </Link>{' '}
-            lists organizations by what they actually work on, so you can find
-            the lab, policy shop or research group whose work bears on your
-            story rather than emailing the three names that always get quoted.
-            If you are looking for a researcher working on a specific question,
-            email us and we will point you to people.
-          </p>
-          <p>
-            <strong>You need to understand a claim before you quote it.</strong>{' '}
-            <a
-              href="https://aisafety.info"
-              target="_blank"
-              rel="noopener noreferrer"
-              className={styles.inlineLink}
-            >
-              AISafety.info
-            </a>{' '}
-            answers the standard questions (what “alignment” means, why anyone
-            thinks this is urgent, what the main disagreements are) without
-            assuming a technical background. Our{' '}
-            <Link href="/self-study" className={styles.inlineLink}>
-              self-study list
-            </Link>{' '}
-            points to the primary material.
-          </p>
-          <p>
-            <strong>You need to know who is arguing with whom.</strong> This
-            field disagrees with itself, loudly, about timelines, about whether
-            existential risk is the right frame, and about what regulation
-            should do. Our directories are deliberately broad, and a listing is
-            not an endorsement.
-          </p>
-          <p>
-            <strong>You are writing about money, jobs or influence.</strong> Our{' '}
-            <Link href="/funding" className={styles.inlineLink}>
-              funding
-            </Link>{' '}
-            and{' '}
-            <Link href="/jobs" className={styles.inlineLink}>
-              jobs
-            </Link>{' '}
-            directories are the closest thing to a public record of where
-            resources in this field are going and who is hiring for what.
-          </p>
-          <p>
-            <strong>Anything here is yours to use.</strong> Cite us or don’t.
-            Every directory is also open data: our{' '}
-            <Link href="/developers" className={styles.inlineLink}>
-              Data API
-            </Link>{' '}
-            serves the same listings as JSON, free, under a CC BY license. If
-            you need a cut of the data the site doesn’t give you, such as a list
-            filtered a particular way or a historical snapshot, ask.
-          </p>
+        <div className={`paragraph-small ${styles.topics}`}>
+          <div className={styles.topic}>
+            <p className="paragraph-default-bold color-white">
+              You need someone to talk to.
+            </p>
+            <p>
+              Our{' '}
+              <Link href="/map" className={styles.inlineLink}>
+                field map
+              </Link>{' '}
+              lists organizations by what they actually work on, so you can find
+              the lab, policy shop or research group whose work bears on your
+              story rather than emailing the three names that always get quoted.
+            </p>
+            <p>
+              If you are looking for a researcher working on a specific
+              question, email us and we will point you to people.
+            </p>
+          </div>
+
+          <div className={styles.topic}>
+            <p className="paragraph-default-bold color-white">
+              You need to understand a claim before you quote it.
+            </p>
+            <p>
+              <a
+                href="https://aisafety.info"
+                target="_blank"
+                rel="noopener noreferrer"
+                className={styles.inlineLink}
+              >
+                AISafety.info
+              </a>{' '}
+              answers the standard questions (what “alignment” means, why anyone
+              thinks this is urgent, what the main disagreements are) without
+              assuming a technical background.
+            </p>
+            <p>
+              Our{' '}
+              <Link href="/self-study" className={styles.inlineLink}>
+                self-study list
+              </Link>{' '}
+              points to the primary material.
+            </p>
+          </div>
+
+          <div className={styles.topic}>
+            <p className="paragraph-default-bold color-white">
+              You need to know who is arguing with whom.
+            </p>
+            <p>
+              This field disagrees with itself, loudly, about timelines, about
+              whether existential risk is the right frame, and about what
+              regulation should do. Our directories are deliberately broad, and
+              a listing is not an endorsement.
+            </p>
+          </div>
+
+          <div className={styles.topic}>
+            <p className="paragraph-default-bold color-white">
+              You are writing about money, jobs or influence.
+            </p>
+            <p>
+              Our{' '}
+              <Link href="/funding" className={styles.inlineLink}>
+                funding
+              </Link>{' '}
+              and{' '}
+              <Link href="/jobs" className={styles.inlineLink}>
+                jobs
+              </Link>{' '}
+              directories are the closest thing to a public record of where
+              resources in this field are going and who is hiring for what.
+            </p>
+            <p>
+              Our{' '}
+              <Link href="/donation-guide" className={styles.inlineLink}>
+                donation guide
+              </Link>{' '}
+              walks donors through where a gift of $100 or $100,000 does the
+              most good in AI safety.
+            </p>
+          </div>
+
+          <div className={styles.topic}>
+            <p className="paragraph-default-bold color-white">
+              Anything here is yours to use.
+            </p>
+            <p>
+              Cite us or don’t. If you need a cut of our data that the site
+              doesn’t give you – a list filtered a particular way, a historical
+              snapshot – ask and we will do our best to share it.
+            </p>
+            <p>
+              Every directory is also open data: the{' '}
+              <Link href="/developers" className={styles.inlineLink}>
+                Data API
+              </Link>{' '}
+              serves the same listings as JSON, free, under a CC BY license.
+            </p>
+          </div>
         </div>
 
         <h3 className={styles.subhead}>

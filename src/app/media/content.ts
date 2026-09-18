@@ -5,58 +5,56 @@
 /** The press inbox. Shown as a real mailto: link so reporters can copy it. */
 export const PRESS_EMAIL = 'media@aisafety.com'
 
-/** Boilerplate in three lengths, each meant to be pasted without editing. */
+/** Boilerplate, meant to be pasted without editing. The page works out each
+ *  word count itself, so it can't go stale when the text changes. */
 export const BOILERPLATE = [
   {
     id: 'one-line',
-    label: 'One line',
-    words: 25,
-    text: 'AISafety.com is a nonprofit resource hub for AI existential safety, indexing the jobs, funding, training programs, communities and research that make up the field.',
+    label: 'One-line version',
+    trackingName: 'one-line boilerplate',
+    text: 'AISafety.com is the resource hub for AI existential safety, run by a small nonprofit that indexes the jobs, funding, training programs, communities, and organizations that make up the field.',
   },
   {
-    id: 'short',
-    label: 'Short',
-    words: 50,
-    text: 'AISafety.com is a nonprofit resource hub for AI existential safety. It maintains free, continuously updated directories of jobs, funding sources, training programs, events, communities and organizations working to reduce risks from advanced AI, so that people who want to contribute can find where they fit.',
-  },
-  {
-    id: 'long',
-    label: 'Long',
-    words: 100,
-    text: 'AISafety.com is a nonprofit resource hub for AI existential safety, run by a small salaried team and a network of volunteer community-builders. It maintains free, continuously updated directories covering the field: open jobs, funding sources, training programs and fellowships, events, online and local communities, self-study materials, and a map of the organizations doing the work. The goal is to multiply global AI safety effort by removing the search cost: a researcher, engineer, policy specialist or funder should be able to find their next step in one place rather than across a hundred scattered forms, Slack channels and application deadlines.',
+    id: 'full',
+    label: 'Full version',
+    trackingName: 'full boilerplate',
+    text: 'AISafety.com is the resource hub for AI existential safety, indexing the jobs, funding, training programs, communities, and organizations that make up the field. Free and continuously updated, it is run by a small, independent nonprofit that is grant-funded, largely volunteer-driven, and takes no position on any lab or policy. Its goal is to connect people who want to work on AI safety with the right resources, multiplying the field’s efforts by cutting the time it takes to find them. All AISafety.com content is free to reuse under a Creative Commons license. Learn more at aisafety.com/media or contact media@aisafety.com.',
   },
 ] as const
 
-/** Team members who take press questions, with what each can speak to.
- *  Photos are the ones on the about page. */
+/** Team members who take press questions: what each can speak to, and a short
+ *  bio that can be quoted as is. Photos are the ones on the about page. */
 export const PEOPLE = [
-  {
-    name: 'Søren Elverlin',
-    role: 'Founder, project lead, back-end development',
-    photo: '/images/soeren.png',
-    speaksTo:
-      'The state of the AI safety field, how the ecosystem is organized, and community-building over the last decade. He founded AI Safety Danmark in 2016 and has run its reading group for more than 300 sessions.',
-  },
   {
     name: 'Bryce Robertson',
     role: 'Project manager',
     photo: '/images/bryce.png',
     speaksTo:
-      'How people actually enter the field, career-change paths, and what the jobs and training data shows. He moved into AI safety from video production after the release of GPT-4.',
+      'How people actually enter the field, career-change paths, and what the jobs and training data shows.',
+    bio: 'Bryce Robertson manages AISafety.com. He moved into AI safety from video production after GPT-4’s release, and now spends his time on the question the site exists to answer: How does someone who wants to help actually get started?',
+  },
+  {
+    name: 'Søren Elverlin',
+    role: 'Founder, project lead, back-end development',
+    photo: '/images/soeren.png',
+    speaksTo:
+      'The state of the AI safety field, how the ecosystem is organized, and community-building over the last decade.',
+    bio: 'Søren Elverlin founded AISafety.com. He bought the domain in 2017 and built the first version of the site. He also founded AI Safety Danmark in 2016 and has run its reading group for more than 300 sessions, making him one of the longer-running community organizers in the field.',
   },
   {
     name: 'Melissa Samworth',
     role: 'Product design, front-end development',
     photo: '/images/melissa.png',
     speaksTo:
-      'Making a technical field legible to newcomers, and what people search for and fail to find. She joined AISafety.com in 2023.',
+      'Making a technical field legible to newcomers, and what people search for and fail to find.',
+    bio: 'Melissa Samworth leads product design and front-end development at AISafety.com, which she joined in 2023.',
   },
   {
     name: 'plex',
     role: 'Founder and advisor',
     photo: '/images/plex.png',
-    speaksTo:
-      'The site’s origins and the wider existential-risk landscape. He has worked on reducing existential risk from AI since 2015, building the original versions of the AISafety.com resources and AISafety.info.',
+    speaksTo: 'The site’s origins and the wider existential-risk landscape.',
+    bio: 'plex has worked toward reducing existential risk from AI since 2015, building infrastructure like the original versions of the AISafety.com resources and AISafety.info. He now advises the project while working on other existential-risk efforts.',
   },
 ] as const
 
