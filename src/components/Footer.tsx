@@ -56,9 +56,9 @@ export default function Footer() {
                 label="Donate"
               />
               <FooterLink
-                href="/hackathon"
+                href="/media"
                 section="Help us out"
-                label="Hackathon 2026"
+                label="Press and media"
               />
             </div>
           </div>
@@ -105,8 +105,7 @@ export default function Footer() {
           </div>
           <p className={`paragraph-xs opacity-80 ${styles.links}`}>
             (ɔ) 2026 · This site is released under a CC BY-SA license ·{' '}
-            <Link href="/privacy">Privacy</Link> ·{' '}
-            <Link href="/media">Press</Link>
+            <Link href="/privacy">Privacy</Link>
           </p>
         </div>
       </div>
