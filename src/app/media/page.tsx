@@ -3,6 +3,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { readLastMonthVisitors } from '@/lib/analytics/events'
 import { fetchAllCounts } from '@/lib/data/counts'
+import { roundToFigures } from '@/lib/round-figure'
 import CopyButton from './CopyButton'
 import JumpLink from './JumpLink'
 import PressLink from './PressLink'
@@ -258,8 +259,8 @@ export default async function MediaPage() {
           </dd>
           {traffic && (
             <FactRow label="Monthly visitors">
-              {traffic.visitors.toLocaleString('en-US')} in{' '}
-              {formatMonth(traffic.month)}
+              About {roundToFigures(traffic.visitors).toLocaleString('en-US')}{' '}
+              in {formatMonth(traffic.month)}
             </FactRow>
           )}
           {DIRECTORIES.map(({ path, label }) => {
