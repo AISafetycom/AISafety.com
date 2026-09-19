@@ -109,7 +109,8 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   'footer_click',
   // The press and media page (/media): `source` is what was done ('copy' a
   // boilerplate block, 'download' a logo/screenshot/kit, 'contact' = the
-  // press email link), `label` says which one, `url` the file or mailto.
+  // press email link, 'jump' = one of the two entry buttons that glide down
+  // the page), `label` says which one, `url` the file or mailto.
   'press_action',
   'chatbot_open',
   'chatbot_message',

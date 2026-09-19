@@ -11,6 +11,7 @@ export default function PressLink({
   label,
   className,
   download,
+  newTab,
   children,
 }: {
   href: string
@@ -20,6 +21,10 @@ export default function PressLink({
   className?: string
   /** Serve the file as a download rather than opening it in the tab. */
   download?: boolean
+  /** Open in a new tab, so the press page stays where it is. Used for the
+   *  press email: with a webmail handler, mailto: would otherwise replace
+   *  the page. */
+  newTab?: boolean
   children: ReactNode
 }) {
   return (
@@ -27,6 +32,8 @@ export default function PressLink({
       href={href}
       className={className}
       download={download || undefined}
+      target={newTab ? '_blank' : undefined}
+      rel={newTab ? 'noopener noreferrer' : undefined}
       onClick={() => trackPressAction(action, label, href)}
     >
       {children}

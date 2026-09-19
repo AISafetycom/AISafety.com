@@ -35,6 +35,12 @@
   padding-bottom: 16px;
 }
 
+/* The entry buttons move keyboard focus to the section they glide to; a
+   whole-section focus ring would only be noise. */
+.section:focus {
+  outline: none;
+}
+
 .lead {
   max-width: 640px;
   color: var(--teal-300);

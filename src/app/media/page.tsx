@@ -3,6 +3,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { fetchAllCounts } from '@/lib/data/counts'
 import CopyButton from './CopyButton'
+import JumpLink from './JumpLink'
 import PressLink from './PressLink'
 import {
   BOILERPLATE,
@@ -113,15 +114,20 @@ export default async function MediaPage() {
               href={mailto}
               action="contact"
               label="Emailed the press inbox"
+              newTab
               className={styles.inlineLink}
             >
               {PRESS_EMAIL}
             </PressLink>
             .
           </p>
-          <a href="#boilerplate" className="button-secondary">
+          <JumpLink
+            targetId="boilerplate"
+            label="Jumped to the boilerplate"
+            className="button-secondary"
+          >
             Start with the boilerplate
-          </a>
+          </JumpLink>
         </div>
         <div className={styles.entryCard}>
           <p className="color-white paragraph-default-bold">
@@ -132,9 +138,13 @@ export default async function MediaPage() {
             field map, open data, and the mistakes we see most often in
             coverage.
           </p>
-          <a href="#covering-ai-safety" className="button-secondary">
+          <JumpLink
+            targetId="covering-ai-safety"
+            label="Jumped to the reporter resources"
+            className="button-secondary"
+          >
             Reporter resources
-          </a>
+          </JumpLink>
         </div>
       </div>
 
@@ -227,6 +237,7 @@ export default async function MediaPage() {
             href={mailto}
             action="contact"
             label="Emailed the press inbox"
+            newTab
             className={styles.inlineLink}
           >
             {PRESS_EMAIL}
@@ -539,6 +550,7 @@ export default async function MediaPage() {
               href={mailto}
               action="contact"
               label="Emailed the press inbox"
+              newTab
               className={styles.email}
             >
               {PRESS_EMAIL}

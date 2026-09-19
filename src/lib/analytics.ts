@@ -302,8 +302,9 @@ export function trackAirtableView(page: string, url: string): void {
 }
 
 /** What a press-page click did: copied a boilerplate block, downloaded an
- *  asset, or opened the press email. */
-export type PressAction = 'copy' | 'download' | 'contact'
+ *  asset, opened the press email, or used one of the two entry buttons to
+ *  jump down the page. */
+export type PressAction = 'copy' | 'download' | 'contact' | 'jump'
 
 /**
  * Track an action on the press and media page (/media). `label` names the
