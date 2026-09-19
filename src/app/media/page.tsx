@@ -4,17 +4,18 @@ import Link from 'next/link'
 import { readLastMonthVisitors } from '@/lib/analytics/events'
 import { fetchAllCounts } from '@/lib/data/counts'
 import { roundToFigures } from '@/lib/round-figure'
+import { withUtm } from '@/lib/utm'
 import CopyButton from './CopyButton'
 import JumpLink from './JumpLink'
 import PressLink from './PressLink'
 import {
   BOILERPLATE,
-  COVERAGE_MISTAKES,
   LOGOS,
   PEOPLE,
   PRESS_BLOB,
   PRESS_EMAIL,
   PRESS_KIT_ZIP,
+  RECOMMENDED_ORGANIZATIONS,
   SCREENSHOTS,
 } from './content'
 import { NEWS } from './news'
@@ -188,11 +189,11 @@ export default async function MediaPage() {
           </p>
           <p className="paragraph-small color-teal-300">
             Skip to the reporter resources: where to find expert contacts, the
-            field map, open data, and the mistakes we see most often in
-            coverage.
+            field map, open data, and the organizations we recommend for
+            questions about AI risk itself.
           </p>
           <JumpLink
-            targetId="covering-ai-safety"
+            targetId="reporter-resources"
             label="Jumped to the reporter resources"
             className="button-secondary"
           >
@@ -286,13 +287,17 @@ export default async function MediaPage() {
         </dl>
       </section>
 
-      {/* Who to talk to */}
-      <section id="who-to-talk-to" className={styles.section}>
-        <h2>Who to talk to</h2>
+      {/* The team */}
+      <section id="team" className={styles.section}>
+        <h2>The AISafety.com team</h2>
         <p className={`paragraph-small ${styles.lead}`}>
           Our team speaks about the AI safety field and about our own work. We
-          do not speak on behalf of the organizations we list. To reach any of
-          us, email{' '}
+          do not speak on behalf of the organizations we list. Everyone is on
+          the{' '}
+          <Link href="/about#team" className={styles.inlineLink}>
+            about page
+          </Link>
+          . To reach any of us, email{' '}
           <PressLink
             href={mailto}
             action="contact"
@@ -323,22 +328,26 @@ export default async function MediaPage() {
                   </p>
                 </div>
               </div>
-              <p className="paragraph-small">
-                <strong className="color-white">Can speak to: </strong>
-                {person.speaksTo}
-              </p>
               <p className="paragraph-small">{person.bio}</p>
+              {person.speaksTo && (
+                <p className="paragraph-small">
+                  <strong className="color-white">Can speak to: </strong>
+                  {person.speaksTo}
+                </p>
+              )}
             </div>
           ))}
         </div>
       </section>
 
-      {/* Covering AI safety */}
-      <section id="covering-ai-safety" className={styles.section}>
-        <h2>Covering AI safety? Start here</h2>
+      {/* Reporter resources */}
+      <section id="reporter-resources" className={styles.section}>
+        <h2>Reporter resources</h2>
+        <h3 className="padding-top-8px padding-bottom-16px">
+          Covering AI safety? Start here
+        </h3>
         <p className={`paragraph-small ${styles.lead}`}>
-          Most of what we maintain is useful to you whether or not you ever
-          mention us. Here is the short version of where to look.
+          Here is the short version of where to look.
         </p>
         <div className={`paragraph-small ${styles.topics}`}>
           <div className={styles.topic}>
@@ -443,20 +452,51 @@ export default async function MediaPage() {
           </div>
         </div>
 
-        <h3 className={styles.subhead}>
-          Five things coverage tends to get wrong
-        </h3>
-        <p className={`paragraph-small ${styles.lead}`}>
-          Offered in good faith, not as a complaint. These are the corrections
-          we find ourselves making most often.
-        </p>
-        <ol className={`paragraph-small ${styles.mistakes}`}>
-          {COVERAGE_MISTAKES.map(item => (
-            <li key={item.claim}>
-              <strong>{item.claim}</strong> {item.text}
+        <h3 className={styles.subhead}>Recommended organizations</h3>
+        <div className={`paragraph-small ${styles.prose}`}>
+          <p>
+            AISafety.com maps the field and does not do research itself. For
+            object-level questions about AI risk, such as what the arguments
+            are, how strong the evidence is and what experts disagree about, we
+            recommend going to the organizations below.
+          </p>
+          <p>
+            A good starting point is the International AI Safety Report, which
+            was written by around 100 independent experts and is backed by some
+            30 governments. It is the closest thing the field has to a neutral
+            consensus document.
+          </p>
+          <p>
+            After that, the right contact depends on the story. Several
+            organizations have dedicated press contacts and are used to working
+            with journalists on deadline. For specialized questions about a
+            particular research area, funding or a specific country, our map of
+            the field lists organizations by category, and we are happy to point
+            you to the right one.
+          </p>
+        </div>
+        <ul className={`paragraph-small ${styles.orgList}`}>
+          {RECOMMENDED_ORGANIZATIONS.map(org => (
+            <li key={org.name}>
+              {'before' in org && org.before}
+              {org.url.startsWith('/') ? (
+                <Link href={org.url} className={styles.inlineLink}>
+                  {org.name}
+                </Link>
+              ) : (
+                <a
+                  href={withUtm(org.url, 'Media')}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={styles.inlineLink}
+                >
+                  {org.name}
+                </a>
+              )}
+              : {org.note}
             </li>
           ))}
-        </ol>
+        </ul>
       </section>
 
       {/* Brand assets */}

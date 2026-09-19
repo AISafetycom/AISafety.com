@@ -12,67 +12,93 @@ export const BOILERPLATE = [
     id: 'one-line',
     label: 'One-line version',
     trackingName: 'one-line boilerplate',
-    text: 'AISafety.com is the resource hub for AI existential safety, run by a small nonprofit that indexes the jobs, funding, training programs, communities, and organizations that make up the field.',
+    text: 'AISafety.com is the resource hub for AI existential safety, run by a small nonprofit project that indexes things like events, funders, training programs, communities, and organizations that make up the field.',
   },
   {
     id: 'full',
     label: 'Full version',
     trackingName: 'full boilerplate',
-    text: 'AISafety.com is the resource hub for AI existential safety, indexing the jobs, funding, training programs, communities, and organizations that make up the field. Free and continuously updated, it is run by a small, independent nonprofit that is grant-funded, largely volunteer-driven, and takes no position on any lab or policy. Its goal is to connect people who want to work on AI safety with the right resources, multiplying the field’s efforts by cutting the time it takes to find them. All AISafety.com content is free to reuse under a Creative Commons license. Learn more at aisafety.com/media or contact media@aisafety.com.',
+    text: 'AISafety.com is the resource hub for AI existential safety, indexing things like events, funders, training programs, communities, and organizations that make up the field. Free and continuously updated, it is run by a small, independent nonprofit project that is grant-funded, largely volunteer-driven, and takes no position on any lab or policy. Its goal is to connect people who want to work on AI safety with the right resources, multiplying the field’s efforts by cutting the time it takes to find them. All AISafety.com content is free to reuse under a Creative Commons license. Learn more at aisafety.com/media or contact media@aisafety.com.',
   },
 ] as const
 
-/** Team members who take press questions: what each can speak to, and a short
- *  bio that can be quoted as is. Same people, order and photos as the core
- *  team on the about page, minus plex, who is not press-facing. */
-export const PEOPLE = [
+/** The core team: a short bio that can be quoted as is and, where the person
+ *  takes press questions, what they can speak to. Same people, order and
+ *  photos as the about page, minus plex, who is not press-facing. */
+export const PEOPLE: {
+  name: string
+  role: string
+  photo: string
+  bio: string
+  speaksTo?: string
+}[] = [
   {
     name: 'Søren Elverlin',
     role: 'Founder, project lead, back-end development',
     photo: '/images/soeren.png',
+    bio: 'Søren Elverlin founded AISafety.com. He bought the domain in 2017 and built the first version of the site. He also founded AI Safety Danmark in 2016, leads PauseAI Denmark, and has run the AISafety.com reading group for more than 340 sessions, making him one of the longer-running community organizers in the field.',
     speaksTo:
-      'The state of the AI safety field, how the ecosystem is organized, and community-building over the last decade.',
-    bio: 'Søren Elverlin founded AISafety.com. He bought the domain in 2017 and built the first version of the site. He also founded AI Safety Danmark in 2016 and has run its reading group for more than 300 sessions, making him one of the longer-running community organizers in the field.',
+      'The arguments for and against AI existential risk, AI safety in Denmark and the Nordics, the case for pausing frontier AI development.',
   },
   {
     name: 'Bryce Robertson',
     role: 'Project manager',
     photo: '/images/bryce.png',
+    bio: 'Bryce Robertson manages AISafety.com, maintaining the database of AI safety resources and running the corresponding newsletters. He moved into AI safety from video production after GPT-4’s release, and now spends his time on the question the site exists to answer: How does someone who wants to help actually get started?',
     speaksTo:
-      'How people actually enter the field, career-change paths, and what the jobs and training data shows.',
-    bio: 'Bryce Robertson manages AISafety.com. He moved into AI safety from video production after GPT-4’s release, and now spends his time on the question the site exists to answer: How does someone who wants to help actually get started?',
+      'Typical paths people follow when entering the field, problems faced by newcomers.',
   },
   {
     name: 'Melissa Samworth',
     role: 'Product design, front-end development',
     photo: '/images/melissa.png',
-    speaksTo:
-      'Making a technical field legible to newcomers, and what people search for and fail to find.',
-    bio: 'Melissa Samworth leads product design and front-end development at AISafety.com, which she joined in 2023.',
+    bio: 'Melissa Samworth leads product strategy, design, and front-end development at AISafety.com, which she joined in 2023.',
   },
-] as const
+]
 
-/** The corrections we find ourselves making most often. */
-export const COVERAGE_MISTAKES = [
+/** Where to send object-level questions about AI risk. `url` is stored clean;
+ *  the page adds the site's UTM tags when it renders the link. */
+export const RECOMMENDED_ORGANIZATIONS = [
   {
-    claim: '“AI safety” is not a position.',
-    text: 'It is a field containing people who disagree sharply about timelines, about how serious the risk is, and about what should be done. Quoting one researcher as representing “the AI safety view” is like quoting one economist as representing economics.',
+    name: 'International AI Safety Report',
+    url: 'https://internationalaisafetyreport.org',
+    note: 'expert consensus overview of capabilities and risks.',
   },
   {
-    claim: 'Safety and ethics are not the same community, and not opposed.',
-    text: 'Work on existential risk from advanced systems and work on present-day harms (bias, labor, surveillance, environmental cost) have different literatures, funders and conferences. Plenty of people work on both. Framing them as rivals makes a story tidier than the reality.',
+    name: 'Future of Life Institute',
+    url: 'https://futureoflife.org',
+    note: 'established nonprofit with wide coverage of AI risk and policy.',
   },
   {
-    claim: 'A probability estimate is not a measurement.',
-    text: 'When a researcher gives a number for the chance of catastrophe, that is a considered personal judgment, not an output of a model. It deserves the same treatment you would give any expert forecast: attribute it, date it, and say what it rests on.',
+    name: 'Center for AI Safety',
+    url: 'https://safe.ai/about/media',
+    note: 'research nonprofit with a dedicated media page. It organized the 2023 extinction risk statement.',
   },
   {
-    claim: 'Being listed here is not an endorsement.',
-    text: 'Our directories aim to be comprehensive. Organizations, funders and programs appear because they exist and are relevant, not because we vouch for them. We list groups whose approaches contradict each other.',
+    name: 'ControlAI',
+    url: 'https://controlai.com',
+    note: 'focused on policymakers and legislation, especially in the UK and US.',
   },
   {
-    claim: 'Almost nobody in this field wants to “stop AI.”',
-    text: 'Positions range from targeted technical work, to specific regulatory asks, to slowing frontier development. “AI safety people want to ban AI” describes very few of the people we index. If you want an accurate spread of views, the field map is the fastest way to see it.',
+    name: 'PauseAI',
+    url: 'https://pauseai.info',
+    note: 'grassroots movement with national chapters and local spokespeople.',
+  },
+  {
+    name: 'AISafety.info',
+    url: 'https://aisafety.info',
+    note: 'plain-language answers to several hundred common questions about AI risk.',
+  },
+  {
+    name: 'UK AISI',
+    before: 'National AI Safety / Security Institutes, for example the ',
+    url: 'https://www.aisi.gov.uk',
+    note: 'government evaluation bodies, best suited to journalists covering a national angle.',
+  },
+  {
+    name: 'AISafety.com map',
+    url: '/map',
+    note: 'for everything else.',
   },
 ] as const
 

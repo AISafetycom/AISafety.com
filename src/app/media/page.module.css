@@ -203,24 +203,19 @@
   color: var(--teal-300);
 }
 
-/* Numbered corrections */
-.mistakes {
+/* Recommended organizations: one linked name and a short note per line. */
+.orgList {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 12px;
   max-width: 720px;
   margin: 0;
-  padding-left: 1.4em;
+  padding: 24px 0 0 1.2em;
   color: var(--teal-300);
 }
 
-.mistakes li::marker {
+.orgList li::marker {
   color: var(--bright-teal-300);
-}
-
-.mistakes strong {
-  color: var(--white);
-  font-weight: 500;
 }
 
 /* Brand assets */
