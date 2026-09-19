@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import Image from 'next/image'
 import Link from 'next/link'
+import { readLastMonthVisitors } from '@/lib/analytics/events'
 import { fetchAllCounts } from '@/lib/data/counts'
 import CopyButton from './CopyButton'
 import JumpLink from './JumpLink'
@@ -37,9 +38,9 @@ const DIRECTORIES = [
   { path: '/funding', label: 'Funding sources' },
   { path: '/media-channels', label: 'Media channels indexed' },
   { path: '/advisors', label: 'Advisors' },
-  { path: '/self-study', label: 'Self-study resources' },
+  { path: '/self-study', label: 'Self-study courses' },
   { path: '/projects', label: 'Volunteer projects' },
-  { path: '/founders', label: 'Founder toolkit resources' },
+  { path: '/founders', label: 'Founder resources' },
 ] as const
 
 /** When the press kit was last refreshed and how big the zip is, from the
@@ -80,6 +81,15 @@ function wordCount(text: string): number {
   return text.trim().split(/\s+/).length
 }
 
+/** "August 2026" for a 'YYYY-MM' month. */
+function formatMonth(month: string): string {
+  return new Date(`${month}-01T00:00:00Z`).toLocaleDateString('en-GB', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  })
+}
+
 /** "17 May 2024" — the site's date order. */
 function formatDate(iso: string): string {
   return new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-GB', {
@@ -114,7 +124,11 @@ const ORGANIZATION_SCHEMA = {
 }
 
 export default async function MediaPage() {
-  const [counts, kit] = await Promise.all([fetchAllCounts(), getPressKitInfo()])
+  const [counts, kit, traffic] = await Promise.all([
+    fetchAllCounts(),
+    getPressKitInfo(),
+    readLastMonthVisitors(),
+  ])
   const news = [...NEWS].sort((a, b) => b.date.localeCompare(a.date))
   const announcements = news.filter(n => n.kind === 'announcement')
   const coverage = news.filter(n => n.kind === 'coverage')
@@ -213,8 +227,9 @@ export default async function MediaPage() {
       <section id="key-facts" className={styles.section}>
         <h2>Key facts</h2>
         <p className={`paragraph-small ${styles.lead}`}>
-          Directory counts are live: they are the same numbers the site shows
-          today, and they change as listings are added and removed.
+          The numbers are live. Directory counts are the same ones the site
+          shows today, and the visitor figure is last month’s, from the site’s
+          own privacy-respecting analytics.
         </p>
         <dl className={`paragraph-small ${styles.facts}`}>
           <dt>Founded</dt>
@@ -241,6 +256,12 @@ export default async function MediaPage() {
               Survival and Flourishing Fund
             </a>
           </dd>
+          {traffic && (
+            <FactRow label="Monthly visitors">
+              {traffic.visitors.toLocaleString('en-US')} in{' '}
+              {formatMonth(traffic.month)}
+            </FactRow>
+          )}
           {DIRECTORIES.map(({ path, label }) => {
             const count = counts[path]
             if (typeof count !== 'number') return null

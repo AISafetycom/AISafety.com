@@ -62,6 +62,7 @@ AISafety.com is a **Next.js 16 (App Router) + TypeScript** app on Vercel. The pu
 
 - **Matomo:** the script in the root layout plus `MatomoRouteTracker` for client-side navigation. `src/proxy.ts` runs on every page request and reports fetches by AI assistants (ChatGPT, Claude, Perplexity, …) server-side, since they never run the script. Visitors can opt out on the privacy page (`useTrackingOptOut`).
 - **First-party events:** the browser posts to `/api/track` (public, every field length-capped, per-IP throttle that fails open). `src/lib/analytics/events.ts` stores events in Upstash Redis, one list per calendar month, or in an `.analytics-dev/` NDJSON file when Redis is not configured. `/admin/analytics` aggregates per query. `themes.ts` groups typed chatbot questions with a Claude call, refreshed by a weekly cron or the dashboard button. Client helpers for click and filter tracking live in `src/lib/analytics.ts`.
+- **Press page traffic figure.** `/media` shows last month's distinct visitors, the same number the dashboard gives for that month. `readLastMonthVisitors()` in `events.ts` works it out once per finished month (one full read of that month's events) and keeps it in Redis under `aisafety:analytics:monthly-visitors:YYYY-MM`; every later render is a single GET. With no store (contributor mode, CI) it returns null and the page leaves the row out.
 
 ## Admin: `src/app/admin`, `src/lib/admin`
 
