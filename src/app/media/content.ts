@@ -23,16 +23,9 @@ export const BOILERPLATE = [
 ] as const
 
 /** Team members who take press questions: what each can speak to, and a short
- *  bio that can be quoted as is. Photos are the ones on the about page. */
+ *  bio that can be quoted as is. Same people, order and photos as the core
+ *  team on the about page, minus plex, who is not press-facing. */
 export const PEOPLE = [
-  {
-    name: 'Bryce Robertson',
-    role: 'Project manager',
-    photo: '/images/bryce.png',
-    speaksTo:
-      'How people actually enter the field, career-change paths, and what the jobs and training data shows.',
-    bio: 'Bryce Robertson manages AISafety.com. He moved into AI safety from video production after GPT-4’s release, and now spends his time on the question the site exists to answer: How does someone who wants to help actually get started?',
-  },
   {
     name: 'Søren Elverlin',
     role: 'Founder, project lead, back-end development',
@@ -42,19 +35,20 @@ export const PEOPLE = [
     bio: 'Søren Elverlin founded AISafety.com. He bought the domain in 2017 and built the first version of the site. He also founded AI Safety Danmark in 2016 and has run its reading group for more than 300 sessions, making him one of the longer-running community organizers in the field.',
   },
   {
+    name: 'Bryce Robertson',
+    role: 'Project manager',
+    photo: '/images/bryce.png',
+    speaksTo:
+      'How people actually enter the field, career-change paths, and what the jobs and training data shows.',
+    bio: 'Bryce Robertson manages AISafety.com. He moved into AI safety from video production after GPT-4’s release, and now spends his time on the question the site exists to answer: How does someone who wants to help actually get started?',
+  },
+  {
     name: 'Melissa Samworth',
     role: 'Product design, front-end development',
     photo: '/images/melissa.png',
     speaksTo:
       'Making a technical field legible to newcomers, and what people search for and fail to find.',
     bio: 'Melissa Samworth leads product design and front-end development at AISafety.com, which she joined in 2023.',
-  },
-  {
-    name: 'plex',
-    role: 'Founder and advisor',
-    photo: '/images/plex.png',
-    speaksTo: 'The site’s origins and the wider existential-risk landscape.',
-    bio: 'plex has worked toward reducing existential risk from AI since 2015, building infrastructure like the original versions of the AISafety.com resources and AISafety.info. He now advises the project while working on other existential-risk efforts.',
   },
 ] as const
 
