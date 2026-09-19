@@ -22,6 +22,9 @@
 
 .entryCard > a {
   margin-top: auto;
+  /* The card is a flex column, which would stretch the button to its full
+     width; keep it the size of its label. */
+  align-self: flex-start;
 }
 
 /* Sections */
