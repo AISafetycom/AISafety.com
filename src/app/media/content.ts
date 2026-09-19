@@ -18,7 +18,7 @@ export const BOILERPLATE = [
     id: 'full',
     label: 'Full version',
     trackingName: 'full boilerplate',
-    text: 'AISafety.com is the centralized resource hub for AI existential safety that aggregates the events, training programs, jobs, funders, organizations, and communities that make up the field. Free and continuously updated, it is run as a small, independent nonprofit project that is grant-funded and volunteer-supported. Its goal is to connect people who want to work on AI safety with the right resources, multiplying the field’s efforts by cutting the time it takes to discover them. All AISafety.com content is free to reuse under a Creative Commons license. Learn more at aisafety.com/media or contact media@aisafety.com.',
+    text: 'AISafety.com is the centralized resource hub for AI existential safety that aggregates the events, training programs, jobs, funders, organizations, and communities that make up the field. Free and continuously updated, it is run as a small, independent nonprofit project that is grant-funded and volunteer-supported. Its goal is to empower and multiply the field’s efforts by connecting people who want to work on AI safety with the right resources. All AISafety.com content is free to reuse under a Creative Commons license. Learn more at aisafety.com/media or contact media@aisafety.com.',
   },
 ] as const
 
