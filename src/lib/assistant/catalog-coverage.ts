@@ -25,6 +25,12 @@ export interface ResourceTable {
   pagePath: string
 }
 
+// TODO(hire): /hire and the 'candidate' catalog type are wired into
+// buildCatalog() and the search_listings tool, but there is no real
+// Airtable table yet (src/lib/data/hire.ts is mock data) — so there's
+// nothing to register here. Add an entry once a real "Candidates" table
+// exists in the base.
+
 /** Airtable tables the assistant searches and that have a browsable page. */
 export const RESOURCE_TABLES: ResourceTable[] = [
   {

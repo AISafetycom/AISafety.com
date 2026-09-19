@@ -39,6 +39,21 @@ export const PAGES: PageInfo[] = [
     ],
   },
   {
+    path: '/hire',
+    title: 'Hire',
+    purpose:
+      'People actively working on AI safety projects, with their contributions, availability, and referrals from collaborators.',
+    audience:
+      'People and teams looking to bring on a collaborator or a hire for AI safety work.',
+    greeting:
+      "Looking for someone to work with? Tell me the focus area, skills, or availability you need and I'll match people.",
+    chips: [
+      'Interpretability researchers in Europe',
+      'Open to full-time roles',
+      'People available right now',
+    ],
+  },
+  {
     path: '/funding',
     title: 'Funding',
     purpose:

@@ -1,3 +1,4 @@
+import { getCandidates } from '@/lib/data/hire'
 import { getJobs } from '@/lib/data/jobs'
 import { getFunders } from '@/lib/data/funding'
 import { isAcceptingApplications } from '@/lib/funding-status'
@@ -95,6 +96,7 @@ function clamp(text: string, max: number): string {
 export async function buildCatalog(): Promise<Catalog> {
   const [
     jobs,
+    candidates,
     funders,
     advisors,
     communities,
@@ -108,6 +110,7 @@ export async function buildCatalog(): Promise<Catalog> {
     recurringPrograms,
   ] = await Promise.all([
     getJobs(),
+    getCandidates(),
     getFunders(),
     getAdvisors(),
     getCommunities(),
@@ -143,6 +146,28 @@ export async function buildCatalog(): Promise<Catalog> {
         workLocation: j.workLocation,
         location: j.location,
         datePublished: j.datePublished,
+      }),
+    })
+  }
+
+  // Candidates come from mock data (src/lib/data/hire.ts) pending a real
+  // Airtable table — see the comment there. No favicon derivation: there's
+  // no organization to fetch one from.
+  for (const c of candidates) {
+    listings.push({
+      id: `candidate:${c.id}`,
+      type: 'candidate',
+      name: c.name,
+      description: clamp(c.interests, 280),
+      url: c.links.website || c.links.linkedin || c.links.github || '#',
+      pageUrl: '/hire',
+      meta: compact({
+        focusArea: c.focusAreas.join(', '),
+        location: c.locationLabel,
+        country: c.country,
+        openToFullTime: c.openToFullTime ? 'Yes' : null,
+        availableNow: c.availability.hasCapacity ? 'Yes' : null,
+        skills: [...new Set(c.projects.flatMap(p => p.categories))].join(', '),
       }),
     })
   }

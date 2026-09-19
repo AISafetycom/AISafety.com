@@ -19,7 +19,7 @@ You should call this tool LIBERALLY. By default there is NO limit — the tool r
 
 ARGUMENTS:
 
-• \`type\` — listing type. One of: 'job', 'funder', 'advisor', 'community', 'course', 'founder-resource', 'project', 'media-channel', 'org', 'event', 'training'. Highly recommended.
+• \`type\` — listing type. One of: 'job', 'candidate', 'funder', 'advisor', 'community', 'course', 'founder-resource', 'project', 'media-channel', 'org', 'event', 'training'. Highly recommended.
 
 • \`query\` — optional free-text terms. Tokens are matched against name (×5 weight), organization (×3), meta fields (×2), and description (×1). Use the user's words, related keywords, or leave empty to browse by filter alone.
 
@@ -27,6 +27,9 @@ ARGUMENTS:
 
   Per type:
     job: skillSet ("Policy"|"Research"|"Software engineering"|"Operations"|"Outreach"|"Strategy"|"Legal"|"Data"|"Information security"|"Management"), minimumExperience ("Entry-level"|"Junior"|"Mid"|"Senior"), roleType ("Full-time"|"Part-time"|"Internship"), workLocation ("Remote"|"On-site"), location (city or country)
+    candidate: focusArea (e.g. "Interpretability"|"Evals"|"Agent safety"|"Alignment theory"|"Governance"|"Security"|"Biosecurity" — a person can carry more than one, comma-joined; substring match means filtering on one value matches anyone who carries it among others), country (a single country, e.g. "UK", OR a region name — "Europe"|"Asia"|"Middle East"|"North America"|"Latin America"|"South America"|"Africa"|"Oceania" — which matches every country in it), openToFullTime ("Yes"), availableNow ("Yes" — has open capacity for more work right now), skills (categories of work from their project history, e.g. "Coding"|"Research"|"Writing"|"Policy"|"Security")
+      – These are PEOPLE (/hire), not organizations or roles — do not confuse with 'job' or 'org'. Use this when someone asks to find a person/contributor/collaborator rather than a listing to apply to.
+      – **When the question names a region alongside another criterion (e.g. "interpretability researchers in Europe"), put BOTH in filters on your FIRST candidate search** — \`filters: { focusArea: 'Interpretability', country: 'Europe' }\` — rather than searching one dimension and reasoning about the other yourself from an unfiltered result. The /hire page's search box floats whatever your first candidate search returns and folds anything from a later, broader search under a "show more" toggle — so the first call being fully scoped is what puts the right people in front of the visitor instead of a mixed set.
     funder: type ("Fund"|"Grant program"|"Platform"), recipientType ("Individuals"|"Organizations"), applicationStatus ("Open"|"Closed" — use this to filter open/closed funders; acceptingApplications holds display text like "Applications close 31 October 2026" and is NOT reliably filterable)
     community: platform ("Slack"|"Discord"|"In-person"), type, activityLevel ("Active"|"Quiet"), location
     course: category, courseType
@@ -71,6 +74,12 @@ EXAMPLES:
   // Browse all advisors
   search_listings({ type: 'advisor' })
 
+  // People open to full-time work, focused on interpretability or evals
+  search_listings({ type: 'candidate', filters: { focusArea: ['Interpretability', 'Evals'], openToFullTime: 'Yes' } })
+
+  // Interpretability researchers in Europe — region AND focus in one call
+  search_listings({ type: 'candidate', filters: { focusArea: 'Interpretability', country: 'Europe' } })
+
   // Every org drawn in one Field map region (first category only)
   search_listings({ type: 'org', filters: { mapArea: 'Advocacy Anchorage' } })
 
@@ -89,6 +98,7 @@ EXAMPLES:
           type: 'string',
           enum: [
             'job',
+            'candidate',
             'funder',
             'advisor',
             'community',
@@ -235,11 +245,7 @@ function eventApplicationStatus(
   today: string
 ): {
   applicationsStatus:
-    | 'open'
-    | 'closed'
-    | 'not_yet_open'
-    | 'unknown'
-    | 'recurring'
+    'open' | 'closed' | 'not_yet_open' | 'unknown' | 'recurring'
   applicationsNote: string
 } {
   if (meta.recurring === 'Yes') {

@@ -1,0 +1,15 @@
+.label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.box {
+  display: flex;
+  flex-direction: column;
+  max-height: 420px;
+  background-color: var(--teal-850);
+  border: 1px solid var(--teal-700);
+  border-radius: 20px;
+  overflow: hidden;
+}

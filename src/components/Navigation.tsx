@@ -34,6 +34,7 @@ const navItems = [
   { href: '/communities', label: 'Communities', icon: 'globe.svg' },
   { href: '/self-study', label: 'Self-study', icon: 'book.svg' },
   { href: '/jobs', label: 'Jobs', icon: 'briefcase.svg' },
+  { href: '/hire', label: 'Hire', icon: 'person-alt.svg' },
   { href: '/funding', label: 'Funding', icon: 'coins.svg' },
   {
     href: '/media-channels',
@@ -162,7 +163,7 @@ export default function Navigation({
     }
     if (widths.length > 0) {
       itemWidths.current = widths
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: must set count before paint to prevent jitter
+
       calculateFromCachedWidths()
       // Reveal nav after correct count is set (CSS starts at opacity:0)
       if (navRef.current) navRef.current.style.opacity = '1'

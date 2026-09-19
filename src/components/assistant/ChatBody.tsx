@@ -410,6 +410,8 @@ interface Props {
   chips?: string[]
   /** Greeting bubble for the empty state. */
   greeting?: string
+  /** Composer placeholder text (defaults to "Ask in any language…"). */
+  placeholder?: string
   /** Small note under the greeting in the empty state. Omit for the site's
    *  "may be reviewed" line; pass a string to replace it, or null to hide it
    *  (the admin sandbox, whose turns are never logged, shows its own). */
@@ -439,6 +441,18 @@ interface Props {
    *  retries — lets the public chatbot count engagement while the admin
    *  playground (which doesn't pass this) stays out of the numbers. */
   onUserSend?: () => void
+  /** Fires each time a tool call finishes, with its name, the arguments the
+   *  model actually used, and the listings it returned (deduped, empty when
+   *  it found nothing or the call failed). Lets a page-embedded search box
+   *  drive its own UI (e.g. filter a grid to the returned listings) from the
+   *  same data the chat cards are built from, without re-parsing the reply
+   *  text. `ok` is false for a failed/errored call. */
+  onToolResult?: (
+    name: string,
+    input: Record<string, unknown>,
+    listings: CitationRef[],
+    ok: boolean
+  ) => void
   /** Fires once when a reply's request goes out ('start') and once when it
    *  ends: 'received' (the stream finished and an answer showed), 'stopped'
    *  (the visitor pressed Stop / cleared the chat), or 'error' (the request
@@ -465,6 +479,7 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
     bodyExtras,
     chips,
     greeting,
+    placeholder,
     privacyNote,
     storageKey,
     onSuggest,
@@ -472,6 +487,7 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
     onLinkClick,
     onRate,
     onUserSend,
+    onToolResult,
     onTurnLifecycle,
     onHasMessagesChange,
     closeOnEscape,
@@ -496,6 +512,14 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
   useEffect(() => {
     onTurnLifecycleRef.current = onTurnLifecycle
   }, [onTurnLifecycle])
+  // Same for onToolResult.
+  const onToolResultRef = useRef(onToolResult)
+  useEffect(() => {
+    onToolResultRef.current = onToolResult
+  }, [onToolResult])
+  // Tool name by call id, so the tool_call_done handler (which doesn't carry
+  // the name in its payload) can still report it via onToolResult.
+  const toolNameByIdRef = useRef<Record<string, string>>({})
 
   // Hydrate from session storage (when key provided)
   useEffect(() => {
@@ -727,6 +751,7 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
               )
             } else if (eventType === 'tool_call_start') {
               lastToolTextOffset = streamingText.length
+              toolNameByIdRef.current[data.id] = data.name
               const newCall: UIToolCall = {
                 id: data.id,
                 name: data.name,
@@ -758,8 +783,7 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
                       ? {
                           ...tc,
                           status: (data.ok ? 'done' : 'error') as
-                            | 'done'
-                            | 'error',
+                            'done' | 'error',
                           resultSummary: data.summary,
                           input:
                             (data.input as Record<string, unknown>) ?? tc.input,
@@ -783,6 +807,12 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
                     citations: allListings,
                   }
                 })
+              )
+              onToolResultRef.current?.(
+                toolNameByIdRef.current[data.id] ?? '',
+                (data.input as Record<string, unknown>) ?? {},
+                incoming,
+                Boolean(data.ok)
               )
             } else if (eventType === 'redo') {
               setMessages(prev =>
@@ -1085,6 +1115,7 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
         disabled={isWaiting && !abortRef.current}
         isStreaming={isWaiting}
         onStop={handleStop}
+        placeholder={placeholder}
       />
     </>
   )

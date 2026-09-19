@@ -12,6 +12,7 @@ const ROUTES = [
   '/founders',
   '/funding',
   '/hackathon',
+  '/hire',
   '/jobs',
   '/map',
   '/media-channels',

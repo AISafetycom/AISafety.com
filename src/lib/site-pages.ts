@@ -102,4 +102,11 @@ export const SITE_PAGES = {
       'A short guide on how to donate most effectively to the AI safety field.',
     icon: 'heart.svg',
   },
+  hire: {
+    path: '/hire',
+    title: 'Hire',
+    description:
+      'People actively working on AI safety projects, with their contributions and referrals from collaborators.',
+    icon: 'person-alt.svg',
+  },
 } as const satisfies Record<string, SitePage>

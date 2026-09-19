@@ -10,6 +10,7 @@ export type ListingType =
   | 'org'
   | 'event'
   | 'training'
+  | 'candidate'
 
 export interface Listing {
   id: string

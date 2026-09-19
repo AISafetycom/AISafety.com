@@ -9,6 +9,7 @@ import { withUtm } from '@/lib/utm'
 import { placementsById } from '@/lib/placements'
 import { setPageContext } from '@/lib/assistant/page-context'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
+import { REGION_MEMBERS, REGION_NAMES } from '@/lib/regions'
 
 interface JobsClientProps {
   jobs: Job[]
@@ -52,105 +53,9 @@ const workLocationOptions = ['Remote', 'On-site']
 // 80k sometimes lists a region instead of a country ("Europe", "Various,
 // Europe", "Remote (Europe)"). Those roles are available from any country
 // in the region, so they match every member country in the filter. Only
-// "Europe" appears in the data today; the other regions are listed so the
-// same behavior kicks in automatically if 80k ever uses them.
-const REGION_MEMBERS: Record<string, Set<string>> = {
-  Europe: new Set([
-    'UK',
-    'Ireland',
-    'France',
-    'Germany',
-    'Netherlands',
-    'Belgium',
-    'Luxembourg',
-    'Switzerland',
-    'Austria',
-    'Denmark',
-    'Norway',
-    'Sweden',
-    'Finland',
-    'Iceland',
-    'Spain',
-    'Portugal',
-    'Italy',
-    'Greece',
-    'Poland',
-    'Czechia',
-    'Czech Republic',
-    'Slovakia',
-    'Hungary',
-    'Romania',
-    'Bulgaria',
-    'Croatia',
-    'Serbia',
-    'Slovenia',
-    'Estonia',
-    'Latvia',
-    'Lithuania',
-    'Ukraine',
-  ]),
-  Asia: new Set([
-    'China',
-    'India',
-    'Japan',
-    'Singapore',
-    'South Korea',
-    'Taiwan',
-    'Hong Kong',
-    'Indonesia',
-    'Malaysia',
-    'Thailand',
-    'Vietnam',
-    'Philippines',
-    'Israel',
-    'United Arab Emirates',
-    'UAE',
-    'Saudi Arabia',
-    'Turkey',
-  ]),
-  'Middle East': new Set([
-    'Israel',
-    'United Arab Emirates',
-    'UAE',
-    'Saudi Arabia',
-    'Qatar',
-    'Turkey',
-    'Jordan',
-    'Egypt',
-  ]),
-  'North America': new Set(['USA', 'Canada', 'Mexico']),
-  'Latin America': new Set([
-    'Mexico',
-    'Brazil',
-    'Argentina',
-    'Chile',
-    'Colombia',
-    'Peru',
-    'Uruguay',
-    'Costa Rica',
-  ]),
-  'South America': new Set([
-    'Brazil',
-    'Argentina',
-    'Chile',
-    'Colombia',
-    'Peru',
-    'Uruguay',
-  ]),
-  Africa: new Set([
-    'South Africa',
-    'Nigeria',
-    'Kenya',
-    'Ghana',
-    'Egypt',
-    'Morocco',
-    'Rwanda',
-    'Uganda',
-  ]),
-  Oceania: new Set(['Australia', 'New Zealand']),
-}
-
-const REGION_NAMES = Object.keys(REGION_MEMBERS)
+// "Europe" appears in the data today; the other regions are listed (in the
+// shared src/lib/regions.ts table) so the same behavior kicks in
+// automatically if 80k ever uses them.
 
 const jobMatchesCountry = (job: Job, country: string) =>
   job.countries.includes(country) ||
