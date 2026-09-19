@@ -240,13 +240,20 @@ export default async function MediaPage() {
             built out since 2023
           </dd>
           <dt>Legal status</dt>
-          <dd>Nonprofit</dd>
+          <dd>
+            Nonprofit project fiscally sponsored by{' '}
+            <a
+              href={withUtm('https://www.ashgro.org/', 'Media')}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Ashgro
+            </a>
+          </dd>
           <dt>Team</dt>
           <dd>
-            One full-time and one part-time salaried role, plus 30+ volunteers
+            One full-time and one part-time salaried role, plus volunteers
           </dd>
-          <dt>Annual budget</dt>
-          <dd>About $100,000 USD</dd>
           <dt>Funding</dt>
           <dd>
             Grants from the{' '}
@@ -282,7 +289,7 @@ export default async function MediaPage() {
             >
               AISafety.info
             </a>
-            , an explainer and FAQ project
+            , a separate explainer and FAQ project
           </dd>
         </dl>
       </section>
@@ -690,17 +697,31 @@ export default async function MediaPage() {
             <p>
               Not a journalist?{' '}
               <a
+                href="https://airtable.com/appF8XfZUGXtfi40E/pagUmmzVb8OnVvTZS/form"
+                target="_blank"
+                rel="noopener noreferrer"
+                className={styles.inlineLink}
+              >
+                Suggest a listing
+              </a>
+              ,{' '}
+              <a
                 href="https://airtable.com/appF8XfZUGXtfi40E/pagndDvdya1DSqoxN/form"
                 target="_blank"
                 rel="noopener noreferrer"
                 className={styles.inlineLink}
               >
-                Suggest a correction
+                report a correction
               </a>
-              , or find the team on the{' '}
-              <Link href="/about" className={styles.inlineLink}>
-                about page
-              </Link>
+              , or{' '}
+              <a
+                href="mailto:bryceerobertson@gmail.com?subject=Volunteering%20for%20AISafety.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className={styles.inlineLink}
+              >
+                volunteer
+              </a>
               .
             </p>
           </div>
