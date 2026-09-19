@@ -395,6 +395,7 @@ function pillFor(e: { page?: string; type: string }): string | null {
   if (e.type === 'footer_click') return 'Footer'
   // Likewise the +N menu: it belongs to the nav, whatever page it opened on.
   if (e.type === 'nav_overflow_open') return 'Nav'
+  if (e.type === 'nav_preview_click') return 'Nav'
   if (e.page) return e.page
   return null
 }
@@ -410,6 +411,8 @@ function labelFor(e: {
     return e.source === 'tap'
       ? 'Opened the +N menu (tap)'
       : 'Opened the +N menu'
+  if (e.type === 'nav_preview_click')
+    return `Clicked the ${e.label ?? ''} hover preview`
   if (e.type === 'search_open')
     return SEARCH_OPEN_LABELS[e.source ?? ''] ?? 'Opened search'
   if (e.type === 'search_query')
@@ -666,6 +669,13 @@ export default async function AnalyticsPage({
   )
   const navOpenShare = new Map(
     data.navOverflowOpenShare.map(s => [s.name, s] as const)
+  )
+  const navPreviewTotal = data.navPreviewClicks.reduce(
+    (sum, r) => sum + r.count,
+    0
+  )
+  const navPreviewShare = new Map(
+    data.navPreviewClickShare.map(s => [s.name, s] as const)
   )
   const newsletterTotalByPage = data.newsletterByPage.reduce(
     (sum, r) => sum + r.count,
@@ -1293,6 +1303,24 @@ export default async function AnalyticsPage({
                   tap = touch screens. % of visitors = the share of all visitors
                   who opened it that way at least once; the Total row is the
                   share who opened it at all. Recording since 7 September 2026.
+                </p>
+              </Panel>
+              <Panel title="Nav preview clicks">
+                <CountTable
+                  rows={data.navPreviewClicks}
+                  labelHead="Preview"
+                  countHead={unique ? 'Users' : 'Clicks'}
+                  total={navPreviewTotal}
+                  shareFor={name => navPreviewShare.get(name)}
+                  totalShare={data.anyNavPreviewClickShare}
+                />
+                <p className={styles.caption}>
+                  Clicks on the panel that opens under a global nav pill on
+                  hover (the page&apos;s description and featured cards), rather
+                  than on the pill itself, by the page it opens. Desktop only. %
+                  of visitors = the share of all visitors who clicked that
+                  preview at least once; the Total row is the share who clicked
+                  any preview. Recording since the previews went live (PR #596).
                 </p>
               </Panel>
             </div>

@@ -134,6 +134,10 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   // menu. `source` is how: 'hover' (mouse/trackpad) or 'tap' (touch screens);
   // `page` the path it happened on. One per closed→open transition.
   'nav_overflow_open',
+  // A click on a nav pill's hover preview (the panel with the page's
+  // description and featured cards) instead of on the pill. `label` is the
+  // page it opens, `page` the path it happened on.
+  'nav_preview_click',
 ])
 
 /** Dashboard labels for how the +N menu was opened (nav_overflow_open.source). */
@@ -657,6 +661,16 @@ export interface DashboardData {
   /** The +N table's Total row: distinct visitors who opened the menu at all
    *  vs distinct visitors site-wide. */
   anyNavOverflowOpenShare: VisitorShare
+  /** Clicks on the global nav's hover previews (the panel under a pill, as
+   *  opposed to the pill itself), one row per page the preview opens
+   *  ('/events', …), sitewide. */
+  navPreviewClicks: Counted[]
+  /** Per page: distinct visitors who clicked that page's preview vs distinct
+   *  visitors site-wide. Keyed by the row names `navPreviewClicks` uses. */
+  navPreviewClickShare: VisitorShare[]
+  /** The preview table's Total row: distinct visitors who clicked any
+   *  preview vs distinct visitors site-wide. */
+  anyNavPreviewClickShare: VisitorShare
   /** For pages with a map (Map, Communities): `selectedPage`'s most-hovered
    *  map listings — tooltip dwells (500 ms cursor rest on desktop, first tap
    *  on mobile), grouped like `topListings` and following the same unique/
@@ -753,6 +767,9 @@ const EMPTY: Omit<DashboardData, 'source'> = {
   navOverflowOpens: [],
   navOverflowOpenShare: [],
   anyNavOverflowOpenShare: { name: 'Any open', active: 0, visitors: 0 },
+  navPreviewClicks: [],
+  navPreviewClickShare: [],
+  anyNavPreviewClickShare: { name: 'Any click', active: 0, visitors: 0 },
   topHovered: [],
   areaClicks: [],
   funnel: { opened: 0, typed: 0, clicked: 0 },
@@ -1278,6 +1295,19 @@ function aggregate(
     )
   )
   const anyNavOverflowOpenShare = anyOnSite(navOpens, 'Any open')
+  // The global nav's hover previews: clicks that landed on a preview rather
+  // than its pill, by the page the preview opens. Same count mode and
+  // site-wide denominator as the +N menu above.
+  const previewClicks = inRange.filter(e => e.type === 'nav_preview_click')
+  const previewTarget = (e: AnalyticsEvent) => e.label ?? 'Unknown'
+  const navPreviewClicks = tallyBy(previewClicks, previewTarget, unique)
+  const navPreviewClickShare = navPreviewClicks.map(row =>
+    anyOnSite(
+      previewClicks.filter(e => previewTarget(e) === row.name),
+      row.name
+    )
+  )
+  const anyNavPreviewClickShare = anyOnSite(previewClicks, 'Any click')
 
   // Most-hovered map listings for the selected page — tooltip dwells
   // (listing_hover events), grouped exactly like topListings but with no
@@ -1386,6 +1416,9 @@ function aggregate(
     navOverflowOpens,
     navOverflowOpenShare,
     anyNavOverflowOpenShare,
+    navPreviewClicks,
+    navPreviewClickShare,
+    anyNavPreviewClickShare,
     topHovered,
     areaClicks,
     funnel: {

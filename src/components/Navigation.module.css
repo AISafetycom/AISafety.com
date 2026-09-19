@@ -99,6 +99,8 @@
   color: inherit;
   cursor: pointer;
   transition: all var(--hover-transition);
+  /* Anchors the hover tooltip. */
+  position: relative;
 }
 
 .nav-item-last {
@@ -193,6 +195,8 @@
   background: transparent;
   cursor: pointer;
   transition: all var(--hover-transition);
+  /* Anchors the hover tooltip. */
+  position: relative;
 }
 
 .nav-dropdown-item:hover {
@@ -229,6 +233,117 @@
    inside the overflow dropdown. */
 .nav-item-last[data-active-inside] {
   border-color: var(--bright-teal-300);
+}
+
+/* Hover preview: the page's description, then its featured cards in
+   miniature (or, for the map, a picture of it), opened under the pill at
+   once. Desktop only by construction — .nav-menu is hidden under 991px and
+   the (hover: hover) guard skips touch screens above it. Surface, shadow,
+   type and padding come from globals (.border-plus-fill,
+   .drop-shadow-extra-dark, .paragraph-*, .padding-*); only placement,
+   show/hide and the cards' fill live here.
+   The preview sits inside the pill's link, so a click on it opens the page.
+   It never catches the pointer itself (pointer-events: none); the ::after
+   layer below does that once the pointer has settled on the pill. */
+.nav-tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 400px;
+  border-radius: 8px;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  transition:
+    opacity var(--hover-transition),
+    visibility var(--hover-transition);
+  z-index: 5;
+}
+
+/* What makes the preview hoverable and clickable: an invisible layer over
+   the whole panel plus the 8px gap up to the pill, so the pointer can travel
+   down into the panel without leaving the pill's hover area. It only exists
+   once the pointer has rested on the pill for a moment — a pointer merely
+   crossing the nav on its way down the page can't land on a panel that just
+   opened under it, and the panel closes behind it as before. */
+.nav-tooltip::after {
+  content: '';
+  position: absolute;
+  inset: -9px -1px -1px;
+  pointer-events: auto;
+  visibility: hidden;
+}
+
+/* A miniature of the page's featured cards: their fill, at tooltip scale. */
+.nav-preview-card {
+  border-radius: 8px;
+  background-image: radial-gradient(
+    farthest-corner at left top,
+    var(--teal-bright-800) 0%,
+    var(--teal-bright-850) 100%
+  );
+  border: 1px solid var(--teal-bright-800);
+}
+
+.nav-preview-logo {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: 4px;
+  object-fit: contain;
+}
+
+/* One fact of the line under a card's name ("New York, USA ·"). Each wraps
+   as a unit, so the line breaks between facts, never inside a date. */
+.nav-preview-fact {
+  display: inline-block;
+}
+
+/* The map's picture, scaled to the panel's width. */
+.nav-preview-visual {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+/* Items stack inside the +N dropdown, so there the preview opens beside the
+   panel (its 24px padding plus the same 8px gap) instead of under the item,
+   and its hover layer reaches right, back across that gap, to the item. */
+.nav-dropdown-item .nav-tooltip {
+  top: 0;
+  left: auto;
+  right: calc(100% + 32px);
+  transform: none;
+}
+
+.nav-dropdown-item .nav-tooltip::after {
+  inset: -1px -33px -1px -1px;
+}
+
+/* No preview of the page you are already on. This is also what closes a
+   preview once a click on it (or on its pill) has opened the page, rather
+   than leaving it open over the page it just led to. */
+.nav-item[aria-current='page'] .nav-tooltip,
+.nav-dropdown-item[aria-current='page'] .nav-tooltip {
+  display: none;
+}
+
+@media (hover: hover) {
+  .nav-item:hover .nav-tooltip,
+  .nav-item:focus-visible .nav-tooltip,
+  .nav-dropdown-item:hover .nav-tooltip,
+  .nav-dropdown-item:focus-visible .nav-tooltip {
+    visibility: visible;
+    opacity: 1;
+  }
+
+  .nav-item:hover .nav-tooltip::after,
+  .nav-dropdown-item:hover .nav-tooltip::after {
+    visibility: visible;
+    transition: visibility 0s 0.15s;
+  }
 }
 
 .nav-search-button {
