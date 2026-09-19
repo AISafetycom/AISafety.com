@@ -66,7 +66,11 @@ const nextConfig: NextConfig = {
         destination: '/media-channels',
         permanent: true,
       },
-      { source: '/media', destination: '/media-channels', permanent: true },
+      // /media used to redirect to /media-channels (a Webflow-era alias). It
+      // is the press and media page since September 2026; /press is its
+      // alias. Browsers that cached the old permanent redirect keep following
+      // it until that cache expires.
+      { source: '/press', destination: '/media', permanent: true },
     ]
   },
 }
