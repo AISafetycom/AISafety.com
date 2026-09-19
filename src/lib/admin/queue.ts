@@ -30,6 +30,7 @@ import {
   type AirtableRow,
 } from './airtable'
 import { sealToken } from './session'
+import { isExpiredAttachment } from './attachment-url'
 
 export const QUEUE_TABLE_ID = 'tblonlKwIFJ7Aa8QN'
 const BROOM_ISSUES_TABLE_ID = 'tblntD3WITPEgjHRK'
@@ -214,11 +215,6 @@ async function catalogLogos(): Promise<Map<string, string>> {
  *  path segment and answer 410 after it. The site's cached data can hold
  *  such links for hours, so anything expiring within ten minutes is
  *  treated as gone and read afresh. */
-function isExpiredAttachment(url: string): boolean {
-  const m = /airtableusercontent\.com\/.*?\/(\d{13})\//.exec(url)
-  return m ? Number(m[1]) < Date.now() + 10 * 60 * 1000 : false
-}
-
 const logoCache = new Map<string, { url: string | null; at: number }>()
 const LOGO_TTL_MS = 5 * 60 * 1000
 
@@ -569,10 +565,44 @@ export async function getTableSchema(table: string): Promise<FieldInfo[]> {
  *  Airtable made one, else the file); Publish?/Hide? are dropped. Used for
  *  the focused item, because the snapshot on the queue row was taken when
  *  the row was written and Airtable's attachment URLs expire within hours. */
+/** What the page shows beside a picture in an attachment field: the link
+ *  the field list carries for it (the large thumbnail when Airtable made
+ *  one), and the file's own name, pixel size, bytes and type. */
+export interface AttachmentInfo {
+  url: string
+  filename: string | null
+  width: number | null
+  height: number | null
+  size: number | null
+  type: string | null
+}
+
+function attachmentInfo(x: Record<string, unknown>): AttachmentInfo | null {
+  if (typeof x.url !== 'string') return null
+  const large =
+    isRecord(x.thumbnails) && isRecord(x.thumbnails.large)
+      ? x.thumbnails.large.url
+      : null
+  return {
+    url: typeof large === 'string' ? large : x.url,
+    filename: typeof x.filename === 'string' ? x.filename : null,
+    width: typeof x.width === 'number' ? x.width : null,
+    height: typeof x.height === 'number' ? x.height : null,
+    size: typeof x.size === 'number' ? x.size : null,
+    type: typeof x.type === 'string' ? x.type : null,
+  }
+}
+
+export interface TargetRead {
+  fields: Record<string, unknown>
+  /** The pictures behind each attachment field, by field name. */
+  attachments: Record<string, AttachmentInfo[]>
+}
+
 export async function getTargetFields(
   table: string,
   record: string
-): Promise<Record<string, unknown> | null> {
+): Promise<TargetRead | null> {
   if (!TABLE_ID_RE.test(table) || !isRecordId(record)) return null
   const res = await airtableRequest(`${table}/${record}`)
   if (res.status === 404 || res.status === 403) return null
@@ -584,6 +614,7 @@ export async function getTargetFields(
   }
   const data = (await res.json()) as { fields: RawFields }
   const out: Record<string, unknown> = {}
+  const attachments: Record<string, AttachmentInfo[]> = {}
   for (const [k, v] of Object.entries(data.fields)) {
     if (PROTECTED_FIELDS.has(k)) continue
     if (
@@ -592,13 +623,11 @@ export async function getTargetFields(
       v.every(isRecord) &&
       v.every(x => typeof x.url === 'string')
     ) {
-      out[k] = v.map(x => {
-        const large =
-          isRecord(x.thumbnails) && isRecord(x.thumbnails.large)
-            ? x.thumbnails.large.url
-            : null
-        return typeof large === 'string' ? large : (x.url as string)
-      })
+      const infos = v
+        .map(attachmentInfo)
+        .filter((a): a is AttachmentInfo => a !== null)
+      out[k] = infos.map(a => a.url)
+      attachments[k] = infos
     } else if (
       v === null ||
       typeof v === 'string' ||
@@ -609,7 +638,7 @@ export async function getTargetFields(
       out[k] = v
     }
   }
-  return out
+  return { fields: out, attachments }
 }
 
 // ─── Preview through the site's own code ────────────────────────────────────
@@ -796,12 +825,69 @@ const MAX_UPLOAD_BYTES = 5 * 1024 * 1024
  *  whatever was there (a logo slot holds one picture). Goes through
  *  Airtable's upload endpoint, so no public URL is needed. The record is
  *  unpublished, so nothing reaches the site until Accept. */
-export async function uploadImage(
+/** A picture that Replace or Undo took off a record, handed back to the
+ *  page so Undo can put it back. Airtable keeps nothing extra – the page
+ *  holds the bytes (Bryce, 17 Sept 2026: "not if it's stored in Airtable,
+ *  since that would be messy"). */
+export interface PreviousImage {
+  filename: string
+  contentType: string
+  base64: string
+}
+
+export interface ImageWrite {
+  urls: string[]
+  attachments: AttachmentInfo[]
+  /** What the write took off the record, when it can be put back. */
+  previous: PreviousImage | null
+}
+
+interface StoredAttachment {
+  id: string
+  url: string
+  filename?: string
+  type?: string
+  size?: number
+  thumbnails?: { large?: { url?: string } }
+}
+
+function isStoredAttachment(x: unknown): x is StoredAttachment {
+  return isRecord(x) && typeof x.id === 'string' && typeof x.url === 'string'
+}
+
+/** The bytes of a picture on a record, read from Airtable's own link (the
+ *  only host this fetches from). Null when it is too big to come back
+ *  through the upload route, or cannot be read. */
+async function fetchImage(x: StoredAttachment): Promise<PreviousImage | null> {
+  if (typeof x.size === 'number' && x.size > MAX_UPLOAD_BYTES) return null
+  try {
+    const host = new URL(x.url).hostname
+    if (!/(^|\.)airtableusercontent\.com$|(^|\.)airtable\.com$/.test(host)) {
+      return null
+    }
+    const res = await fetch(x.url, { cache: 'no-store' })
+    if (!res.ok) return null
+    const buf = Buffer.from(await res.arrayBuffer())
+    if (buf.length > MAX_UPLOAD_BYTES) return null
+    const type = (x.type ?? res.headers.get('content-type') ?? '').split(';')[0]
+    if (!IMAGE_TYPE_RE.test(type)) return null
+    return {
+      filename: x.filename ?? 'image',
+      contentType: type,
+      base64: buf.toString('base64'),
+    }
+  } catch {
+    return null
+  }
+}
+
+const IMAGE_TYPE_RE = /^image\/(png|jpe?g|webp|gif|svg\+xml)$/
+
+async function checkImageField(
   table: string,
   record: string,
-  field: string,
-  file: { filename: string; contentType: string; base64: string }
-): Promise<string[]> {
+  field: string
+): Promise<void> {
   if (!TABLE_ID_RE.test(table) || !isRecordId(record)) {
     throw new QueueError('This item has no valid target record.', 400)
   }
@@ -810,7 +896,44 @@ export async function uploadImage(
   if (!info || info.type !== 'multipleAttachments') {
     throw new QueueError(`"${field}" is not an image field.`, 400)
   }
-  if (!/^image\/(png|jpe?g|webp|gif|svg\+xml)$/.test(file.contentType)) {
+}
+
+/** The pictures an attachment field holds right now. */
+async function storedImages(
+  table: string,
+  record: string,
+  field: string
+): Promise<StoredAttachment[]> {
+  const res = await airtableRequest(`${table}/${record}`)
+  if (!res.ok) {
+    throw new QueueError(`Airtable read failed: ${res.status}`, 502)
+  }
+  const stored = ((await res.json()) as { fields: RawFields }).fields[field]
+  return Array.isArray(stored) ? stored.filter(isStoredAttachment) : []
+}
+
+/** Empties an attachment field, handing back the picture that was there
+ *  (Undo after a first drop, or Redo of an undone clear). */
+export async function clearImage(
+  table: string,
+  record: string,
+  field: string
+): Promise<ImageWrite> {
+  await checkImageField(table, record, field)
+  const before = await storedImages(table, record, field)
+  const previous = before[0] ? await fetchImage(before[0]) : null
+  await patchRecord(table, record, { [field]: [] })
+  return { urls: [], attachments: [], previous }
+}
+
+export async function uploadImage(
+  table: string,
+  record: string,
+  field: string,
+  file: { filename: string; contentType: string; base64: string }
+): Promise<ImageWrite> {
+  await checkImageField(table, record, field)
+  if (!IMAGE_TYPE_RE.test(file.contentType)) {
     throw new QueueError('Only PNG, JPEG, WebP, GIF or SVG images.', 400)
   }
   const bytes = Math.floor((file.base64.length * 3) / 4)
@@ -843,33 +966,22 @@ export async function uploadImage(
     )
   }
   // The upload reply keys fields by id, so re-read the record by name.
-  const after = await airtableRequest(`${table}/${record}`)
-  if (!after.ok) {
-    throw new QueueError(
-      `Airtable read failed after upload: ${after.status}`,
-      502
-    )
-  }
-  const stored = ((await after.json()) as { fields: RawFields }).fields[field]
-  const list = Array.isArray(stored)
-    ? stored.filter(
-        (
-          x
-        ): x is {
-          id: string
-          url: string
-          thumbnails?: { large?: { url?: string } }
-        } =>
-          isRecord(x) && typeof x.id === 'string' && typeof x.url === 'string'
-      )
-    : []
+  const list = await storedImages(table, record, field)
   const newest = list[list.length - 1]
+  // A logo slot holds one picture: keep only the one just dropped, after
+  // reading the old one's bytes so the page can offer Undo.
+  const old = list.length > 1 ? list[list.length - 2] : undefined
+  const previous = old ? await fetchImage(old) : null
   if (newest && list.length > 1) {
-    // A logo slot holds one picture: keep only the one just dropped.
     await patchRecord(table, record, { [field]: [{ id: newest.id }] })
   }
-  if (!newest) return []
-  return [newest.thumbnails?.large?.url ?? newest.url]
+  if (!newest) return { urls: [], attachments: [], previous }
+  const picture = attachmentInfo(newest as unknown as Record<string, unknown>)
+  return {
+    urls: [picture?.url ?? newest.url],
+    attachments: picture ? [picture] : [],
+    previous,
+  }
 }
 
 // ─── Airtable helpers ───────────────────────────────────────────────────────
@@ -1005,6 +1117,110 @@ function requireOpen(item: QueueItem): void {
       409
     )
   }
+}
+
+// ─── Handled in Airtable directly ───────────────────────────────────────────
+
+/** The tables whose rows carry the Publish?/Hide? pair – the ones that hold
+ *  suggestions. Jobs has neither (its rows come from a feed and are never
+ *  suggested). Mirrors SUGGESTION_TABLES in ~/Queue/queue_lib.py. */
+const SUGGESTION_TABLES = new Set([
+  EVENTS_TABLE,
+  TRAINING_TABLE,
+  RECURRING_TABLE,
+  MAP_TABLE,
+  COMMUNITIES_TABLE,
+  SELF_STUDY_TABLE,
+  FUNDING_TABLE,
+  MEDIA_TABLE,
+  ADVISORS_TABLE,
+  PROJECTS_TABLE,
+  FOUNDERS_TABLE,
+])
+const UNPUBLISHED_FORMULA = 'AND(NOT({Publish?}), NOT({Hide?}))'
+
+/** Why an open Add row is done with, read off its target record as it is
+ *  now (null for a record that is gone): nothing while the record is still
+ *  an unpublished, unhidden suggestion. The wording is the Mac worker's. */
+export function handledOutside(
+  record: { fields: Record<string, unknown> } | null
+): string | null {
+  if (!record) return 'Deleted outside the queue'
+  if (record.fields['Hide?']) return 'Hidden outside the queue'
+  if (record.fields['Publish?']) return 'Published outside the queue'
+  return null
+}
+
+/** Close the open Add rows whose record was deleted, published or hidden
+ *  in Airtable itself – the Mac worker's sync, done here when the page asks
+ *  so the list is right the moment the admin looks rather than on the
+ *  worker's next five-minute pass (Bryce, 17 Sept 2026: suggestions he had
+ *  just deleted still counted). One read per table of its unpublished
+ *  records; a row whose record is not among them is read once more before
+ *  it closes, in case the listing raced a record just added. Accepted rows
+ *  and Broom flags stay with the worker. Never throws: a table that cannot
+ *  be read is left for the worker. Answers with the ids it closed. */
+export async function closeHandledRows(items: QueueItem[]): Promise<string[]> {
+  const byTable = new Map<string, QueueItem[]>()
+  for (const i of items) {
+    if (i.type !== 'Add') continue
+    if (i.status !== 'Pending' && i.status !== 'Revising') continue
+    if (!i.targetTable || !i.targetRecord) continue
+    if (!SUGGESTION_TABLES.has(i.targetTable) || !isRecordId(i.targetRecord)) {
+      continue
+    }
+    const rows = byTable.get(i.targetTable) ?? []
+    rows.push(i)
+    byTable.set(i.targetTable, rows)
+  }
+  const closed: string[] = []
+  const tables = [...byTable]
+  // A few tables at a time: Airtable allows five requests a second.
+  for (let at = 0; at < tables.length; at += 3) {
+    await Promise.all(
+      tables.slice(at, at + 3).map(async ([table, rows]) => {
+        try {
+          const params = new URLSearchParams()
+          params.set('filterByFormula', UNPUBLISHED_FORMULA)
+          params.append('fields[]', 'Publish?')
+          const live = new Set(
+            (await listAll<RawFields>(table, params)).map(r => r.id)
+          )
+          for (const row of rows) {
+            const record = row.targetRecord as string
+            if (live.has(record)) continue
+            const res = await airtableRequest(`${table}/${record}`)
+            let why: string | null
+            if (res.status === 404 || res.status === 403) {
+              why = handledOutside(null)
+            } else if (!res.ok) {
+              console.error(
+                `[admin-queue] sync: reading ${table}/${record} failed: ${res.status}`
+              )
+              continue
+            } else {
+              why = handledOutside((await res.json()) as { fields: RawFields })
+            }
+            if (!why) continue
+            await patchQueueRow(row.id, {
+              [F.status]: 'Closed',
+              [F.error]: why,
+            })
+            console.log(
+              `[admin-queue] sync: closed ${row.id} "${row.title}" – ${why.toLowerCase()}`
+            )
+            closed.push(row.id)
+          }
+        } catch (e) {
+          console.error(
+            `[admin-queue] sync: ${rows[0]?.page ?? table}`,
+            e instanceof Error ? e.message : e
+          )
+        }
+      })
+    )
+  }
+  return closed
 }
 
 // ─── Decisions ──────────────────────────────────────────────────────────────

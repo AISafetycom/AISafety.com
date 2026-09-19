@@ -51,7 +51,7 @@ export default function Footer() {
                 airtablePrefillField="Page"
               />
               <FooterLink
-                href="https://www.every.org/alignment-ecosystem-development#/donate/card"
+                href="https://www.every.org/aisafetycom?donateTo=aisafetycom#/donate/card"
                 section="Help us out"
                 label="Donate"
               />

@@ -176,6 +176,11 @@ interface TurnDelivery {
   seen?: number
 }
 
+/** The label the chat endpoint puts on our own test chats. Must match
+ *  INTERNAL_TAG in src/lib/assistant/conversation-store.ts (not imported:
+ *  that module pulls in the server-side Airtable client). */
+const INTERNAL_LABEL = 'internal'
+
 /** The Review single select's options, as named in Airtable. */
 const REVIEW_VALUES = ['Good', 'Bad', 'Unsure'] as const
 type ReviewValue = (typeof REVIEW_VALUES)[number]
@@ -866,6 +871,9 @@ function ConversationRow({
   const [labelHighlight, setLabelHighlight] = useState(-1)
   const [linkCopied, setLinkCopied] = useState(false)
   const data = conv.data
+  // Our own chats are not visitor traffic, so their rows are set back —
+  // they're the ones to skip over.
+  const internal = conv.tags.includes(INTERNAL_LABEL)
   // Visitor messages actually stored in the (windowed) history — what the
   // transcript below can show.
   const storedTurns = data?.history.filter(t => t.role === 'user').length ?? 0
@@ -1096,6 +1104,7 @@ function ConversationRow({
           styles.convRow,
           viewed ? styles.convRowViewed : '',
           expanded ? styles.convRowExpanded : '',
+          internal ? styles.convRowInternal : '',
         ]
           .filter(Boolean)
           .join(' ')}

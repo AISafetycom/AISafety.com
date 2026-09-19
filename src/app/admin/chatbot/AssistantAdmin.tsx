@@ -66,6 +66,13 @@ export default function AssistantAdmin({
           <span className={styles.pageMetaValue}>{promptVersion}</span>
         </div>
       </div>
+      <p className={styles.pageIntro}>
+        A sandbox for trying the site&apos;s chatbot with different
+        instructions, a different model, or a different kind of visitor. The
+        chat on the left answers with whatever is set on the right, searching
+        the same live listings as the site. Nothing here changes the live bot,
+        and test chats stay out of the Bot log.
+      </p>
 
       <div className={styles.consoleSplit}>
         <AdminChatHost

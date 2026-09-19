@@ -205,16 +205,20 @@
   padding: 0 0 10px;
 }
 
-/* Stays put at the top of the list while its group scrolls under it. */
+/* Stays put at the top of the list while its group scrolls under it. Its
+   height is fixed so a page sub-head can sit exactly beneath it. */
 .groupHead {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 7px;
+  box-sizing: border-box;
   width: 100%;
+  height: 34px;
   padding: 12px 16px 8px;
+  line-height: 14px;
   border: none;
   background: var(--q-panel-2);
   font: inherit;
@@ -251,6 +255,35 @@
   padding: 4px 16px 8px;
   font-size: 13px;
   color: var(--q-muted);
+}
+
+.pageGroup {
+  padding: 0 0 6px;
+}
+
+/* A resource page within a section: sticks just under the section's head
+   while its rows scroll past, so the page in hand is always named. */
+.pageHead {
+  position: sticky;
+  top: 34px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 16px 5px;
+  border: none;
+  background: var(--q-panel-2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--q-muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+.pageHead:hover {
+  color: var(--q-text);
 }
 
 .row {
@@ -420,6 +453,18 @@
   border-top-color: var(--q-danger);
 }
 
+/* Where Comb found the listing, at the head of the panel above the verdict
+   (Bryce, 17 Sept 2026). */
+.asideFound {
+  display: grid;
+  gap: 2px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--q-border);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--q-text);
+}
+
 .verdictHead {
   display: grid;
   gap: 2px;
@@ -502,6 +547,18 @@
 .when {
   font-size: 12px;
   color: var(--q-muted);
+}
+
+/* Where Comb found the listing: the Source line of its Airtable comment. */
+.found {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--q-muted);
+}
+
+.foundLabel {
+  font-weight: 600;
 }
 
 .title {
@@ -818,15 +875,66 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* A picture in the field list: the thumbnail with its file name, pixel
+   size, bytes and type beside it. The row sits at the top, not on the
+   picture's bottom edge. */
+.thumbItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.thumbDetails {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* With details beside the picture, a long file name wraps rather than
+   pushing the Replace button onto its own line. */
+.imageSlot:has(.thumbDetails) {
+  flex-wrap: nowrap;
+}
+
+.imageSlot:has(.thumbDetails) .dropZone {
+  flex: 0 0 auto;
+}
+
+/* Undo / Redo of a Replace, beside the drop zone. */
+.imageUndo {
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+
+.imageUndo:disabled {
+  color: var(--q-muted);
+  cursor: default;
+  text-decoration: none;
+}
+
+.fieldRow:has(.imageSlot) {
+  align-items: start;
+}
+
+/* One flex item holds the whole value as running text: the box's baseline
+   is then the value's first line, so a row's label stays level with it,
+   while inside, the icon, text, "edited" mark and pencil wrap like a
+   paragraph. */
 .editable {
   display: inline-flex;
-  align-items: baseline;
-  gap: 8px;
   max-width: 100%;
   padding: 2px 8px;
   margin: -2px -8px;
   border-radius: 6px;
   cursor: text;
+}
+
+.editText {
+  min-width: 0;
 }
 
 .editable:hover,
@@ -837,7 +945,8 @@
 
 .editHint {
   display: inline-flex;
-  align-self: center;
+  vertical-align: middle;
+  margin-left: 6px;
   color: var(--q-muted);
   opacity: 0.55;
 }
@@ -1132,11 +1241,129 @@
   color: var(--q-muted);
 }
 
-.fieldsRest {
+/* The filled fields after the name, link, description and pictures: a
+   compact grid, label over value. A long value or an open editor takes the
+   full row. */
+.fieldGrid {
   display: grid;
-  gap: 10px;
-  padding-top: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px 22px;
+  padding-top: 12px;
   border-top: 1px dashed var(--q-border);
+}
+
+.fieldCell {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  align-content: start;
+}
+
+.fieldCell .value {
+  font-size: 14px;
+}
+
+.fieldWide {
+  grid-column: 1 / -1;
+}
+
+/* The site's own icon for the field, drawn the way its card draws it. */
+.fieldIcon {
+  vertical-align: -3px;
+  margin-right: 6px;
+  color: var(--q-muted);
+}
+
+.label .fieldIcon {
+  vertical-align: -2px;
+  margin-right: 5px;
+}
+
+/* A training or event Type as the site's pill: the type's colour (the
+   site's own variable, set per pill as --pill) as text, a 30% border and a
+   12% wash. The site's colours are made for its dark cards, so on the light
+   panel the text is darkened to read while the wash keeps the hue. */
+.typePills {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  vertical-align: middle;
+}
+
+.typePill {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  color: color-mix(in srgb, var(--pill) 45%, #1f2328);
+  border: 1px solid color-mix(in srgb, var(--pill) 60%, transparent);
+  background: color-mix(in srgb, var(--pill) 18%, transparent);
+}
+
+.dark .typePill {
+  color: var(--pill);
+  border-color: color-mix(in srgb, var(--pill) 30%, transparent);
+  background: color-mix(in srgb, var(--pill) 12%, transparent);
+}
+
+/* The empty fields, one line of names: click one to fill it in. */
+.unset {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--q-border);
+}
+
+.unsetChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px 3px 7px;
+  border: 1px dashed var(--q-border-strong);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--q-muted);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.3;
+  cursor: pointer;
+}
+
+.unsetChip:hover:not(:disabled) {
+  border-color: var(--q-muted);
+  color: var(--q-text-2);
+}
+
+.unsetChip:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* A field the page cannot do without, still empty: its name is orange and
+   bold where it sits – the row's label, or its chip in the "Not set" line
+   (Bryce, 17 Sept 2026: two events went out with no Cost). */
+.unsetMissing {
+  border-style: solid;
+  border-color: var(--q-warn);
+  color: var(--q-warn);
+  font-weight: 600;
+}
+
+.unsetMissing:hover:not(:disabled) {
+  border-color: var(--q-warn);
+  color: var(--q-warn);
+  background: var(--q-warn-soft);
+}
+
+.labelMissing {
+  color: var(--q-warn);
+  font-weight: 600;
 }
 
 .reasons {

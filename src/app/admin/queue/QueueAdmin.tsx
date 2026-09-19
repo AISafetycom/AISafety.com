@@ -5,12 +5,23 @@ import Image from 'next/image'
 import type { SaidBy } from '@/lib/admin/queue'
 import type {
   AgentInfo,
+  AttachmentInfo,
   FieldInfo,
+  PreviousImage,
   PreviewKind,
   QueueItem,
 } from '@/lib/admin/queue'
+import { missingFields } from '@/lib/admin/queue-needed'
 import Icon from '@/components/Icon'
-import SitePreview, { prefetchPreview, seedPreviews } from './SitePreview'
+import { activityIcon } from '@/app/communities/activity-icon'
+import { isAcceptingApplications } from '@/lib/funding-status'
+import { trainingTypeColor } from '@/lib/training-types'
+import { eventTypeColor } from '@/lib/event-types'
+import SitePreview, {
+  forgetPreviews,
+  prefetchPreview,
+  seedPreviews,
+} from './SitePreview'
 import Chat from './Chat'
 import styles from './queue.module.css'
 
@@ -23,6 +34,12 @@ import styles from './queue.module.css'
 
 const API = '/api/admin/queue'
 const UPLOAD_API = '/api/admin/queue/upload'
+
+// The list reads Airtable again this often while the tab is in view, and
+// the moment it comes back into view. Two refreshes closer together than
+// the gap (a tab flicked back and forth) are one.
+const REFRESH_MS = 60 * 1000
+const REFRESH_MIN_GAP_MS = 5 * 1000
 
 // The list shows one kind of work at a time (additions to judge whole,
 // changes to judge as a diff, or rules for the bots), grouped by where each
@@ -53,6 +70,59 @@ const SECTION_LABEL: Record<Section, string> = {
   broom: 'Broom',
   rules: 'Rules',
   comb: 'Comb',
+}
+
+// Inside a section the items sit under their resource page, in the site's
+// own nav order, so one page can be judged at a stretch with the rest folded
+// away. Bryce, 17 Sept 2026: "I need to be able to sub-group by resource
+// page". A section on a single page shows no sub-heads.
+const PAGE_ORDER = [
+  '/training',
+  '/events',
+  '/map',
+  '/communities',
+  '/self-study',
+  '/jobs',
+  '/funding',
+  '/media-channels',
+  '/advisors',
+  '/projects',
+  '/founders',
+  '/donation-guide',
+]
+const NO_PAGE_LABEL = 'No page'
+
+/** One resource page's items within a section. `key` is the page label
+ *  ('/training', '/training (recurring)', '' for no page). */
+type PageGroup = { key: string; label: string; items: QueueItem[] }
+
+function pageRank(group: PageGroup): number {
+  if (!group.key) return PAGE_ORDER.length + 1
+  const page = group.items[0]?.page ?? ''
+  const i = PAGE_ORDER.indexOf(page)
+  return i === -1 ? PAGE_ORDER.length : i
+}
+
+/** The site's nav order, unknown pages after it by name, recurring programs
+ *  right behind /training, items with no page last. */
+function byPageOrder(a: PageGroup, b: PageGroup): number {
+  return pageRank(a) - pageRank(b) || a.key.localeCompare(b.key)
+}
+
+/** Split a section's (already sorted) items by resource page, keeping each
+ *  page's items in the order they came. */
+function splitByPage(list: QueueItem[]): PageGroup[] {
+  const byKey = new Map<string, PageGroup>()
+  for (const item of list) {
+    const key = pageLabel(item) ?? ''
+    let group = byKey.get(key)
+    if (!group) {
+      group = { key, label: key || NO_PAGE_LABEL, items: [] }
+      byKey.set(key, group)
+    }
+    group.items.push(item)
+  }
+  return [...byKey.values()].sort(byPageOrder)
 }
 
 // Library icons (public/images/icons), rendered through the site's <Icon>.
@@ -131,6 +201,7 @@ function linkIcon(url: string): string {
 type Theme = 'light' | 'dark'
 const THEME_KEY = 'aisafety-admin-queue:theme'
 const COLLAPSED_KEY = 'aisafety-admin-queue:collapsed'
+const FOLDED_PAGES_KEY = 'aisafety-admin-queue:folded-pages'
 const KIND_KEY = 'aisafety-admin-queue:kind'
 
 function sectionOf(item: QueueItem): Section {
@@ -161,6 +232,13 @@ function verdictRank(v: QueueItem['verdict']): number {
 
 /** Sizes a text box to what is typed in it, on open and on every keystroke,
  *  so a long description is never hidden behind a scrollbar. */
+/** Cmd+Enter (Ctrl+Enter elsewhere) finishes a text box the way clicking
+ *  away does: the words are kept and the box closes (Bryce, 17 Sept 2026:
+ *  "CMD ENTER should exit the box (saving)"). */
+function isDoneKey(e: React.KeyboardEvent): boolean {
+  return e.key === 'Enter' && (e.metaKey || e.ctrlKey)
+}
+
 function fitToText(el: HTMLTextAreaElement | null) {
   if (!el) return
   el.style.height = 'auto'
@@ -200,6 +278,18 @@ function hashId(): string | null {
   return /^#(rec[A-Za-z0-9]{14})$/.exec(window.location.hash)?.[1] ?? null
 }
 
+/** The "Source:" line of Comb's Airtable comment, minus the clock time and
+ *  zone on a posting date ("posted 15 September 2026 19:57 UTC+01:00" →
+ *  "posted 15 September 2026"): the day is what places it. */
+function foundLabel(text: string): string {
+  return text
+    .replace(
+      /(\d{1,2} [A-Z][a-z]+ \d{4}) \d{1,2}:\d{2}(?: UTC[+\-\u2212]\d{2}:\d{2})?/,
+      '$1'
+    )
+    .trim()
+}
+
 function ago(iso: string | null): string {
   if (!iso) return ''
   const ms = Date.now() - new Date(iso).getTime()
@@ -233,6 +323,30 @@ function show(v: unknown): string {
   if (typeof v === 'number') return String(v)
   if (Array.isArray(v)) return v.map(show).join(', ')
   return JSON.stringify(v)
+}
+
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/
+const DATE_TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/
+
+/** An Airtable date as people write it: "1 February 2027", or with the
+ *  time after a comma when the field carries one. Anything else comes
+ *  back untouched. Only what is SHOWN goes through here; the value kept
+ *  for editing and saving stays in Airtable's own YYYY-MM-DD (Bryce,
+ *  17 Sept 2026: "show dates in friendly format"). */
+function friendly(text: string): string {
+  if (DATE_ONLY_RE.test(text)) {
+    const [y, m, d] = text.split('-').map(Number)
+    const date = new Date(Date.UTC(y, m - 1, d))
+    if (Number.isNaN(date.getTime())) return text
+    return date.toLocaleDateString('en-GB', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC',
+    })
+  }
+  if (DATE_TIME_RE.test(text)) return whenLabel(text) || text
+  return text
 }
 
 /** An attachment value as the queue sees it: Airtable's own shape (an
@@ -378,9 +492,91 @@ function Picture({ url, name }: { url: string | null; name: string | null }) {
   )
 }
 
+/** What the record's pictures are (file name, size, type), by the link the
+ *  field list holds for them – from the live read and from an upload.
+ *  Module-wide, so the picture slot can look its own links up. */
+const attachmentMeta = new Map<string, AttachmentInfo>()
+function rememberAttachments(
+  byField: Record<string, AttachmentInfo[]> | undefined
+): void {
+  if (!byField) return
+  for (const list of Object.values(byField)) {
+    for (const a of list) attachmentMeta.set(a.url, a)
+  }
+}
+
+const TYPE_LABEL: Record<string, string> = {
+  'image/png': 'PNG',
+  'image/jpeg': 'JPEG',
+  'image/webp': 'WebP',
+  'image/gif': 'GIF',
+  'image/svg+xml': 'SVG',
+}
+
+/** "250 × 63 · 2 KB · WebP" for a picture the record holds. */
+function attachmentMetaLine(a: AttachmentInfo): string {
+  return [
+    a.width && a.height ? `${a.width} × ${a.height}` : null,
+    a.size !== null ? fileSize(a.size) : null,
+    a.type
+      ? (TYPE_LABEL[a.type] ?? a.type.replace(/^image\//, '').toUpperCase())
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+/** The cached card no longer speaks for this record: it changed. */
+function forgetCard(item: QueueItem): void {
+  if (item.targetTable && item.targetRecord) {
+    forgetPreviews(item.targetTable, item.targetRecord)
+  }
+}
+
+// Row pictures whose link has failed: never shown again, however often the
+// server hands the same link back.
+const deadLogos = new Set<string>()
+
+/** The picture that Replace, Undo or Redo took off a record, held in the
+ *  page – never in Airtable – so the next Undo can put it back. By item and
+ *  field, so it is still there after moving to another item and back. A
+ *  null file means the field was empty before the drop, so Undo empties
+ *  it again. `redo` is set after an Undo: the next press puts the
+ *  replacement back. */
+interface ImageStash {
+  file: PreviousImage | null
+  redo: boolean
+}
+const imageStash = new Map<string, ImageStash>()
+const STASH_LIMIT = 12
+function stashImage(key: string, stash: ImageStash): void {
+  imageStash.delete(key)
+  imageStash.set(key, stash)
+  while (imageStash.size > STASH_LIMIT) {
+    const oldest = imageStash.keys().next().value
+    if (oldest === undefined) break
+    imageStash.delete(oldest)
+  }
+}
+
 const NAME_KEYS = /\b(name|title)\b|^organi[sz]ation$/i
 const URL_KEYS = /^(url|website|link|join link|apply link|application link)$/i
 const DESC_KEYS = /description/i
+
+/** The listing's own link: the row's, else the first link-like field of
+ *  the record as read live (or as proposed). */
+function listingLink(
+  item: QueueItem,
+  fields: Record<string, unknown> | null | undefined
+): string | null {
+  if (item.url) return item.url
+  for (const [k, v] of Object.entries(fields ?? item.fields ?? {})) {
+    if (URL_KEYS.test(k) && typeof v === 'string' && /^https?:\/\//.test(v)) {
+      return v
+    }
+  }
+  return null
+}
 
 function linkLabel(url: string): string {
   if (hostOf(url) === 'mail.google.com') return 'Open email'
@@ -450,6 +646,21 @@ function editsAsText(edits: Record<string, unknown>): Record<string, string> {
   return out
 }
 
+/** The draft an item starts from: its saved edits, when it is still open. */
+function draftOfRow(items: QueueItem[] | null | undefined, id: string): Draft {
+  const item = items?.find(i => i.id === id)
+  if (!item || !item.edits || !isOpen(item)) return FRESH
+  return { ...FRESH, edits: editsAsText(item.edits) }
+}
+
+function sameEdits(
+  a: Record<string, string>,
+  b: Record<string, string>
+): boolean {
+  const ka = Object.keys(a)
+  return ka.length === Object.keys(b).length && ka.every(k => a[k] === b[k])
+}
+
 function isOpen(item: QueueItem): boolean {
   return (
     item.status === 'Pending' ||
@@ -470,13 +681,16 @@ function proposedEdits(item: QueueItem): Record<string, unknown> {
  *  the pictures of the rows that came without one (the site's catalog,
  *  then the records themselves for unpublished targets) and answers with
  *  a URL by target record. Best effort: no logo is not worth an error. */
+/** Records whose picture has been asked for already, so a refresh of the
+ *  list asks only for the rows that are new to it. */
+const askedLogos = new Set<string>()
+
 async function loadLogos(items: QueueItem[]): Promise<Record<string, string>> {
-  const seen = new Set<string>()
   const targets: { table: string; record: string }[] = []
   for (const i of items) {
     if (i.logo || !i.targetTable || !i.targetRecord) continue
-    if (seen.has(i.targetRecord)) continue
-    seen.add(i.targetRecord)
+    if (askedLogos.has(i.targetRecord)) continue
+    askedLogos.add(i.targetRecord)
     targets.push({ table: i.targetTable, record: i.targetRecord })
   }
   if (!targets.length) return {}
@@ -487,10 +701,12 @@ async function loadLogos(items: QueueItem[]): Promise<Record<string, string>> {
       body: JSON.stringify({ targets }),
     })
     const data = (await res.json()) as { logos?: Record<string, string> }
-    return res.ok && data.logos ? data.logos : {}
+    if (res.ok && data.logos) return data.logos
   } catch {
-    return {}
+    // not answered: asked again below
   }
+  for (const t of targets) askedLogos.delete(t.record)
+  return {}
 }
 
 /** Build every open item's card in one request and hold them ready, so
@@ -556,6 +772,14 @@ function livePageUrl(item: QueueItem): string {
   const view = item.targetTable === RECURRING_TABLE ? '?view=recurring' : ''
   const hash = item.targetRecord ? `#${item.targetRecord}` : ''
   return `https://aisafety.com${item.page ?? ''}${view}${hash}`
+}
+
+/** The listing's name goes to the clipboard on the way to the live page,
+ *  ready to paste into the site search or Airtable. */
+function copyListingName(item: QueueItem): void {
+  navigator.clipboard
+    ?.writeText(splitTitle(item).name ?? item.title)
+    .catch(() => {})
 }
 
 function acceptLabel(item: QueueItem): string {
@@ -733,6 +957,9 @@ export default function QueueAdmin({
   canEdit: boolean
 }) {
   const [items, setItems] = useState<QueueItem[] | null>(null)
+  // The list as it is now, for callbacks that must not go stale.
+  const itemsRef = useRef(items)
+  itemsRef.current = items
   const [loadError, setLoadError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
@@ -751,6 +978,17 @@ export default function QueueAdmin({
   // The last decision clicked is the only one U can target, in whatever
   // order the writes land.
   const lastDecidedRef = useRef<string | null>(null)
+  // What Cmd+Z takes back: each change to an item's edits or reply, with
+  // the draft as it was, and when the last decision was made, so the more
+  // recent of the two is the one undone (Bryce, 17 Sept 2026: "CMD Z in
+  // general should undo the last action (i.e. changing a field)"). A logo
+  // swap is written to Airtable at once and is not taken back here.
+  const historyRef = useRef<{ id: string; before: Draft; at: number }[]>([])
+  const decidedAtRef = useRef(0)
+  // What Cmd+Shift+Z puts back: the edits Cmd+Z took away, newest last. A
+  // fresh change after an undo empties it, as in any editor. An undone
+  // decision is not redone this way (A or R makes it again).
+  const redoRef = useRef<{ id: string; after: Draft }[]>([])
   const actRef = useRef<
     (
       item: QueueItem,
@@ -797,6 +1035,8 @@ export default function QueueAdmin({
     rules: false,
     comb: false,
   })
+  // Folded page sub-groups, keyed "<section>:<page label>".
+  const [foldedPages, setFoldedPages] = useState<Record<string, boolean>>({})
   const listRef = useRef<HTMLDivElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const detailRef = useRef<HTMLDivElement>(null)
@@ -836,6 +1076,14 @@ export default function QueueAdmin({
           return next
         })
       }
+      const pages = JSON.parse(localStorage.getItem(FOLDED_PAGES_KEY) ?? '{}')
+      if (pages && typeof pages === 'object' && !Array.isArray(pages)) {
+        const next: Record<string, boolean> = {}
+        for (const [key, value] of Object.entries(pages)) {
+          if (value === true) next[key] = true
+        }
+        setFoldedPages(next)
+      }
       const k = localStorage.getItem(KIND_KEY)
       if (k === 'additions' || k === 'changes' || k === 'rules') setKind(k)
     } catch {
@@ -854,6 +1102,24 @@ export default function QueueAdmin({
       return next
     })
   }
+
+  const foldPage = useCallback((foldKey: string, folded: boolean) => {
+    setFoldedPages(prev => {
+      if (Boolean(prev[foldKey]) === folded) return prev
+      const next = { ...prev }
+      if (folded) next[foldKey] = true
+      else delete next[foldKey]
+      try {
+        localStorage.setItem(FOLDED_PAGES_KEY, JSON.stringify(next))
+      } catch {
+        // ignore
+      }
+      return next
+    })
+  }, [])
+
+  const togglePage = (foldKey: string) =>
+    foldPage(foldKey, !foldedPages[foldKey])
 
   const chooseKind = (next: Kind) => {
     setKind(next)
@@ -877,10 +1143,23 @@ export default function QueueAdmin({
     }
   }
 
-  const load = useCallback(async () => {
+  // Each read of the list is numbered; an answer that is not the newest
+  // read's – or that began before a decision landed – is dropped, so the
+  // page never steps back to an older list.
+  const loadSeq = useRef(0)
+  const lastRefreshRef = useRef(0)
+  /** Read the list. `sync` has the API first close the rows whose record
+   *  was deleted, published or hidden in Airtable itself (a moment slower,
+   *  so the first read skips it). Once a list is on screen, a read that
+   *  fails leaves it be. */
+  const load = useCallback(async (opts: { sync?: boolean } = {}) => {
+    const seq = ++loadSeq.current
+    if (opts.sync) lastRefreshRef.current = Date.now()
     setLoadError(null)
     try {
-      const res = await fetch(API, { cache: 'no-store' })
+      const res = await fetch(opts.sync ? `${API}?sync=1` : API, {
+        cache: 'no-store',
+      })
       const data = (await res.json()) as {
         items?: QueueItem[]
         agent?: AgentInfo | null
@@ -889,11 +1168,27 @@ export default function QueueAdmin({
       if (!res.ok || !data.items) {
         throw new Error(data.error ?? `HTTP ${res.status}`)
       }
-      setItems(data.items)
+      if (seq !== loadSeq.current) return
+      const before = itemsRef.current
+      const known = new Map((before ?? []).map(i => [i.id, i]))
+      const fresh: QueueItem[] = []
+      const next = data.items.map(i => {
+        const was = known.get(i.id)
+        if (!was) {
+          fresh.push(i)
+          return i
+        }
+        // A decision still on its way: the page's own version stands.
+        if (pendingRef.current[i.id]) return was
+        // The list comes without most pictures; the one on the page stays.
+        return i.logo || !was.logo ? i : { ...i, logo: was.logo }
+      })
+      setItems(next)
       setAgent(data.agent ?? null)
       // The list is on screen now; the pictures and the cards follow in
-      // the background, each filled in as it arrives.
-      void loadLogos(data.items).then(logos => {
+      // the background, each filled in as it arrives. A refresh asks only
+      // for what is new to it.
+      void loadLogos(next).then(logos => {
         if (!Object.keys(logos).length) return
         setItems(prev =>
           prev
@@ -905,15 +1200,39 @@ export default function QueueAdmin({
             : prev
         )
       })
-      void preloadCards(data.items)
+      void preloadCards(before ? fresh : next)
     } catch (e) {
+      if (itemsRef.current) return
       setLoadError(e instanceof Error ? e.message : String(e))
     }
   }, [])
 
+  // The first read is the quick one, so the list is on screen at once;
+  // the synced one follows right behind it and corrects the count.
   useEffect(() => {
     wantedRef.current = hashId()
-    void load()
+    void load().then(() => load({ sync: true }))
+  }, [load])
+
+  // The list keeps itself current: again the moment the tab or window
+  // comes back into view (Bryce, 17 Sept 2026: he deletes suggestions in
+  // Airtable, switches back, and the count should have moved), and once a
+  // minute while it is in view – synced, so nothing waits on the Mac
+  // worker's five-minute pass.
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return
+      if (Date.now() - lastRefreshRef.current < REFRESH_MIN_GAP_MS) return
+      void load({ sync: true })
+    }
+    document.addEventListener('visibilitychange', refresh)
+    window.addEventListener('focus', refresh)
+    const timer = setInterval(refresh, REFRESH_MS)
+    return () => {
+      document.removeEventListener('visibilitychange', refresh)
+      window.removeEventListener('focus', refresh)
+      clearInterval(timer)
+    }
   }, [load])
 
   // A "#rec…" in the address (the Secretary note's "Queued:" link, or one
@@ -980,7 +1299,9 @@ export default function QueueAdmin({
   }, [agent])
 
   // One flat, ordered list of open items: requests, Broom, rules, then Comb
-  // with Fable's Publish verdicts first. Keyboard navigation walks it.
+  // with Fable's Publish verdicts first, each section split by resource
+  // page. W/Q and auto-advance walk it, opening a folded page as they
+  // reach it; a folded section is passed over.
   const ordered = useMemo(() => {
     const groups: Record<Section, QueueItem[]> = {
       requests: [],
@@ -1018,9 +1339,40 @@ export default function QueueAdmin({
     groups.rules.sort(newest)
     groups.comb.sort(byVerdict)
     done.sort((a, b) => ((a.decidedAt ?? '') < (b.decidedAt ?? '') ? 1 : -1))
-    const flat = SECTIONS.filter(s => !collapsed[s]).flatMap(s => groups[s])
-    return { groups, done, flat, open, perKind }
-  }, [items, collapsed, kind, dayStart, selectedId])
+    // Sub-heads only where a section spans more than one page; a section on
+    // a single page lists its items as they are.
+    const pages: Record<Section, PageGroup[]> = {
+      requests: [],
+      broom: [],
+      rules: [],
+      comb: [],
+    }
+    for (const s of SECTIONS) {
+      const split = splitByPage(groups[s])
+      pages[s] = split.length > 1 ? split : []
+    }
+    // `walk` is every item in the open sections in list order, folded pages
+    // included, with the page fold each one sits under; `flat` is what is
+    // on screen.
+    const walk: QueueItem[] = []
+    const foldOf = new Map<string, string>()
+    for (const s of SECTIONS) {
+      if (collapsed[s]) continue
+      if (!pages[s].length) {
+        walk.push(...groups[s])
+        continue
+      }
+      for (const p of pages[s]) {
+        const foldKey = `${s}:${p.key}`
+        for (const item of p.items) {
+          walk.push(item)
+          foldOf.set(item.id, foldKey)
+        }
+      }
+    }
+    const flat = walk.filter(i => !foldedPages[foldOf.get(i.id) ?? ''])
+    return { groups, pages, done, flat, walk, foldOf, open, perKind }
+  }, [items, collapsed, foldedPages, kind, dayStart, selectedId])
 
   const selected = useMemo(() => {
     if (!items) return null
@@ -1040,22 +1392,37 @@ export default function QueueAdmin({
       wantedRef.current = null
       return
     }
-    if (selectedId && ordered.flat.some(i => i.id === selectedId)) return
+    if (selectedId && ordered.walk.some(i => i.id === selectedId)) return
     if (selected && isOpen(selected)) return
     if (selected && !isOpen(selected) && showDone) return
-    setSelectedId(ordered.flat[0]?.id ?? null)
-  }, [items, ordered.flat, selectedId, selected, showDone])
+    // The first item on screen; with every page folded, the first there
+    // is, with its page opened.
+    const first = ordered.flat[0] ?? ordered.walk[0]
+    const foldKey = first && ordered.foldOf.get(first.id)
+    if (foldKey && foldedPages[foldKey]) foldPage(foldKey, false)
+    setSelectedId(first?.id ?? null)
+  }, [
+    items,
+    ordered.flat,
+    ordered.walk,
+    ordered.foldOf,
+    foldedPages,
+    foldPage,
+    selectedId,
+    selected,
+    showDone,
+  ])
 
-  // The card of the item after this one is fetched now, so J/auto-advance
-  // shows it at once.
+  // The card of the item after this one is fetched now, so W/auto-advance
+  // shows it at once, whether or not its page is folded.
   useEffect(() => {
     if (!selected) return
-    const flat = ordered.flat
-    const next = flat[flat.findIndex(i => i.id === selected.id) + 1]
+    const walk = ordered.walk
+    const next = walk[walk.findIndex(i => i.id === selected.id) + 1]
     if (!next?.targetTable || !next.targetRecord) return
     if (next.type !== 'Add' && next.type !== 'Change') return
     prefetchPreview(next.targetTable, next.targetRecord, proposedEdits(next))
-  }, [selected, ordered.flat])
+  }, [selected, ordered.walk])
 
   useEffect(() => {
     if (!selected) return
@@ -1078,11 +1445,13 @@ export default function QueueAdmin({
         })
         const data = (await res.json()) as {
           fields?: Record<string, unknown>
+          attachments?: Record<string, AttachmentInfo[]>
           schema?: FieldInfo[]
         }
         if (!cancelled && res.ok && data.fields) {
           const fields = data.fields
           const schema = data.schema ?? []
+          rememberAttachments(data.attachments)
           setLive(prev => ({ ...prev, [id]: { fields, schema } }))
         }
       } catch {
@@ -1119,66 +1488,110 @@ export default function QueueAdmin({
     })
   }, [])
 
+  // A row's picture link has stopped working (Airtable links last a few
+  // hours): show the plain box and ask for a fresh link.
+  const logoDied = useCallback((item: QueueItem) => {
+    if (item.logo) deadLogos.add(item.logo)
+    const setLogo = (logo: string | null) =>
+      setItems(prev =>
+        prev ? prev.map(i => (i.id === item.id ? { ...i, logo } : i)) : prev
+      )
+    setLogo(null)
+    // The load-time lookup already asked for this record; ask once more.
+    if (item.targetRecord) askedLogos.delete(item.targetRecord)
+    void loadLogos([{ ...item, logo: null }]).then(logos => {
+      const url = item.targetRecord ? logos[item.targetRecord] : undefined
+      if (url && !deadLogos.has(url)) setLogo(url)
+    })
+  }, [])
+
   // A fresh draft starts from the edits saved on the row, so what was
   // applied (by hand or from the chat) is still there after a reload.
-  const draft = (id: string): Draft => {
-    const d = drafts[id]
-    if (d) return d
-    const item = items?.find(i => i.id === id)
-    if (!item || !item.edits || !isOpen(item)) return FRESH
-    return { ...FRESH, edits: editsAsText(item.edits) }
-  }
+  const draft = (id: string): Draft => drafts[id] ?? draftOfRow(items, id)
   // Edits and the reply draft as edited are kept on the row a moment after
   // they change (one save per item, the last one wins), so they are still
   // there after a reload. The live base is untouched until Accept.
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const draftsRef = useRef(drafts)
   draftsRef.current = drafts
-  const itemsRef = useRef(items)
-  itemsRef.current = items
-  const setDraft = useCallback((id: string, patch: Partial<Draft>) => {
-    setDrafts(prev => ({ ...prev, [id]: { ...(prev[id] ?? FRESH), ...patch } }))
-    if (!patch.edits && patch.reply === undefined) return
-    const merged = { ...(draftsRef.current[id] ?? FRESH), ...patch }
-    const row = itemsRef.current?.find(i => i.id === id)
-    const body: Record<string, unknown> = {
-      id,
-      action: 'edit',
-      edits: merged.edits,
-    }
-    if (patch.reply !== undefined && row?.replyDraft !== null) {
-      // Back to "as it came" means the row's own draft is saved again.
-      body.replyDraft = merged.reply ?? row?.replyDraft ?? ''
-    }
-    clearTimeout(saveTimers.current[id])
-    saveTimers.current[id] = setTimeout(() => {
-      void fetch(API, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      }).catch(() => {
-        // best effort: the edits are still on the page and go with Accept
-      })
-    }, 800)
-  }, [])
+  const setDraft = useCallback(
+    (
+      id: string,
+      patch: Partial<Draft>,
+      why: 'edit' | 'undo' | 'redo' = 'edit'
+    ) => {
+      const was = draftsRef.current[id] ?? draftOfRow(itemsRef.current, id)
+      const changed =
+        (patch.edits !== undefined && !sameEdits(patch.edits, was.edits)) ||
+        (patch.reply !== undefined && patch.reply !== was.reply)
+      if (why !== 'undo' && changed) {
+        historyRef.current.push({ id, before: was, at: Date.now() })
+        if (historyRef.current.length > 50) historyRef.current.shift()
+        if (why === 'edit') redoRef.current = []
+      }
+      setDrafts(prev => ({
+        ...prev,
+        [id]: { ...(prev[id] ?? FRESH), ...patch },
+      }))
+      if (!patch.edits && patch.reply === undefined) return
+      const merged = { ...(draftsRef.current[id] ?? FRESH), ...patch }
+      const row = itemsRef.current?.find(i => i.id === id)
+      const body: Record<string, unknown> = {
+        id,
+        action: 'edit',
+        edits: merged.edits,
+      }
+      if (patch.reply !== undefined && row?.replyDraft !== null) {
+        // Back to "as it came" means the row's own draft is saved again.
+        body.replyDraft = merged.reply ?? row?.replyDraft ?? ''
+      }
+      clearTimeout(saveTimers.current[id])
+      saveTimers.current[id] = setTimeout(() => {
+        void fetch(API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }).catch(() => {
+          // best effort: the edits are still on the page and go with Accept
+        })
+      }, 800)
+    },
+    []
+  )
 
   const select = useCallback((id: string) => {
     setSelectedId(id)
     setShowDone(false)
     if (detailRef.current) detailRef.current.scrollTop = 0
-    const row = listRef.current?.querySelector<HTMLElement>(`[data-id="${id}"]`)
-    row?.scrollIntoView({ block: 'nearest' })
+    // After the render, so a row inside a page just unfolded is there too.
+    requestAnimationFrame(() => {
+      listRef.current
+        ?.querySelector<HTMLElement>(`[data-id="${id}"]`)
+        ?.scrollIntoView({ block: 'nearest' })
+    })
   }, [])
+
+  /** Put an item in focus, opening the page it sits under if that is
+   *  folded: W/Q and auto-advance walk into folded pages rather than past
+   *  them (Bryce, 17 Sept 2026). */
+  const reveal = useCallback(
+    (item: QueueItem) => {
+      const foldKey = ordered.foldOf.get(item.id)
+      if (foldKey && foldedPages[foldKey]) foldPage(foldKey, false)
+      select(item.id)
+    },
+    [ordered.foldOf, foldedPages, foldPage, select]
+  )
 
   const move = useCallback(
     (delta: number) => {
-      const flat = ordered.flat
-      if (flat.length === 0) return
-      const i = flat.findIndex(x => x.id === selectedId)
-      const next = flat[Math.min(flat.length - 1, Math.max(0, i + delta))]
-      if (next) select(next.id)
+      const walk = ordered.walk
+      if (walk.length === 0) return
+      const i = walk.findIndex(x => x.id === selectedId)
+      const next = walk[Math.min(walk.length - 1, Math.max(0, i + delta))]
+      if (next) reveal(next)
     },
-    [ordered.flat, selectedId, select]
+    [ordered.walk, selectedId, reveal]
   )
 
   // After an accept: have the Mac agent save the reply draft in Gmail now,
@@ -1236,6 +1649,7 @@ export default function QueueAdmin({
         // The page moves on now; the write lands behind it. The previous
         // decision stops being U's target (the Done list still has it).
         lastDecidedRef.current = item.id
+        decidedAtRef.current = Date.now()
         setUndoable(null)
         pendingRef.current = { ...pendingRef.current, [item.id]: action }
         setPending(pendingRef.current)
@@ -1245,15 +1659,16 @@ export default function QueueAdmin({
           state: 'working',
           text: workingLabel(item, action),
         })
-        // Auto-advance to the next open item that is not itself on its way.
-        const flat = ordered.flat
-        const i = flat.findIndex(x => x.id === item.id)
+        // Auto-advance to the next open item that is not itself on its way,
+        // opening its page if that is folded.
+        const walk = ordered.walk
+        const i = walk.findIndex(x => x.id === item.id)
         const free = (x: QueueItem) =>
           x.id !== item.id && !pendingRef.current[x.id]
         const next =
-          flat.slice(i + 1).find(free) ??
-          flat.slice(0, Math.max(0, i)).reverse().find(free)
-        if (next) select(next.id)
+          walk.slice(i + 1).find(free) ??
+          walk.slice(0, Math.max(0, i)).reverse().find(free)
+        if (next) reveal(next)
       }
       const forget = () => {
         const rest = { ...pendingRef.current }
@@ -1276,9 +1691,15 @@ export default function QueueAdmin({
         if (!res.ok || !data.item) {
           throw new Error(data.error ?? `HTTP ${res.status}`)
         }
+        // A read of the list that began before this landed would show the
+        // row as it was: stale now.
+        loadSeq.current++
         // The decision comes back without a logo lookup (kept quick); the
         // picture already on the page stays.
         const updated = { ...data.item, logo: data.item.logo ?? item.logo }
+        // Accept wrote the edits and the flag, undo took them back: the
+        // card built before either is out of date.
+        forgetCard(updated)
         setItems(prev =>
           prev ? prev.map(i => (i.id === updated.id ? updated : i)) : prev
         )
@@ -1356,7 +1777,7 @@ export default function QueueAdmin({
         }
       }
     },
-    [ordered.flat, select, setDraft, drafts, agent, saveReply, canEdit]
+    [ordered.walk, reveal, select, setDraft, drafts, agent, saveReply, canEdit]
   )
   actRef.current = act
 
@@ -1404,6 +1825,67 @@ export default function QueueAdmin({
         (t.tagName === 'INPUT' ||
           t.tagName === 'TEXTAREA' ||
           t.isContentEditable)
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === 'z' &&
+        !typing
+      ) {
+        // Cmd+Shift+Z: the last edit Cmd+Z took away comes back.
+        e.preventDefault()
+        const r = redoRef.current
+        while (r.length) {
+          const row = items?.find(i => i.id === r[r.length - 1].id)
+          if (row && isOpen(row) && !draft(row.id).busy) break
+          r.pop()
+        }
+        const top = r.pop()
+        if (top) {
+          setDraft(
+            top.id,
+            { edits: top.after.edits, reply: top.after.reply, editing: null },
+            'redo'
+          )
+          select(top.id)
+        }
+        return
+      }
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === 'z' &&
+        !typing
+      ) {
+        // Cmd+Z: the last edit on any open item, or the last decision when
+        // that came later (what U does). Inside a text box the browser's own
+        // undo keeps working.
+        e.preventDefault()
+        const h = historyRef.current
+        while (h.length) {
+          const row = items?.find(i => i.id === h[h.length - 1].id)
+          if (row && isOpen(row) && !draft(row.id).busy) break
+          h.pop()
+        }
+        const top = h[h.length - 1]
+        const decision = undoable && !draft(undoable.id).busy ? undoable : null
+        if (top && (!decision || top.at > decidedAtRef.current)) {
+          h.pop()
+          redoRef.current.push({ id: top.id, after: draft(top.id) })
+          setDraft(
+            top.id,
+            { edits: top.before.edits, reply: top.before.reply, editing: null },
+            'undo'
+          )
+          select(top.id)
+        } else if (decision) {
+          void act(decision, 'undo')
+        } else if (toast?.state === 'working') {
+          queueUndo(toast.item.id)
+        }
+        return
+      }
       if (e.metaKey || e.ctrlKey || e.altKey) return
       if (typing) {
         if (e.key === 'Escape') (t as HTMLElement).blur()
@@ -1494,6 +1976,26 @@ export default function QueueAdmin({
             queueUndo(toast.item.id)
           }
           break
+        case 's': {
+          // The shown listing's own link, in a new tab (Bryce, 17 Sept
+          // 2026: "make S open the link for the currently shown listing").
+          const href = item ? listingLink(item, live[item.id]?.fields) : null
+          if (href) {
+            e.preventDefault()
+            window.open(href, '_blank', 'noopener')
+          }
+          break
+        }
+        case 'd':
+          // The page tag's link: the live page at this record's card, the
+          // name copied on the way, as a click on the tag does (Bryce, 19
+          // Sept 2026: "Make D open this link").
+          if (item?.page) {
+            e.preventDefault()
+            copyListingName(item)
+            window.open(livePageUrl(item), '_blank', 'noopener')
+          }
+          break
         case '?':
           e.preventDefault()
           setShowHelp(v => !v)
@@ -1521,6 +2023,8 @@ export default function QueueAdmin({
     setDraft,
     live,
     agentChat,
+    items,
+    select,
   ])
 
   const waiting = ordered.open
@@ -1646,6 +2150,47 @@ export default function QueueAdmin({
                   </button>
                   {collapsed[section] ? null : list.length === 0 ? (
                     <div className={styles.groupEmpty}>Nothing waiting</div>
+                  ) : ordered.pages[section].length ? (
+                    ordered.pages[section].map(page => {
+                      const foldKey = `${section}:${page.key}`
+                      const folded = foldedPages[foldKey] === true
+                      return (
+                        <div key={page.key} className={styles.pageGroup}>
+                          <button
+                            className={styles.pageHead}
+                            onClick={() => togglePage(foldKey)}
+                            aria-expanded={!folded}
+                          >
+                            {page.label}
+                            <span className={styles.groupCount}>
+                              {page.items.length}
+                            </span>
+                            <span
+                              className={`${styles.groupChevron} ${folded ? styles.groupChevronClosed : ''}`}
+                            >
+                              <Icon src={ICON.chevron} size={12} />
+                            </span>
+                          </button>
+                          {folded
+                            ? null
+                            : page.items.map(item => (
+                                <Row
+                                  key={item.id}
+                                  item={item}
+                                  active={item.id === selectedId && !showDone}
+                                  working={pending[item.id] ?? null}
+                                  failed={
+                                    !pending[item.id] &&
+                                    Boolean(draft(item.id).error)
+                                  }
+                                  showPage={false}
+                                  onClick={() => select(item.id)}
+                                  onLogoError={() => logoDied(item)}
+                                />
+                              ))}
+                        </div>
+                      )
+                    })
                   ) : (
                     list.map(item => (
                       <Row
@@ -1657,6 +2202,7 @@ export default function QueueAdmin({
                           !pending[item.id] && Boolean(draft(item.id).error)
                         }
                         onClick={() => select(item.id)}
+                        onLogoError={() => logoDied(item)}
                       />
                     ))
                   )}
@@ -1677,10 +2223,14 @@ export default function QueueAdmin({
               <Detail
                 item={selected}
                 live={live[selected.id] ?? null}
-                onImage={(field, urls) =>
+                onImage={(field, urls) => {
                   setLiveField(selected.id, field, urls)
-                }
-                onWrote={() => forgetLive(selected.id)}
+                  forgetCard(selected)
+                }}
+                onWrote={() => {
+                  forgetLive(selected.id)
+                  forgetCard(selected)
+                }}
                 d={draft(selected.id)}
                 setD={patch => setDraft(selected.id, patch)}
                 act={(action, extra) => void act(selected, action, extra)}
@@ -1820,9 +2370,35 @@ export default function QueueAdmin({
               </dt>
               <dd>talk to Fable about the item, or tell it what to change</dd>
               <dt>
+                <kbd>S</kbd>
+              </dt>
+              <dd>open the listing&apos;s link in a new tab</dd>
+              <dt>
+                <kbd>D</kbd>
+              </dt>
+              <dd>
+                open the listing&apos;s card on the live site (the page tag up
+                top), copying its name
+              </dd>
+              <dt>
                 <kbd>U</kbd>
               </dt>
               <dd>undo the last decision</dd>
+              <dt>
+                <kbd>⌘</kbd> <kbd>Z</kbd>
+              </dt>
+              <dd>
+                undo the last change to a field or reply, or the last decision
+                if that came later
+              </dd>
+              <dt>
+                <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>Z</kbd>
+              </dt>
+              <dd>put back the change that was just undone</dd>
+              <dt>
+                <kbd>⌘</kbd> <kbd>Enter</kbd>
+              </dt>
+              <dd>finish a text box, keeping what you typed</dd>
               <dt>
                 <kbd>Esc</kbd>
               </dt>
@@ -1840,7 +2416,9 @@ function Row({
   active,
   working,
   failed,
+  showPage = true,
   onClick,
+  onLogoError,
 }: {
   item: QueueItem
   active: boolean
@@ -1848,7 +2426,11 @@ function Row({
   working: Decision | null
   /** The last decision on it did not land; the error is on the detail. */
   failed: boolean
+  /** Off under a page sub-head, which already names the page. */
+  showPage?: boolean
   onClick: () => void
+  /** The picture's link has stopped working. */
+  onLogoError: () => void
 }) {
   return (
     <button
@@ -1862,15 +2444,9 @@ function Row({
           className={styles.rowLogo}
           src={item.logo}
           alt=""
-          onError={e => {
-            // an expired link: show the plain box rather than a broken image
-            const img = e.currentTarget
-            img.replaceWith(
-              Object.assign(document.createElement('span'), {
-                className: `${styles.rowLogo} ${styles.rowLogoEmpty}`,
-              })
-            )
-          }}
+          // An expired link: the list drops the picture (the plain box
+          // shows) and asks for a fresh one.
+          onError={onLogoError}
         />
       ) : (
         <span
@@ -1885,7 +2461,7 @@ function Row({
         </span>
         <span className={styles.rowMeta}>
           {item.source !== 'Comb' && <span>{item.source}</span>}
-          {item.page && <span>{pageLabel(item)}</span>}
+          {showPage && item.page && <span>{pageLabel(item)}</span>}
           {item.verdict && (
             <span className={`${styles.withIcon} ${verdictClass(item)}`}>
               <Icon src={verdictIcon(item)} size={12} />
@@ -1977,31 +2553,33 @@ function Detail({
   const showsCard =
     hasCard ||
     (item.type === 'Add' && Boolean(item.targetTable && item.targetRecord))
-  const excerptBlock = item.sourceExcerpt ? (
+  // A Comb row's excerpt is where Comb found the listing, which the head
+  // shows as its Source line; every other intake's is the words that
+  // opened the item.
+  const excerpt = item.source === 'Comb' ? null : item.sourceExcerpt
+  const excerptBlock = excerpt ? (
     <section className={styles.block}>
       <h3 className={styles.h3}>
         {item.source === 'Broom' ? 'What Broom found' : 'What they wrote'}
       </h3>
       {item.source === 'Broom' ? (
         <div className={styles.finding}>
-          <p className={styles.findingLead}>
-            {splitExcerpt(item.sourceExcerpt).lead}
-          </p>
-          {splitExcerpt(item.sourceExcerpt).detail && (
+          <p className={styles.findingLead}>{splitExcerpt(excerpt).lead}</p>
+          {splitExcerpt(excerpt).detail && (
             // Broom's evidence, folded away: the summary is what gets
             // read (Bryce, 11 Sept 2026); the rest is there on a click.
             <details className={styles.findingMore}>
               <summary>Details</summary>
               <p className={styles.findingDetail}>
-                {splitExcerpt(item.sourceExcerpt).detail}
+                {splitExcerpt(excerpt).detail}
               </p>
             </details>
           )}
         </div>
       ) : item.saidBy ? (
-        <Said by={item.saidBy} text={item.sourceExcerpt} />
+        <Said by={item.saidBy} text={excerpt} />
       ) : (
-        <blockquote className={styles.quote}>{item.sourceExcerpt}</blockquote>
+        <blockquote className={styles.quote}>{excerpt}</blockquote>
       )}
     </section>
   ) : null
@@ -2038,6 +2616,9 @@ function Detail({
             if (e.key === 'Escape') {
               e.preventDefault()
               setD({ editingReply: false })
+            } else if (isDoneKey(e)) {
+              e.preventDefault()
+              e.currentTarget.blur()
             }
           }}
           onBlur={e => setD({ editingReply: false, reply: e.target.value })}
@@ -2085,6 +2666,12 @@ function Detail({
   // with Fable (when the Mac agent is up), which is there for every item.
   const hasVerdict = Boolean(item.verdict) || item.reasons.length > 0
   const showAside = hasVerdict || chatAgent !== null
+  // Where Comb found the listing: the "Source:" line of its own Airtable
+  // comment, read here as it is in Airtable (Bryce, 17 Sept 2026).
+  const found =
+    item.source === 'Comb' && item.sourceExcerpt
+      ? foundLabel(item.sourceExcerpt)
+      : null
 
   return (
     <div
@@ -2108,14 +2695,8 @@ function Detail({
                 href={livePageUrl(item)}
                 target="_blank"
                 rel="noreferrer"
-                title="Opens the live card and copies the listing's name"
-                onClick={() => {
-                  // The name goes to the clipboard on the way, ready to
-                  // paste into the site search or Airtable.
-                  navigator.clipboard
-                    ?.writeText(splitTitle(item).name ?? item.title)
-                    .catch(() => {})
-                }}
+                title="Opens the live card and copies the listing's name (D)"
+                onClick={() => copyListingName(item)}
               >
                 {pageLabel(item)}
               </a>
@@ -2146,6 +2727,13 @@ function Detail({
               )}
             </div>
           </div>
+          {/* Where Comb found the listing heads the panel on the right;
+              with no panel it sits here instead. */}
+          {found && !showAside && (
+            <p className={styles.found}>
+              <span className={styles.foundLabel}>Source</span> {found}
+            </p>
+          )}
           {/* With a card on show the heading only repeats what Broom found
               (or the record's name), so it is left out. */}
           {!showsCard && (
@@ -2215,14 +2803,22 @@ function Detail({
             <div className={styles.diff}>
               {item.changes.map(c => (
                 <div key={c.field} className={styles.diffRow}>
-                  <span className={styles.label}>{c.field}</span>
+                  <span className={styles.label}>
+                    <FieldIcon
+                      page={item.page}
+                      name={c.field}
+                      value={show(c.to)}
+                      size={12}
+                    />
+                    {c.field}
+                  </span>
                   <span className={styles.from}>
                     {(() => {
                       const pic = pictureOf(c.from, live?.fields[c.field])
                       return pic ? (
                         <Picture key={pic.url ?? ''} {...pic} />
                       ) : (
-                        show(c.from)
+                        friendly(show(c.from))
                       )
                     })()}
                   </span>
@@ -2253,6 +2849,9 @@ function Detail({
                             if (e.key === 'Escape') {
                               e.preventDefault()
                               setD({ editing: null })
+                            } else if (isDoneKey(e)) {
+                              e.preventDefault()
+                              e.currentTarget.blur()
                             }
                           }}
                           onBlur={e => {
@@ -2267,9 +2866,9 @@ function Detail({
                         />
                       ) : (
                         <EditableValue
-                          text={
+                          text={friendly(
                             c.field in d.edits ? d.edits[c.field] : show(c.to)
-                          }
+                          )}
                           edited={c.field in d.edits}
                           canEdit={!revising}
                           onEdit={() => setD({ editing: c.field })}
@@ -2305,6 +2904,12 @@ function Detail({
           className={`${styles.detailAside} ${hasVerdict ? verdictClass(item) : ''}`}
           data-chat-scroll
         >
+          {found && (
+            <div className={styles.asideFound}>
+              <span className={styles.verdictKicker}>Source</span>
+              <span>{found}</span>
+            </div>
+          )}
           {item.verdict && (
             <div className={styles.verdictHead}>
               <span className={styles.verdictKicker}>Fable says</span>
@@ -2465,6 +3070,160 @@ const COMPUTED_TYPES = new Set([
   'button',
 ])
 
+// The icon the site's own card draws beside a field's value, so the grid
+// reads the way the card does (Bryce, 17 Sept 2026: "where we have icons
+// from the live site available for a field, let's put it next to it").
+// Field names in lower case; a page's own entry beats the shared one; a
+// few icons follow the value the way the card's do (src/app/<page>/card.ts).
+const SHARED_ICONS: Record<string, string> = {
+  location: 'pin',
+  'location (if in-person)': 'pin',
+  platform: 'computer',
+  'start date': 'calendar',
+  'start date (approximate)': 'calendar',
+  'end date': 'calendar',
+  'typical length': 'calendar',
+  deadline: 'paper',
+  'deadline type': 'paper',
+  'applications not yet open?': 'paper-closed',
+  'applications/registrations not yet open?': 'paper-closed',
+  focus: 'target',
+  host: 'person',
+  'host name': 'person',
+  'contact name': 'person',
+  'contact email': 'mail',
+  cost: 'tag',
+  status: 'activity',
+  organizer: 'author',
+  category: 'category',
+}
+const PAGE_ICONS: Record<string, Record<string, string>> = {
+  '/funding': { type: 'tag' },
+  '/founders': { type: 'tag' },
+  '/media-channels': { type: 'computer' },
+  '/self-study': { type: 'type', 'course type': 'type' },
+}
+
+function fieldIcon(
+  page: string | null,
+  name: string,
+  value: string
+): string | null {
+  const key = name.trim().toLowerCase()
+  // The card folds Mode into its location row: a screen for online, a pin
+  // for a place.
+  if (key === 'mode') {
+    return value === 'Online'
+      ? '/images/icons/computer.svg'
+      : '/images/icons/pin.svg'
+  }
+  if (key === 'entry bar') {
+    const bar = value.toLowerCase()
+    return ['low', 'mid', 'high'].includes(bar)
+      ? `/images/icons/entry-${bar}.svg`
+      : null
+  }
+  if (key === 'activity level') return activityIcon(value)
+  if (key === 'stipend') {
+    return value === 'No stipend'
+      ? '/images/icons/money-off.svg'
+      : '/images/icons/money.svg'
+  }
+  if (key === 'time commitment') {
+    return value === 'Part-time'
+      ? '/images/icons/timer-half.svg'
+      : '/images/icons/timer.svg'
+  }
+  if (key === 'accepting applications?') {
+    return isAcceptingApplications(value)
+      ? '/images/icons/form-check.svg'
+      : '/images/icons/form-pause.svg'
+  }
+  const file = PAGE_ICONS[page ?? '']?.[key] ?? SHARED_ICONS[key]
+  return file ? `/images/icons/${file}.svg` : null
+}
+
+/** A training or event Type as the site's card shows it: one pill per
+ *  type in the page's own colour (Bryce, 17 Sept 2026: "colour this the
+ *  same way as the site"). Undefined for every other field, which stays
+ *  plain text. */
+function typePills(
+  page: string | null,
+  name: string,
+  value: string
+): React.ReactNode | undefined {
+  if (name.trim().toLowerCase() !== 'type' || !value.trim()) return undefined
+  const color =
+    page === '/training'
+      ? trainingTypeColor
+      : page === '/events'
+        ? eventTypeColor
+        : null
+  if (!color) return undefined
+  const types = value
+    .split(',')
+    .map(t => t.trim())
+    .filter(Boolean)
+  return (
+    <span className={styles.typePills}>
+      {types.map(t => (
+        // The site's colour class names its variable: color-orange → --orange.
+        <span
+          key={t}
+          className={styles.typePill}
+          style={
+            {
+              '--pill': `var(--${color(t).replace(/^color-/, '')})`,
+            } as React.CSSProperties
+          }
+        >
+          {t}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+/** The site's icon for a field, or nothing when the site draws none. */
+function FieldIcon({
+  page,
+  name,
+  value,
+  size,
+}: {
+  page: string | null
+  name: string
+  value: string
+  size: 12 | 16
+}) {
+  const src = fieldIcon(page, name, value)
+  return src ? (
+    <Icon src={src} size={size} className={styles.fieldIcon} />
+  ) : null
+}
+
+/** Editors that fit in a grid cell; a textarea or a chip picker wants
+ *  the full row. */
+const NARROW_EDITORS = new Set([
+  'singleSelect',
+  'date',
+  'number',
+  'url',
+  'email',
+])
+const LONG_TEXT_TYPES = new Set(['multilineText', 'richText'])
+
+/** Nothing there: no value, an empty list, or an unticked box. */
+function isBlank(v: unknown): boolean {
+  return (
+    v === null ||
+    v === undefined ||
+    v === '' ||
+    v === false ||
+    (Array.isArray(v) && v.length === 0)
+  )
+}
+
 function Fields({
   item,
   fields,
@@ -2494,6 +3253,17 @@ function Fields({
   } else {
     Object.assign(all, fields)
   }
+  // What the page cannot do without and the record – with the edits typed
+  // here – still leaves empty (Bryce, 17 Sept 2026: two events went out
+  // with no Cost, "I had missed that"). Its name goes orange and bold where
+  // it sits; and it is listed even before the table's field list arrives.
+  const current: Record<string, unknown> = { ...all }
+  for (const [k, v] of Object.entries(d.edits)) {
+    current[k] = v === 'false' ? false : v
+  }
+  const missing = missingFields(item.page, current)
+  const missingSet = new Set(missing)
+  for (const k of missing) if (!(k in all)) all[k] = null
   const entries = Object.entries(all)
   const pick = (re: RegExp) => entries.filter(([k]) => re.test(k))
   const main = [...pick(NAME_KEYS), ...pick(URL_KEYS), ...pick(DESC_KEYS)]
@@ -2502,7 +3272,23 @@ function Fields({
     !HOUSEKEEPING.test(k) && !COMPUTED_TYPES.has(types.get(k) ?? '')
   const rest = entries.filter(e => !seen.has(e[0]) && editable(e))
   const revising = item.status === 'Revising' || readOnly
-  const row = ([k, v]: [string, unknown]) => {
+
+  // Name, link and description keep a row each, and so does every picture
+  // (an empty logo slot is the point). Every other filled field sits in a
+  // compact grid, and the empty ones fold into one line of names, each a
+  // click from being set (Bryce, 17 Sept 2026: "overwhelmed by all the
+  // fields"). An unticked box counts as empty; a field being edited, or
+  // edited to empty, stays in the grid with its "edited" mark.
+  const isPicture = ([k, v]: [string, unknown]) =>
+    types.get(k) === 'multipleAttachments' || isImageList(v)
+  const pictures = rest.filter(isPicture)
+  const details = rest.filter(e => !isPicture(e))
+  const inGrid = ([k, v]: [string, unknown]) =>
+    !isBlank(v) || k in d.edits || d.editing === k
+  const filled = details.filter(inGrid)
+  const unset = details.filter(e => !inGrid(e))
+
+  const valueOf = ([k, v]: [string, unknown], icon?: React.ReactNode) => {
     const info = infos.get(k)
     const isAttachment = types.get(k) === 'multipleAttachments'
     const empty =
@@ -2513,83 +3299,157 @@ function Fields({
     const edited = k in d.edits
     const value = edited ? d.edits[k] : show(v)
     const isUrl = typeof v === 'string' && /^https?:\/\//.test(v) && !edited
-    return (
-      <div key={k} className={styles.fieldRow}>
-        <span className={styles.label}>{k}</span>
-        <span className={styles.value}>
-          {d.editing === k ? (
-            <FieldEditor
-              info={info}
-              value={empty && !edited ? '' : value}
-              onSave={text => {
-                // Saving what was already there is not an edit.
-                const same = text === (empty ? '' : show(v))
+    if (d.editing === k) {
+      return (
+        <FieldEditor
+          info={info}
+          value={empty && !edited ? '' : value}
+          onSave={text => {
+            // Saving what was already there is not an edit.
+            const same = text === (empty ? '' : show(v))
+            const edits = { ...d.edits }
+            if (same) delete edits[k]
+            else edits[k] = text
+            setD({ editing: null, edits })
+          }}
+          onCancel={() => setD({ editing: null })}
+        />
+      )
+    }
+    if (isAttachment || isImageList(v)) {
+      return (
+        <ImageSlot
+          itemId={item.id}
+          field={k}
+          urls={isImageList(v) ? v : []}
+          canUpload={isAttachment && !revising}
+          onDone={urls => onImage(k, urls)}
+        />
+      )
+    }
+    if (info?.type === 'checkbox') {
+      const on = edited ? d.edits[k] === 'true' : v === true
+      return (
+        <>
+          {icon}
+          <label className={styles.check}>
+            <input
+              type="checkbox"
+              checked={on}
+              disabled={revising}
+              onChange={e => {
+                // Back to how it was is not an edit.
                 const edits = { ...d.edits }
-                if (same) delete edits[k]
-                else edits[k] = text
-                setD({ editing: null, edits })
+                if (e.target.checked === (v === true)) delete edits[k]
+                else edits[k] = e.target.checked ? 'true' : 'false'
+                setD({ edits })
               }}
-              onCancel={() => setD({ editing: null })}
             />
-          ) : isAttachment || isImageList(v) ? (
-            <ImageSlot
-              itemId={item.id}
-              field={k}
-              urls={isImageList(v) ? v : []}
-              canUpload={isAttachment && !revising}
-              onDone={urls => onImage(k, urls)}
-            />
-          ) : info?.type === 'checkbox' ? (
-            <label className={styles.check}>
-              <input
-                type="checkbox"
-                checked={edited ? d.edits[k] === 'true' : v === true}
-                disabled={revising}
-                onChange={e =>
-                  setD({
-                    edits: {
-                      ...d.edits,
-                      [k]: e.target.checked ? 'true' : 'false',
-                    },
-                  })
-                }
-              />
-              {(edited ? d.edits[k] === 'true' : v === true) ? 'Yes' : 'No'}
-              {edited && <em className={styles.edited}>edited</em>}
-            </label>
-          ) : empty && !edited ? (
-            <EditableValue
-              text="—"
-              muted
-              edited={false}
-              canEdit={!revising}
-              onEdit={() => setD({ editing: k })}
-            />
-          ) : (
-            <EditableValue
-              text={value}
-              href={isUrl ? (v as string) : undefined}
-              edited={edited}
-              canEdit={!revising && isEditable(v) && !isAttachment}
-              onEdit={() => setD({ editing: k })}
-            />
-          )}
-        </span>
+            {on ? 'Yes' : 'No'}
+            {edited && <em className={styles.edited}>edited</em>}
+          </label>
+        </>
+      )
+    }
+    if (empty && !edited) {
+      return (
+        <EditableValue
+          text="—"
+          icon={icon}
+          muted
+          edited={false}
+          canEdit={!revising}
+          onEdit={() => setD({ editing: k })}
+        />
+      )
+    }
+    return (
+      <EditableValue
+        text={friendly(value)}
+        href={isUrl ? (v as string) : undefined}
+        body={typePills(item.page, k, value)}
+        icon={icon}
+        edited={edited}
+        canEdit={!revising && isEditable(v) && !isAttachment}
+        onEdit={() => setD({ editing: k })}
+      />
+    )
+  }
+  const row = (e: [string, unknown]) => (
+    <div key={e[0]} className={styles.fieldRow}>
+      <span
+        className={`${styles.label} ${missingSet.has(e[0]) ? styles.labelMissing : ''}`}
+      >
+        {e[0]}
+      </span>
+      <span className={styles.value}>{valueOf(e)}</span>
+    </div>
+  )
+  const cell = (e: [string, unknown]) => {
+    const [k, v] = e
+    const text = k in d.edits ? d.edits[k] : show(v)
+    const type = types.get(k) ?? ''
+    const wide =
+      LONG_TEXT_TYPES.has(type) ||
+      text.length > 40 ||
+      (d.editing === k && !NARROW_EDITORS.has(type))
+    // The icon is part of the value, so a long value wraps beside it
+    // instead of dropping to the line below it.
+    const icon =
+      d.editing !== k ? (
+        <FieldIcon page={item.page} name={k} value={text} size={16} />
+      ) : undefined
+    return (
+      <div
+        key={k}
+        className={`${styles.fieldCell} ${wide ? styles.fieldWide : ''}`}
+      >
+        <span className={styles.label}>{k}</span>
+        <span className={styles.value}>{valueOf(e, icon)}</span>
       </div>
     )
   }
   return (
     <div className={styles.fields}>
       {main.map(row)}
-      {rest.length > 0 && (
-        <div className={styles.fieldsRest}>{rest.map(row)}</div>
+      {pictures.map(row)}
+      {filled.length > 0 && (
+        <div className={styles.fieldGrid}>{filled.map(cell)}</div>
+      )}
+      {unset.length > 0 && (
+        <div className={styles.unset}>
+          <span className={styles.label}>Not set</span>
+          {unset.map(([k]) => {
+            const box = infos.get(k)?.type === 'checkbox'
+            return (
+              <button
+                key={k}
+                type="button"
+                className={`${styles.unsetChip} ${missingSet.has(k) ? styles.unsetMissing : ''}`}
+                disabled={revising}
+                title={box ? `Tick ${k}` : `Fill in ${k}`}
+                onClick={() =>
+                  box
+                    ? setD({ edits: { ...d.edits, [k]: 'true' } })
+                    : setD({ editing: k })
+                }
+              >
+                <Icon src={ICON.plus} size={12} />
+                {k}
+              </button>
+            )
+          })}
+        </div>
       )}
     </div>
   )
 }
 
-/** The pictures in an attachment field, and a drop target: drag an image in
- *  or click to choose one, and it goes onto the record right away. */
+/** The pictures in an attachment field – each with its file name, pixel
+ *  size, bytes and type beside it – and a drop target: drag an image in or
+ *  click to choose one, and it goes onto the record right away. Undo puts
+ *  the picture it replaced back (the page held its bytes); Redo undoes
+ *  the Undo. */
 function ImageSlot({
   itemId,
   field,
@@ -2604,9 +3464,50 @@ function ImageSlot({
   onDone: (urls: string[]) => void
 }) {
   const [over, setOver] = useState(false)
-  const [busy, setBusy] = useState(false)
+  // What is on its way: a drop, or an undo/redo of one.
+  const [busy, setBusy] = useState<'upload' | 'undo' | 'redo' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const stashKey = `${itemId}/${field}`
+  const stash = imageStash.get(stashKey) ?? null
+  // Re-render after the stash (module state) changes.
+  const [, setTick] = useState(0)
+
+  /** One write to the field: a picture, or `clear` to empty it. What the
+   *  write takes off the record is stashed for the next Undo. */
+  const write = async (
+    body: Record<string, unknown>,
+    what: 'upload' | 'undo' | 'redo'
+  ) => {
+    setError(null)
+    setBusy(what)
+    try {
+      const res = await fetch(UPLOAD_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: itemId, field, ...body }),
+      })
+      const data = (await res.json()) as {
+        urls?: string[]
+        attachments?: AttachmentInfo[]
+        previous?: PreviousImage | null
+        error?: string
+      }
+      if (!res.ok || !data.urls)
+        throw new Error(data.error ?? `HTTP ${res.status}`)
+      rememberAttachments({ [field]: data.attachments ?? [] })
+      stashImage(stashKey, {
+        file: data.previous ?? null,
+        redo: what === 'undo',
+      })
+      setTick(t => t + 1)
+      onDone(data.urls)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
 
   const send = async (file: File) => {
     setError(null)
@@ -2618,9 +3519,9 @@ function ImageSlot({
       setError('Over 5 MB.')
       return
     }
-    setBusy(true)
+    let base64: string
     try {
-      const base64 = await new Promise<string>((resolve, reject) => {
+      base64 = await new Promise<string>((resolve, reject) => {
         const r = new FileReader()
         r.onload = () => {
           const s = String(r.result)
@@ -2629,25 +3530,26 @@ function ImageSlot({
         r.onerror = () => reject(new Error('Could not read the file.'))
         r.readAsDataURL(file)
       })
-      const res = await fetch(UPLOAD_API, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: itemId,
-          field,
-          filename: file.name,
-          contentType: file.type,
-          data: base64,
-        }),
-      })
-      const data = (await res.json()) as { urls?: string[]; error?: string }
-      if (!res.ok || !data.urls)
-        throw new Error(data.error ?? `HTTP ${res.status}`)
-      onDone(data.urls)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
+      return
+    }
+    await write(
+      { filename: file.name, contentType: file.type, data: base64 },
+      'upload'
+    )
+  }
+
+  /** Undo puts the stashed picture back (or empties the field when there
+   *  was none); Redo is the same move the other way. */
+  const undo = () => {
+    if (!stash) return
+    const what = stash.redo ? 'redo' : 'undo'
+    if (stash.file) {
+      const { filename, contentType, base64 } = stash.file
+      void write({ filename, contentType, data: base64 }, what)
+    } else {
+      void write({ clear: true }, what)
     }
   }
 
@@ -2677,19 +3579,33 @@ function ImageSlot({
       }
       {...dragProps}
     >
-      {urls.map(src => (
-        <span key={src} className={styles.thumbWrap}>
-          <Image
-            src={src}
-            alt=""
-            width={56}
-            height={56}
-            unoptimized
-            className={styles.thumb}
-          />
-          {over && <span className={styles.thumbOverlay}>Replace</span>}
-        </span>
-      ))}
+      {urls.map(src => {
+        const meta = attachmentMeta.get(src)
+        const line = meta ? attachmentMetaLine(meta) : ''
+        return (
+          <span key={src} className={styles.thumbItem}>
+            <span className={styles.thumbWrap}>
+              <Image
+                src={src}
+                alt=""
+                width={56}
+                height={56}
+                unoptimized
+                className={styles.thumb}
+              />
+              {over && <span className={styles.thumbOverlay}>Replace</span>}
+            </span>
+            {meta && (meta.filename || line) && (
+              <span className={styles.thumbDetails}>
+                {meta.filename && (
+                  <span className={styles.pictureName}>{meta.filename}</span>
+                )}
+                {line && <span className={styles.pictureMeta}>{line}</span>}
+              </span>
+            )}
+          </span>
+        )
+      })}
       {canUpload && (
         <span
           className={`${styles.dropZone} ${over ? styles.dropZoneOver : ''} ${
@@ -2703,7 +3619,11 @@ function ImageSlot({
             if (e.key === 'Enter') inputRef.current?.click()
           }}
         >
-          {busy ? 'Uploading…' : urls.length ? 'Replace' : 'Drop image'}
+          {busy === 'upload'
+            ? 'Uploading…'
+            : urls.length
+              ? 'Replace'
+              : 'Drop image'}
           <input
             ref={inputRef}
             type="file"
@@ -2716,6 +3636,29 @@ function ImageSlot({
             }}
           />
         </span>
+      )}
+      {canUpload && stash && (
+        <button
+          type="button"
+          className={`${styles.linkButton} ${styles.imageUndo}`}
+          disabled={busy !== null}
+          title={
+            stash.redo
+              ? 'Put the replacement back'
+              : stash.file
+                ? `Put ${stash.file.filename} back`
+                : 'Take the picture off again'
+          }
+          onClick={undo}
+        >
+          {busy === 'undo'
+            ? 'Undoing…'
+            : busy === 'redo'
+              ? 'Redoing…'
+              : stash.redo
+                ? 'Redo'
+                : 'Undo'}
+        </button>
       )}
       {!canUpload && urls.length === 0 && (
         <span className={styles.noImage}>none</span>
@@ -2849,17 +3792,29 @@ function FieldEditor({
       rows={value.length > 120 ? 5 : 2}
       autoFocus
       defaultValue={value}
-      onKeyDown={esc}
+      onKeyDown={e => {
+        esc(e)
+        if (isDoneKey(e)) {
+          e.preventDefault()
+          save(e.currentTarget.value)
+        }
+      }}
       onBlur={e => save(e.target.value)}
     />
   )
 }
 
 /** A value you can click to edit: a visible pencil, a hover tint, and a link
- *  that still opens when it is one. */
+ *  that still opens when it is one. The field's icon, the value, its
+ *  "edited" mark and the pencil run as one line of text, so a long value
+ *  wraps with the icon at its start and the pencil after its last word
+ *  (Bryce, 17 Sept 2026: the icon alone on the first line with the pencil
+ *  floating beside two lines of text was "ugly"). */
 function EditableValue({
   text,
   href,
+  body,
+  icon,
   edited,
   canEdit,
   muted,
@@ -2867,19 +3822,29 @@ function EditableValue({
 }: {
   text: string
   href?: string
+  /** Shown in place of the text (e.g. the site's coloured type pills). */
+  body?: React.ReactNode
+  /** The site's icon for the field, drawn before the value. */
+  icon?: React.ReactNode
   edited: boolean
   canEdit: boolean
   muted?: boolean
   onEdit: () => void
 }) {
-  const body = href ? (
+  const shown = href ? (
     <a href={href} target="_blank" rel="noreferrer">
       {text}
     </a>
   ) : (
-    <span className={muted ? styles.empty : undefined}>{text}</span>
+    (body ?? <span className={muted ? styles.empty : undefined}>{text}</span>)
   )
-  if (!canEdit) return body
+  if (!canEdit)
+    return (
+      <>
+        {icon}
+        {shown}
+      </>
+    )
   return (
     <span
       className={styles.editable}
@@ -2898,10 +3863,13 @@ function EditableValue({
         }
       }}
     >
-      {body}
-      {edited && <em className={styles.edited}>edited</em>}
-      <span className={styles.editHint}>
-        <Icon src={ICON.pencil} size={12} />
+      <span className={styles.editText}>
+        {icon}
+        {shown}
+        {edited && <em className={styles.edited}>edited</em>}
+        <span className={styles.editHint}>
+          <Icon src={ICON.pencil} size={12} />
+        </span>
       </span>
     </span>
   )
