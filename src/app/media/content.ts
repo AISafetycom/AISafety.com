@@ -12,13 +12,13 @@ export const BOILERPLATE = [
     id: 'one-line',
     label: 'One-line version',
     trackingName: 'one-line boilerplate',
-    text: 'AISafety.com is the resource hub for AI existential safety, run by a small nonprofit project that indexes things like events, funders, training programs, communities, and organizations that make up the field.',
+    text: 'AISafety.com is a nonprofit-driven resource hub for AI existential safety that aggregates the events, training programs, jobs, funders, organizations, and communities that make up the field.',
   },
   {
     id: 'full',
     label: 'Full version',
     trackingName: 'full boilerplate',
-    text: 'AISafety.com is the resource hub for AI existential safety, indexing things like events, funders, training programs, communities, and organizations that make up the field. Free and continuously updated, it is run by a small, independent nonprofit project that is grant-funded and volunteer-supported. Its goal is to connect people who want to work on AI safety with the right resources, multiplying the field’s efforts by cutting the time it takes to discover them. All AISafety.com content is free to reuse under a Creative Commons license. Learn more at aisafety.com/media or contact media@aisafety.com.',
+    text: 'AISafety.com is the centralized resource hub for AI existential safety that aggregates the events, training programs, jobs, funders, organizations, and communities that make up the field. Free and continuously updated, it is run as a small, independent nonprofit project that is grant-funded and volunteer-supported. Its goal is to connect people who want to work on AI safety with the right resources, multiplying the field’s efforts by cutting the time it takes to discover them. All AISafety.com content is free to reuse under a Creative Commons license. Learn more at aisafety.com/media or contact media@aisafety.com.',
   },
 ] as const
 
@@ -56,7 +56,7 @@ export const RECOMMENDED_ORGANIZATIONS = [
   {
     name: 'International AI Safety Report',
     url: 'https://internationalaisafetyreport.org',
-    note: 'expert consensus overview of capabilities and risks.',
+    note: 'expert consensus overview of AI capabilities and risks.',
   },
   {
     name: 'Future of Life Institute',
@@ -90,7 +90,7 @@ export const RECOMMENDED_ORGANIZATIONS = [
     note: 'government evaluation bodies, best suited to journalists covering a national angle.',
   },
   {
-    name: 'AISafety.com map',
+    name: 'AISafety.com field map',
     url: '/map',
     note: 'for everything else.',
   },

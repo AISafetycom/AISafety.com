@@ -188,8 +188,8 @@ export default async function MediaPage() {
             Writing about AI risk?
           </p>
           <p className="paragraph-small color-teal-300">
-            Skip to the reporter resources: where to find expert contacts, the
-            field map, open data, and the organizations we recommend for
+            Skip to the reporter resources: the field map, plain-language
+            explainers, open data, and the organizations we recommend for
             questions about AI risk itself.
           </p>
           <JumpLink
@@ -361,21 +361,13 @@ export default async function MediaPage() {
         </p>
         <div className={`paragraph-small ${styles.topics}`}>
           <div className={styles.topic}>
-            <p className="paragraph-default-bold color-white">
-              You need someone to talk to.
-            </p>
             <p>
               Our{' '}
               <Link href="/map" className={styles.inlineLink}>
                 field map
               </Link>{' '}
-              lists organizations by what they actually work on, so you can find
-              the lab, policy shop or research group whose work bears on your
-              story rather than emailing the three names that always get quoted.
-            </p>
-            <p>
-              If you are looking for a researcher working on a specific
-              question, email us and we will point you to people.
+              lists organizations, programs, and projects by what they work on,
+              so you can find the one whose work bears on your story.
             </p>
           </div>
 
@@ -385,16 +377,16 @@ export default async function MediaPage() {
             </p>
             <p>
               <a
-                href="https://aisafety.info"
+                href={withUtm('https://aisafety.info', 'Media')}
                 target="_blank"
                 rel="noopener noreferrer"
                 className={styles.inlineLink}
               >
                 AISafety.info
               </a>{' '}
-              answers the standard questions (what “alignment” means, why anyone
-              thinks this is urgent, what the main disagreements are) without
-              assuming a technical background.
+              answers the standard questions – what “alignment” means, why
+              researchers think this is urgent, what the main disagreements are
+              – without assuming a technical background.
             </p>
             <p>
               Our{' '}
@@ -411,35 +403,9 @@ export default async function MediaPage() {
             </p>
             <p>
               This field disagrees with itself, loudly, about timelines, about
-              whether existential risk is the right frame, and about what
-              regulation should do. Our directories are deliberately broad, and
-              a listing is not an endorsement.
-            </p>
-          </div>
-
-          <div className={styles.topic}>
-            <p className="paragraph-default-bold color-white">
-              You are writing about money, jobs or influence.
-            </p>
-            <p>
-              Our{' '}
-              <Link href="/funding" className={styles.inlineLink}>
-                funding
-              </Link>{' '}
-              and{' '}
-              <Link href="/jobs" className={styles.inlineLink}>
-                jobs
-              </Link>{' '}
-              directories are the closest thing to a public record of where
-              resources in this field are going and who is hiring for what.
-            </p>
-            <p>
-              Our{' '}
-              <Link href="/donation-guide" className={styles.inlineLink}>
-                donation guide
-              </Link>{' '}
-              walks donors through where a gift of $100 or $100,000 does the
-              most good in AI safety.
+              which research agendas are most promising for reducing existential
+              risk, and about what regulation should do. Our directories are
+              deliberately broad, and a listing is not an endorsement.
             </p>
           </div>
 
@@ -448,9 +414,9 @@ export default async function MediaPage() {
               Anything here is yours to use.
             </p>
             <p>
-              Cite us or don’t. If you need a cut of our data that the site
-              doesn’t give you – a list filtered a particular way, a historical
-              snapshot – ask and we will do our best to share it.
+              Citing us is optional. If you need a cut of our data that the site
+              doesn’t give you (e.g. a list filtered a particular way or a
+              historical snapshot) ask and we will do our best to share it.
             </p>
             <p>
               Every directory is also open data: the{' '}
@@ -480,7 +446,7 @@ export default async function MediaPage() {
             After that, the right contact depends on the story. Several
             organizations have dedicated press contacts and are used to working
             with journalists on deadline. For specialized questions about a
-            particular research area, funding or a specific country, our map of
+            particular research area, funding, or a specific country, our map of
             the field lists organizations by category, and we are happy to point
             you to the right one.
           </p>
