@@ -148,12 +148,10 @@ export default async function MediaPage() {
       <h1 className="padding-top-56px padding-bottom-40px">Press and media</h1>
 
       <h2 className="width-9-col-narrow padding-bottom-56px">
-        AISafety.com is a nonprofit resource hub for AI existential safety. This
-        page has{' '}
-        <span className="color-light-teal">
-          what you need to write about us, and what you need to write about the
-          field.
-        </span>
+        AISafety.com is a{' '}
+        <span className="color-light-teal">nonprofit resource hub</span> for AI
+        existential safety. This page has what you need to write about us, and
+        what you need to write about the field.
       </h2>
 
       <div className={`${styles.entryCards} flex-col-mobile`}>
