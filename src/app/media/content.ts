@@ -82,7 +82,7 @@ export const COVERAGE_MISTAKES = [
   },
 ] as const
 
-/** Where the weekly Press Shots job uploads the screenshots, the zip and
+/** Where the weekly Media Shots job uploads the screenshots, the zip and
  *  manifest.json (docs/architecture.md, "Press kit"). Public files at fixed
  *  addresses in the site's Vercel Blob store, so a refresh needs no deploy.
  *  The logos never change, so they live in public/press. */

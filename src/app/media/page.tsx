@@ -39,7 +39,7 @@ const DIRECTORIES = [
 ] as const
 
 /** When the press kit was last refreshed and how big the zip is, from the
- *  manifest the weekly Press Shots job uploads beside the files. */
+ *  manifest the weekly Media Shots job uploads beside the files. */
 async function getPressKitInfo(): Promise<{
   updatedAt: string
   zipBytes: number
