@@ -26,7 +26,8 @@ export const metadata: Metadata = {
 }
 
 /** Directory counts shown under Key facts, in this order. Each is the live
- *  number on that page (the same one the nav badge shows). */
+ *  number on that page (the same one the nav badge shows). Every resource
+ *  page with a count is here; the donation guide is prose, so it has none. */
 const DIRECTORIES = [
   { path: '/jobs', label: 'Jobs listed' },
   { path: '/map', label: 'Organizations on the field map' },
@@ -36,6 +37,9 @@ const DIRECTORIES = [
   { path: '/funding', label: 'Funding sources' },
   { path: '/media-channels', label: 'Media channels indexed' },
   { path: '/advisors', label: 'Advisors' },
+  { path: '/self-study', label: 'Self-study resources' },
+  { path: '/projects', label: 'Volunteer projects' },
+  { path: '/founders', label: 'Founder toolkit resources' },
 ] as const
 
 /** When the press kit was last refreshed and how big the zip is, from the
