@@ -18,13 +18,13 @@ export const BOILERPLATE = [
     id: 'full',
     label: 'Full version',
     trackingName: 'full boilerplate',
-    text: 'AISafety.com is the resource hub for AI existential safety, indexing things like events, funders, training programs, communities, and organizations that make up the field. Free and continuously updated, it is run by a small, independent nonprofit project that is grant-funded, largely volunteer-driven, and takes no position on any lab or policy. Its goal is to connect people who want to work on AI safety with the right resources, multiplying the field’s efforts by cutting the time it takes to find them. All AISafety.com content is free to reuse under a Creative Commons license. Learn more at aisafety.com/media or contact media@aisafety.com.',
+    text: 'AISafety.com is the resource hub for AI existential safety, indexing things like events, funders, training programs, communities, and organizations that make up the field. Free and continuously updated, it is run by a small, independent nonprofit project that is grant-funded and volunteer-supported. Its goal is to connect people who want to work on AI safety with the right resources, multiplying the field’s efforts by cutting the time it takes to discover them. All AISafety.com content is free to reuse under a Creative Commons license. Learn more at aisafety.com/media or contact media@aisafety.com.',
   },
 ] as const
 
-/** The core team: a short bio that can be quoted as is and, where the person
- *  takes press questions, what they can speak to. Same people, order and
- *  photos as the about page, minus plex, who is not press-facing. */
+/** The media contacts: a short bio that can be quoted as is, and what each
+ *  can speak to. In the about page's order, with its photos. The rest of the
+ *  team is on the about page, which the section links to. */
 export const PEOPLE: {
   name: string
   role: string
@@ -47,12 +47,6 @@ export const PEOPLE: {
     bio: 'Bryce Robertson manages AISafety.com, maintaining the database of AI safety resources and running the corresponding newsletters. He moved into AI safety from video production after GPT-4’s release, and now spends his time on the question the site exists to answer: How does someone who wants to help actually get started?',
     speaksTo:
       'Typical paths people follow when entering the field, problems faced by newcomers.',
-  },
-  {
-    name: 'Melissa Samworth',
-    role: 'Product design, front-end development',
-    photo: '/images/melissa.png',
-    bio: 'Melissa Samworth leads product strategy, design, and front-end development at AISafety.com, which she joined in 2023.',
   },
 ]
 

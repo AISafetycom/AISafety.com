@@ -287,17 +287,13 @@ export default async function MediaPage() {
         </dl>
       </section>
 
-      {/* The team */}
-      <section id="team" className={styles.section}>
-        <h2>The AISafety.com team</h2>
+      {/* Media contacts */}
+      <section id="media-contacts" className={styles.section}>
+        <h2>Media contacts</h2>
         <p className={`paragraph-small ${styles.lead}`}>
-          Our team speaks about the AI safety field and about our own work. We
-          do not speak on behalf of the organizations we list. Everyone is on
-          the{' '}
-          <Link href="/about#team" className={styles.inlineLink}>
-            about page
-          </Link>
-          . To reach any of us, email{' '}
+          Our media contacts speak about the AI safety field and about our own
+          work. They do not speak on behalf of the organizations we list. To
+          reach either of them, email{' '}
           <PressLink
             href={mailto}
             action="contact"
@@ -338,6 +334,13 @@ export default async function MediaPage() {
             </div>
           ))}
         </div>
+        <p className={`paragraph-small ${styles.afterPeople}`}>
+          Learn more about the AISafety.com team on our{' '}
+          <Link href="/about#team" className={styles.inlineLink}>
+            about page
+          </Link>
+          .
+        </p>
       </section>
 
       {/* Reporter resources */}

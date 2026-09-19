@@ -199,6 +199,11 @@
   gap: 16px;
 }
 
+.afterPeople {
+  padding-top: 40px;
+  color: var(--teal-300);
+}
+
 .person p {
   color: var(--teal-300);
 }
