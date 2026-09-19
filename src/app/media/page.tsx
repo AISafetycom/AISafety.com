@@ -10,6 +10,7 @@ import {
   COVERAGE_MISTAKES,
   LOGOS,
   PEOPLE,
+  PRESS_BLOB,
   PRESS_EMAIL,
   PRESS_KIT_ZIP,
   SCREENSHOTS,
@@ -36,6 +37,39 @@ const DIRECTORIES = [
   { path: '/media-channels', label: 'Media channels indexed' },
   { path: '/advisors', label: 'Advisors' },
 ] as const
+
+/** When the press kit was last refreshed and how big the zip is, from the
+ *  manifest the weekly Press Shots job uploads beside the files. */
+async function getPressKitInfo(): Promise<{
+  updatedAt: string
+  zipBytes: number
+} | null> {
+  try {
+    const response = await fetch(`${PRESS_BLOB}/manifest.json`, {
+      next: { revalidate: 3600 },
+    })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const data: unknown = await response.json()
+    if (
+      !data ||
+      typeof data !== 'object' ||
+      typeof (data as { updatedAt?: unknown }).updatedAt !== 'string' ||
+      typeof (data as { zipBytes?: unknown }).zipBytes !== 'number'
+    ) {
+      throw new Error('unexpected manifest shape')
+    }
+    const { updatedAt, zipBytes } = data as {
+      updatedAt: string
+      zipBytes: number
+    }
+    return { updatedAt, zipBytes }
+  } catch (error) {
+    // Recoverable: the files are still there, the page just can't say when
+    // they were refreshed or how big the zip is.
+    console.warn(`Press kit manifest unavailable (${error})`)
+    return null
+  }
+}
 
 /** Words in a block of copy, shown beside each boilerplate version. */
 function wordCount(text: string): number {
@@ -76,7 +110,7 @@ const ORGANIZATION_SCHEMA = {
 }
 
 export default async function MediaPage() {
-  const counts = await fetchAllCounts()
+  const [counts, kit] = await Promise.all([fetchAllCounts(), getPressKitInfo()])
   const news = [...NEWS].sort((a, b) => b.date.localeCompare(a.date))
   const announcements = news.filter(n => n.kind === 'announcement')
   const coverage = news.filter(n => n.kind === 'coverage')
@@ -473,8 +507,9 @@ export default async function MediaPage() {
 
         <h3 className={styles.subhead}>Screenshots</h3>
         <p className={`paragraph-small ${styles.lead}`}>
-          Current pages at 2× (2880 × 1800 pixels). Click one to open the full
-          size file.
+          Re-shot from the live site every week
+          {kit ? `, last on ${formatDate(kit.updatedAt.slice(0, 10))}` : ''}.
+          Each is 2880 × 1800 pixels; click one to open the full-size file.
         </p>
         <div className={styles.shotGrid}>
           {SCREENSHOTS.map(shot => (
@@ -483,13 +518,14 @@ export default async function MediaPage() {
                 href={shot.file}
                 action="download"
                 label={`Opened screenshot (${shot.id})`}
+                newTab
               >
                 <Image
-                  src={shot.file}
+                  src={shot.thumb}
                   alt={`AISafety.com ${shot.label.toLowerCase()} screenshot`}
-                  width={2880}
-                  height={1800}
-                  sizes="(max-width: 991px) 100vw, 280px"
+                  width={1440}
+                  height={900}
+                  unoptimized
                 />
               </PressLink>
               <span className="paragraph-xs color-teal-300">{shot.label}</span>
@@ -503,9 +539,9 @@ export default async function MediaPage() {
             action="download"
             label="Downloaded press kit"
             className="button-primary"
-            download
           >
-            Download everything (zip, 1.7 MB)
+            Download everything (zip
+            {kit ? `, ${(kit.zipBytes / 1_000_000).toFixed(1)} MB` : ''})
           </PressLink>
           <span className="paragraph-xs color-teal-300">
             All logos and screenshots above, in one file.

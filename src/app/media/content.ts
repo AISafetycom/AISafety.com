@@ -82,8 +82,15 @@ export const COVERAGE_MISTAKES = [
   },
 ] as const
 
-/** Files in public/press. The zip holds all of them. */
-export const PRESS_KIT_ZIP = '/press/aisafety-com-press-kit.zip'
+/** Where the weekly Press Shots job uploads the screenshots, the zip and
+ *  manifest.json (docs/architecture.md, "Press kit"). Public files at fixed
+ *  addresses in the site's Vercel Blob store, so a refresh needs no deploy.
+ *  The logos never change, so they live in public/press. */
+export const PRESS_BLOB =
+  'https://vfnmdozpctvdobh7.public.blob.vercel-storage.com/press'
+
+/** `?download=1` makes Blob serve it as a download rather than in the tab. */
+export const PRESS_KIT_ZIP = `${PRESS_BLOB}/aisafety-com-press-kit.zip?download=1`
 
 export const LOGOS = [
   {
@@ -126,20 +133,25 @@ export const LOGOS = [
   },
 ] as const
 
+/** `file` is the full 2880 x 1800 PNG, `thumb` the 1440 x 900 JPEG shown on
+ *  the page. Both are re-shot from the live site every week. */
 export const SCREENSHOTS = [
   {
     id: 'field-map',
     label: 'Field map',
-    file: '/press/aisafety-com-screenshot-field-map.png',
+    file: `${PRESS_BLOB}/aisafety-com-screenshot-field-map.png`,
+    thumb: `${PRESS_BLOB}/aisafety-com-screenshot-field-map-thumb.jpg`,
   },
   {
     id: 'home',
     label: 'Homepage',
-    file: '/press/aisafety-com-screenshot-home.png',
+    file: `${PRESS_BLOB}/aisafety-com-screenshot-home.png`,
+    thumb: `${PRESS_BLOB}/aisafety-com-screenshot-home-thumb.jpg`,
   },
   {
     id: 'jobs',
     label: 'Jobs board',
-    file: '/press/aisafety-com-screenshot-jobs.png',
+    file: `${PRESS_BLOB}/aisafety-com-screenshot-jobs.png`,
+    thumb: `${PRESS_BLOB}/aisafety-com-screenshot-jobs-thumb.jpg`,
   },
 ] as const
