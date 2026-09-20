@@ -8,9 +8,12 @@ export default function Footer() {
   return (
     <footer className="margin-top-192px padding-bottom-24px">
       <div className="container-default">
-        <div className="flex flex-col-mobile gap-56px margin-bottom-128px">
-          {/* First footer column */}
-          <div className="width-6-col">
+        <div className="flex flex-col-mobile justify-between gap-56px margin-bottom-128px">
+          {/* First footer column. The text inside is 4 grid columns wide, so
+              the column itself is 4 wide too. The link columns sit at the
+              right edge at their natural width, so whatever the grid has left
+              over becomes air between this text and "Help us out". */}
+          <div className="width-4-col">
             <div className="width-4-col">
               <Image
                 src="/images/logo.svg"
@@ -31,61 +34,82 @@ export default function Footer() {
             </div>
           </div>
 
-          {/* Second footer column */}
-          <div className="width-3-col">
-            <h4 className="paragraph-small-bold padding-bottom-16px">
-              Help us out
-            </h4>
-            <div
-              className={`paragraph-small flex flex-col gap-8px opacity-80 ${styles.links}`}
-            >
-              <FooterLink
-                href="https://airtable.com/appF8XfZUGXtfi40E/pagndDvdya1DSqoxN/form"
-                section="Help us out"
-                label="Suggest a correction"
-              />
-              <FooterLink
-                href="https://airtable.com/appF8XfZUGXtfi40E/pageXZp18w3Sqm1Z7/form"
-                section="Help us out"
-                label="Give anonymous feedback"
-                airtablePrefillField="Page"
-              />
-              <FooterLink
-                href="https://www.every.org/aisafetycom?donateTo=aisafetycom#/donate/card"
-                section="Help us out"
-                label="Donate"
-              />
-              <FooterLink
-                href="/media"
-                section="Help us out"
-                label="Press and media"
-              />
+          <div className="flex flex-col-mobile gap-56px">
+            {/* Second footer column */}
+            <div>
+              <h4 className="paragraph-small-bold padding-bottom-16px">
+                Help us out
+              </h4>
+              <div
+                className={`paragraph-small flex flex-col gap-8px opacity-80 ${styles.links}`}
+              >
+                <FooterLink
+                  href="https://airtable.com/appF8XfZUGXtfi40E/pagndDvdya1DSqoxN/form"
+                  section="Help us out"
+                  label="Suggest a correction"
+                />
+                <FooterLink
+                  href="https://airtable.com/appF8XfZUGXtfi40E/pageXZp18w3Sqm1Z7/form"
+                  section="Help us out"
+                  label="Give anonymous feedback"
+                  airtablePrefillField="Page"
+                />
+                <FooterLink
+                  href="https://www.every.org/aisafetycom?donateTo=aisafetycom#/donate/card"
+                  section="Help us out"
+                  label="Donate"
+                />
+              </div>
             </div>
-          </div>
 
-          {/* Third footer column */}
-          <div className="width-3-col">
-            <h4 className="paragraph-small-bold padding-bottom-16px">
-              Newsletters
-            </h4>
-            <div
-              className={`paragraph-small flex flex-col gap-8px opacity-80 ${styles.links}`}
-            >
-              <FooterLink
-                href="https://aisafetyeventsandtraining.substack.com/"
-                section="Newsletters"
-                label="AI Safety Events & Training"
-              />
-              <FooterLink
-                href="https://aisafetyfunding.substack.com/"
-                section="Newsletters"
-                label="AI Safety Funding"
-              />
-              <FooterLink
-                href="https://aisafetycom.substack.com/"
-                section="Newsletters"
-                label="AISafety.com Updates"
-              />
+            {/* Third footer column */}
+            <div>
+              <h4 className="paragraph-small-bold padding-bottom-16px">
+                Newsletters
+              </h4>
+              <div
+                className={`paragraph-small flex flex-col gap-8px opacity-80 ${styles.links}`}
+              >
+                <FooterLink
+                  href="https://aisafetyeventsandtraining.substack.com/"
+                  section="Newsletters"
+                  label="AI Safety Events & Training"
+                />
+                <FooterLink
+                  href="https://aisafetyfunding.substack.com/"
+                  section="Newsletters"
+                  label="AI Safety Funding"
+                />
+                <FooterLink
+                  href="https://aisafetycom.substack.com/"
+                  section="Newsletters"
+                  label="AISafety.com Updates"
+                />
+              </div>
+            </div>
+
+            {/* Fourth footer column: pages about the project itself, for
+                audiences (press, developers) that "Help us out" never fit.
+                No About us link: the first column's button already goes
+                there. */}
+            <div>
+              <h4 className="paragraph-small-bold padding-bottom-16px">
+                About
+              </h4>
+              <div
+                className={`paragraph-small flex flex-col gap-8px opacity-80 ${styles.links}`}
+              >
+                <FooterLink
+                  href="/media"
+                  section="About"
+                  label="Press and media"
+                />
+                <FooterLink
+                  href="/developers"
+                  section="About"
+                  label="Data API"
+                />
+              </div>
             </div>
           </div>
         </div>
