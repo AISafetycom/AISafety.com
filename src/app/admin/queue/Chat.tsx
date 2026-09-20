@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import Icon from '@/components/Icon'
 import type { AgentInfo, QueueItem } from '@/lib/admin/queue'
 import styles from './queue.module.css'
 
@@ -14,6 +15,9 @@ import styles from './queue.module.css'
 // is there again when the item is reopened. Changes to OTHER records Fable
 // makes itself and says so; wording for this item's own record arrives in an
 // ```edits block, applied on the page, and reaches Airtable with Accept.
+// Files go with a message too (the clip, a paste or a drop – 20 Sept 2026,
+// Bryce: "I want to be able to attach things (e.g. images) to the Fable
+// chat"): they are saved on the Mac beside the thread and Fable opens them.
 
 // A reply's parts: its prose, what it was doing at that point (shown only
 // while it is still answering – one line that changes; Bryce, 14 Sept 2026:
@@ -24,10 +28,35 @@ type Part =
   | { t: 'tool'; label: string }
   | { t: 'note'; label: string }
 
+/** A file sent with a message. Saved on the Mac under the item's thread;
+ *  the page fetches it back (POST /chat/file) for the thumbnail. `url` is
+ *  set only on the page that sent it, until the history is re-read. */
+interface Attachment {
+  name: string
+  type: string
+  size: number
+  file: string
+  url?: string
+}
+
+/** A file picked, pasted or dropped, waiting to go with the next message. */
+interface Pending {
+  file: File
+  name: string
+  type: string
+  size: number
+  /** An object URL for the thumbnail (pictures only). */
+  url?: string
+}
+
+const MAX_FILES = 8
+const MAX_FILE_BYTES = 15 * 1024 * 1024
+
 interface Msg {
   role: 'you' | 'fable' | 'error'
   text?: string
   parts?: Part[]
+  attachments?: Attachment[]
   at: string
   /** e.g. "Fable is at its usage limit until … – this reply is from Opus" */
   note?: string
@@ -178,7 +207,13 @@ export default function Chat({
   // a note) and this goes as soon as its stream ends – like the Claude Code
   // app (Bryce, 15 Sept 2026: "make it interrupt it"). Several in a row go
   // in order.
-  const [queued, setQueued] = useState<string[]>([])
+  const [queued, setQueued] = useState<{ text: string; files: Pending[] }[]>([])
+  // Files waiting to go with the next message, and whether one is being
+  // dragged over the panel right now.
+  const [files, setFiles] = useState<Pending[]>([])
+  const [dragging, setDragging] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const dragDepth = useRef(0)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
   // The page's current values, readable from inside stream handlers.
@@ -246,6 +281,16 @@ export default function Chat({
         cache: 'no-store',
       }),
     [agent.port, agent.token, item.id]
+  )
+
+  /** A file from an earlier message, back from the Mac. */
+  const fetchFile = useCallback(
+    async (file: string) => {
+      const res = await call('/chat/file', { file })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      return res.blob()
+    },
+    [call]
   )
 
   const loadHistory = useCallback(async () => {
@@ -351,6 +396,69 @@ export default function Chat({
     inputRef.current?.focus()
   }
 
+  /** Files picked with the clip, pasted into the box or dropped on the
+   *  panel: shown as chips until the next message takes them. */
+  const addFiles = (list: Iterable<File>) => {
+    const next = [...files]
+    const problems: string[] = []
+    for (const f of Array.from(list)) {
+      if (next.length >= MAX_FILES) {
+        problems.push(`Up to ${MAX_FILES} files per message.`)
+        break
+      }
+      if (f.size > MAX_FILE_BYTES) {
+        problems.push(`${f.name} is over 15 MB.`)
+        continue
+      }
+      next.push({
+        file: f,
+        name: f.name || 'image.png',
+        type: f.type,
+        size: f.size,
+        url: f.type.startsWith('image/') ? URL.createObjectURL(f) : undefined,
+      })
+    }
+    setFiles(next)
+    setError(problems.length ? problems.join(' ') : null)
+    inputRef.current?.focus()
+  }
+
+  const dropFile = (i: number) => {
+    setFiles(cur => {
+      const f = cur[i]
+      if (f?.url) URL.revokeObjectURL(f.url)
+      return cur.filter((_, j) => j !== i)
+    })
+  }
+
+  // A file dragged over the panel: a dashed frame says it can be dropped.
+  // Enter/leave fire for every child, so a depth count tells the real leave.
+  const hasFiles = (e: React.DragEvent) =>
+    Array.from(e.dataTransfer.types).includes('Files')
+  const onDragEnter = (e: React.DragEvent) => {
+    if (!hasFiles(e)) return
+    e.preventDefault()
+    dragDepth.current++
+    setDragging(true)
+  }
+  const onDragOver = (e: React.DragEvent) => {
+    if (!hasFiles(e)) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+  }
+  const onDragLeave = (e: React.DragEvent) => {
+    if (!hasFiles(e)) return
+    dragDepth.current = Math.max(0, dragDepth.current - 1)
+    if (dragDepth.current === 0) setDragging(false)
+  }
+  const onDrop = (e: React.DragEvent) => {
+    if (!hasFiles(e)) return
+    e.preventDefault()
+    dragDepth.current = 0
+    setDragging(false)
+    addFiles(e.dataTransfer.files)
+  }
+
   const handle = (ev: Event) => {
     switch (ev.type) {
       case 'text':
@@ -414,35 +522,55 @@ export default function Chat({
    *  item at a time). */
   const submit = () => {
     const typed = text.trim()
-    if (!typed && !quote) return
+    if (!typed && !quote && files.length === 0) return
     // The quote goes first, as a markdown quote, then what was typed.
     const msg = quote
       ? '> ' + quote.replace(/\n+/g, '\n> ') + (typed ? '\n\n' + typed : '')
       : typed
+    const going = files
     setText('')
     setQuote(null)
+    setFiles([])
     if (inputRef.current) inputRef.current.style.height = 'auto'
     if (busy || pending) {
-      setQueued(q => [...q, msg])
+      setQueued(q => [...q, { text: msg, files: going }])
       // The Mac stops the call being written; its stream ends with what
       // was written so far, and the effect below sends this one.
       void call('/chat/interrupt', {}).catch(() => {})
       return
     }
-    void deliver(msg)
+    void deliver(msg, going)
   }
 
-  const deliver = async (msg: string) => {
+  const deliver = async (msg: string, going: Pending[]) => {
     setError(null)
     setBusy(true)
+    const sent = asSent(going)
     setMessages(m => [
       ...(m ?? []),
-      { role: 'you', text: msg, at: new Date().toISOString() },
+      {
+        role: 'you',
+        text: msg,
+        at: new Date().toISOString(),
+        ...(sent.length ? { attachments: sent } : {}),
+      },
     ])
     seenRef.current = (seenRef.current ?? 0) + 1
     setLive([])
     try {
-      const res = await call('/chat', { message: msg })
+      // The files go as base64 beside the words; the Mac saves them and
+      // lists their paths under the message for Fable.
+      const attachments = await Promise.all(
+        going.map(async f => ({
+          name: f.name,
+          type: f.type,
+          data: await base64Of(f.file),
+        }))
+      )
+      const res = await call(
+        '/chat',
+        attachments.length ? { message: msg, attachments } : { message: msg }
+      )
       if (!res.ok || !res.body) {
         const data = (await res.json().catch(() => ({}))) as { error?: string }
         throw new Error(data.error ?? `HTTP ${res.status}`)
@@ -487,7 +615,7 @@ export default function Chat({
     if (busy || pending || queued.length === 0) return
     const [next, ...rest] = queued
     setQueued(rest)
-    void deliverRef.current(next)
+    void deliverRef.current(next.text, next.files)
   }, [busy, pending, queued])
 
   const startOver = async () => {
@@ -512,14 +640,24 @@ export default function Chat({
   const hasThread = thread.length > 0 || live !== null
 
   return (
-    <div className={styles.chat}>
+    <div
+      className={`${styles.chat}${dragging ? ` ${styles.chatDropping}` : ''}`}
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
       {hasThread && (
         <div className={styles.chatThread}>
           {thread.map((m, i) =>
             m.role === 'you' ? (
               <div key={i} className={styles.chatMsg}>
                 <span className={styles.chatWho}>You</span>
-                <YouText text={m.text ?? ''} />
+                <YouText
+                  text={m.text ?? ''}
+                  attachments={m.attachments}
+                  fetchFile={fetchFile}
+                />
               </div>
             ) : m.role === 'error' ? (
               <p key={i} className={styles.chatError}>
@@ -570,7 +708,7 @@ export default function Chat({
               className={`${styles.chatMsg} ${styles.chatQueued}`}
             >
               <span className={styles.chatWho}>You · sending</span>
-              <YouText text={q} />
+              <YouText text={q.text} attachments={asSent(q.files)} />
               <button
                 type="button"
                 className={styles.chatLink}
@@ -609,30 +747,84 @@ export default function Chat({
             </button>
           </div>
         )}
-        <textarea
-          ref={inputRef}
-          className={styles.chatInput}
-          rows={1}
-          placeholder={
-            quote
-              ? 'Your reply to that…'
-              : thread.length
-                ? 'Reply…'
-                : 'Ask Fable, or say what should change…'
-          }
-          value={text}
-          onChange={e => setText(e.target.value)}
-          onInput={e => grow(e.currentTarget)}
-          onKeyDown={e => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              submit()
-            } else if (e.key === 'Escape' && quote) {
-              e.preventDefault()
-              setQuote(null)
+        {files.length > 0 && (
+          <div className={styles.chatFiles}>
+            {files.map((f, i) => (
+              <span key={i} className={styles.chatFileChip} title={f.name}>
+                {f.url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={f.url} alt="" className={styles.chatFileThumb} />
+                ) : (
+                  <Icon src="/images/icons/paper.svg" size={16} />
+                )}
+                <span className={styles.chatFileName}>{f.name}</span>
+                <button
+                  type="button"
+                  className={styles.chatQuoteX}
+                  aria-label={`Remove ${f.name}`}
+                  onClick={() => dropFile(i)}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div className={styles.chatBox}>
+          <textarea
+            ref={inputRef}
+            className={styles.chatInput}
+            rows={1}
+            placeholder={
+              quote
+                ? 'Your reply to that…'
+                : files.length
+                  ? 'Anything to add? Enter sends…'
+                  : thread.length
+                    ? 'Reply…'
+                    : 'Ask Fable, or say what should change…'
             }
-          }}
-        />
+            value={text}
+            onChange={e => setText(e.target.value)}
+            onInput={e => grow(e.currentTarget)}
+            onPaste={e => {
+              // A screenshot on the clipboard lands as a file.
+              const pasted = e.clipboardData?.files
+              if (pasted && pasted.length > 0) {
+                e.preventDefault()
+                addFiles(pasted)
+              }
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                submit()
+              } else if (e.key === 'Escape' && quote) {
+                e.preventDefault()
+                setQuote(null)
+              }
+            }}
+          />
+          <input
+            ref={fileRef}
+            type="file"
+            multiple
+            hidden
+            onChange={e => {
+              if (e.target.files) addFiles(e.target.files)
+              e.target.value = ''
+            }}
+          />
+          <button
+            type="button"
+            className={styles.chatAttach}
+            aria-label="Attach a file"
+            title="Attach a file – or paste or drop one here"
+            onClick={() => fileRef.current?.click()}
+          >
+            <Icon src="/images/icons/paperclip.svg" size={16} />
+          </button>
+        </div>
         {thread.length > 0 && (
           // Always there once a thread exists, so the panel's foot keeps
           // its height while Fable answers (the box looked cut off at the
@@ -656,8 +848,16 @@ export default function Chat({
 }
 
 /** A message of Bryce's: a quoted passage (lines starting "> ") as a
- *  quote block, then his words. */
-function YouText({ text }: { text: string }) {
+ *  quote block, then his words, then the files that went with it. */
+function YouText({
+  text,
+  attachments,
+  fetchFile,
+}: {
+  text: string
+  attachments?: Attachment[]
+  fetchFile?: (file: string) => Promise<Blob>
+}) {
   const lines = text.split('\n')
   const quoted: string[] = []
   let i = 0
@@ -674,8 +874,107 @@ function YouText({ text }: { text: string }) {
         </blockquote>
       )}
       {rest}
+      {attachments && attachments.length > 0 && (
+        <div className={styles.chatSent}>
+          {attachments.map((a, i) => (
+            <Sent key={i} att={a} fetchFile={fetchFile} />
+          ))}
+        </div>
+      )}
     </div>
   )
+}
+
+/** One file in the thread: a picture as a thumbnail that opens full size
+ *  in a new tab, anything else as a chip with its name that opens the
+ *  file. A file from an earlier visit is fetched back from the Mac. */
+function Sent({
+  att,
+  fetchFile,
+}: {
+  att: Attachment
+  fetchFile?: (file: string) => Promise<Blob>
+}) {
+  const isImage = att.type.startsWith('image/')
+  const [src, setSrc] = useState<string | null>(att.url ?? null)
+  const madeRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (att.url || !isImage || !att.file || !fetchFile) return
+    let alive = true
+    fetchFile(att.file)
+      .then(b => {
+        if (!alive) return
+        madeRef.current = URL.createObjectURL(b)
+        setSrc(madeRef.current)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+      if (madeRef.current) URL.revokeObjectURL(madeRef.current)
+      madeRef.current = null
+    }
+  }, [att.url, att.file, fetchFile, isImage])
+  const open = async () => {
+    if (src) {
+      window.open(src, '_blank', 'noopener')
+      return
+    }
+    if (!att.file || !fetchFile) return
+    try {
+      const b = await fetchFile(att.file)
+      window.open(URL.createObjectURL(b), '_blank', 'noopener')
+    } catch {
+      // the Mac did not answer; nothing to open
+    }
+  }
+  if (isImage && src) {
+    return (
+      <button
+        type="button"
+        className={styles.chatSentPic}
+        onClick={() => void open()}
+        title={att.name}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={src} alt={att.name} />
+      </button>
+    )
+  }
+  return (
+    <button
+      type="button"
+      className={styles.chatFileChip}
+      onClick={() => void open()}
+      title={att.name}
+    >
+      <Icon src="/images/icons/paper.svg" size={16} />
+      <span className={styles.chatFileName}>{att.name}</span>
+    </button>
+  )
+}
+
+/** Pending files as the thread shows them (their own object URLs). */
+function asSent(files: Pending[]): Attachment[] {
+  return files.map(f => ({
+    name: f.name,
+    type: f.type,
+    size: f.size,
+    file: '',
+    url: f.url,
+  }))
+}
+
+/** A file's bytes as base64, the way the Mac agent takes them. */
+function base64Of(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => {
+      const s = String(r.result)
+      resolve(s.slice(s.indexOf(',') + 1))
+    }
+    r.onerror = () => reject(new Error(`${file.name} could not be read.`))
+    r.readAsDataURL(file)
+  })
 }
 
 /** What Fable is doing right now, for the one line under a reply in
