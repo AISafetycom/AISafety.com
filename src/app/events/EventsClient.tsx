@@ -19,7 +19,7 @@ import FilterDropdown from '@/components/FilterDropdown'
 import ModeToggle from '@/components/ModeToggle'
 import StickyBar, { scrollToAnchor } from '@/components/StickyBar'
 import { EVENT_TYPES, eventTypeColor } from '@/lib/event-types'
-import { selectFeatured, withRandomStandIns } from '@/lib/featured'
+import { featuredEventsFor } from '@/lib/featured'
 import { trackFilterApply } from '@/lib/analytics'
 import { placementsById } from '@/lib/placements'
 import type { EventListing } from '@/lib/data/events'
@@ -328,20 +328,12 @@ export default function EventsClient({ events }: EventsClientProps) {
     [events, mode]
   )
 
-  // Events whose applications/registrations closed (competitions can run for
-  // months after their deadline) are never shown as featured, matching
-  // /training; when the queue can't fill both slots, the row is topped up
-  // with random stand-ins from the same view. Hybrid events are featured
-  // under Online only — in the In person view they appear in the grid but
-  // never in the featured row.
-  const featuredEvents = useMemo(() => {
-    const pool =
-      mode === 'online'
-        ? modeEvents
-        : modeEvents.filter(e => e.mode !== 'Hybrid')
-    const isOpen = (e: EventListing) => e.applicationStatus === 'Open'
-    return withRandomStandIns(selectFeatured(pool, isOpen), pool, isOpen)
-  }, [modeEvents, mode])
+  // The view's featured row (rules in featuredEventsFor, shared with the
+  // nav's hover preview).
+  const featuredEvents = useMemo(
+    () => featuredEventsFor(events, mode),
+    [events, mode]
+  )
 
   // Each event's slot in the full (unfiltered) order of the active mode, so a
   // click is tagged with the rank the visitor saw — not its position within an

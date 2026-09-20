@@ -62,6 +62,60 @@ export function withRandomStandIns<T extends { id: string }>(
   return result
 }
 
+/** The fields the /events featured row reads — an EventListing satisfies this. */
+interface FeaturableEvent {
+  id: string
+  featured: number | null
+  mode: string
+  applicationStatus: string
+}
+
+/**
+ * The featured row of one /events view, shared by the page and the nav's
+ * hover preview so the two always agree. Events whose applications or
+ * registrations closed (competitions can run for months after their deadline)
+ * are never shown as featured, matching /training; when the queue can't fill
+ * both slots, the row is topped up with random stand-ins from the same view.
+ * Hybrid events are featured under Online only — in the In person view they
+ * appear in the grid but never in the featured row.
+ */
+export function featuredEventsFor<T extends FeaturableEvent>(
+  events: T[],
+  view: 'in-person' | 'online'
+): T[] {
+  const pool = events.filter(e =>
+    view === 'online'
+      ? e.mode !== 'In person'
+      : e.mode !== 'Online' && e.mode !== 'Hybrid'
+  )
+  const isOpen = (e: T) => e.applicationStatus === 'Open'
+  return withRandomStandIns(selectFeatured(pool, isOpen), pool, isOpen)
+}
+
+/** The fields the /training featured row reads. Recurring programs have no
+ *  `applicationStatus`. */
+interface FeaturableProgram {
+  id: string
+  featured: number | null
+  applicationStatus?: string
+}
+
+/**
+ * The featured row of one /training tab, shared by the page and the nav's
+ * hover preview. `programs` is the tab's list in display order (the stand-in
+ * pick is seeded from it). Programs whose applications closed are never shown
+ * as featured (recurring programs have no applications and always count as
+ * open); when the queue can't fill both slots, the row is topped up with
+ * random stand-ins from the same set.
+ */
+export function featuredProgramsFor<T extends FeaturableProgram>(
+  programs: T[]
+): T[] {
+  const isOpen = (p: T) =>
+    p.applicationStatus === undefined || p.applicationStatus === 'Open'
+  return withRandomStandIns(selectFeatured(programs, isOpen), programs, isOpen)
+}
+
 // FNV-1a over the pool's record ids — a stable seed shared by server and
 // client so hydration agrees on the pick.
 function hashIds(items: Array<{ id: string }>): number {
