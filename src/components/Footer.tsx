@@ -88,25 +88,24 @@ export default function Footer() {
               </div>
             </div>
 
-            {/* Fourth footer column: pages about the project itself, for
-                audiences (press, developers) that "Help us out" never fit.
-                No About us link: the first column's button already goes
-                there. */}
+            {/* Fourth footer column: the pages for people who use
+                AISafety.com in their own work (journalists, developers),
+                which "Help us out" never fit. */}
             <div>
               <h4 className="paragraph-small-bold padding-bottom-16px">
-                About
+                For press and developers
               </h4>
               <div
                 className={`paragraph-small flex flex-col gap-8px opacity-80 ${styles.links}`}
               >
                 <FooterLink
                   href="/media"
-                  section="About"
+                  section="For press and developers"
                   label="Press and media"
                 />
                 <FooterLink
                   href="/developers"
-                  section="About"
+                  section="For press and developers"
                   label="Data API"
                 />
               </div>
