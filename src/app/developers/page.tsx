@@ -28,7 +28,7 @@ const COLLECTION_COUNT =
   COUNT_WORDS[ENDPOINTS.length] ?? String(ENDPOINTS.length)
 
 export const metadata: Metadata = {
-  title: 'Developer API – AISafety.com',
+  title: 'Data API – AISafety.com',
   description:
     'Public, read-only JSON API over the AISafety.com directories: communities, events, organizations, jobs, funding and more. Free to use under CC-BY-4.0.',
 }
