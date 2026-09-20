@@ -21,7 +21,7 @@ import StickyBar, { scrollToAnchor } from '@/components/StickyBar'
 import { EVENT_TYPES, eventTypeColor } from '@/lib/event-types'
 import { selectFeatured, withRandomStandIns } from '@/lib/featured'
 import { trackFilterApply } from '@/lib/analytics'
-import { placementsById } from '@/lib/placements'
+import { gridListings, placementsById } from '@/lib/placements'
 import type { EventListing } from '@/lib/data/events'
 import { bottomMetaFor, eventCardProps, parseISO, titleMetaFor } from './card'
 import styles from './page.module.css'
@@ -288,9 +288,15 @@ function ViewParamSync({ onView }: { onView: (view: string | null) => void }) {
   return null
 }
 
+// The page opens on Open events only, so that one tick isn't "a filter the
+// visitor chose" — anyFilterActive below reads changes against this.
+const DEFAULT_STATUS = ['Open']
+
 export default function EventsClient({ events }: EventsClientProps) {
   const [mode, setMode] = useState<Mode>('in-person')
-  const [selectedStatus, setSelectedStatus] = useState<string[]>(['Open'])
+  const [selectedStatus, setSelectedStatus] = useState<string[]>([
+    ...DEFAULT_STATUS,
+  ])
   const [selectedTypes, setSelectedTypes] = useState<string[]>([])
   const [selectedCost, setSelectedCost] = useState<string[]>([])
   const [selectedCities, setSelectedCities] = useState<string[]>([])
@@ -422,12 +428,28 @@ export default function EventsClient({ events }: EventsClientProps) {
       selectedCities,
     ])
 
+  // Any filter changed from the page's opening state (Open events, nothing
+  // else ticked) counts; the city search is a filter too.
+  const anyFilterActive =
+    selectedStatus.length !== DEFAULT_STATUS.length ||
+    !DEFAULT_STATUS.every(s => selectedStatus.includes(s)) ||
+    selectedTypes.length > 0 ||
+    selectedCost.length > 0 ||
+    (mode === 'in-person' && selectedCities.length > 0)
+
+  // The featured events show in the grid only once a filter is on;
+  // unfiltered, the featured row above already has them.
+  const gridEvents = useMemo(
+    () => gridListings(filteredEvents, placements, anyFilterActive),
+    [filteredEvents, placements, anyFilterActive]
+  )
+
   // Events group under month-of-start headings: the date you attend is what
   // matters. (/training differs — its programs order by application deadline
   // with no month headings; see TrainingClient.)
   const monthGroups = useMemo(() => {
     const groups: { key: string; label: string; events: EventListing[] }[] = []
-    for (const event of filteredEvents) {
+    for (const event of gridEvents) {
       const key = monthKey(event.startDate)
       let group = groups.find(g => g.key === key)
       if (!group) {
@@ -437,7 +459,7 @@ export default function EventsClient({ events }: EventsClientProps) {
       group.events.push(event)
     }
     return groups
-  }, [filteredEvents])
+  }, [gridEvents])
 
   const savedScrollY = useRef<number | null>(null)
   const toggleFilter = (
