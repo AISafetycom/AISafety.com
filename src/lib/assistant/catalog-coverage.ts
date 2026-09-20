@@ -25,6 +25,11 @@ export interface ResourceTable {
   pagePath: string
 }
 
+// /hire and the 'person' catalog type are wired into buildCatalog() and the
+// search_listings tool, but there's nothing to register here: their data
+// comes from Mangrove One's partner API (src/lib/data/people.ts), not an
+// Airtable table, so this Airtable-coverage registry doesn't apply to it.
+
 /** Airtable tables the assistant searches and that have a browsable page. */
 export const RESOURCE_TABLES: ResourceTable[] = [
   {

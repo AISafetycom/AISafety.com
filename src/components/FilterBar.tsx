@@ -9,6 +9,9 @@ interface FilterBarProps {
   /** Singular noun for the count, e.g. "course". Pluralized with an "s". */
   noun: string
   label?: ReactNode
+  /** Drop the 40px gap below the bar (for a bar that isn't above a grid, e.g.
+   *  inside the chatbot panel). */
+  compact?: boolean
 }
 
 // Horizontal row of filter dropdowns with the result count flowing directly
@@ -20,10 +23,11 @@ export default function FilterBar({
   count,
   noun,
   label,
+  compact,
 }: FilterBarProps) {
   return (
     <div
-      className={`flex items-start gap-16px padding-bottom-40px ${styles.bar}`}
+      className={`flex items-start gap-16px ${compact ? '' : 'padding-bottom-40px'} ${styles.bar}`}
     >
       <div className={`flex items-center gap-8px ${styles.pills}`}>
         {children}

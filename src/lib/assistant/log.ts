@@ -40,7 +40,9 @@ export interface AssistantClickEvent {
 
 export interface AssistantOpenEvent {
   kind: 'open'
-  trigger: 'pill' | 'chip' | 'keyboard'
+  /** 'page' is a page handing the widget a question (e.g. /hire's hero
+   *  field) via askAssistant() — see page-events.ts. */
+  trigger: 'pill' | 'chip' | 'keyboard' | 'page'
   currentPage: string
 }
 

@@ -6,6 +6,7 @@ import { getCommunities } from './communities'
 import { getEvents } from './events'
 import { getFounderResources } from './founders'
 import { getFunders } from './funding'
+import { getPeople } from './people'
 import { getJobs } from './jobs'
 import { getMapData } from './map'
 import { getMediaChannels } from './media-channels'
@@ -59,6 +60,7 @@ export async function fetchAllCounts(): Promise<Counts> {
       '/map': mapData.records.filter(r => !r.isMagic).length,
       '/communities': (await getCommunities()).length,
       '/jobs': (await getJobs()).length,
+      '/hire': (await getPeople()).length,
       '/funding': (await getFunders()).length,
       '/media-channels': (await getMediaChannels()).length,
       '/advisors': (await getAdvisors()).length,
@@ -131,6 +133,7 @@ async function readAllCounts(): Promise<Counts> {
   // nav badge always matches the on-page total exactly.
   counts['/communities'] = (await getCommunities()).length
   counts['/jobs'] = (await getJobs()).length
+  counts['/hire'] = (await getPeople()).length
   counts['/media-channels'] = (await getMediaChannels()).length
   counts['/advisors'] = (await getAdvisors()).length
   counts['/projects'] = (await getProjects()).length

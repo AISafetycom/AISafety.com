@@ -34,6 +34,7 @@ const navItems = [
   { href: '/communities', label: 'Communities', icon: 'globe.svg' },
   { href: '/self-study', label: 'Self-study', icon: 'book.svg' },
   { href: '/jobs', label: 'Jobs', icon: 'briefcase.svg' },
+  { href: '/hire', label: 'Hire', icon: 'people.svg' },
   { href: '/funding', label: 'Funding', icon: 'coins.svg' },
   {
     href: '/media-channels',

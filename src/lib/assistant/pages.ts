@@ -39,6 +39,21 @@ export const PAGES: PageInfo[] = [
     ],
   },
   {
+    path: '/hire',
+    title: 'Hire',
+    purpose:
+      'People actively working on AI safety projects who may be open to a role or a collaboration: profiles with focus areas, project history (status, role, public artifacts), availability, time zone and skills. The page has filter pills the assistant can set with set_page_filters.',
+    audience:
+      'Hiring managers, project leads and collaborators looking for people.',
+    greeting:
+      'Looking for someone to hire or collaborate with? Tell me the focus area, availability or location you need and I can find people and set the filters for you.',
+    chips: [
+      'Evals people open to full-time work',
+      'Governance people in Europe',
+      'Who has completed projects with public artifacts?',
+    ],
+  },
+  {
     path: '/funding',
     title: 'Funding',
     purpose:

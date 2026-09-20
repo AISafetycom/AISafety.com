@@ -4,7 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { chipsFor, greetingFor } from '@/lib/assistant/pages'
 import { getPageContext } from '@/lib/assistant/page-context'
+import {
+  ASSISTANT_ASK_EVENT,
+  type AssistantAskDetail,
+} from '@/lib/assistant/page-events'
 import { suggestFormUrl } from '@/lib/assistant/constants'
+import { useAssistantPanelSlot } from '@/lib/assistant/panel-slot'
 import { trackEvent, isTrackingOptedOut } from '@/lib/analytics'
 import type { CitationRef } from '@/lib/assistant/types'
 import ChatBody, {
@@ -15,6 +20,10 @@ import Icon from '@/components/Icon'
 import styles from './Assistant.module.css'
 
 const STORAGE_KEY = 'aisafety-assistant-messages-v3'
+
+// Pages where the expanded panel opens wider (see .panelWide): their replies
+// carry full-width cards that don't fit the regular 760px panel.
+const WIDE_PANEL_PAGES = ['/hire']
 const SESSION_KEY = 'aisafety-assistant-session-v1'
 
 /** A fresh id for this browser session: the platform's UUID generator, or
@@ -127,6 +136,8 @@ export default function Assistant() {
   const chatRef = useRef<ChatBodyHandle>(null)
 
   const currentPage = pathname || '/'
+  const isWide = WIDE_PANEL_PAGES.includes(currentPage)
+  const panelSlot = useAssistantPanelSlot()
   const chips = useMemo(() => chipsFor(currentPage), [currentPage])
   const greeting = useMemo(() => greetingFor(currentPage), [currentPage])
 
@@ -147,7 +158,7 @@ export default function Assistant() {
   }, [])
 
   const handleOpen = useCallback(
-    (trigger: 'pill' | 'chip' | 'keyboard') => {
+    (trigger: 'pill' | 'chip' | 'keyboard' | 'page') => {
       setIsOpen(true)
       void fireLog({ kind: 'open', trigger, currentPage })
       // First-party funnel: unique users who open the chatbot. The page and
@@ -402,6 +413,20 @@ export default function Assistant() {
     }
   }, [currentPage])
 
+  // A page can hand the widget a question (the /hire hero field): open it,
+  // expanded when asked, and send the message as if the visitor typed it.
+  useEffect(() => {
+    const onAsk = (e: Event) => {
+      const detail = (e as CustomEvent<AssistantAskDetail>).detail
+      if (!detail?.message) return
+      handleOpen('page')
+      if (detail.expand) setIsExpanded(true)
+      chatRef.current?.send(detail.message)
+    }
+    window.addEventListener(ASSISTANT_ASK_EVENT, onAsk)
+    return () => window.removeEventListener(ASSISTANT_ASK_EVENT, onAsk)
+  }, [handleOpen])
+
   useEffect(() => {
     if (!isOpen) return
     const onKey = (e: KeyboardEvent) => {
@@ -445,7 +470,7 @@ export default function Assistant() {
       />
 
       <aside
-        className={`${styles.panel} ${isOpen ? styles.panelOpen : ''} ${isExpanded ? styles.panelExpanded : ''}`}
+        className={`${styles.panel} ${isOpen ? styles.panelOpen : ''} ${isExpanded ? styles.panelExpanded : ''} ${isExpanded && isWide ? styles.panelWide : ''}`}
         role="dialog"
         aria-modal={isExpanded}
         aria-label="AISafety.com directory assistant"
@@ -495,6 +520,12 @@ export default function Assistant() {
             </button>
           </div>
         </header>
+
+        {/* Page-supplied controls (e.g. /hire's filter pills), only when the
+            panel is expanded and covering the page they belong to. */}
+        {isExpanded && panelSlot && (
+          <div className={styles.panelSlot}>{panelSlot}</div>
+        )}
 
         <ChatBody
           ref={chatRef}

@@ -15,6 +15,7 @@ import type {
   UIToolCall,
 } from '@/lib/assistant/types'
 import { extractChips, stripChipTokens } from '@/lib/assistant/tokens'
+import { announceAssistantTool } from '@/lib/assistant/page-events'
 import Composer from './Composer'
 import MessageContent from './MessageContent'
 import ToolCallPill from './ToolCallPill'
@@ -197,6 +198,9 @@ export interface ChatBodyHandle {
   clear: () => void
   /** Focus the composer input so the user can start typing immediately. */
   focusInput: () => void
+  /** Send a message as if the user typed it (used when a page hands the
+   *  widget a question, e.g. the /hire hero field — see page-events.ts). */
+  send: (text: string) => void
 }
 
 /** How one reply's request went, from the browser's point of view. See the
@@ -410,6 +414,8 @@ interface Props {
   chips?: string[]
   /** Greeting bubble for the empty state. */
   greeting?: string
+  /** Composer placeholder text (defaults to "Ask in any language…"). */
+  placeholder?: string
   /** Small note under the greeting in the empty state. Omit for the site's
    *  "may be reviewed" line; pass a string to replace it, or null to hide it
    *  (the admin sandbox, whose turns are never logged, shows its own). */
@@ -465,6 +471,7 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
     bodyExtras,
     chips,
     greeting,
+    placeholder,
     privacyNote,
     storageKey,
     onSuggest,
@@ -496,7 +503,6 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
   useEffect(() => {
     onTurnLifecycleRef.current = onTurnLifecycle
   }, [onTurnLifecycle])
-
   // Hydrate from session storage (when key provided)
   useEffect(() => {
     if (!storageKey) return
@@ -574,15 +580,6 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
     abortRef.current = null
     setIsWaiting(false)
   }, [])
-
-  useImperativeHandle(
-    ref,
-    () => ({
-      clear: handleClear,
-      focusInput: () => composerRef.current?.focus(),
-    }),
-    [handleClear]
-  )
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort()
@@ -750,6 +747,14 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
             } else if (eventType === 'tool_call_done') {
               const incoming =
                 (data.listings as CitationRef[] | undefined) ?? []
+              // Let any page listening react (e.g. /hire applies
+              // set_page_filters to its pills). Fire-and-forget: a page with
+              // no listener is fine.
+              announceAssistantTool({
+                name: String(data.name ?? ''),
+                input: (data.input as Record<string, unknown>) ?? {},
+                ok: Boolean(data.ok),
+              })
               setMessages(prev =>
                 prev.map(m => {
                   if (m.id !== asstId) return m
@@ -758,8 +763,7 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
                       ? {
                           ...tc,
                           status: (data.ok ? 'done' : 'error') as
-                            | 'done'
-                            | 'error',
+                            'done' | 'error',
                           resultSummary: data.summary,
                           input:
                             (data.input as Record<string, unknown>) ?? tc.input,
@@ -894,6 +898,16 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
       }
     },
     [bodyExtras, endpoint, isWaiting, messages]
+  )
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      clear: handleClear,
+      focusInput: () => composerRef.current?.focus(),
+      send: (text: string) => void send(text),
+    }),
+    [handleClear, send]
   )
 
   const handleChipClick = useCallback((chip: string) => void send(chip), [send])
@@ -1085,6 +1099,7 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
         disabled={isWaiting && !abortRef.current}
         isStreaming={isWaiting}
         onStop={handleStop}
+        placeholder={placeholder}
       />
     </>
   )

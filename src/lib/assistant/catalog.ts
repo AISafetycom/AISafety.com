@@ -1,3 +1,4 @@
+import { getPeople } from '@/lib/data/people'
 import { getJobs } from '@/lib/data/jobs'
 import { getFunders } from '@/lib/data/funding'
 import { isAcceptingApplications } from '@/lib/funding-status'
@@ -95,6 +96,7 @@ function clamp(text: string, max: number): string {
 export async function buildCatalog(): Promise<Catalog> {
   const [
     jobs,
+    people,
     funders,
     advisors,
     communities,
@@ -108,6 +110,7 @@ export async function buildCatalog(): Promise<Catalog> {
     recurringPrograms,
   ] = await Promise.all([
     getJobs(),
+    getPeople(),
     getFunders(),
     getAdvisors(),
     getCommunities(),
@@ -143,6 +146,59 @@ export async function buildCatalog(): Promise<Catalog> {
         workLocation: j.workLocation,
         location: j.location,
         datePublished: j.datePublished,
+      }),
+    })
+  }
+
+  // People on /hire (Mangrove One). No external link of their own on this
+  // site (url '#'), so a card routes to the profile's anchor on the page.
+  // The project history rides along as one meta string so search and the
+  // model can see it. Deliberately NOT carrying a reliability/flake signal
+  // here — nothing about how many projects someone left early reaches the
+  // model at all, so it can never characterize a real person's reliability.
+  for (const p of people) {
+    const completed = p.projects.filter(x => x.status === 'Completed').length
+    const current = p.projects.filter(
+      x => x.status === 'Current' || x.status === 'Active'
+    ).length
+    listings.push({
+      id: `person:${p.id}`,
+      type: 'person',
+      name: p.displayName,
+      description: clamp(`${p.interests} ${p.wantToWorkOn}`, 280),
+      logo: p.avatarUrl ?? undefined,
+      url: '#',
+      pageUrl: `/hire#person-${p.id}`,
+      lastModified: p.updatedAt.slice(0, 10),
+      meta: compact({
+        handle: `@${p.handle}`,
+        profileUrl: p.profileUrl,
+        focus: p.focusAreas.join(', '),
+        region: p.region,
+        location: p.location ?? p.timeZone,
+        timeZone: p.timeZone,
+        hoursPerWeek: p.hoursBucket,
+        maxHoursPerWeek:
+          p.maxHoursPerWeek == null ? null : String(p.maxHoursPerWeek),
+        maxConcurrentProjects:
+          p.maxConcurrentProjects == null
+            ? null
+            : String(p.maxConcurrentProjects),
+        track: p.track.join(', '),
+        projectsCompleted: String(completed),
+        projectsCurrent: String(current),
+        projects: p.projects
+          .map(
+            x =>
+              `${x.title} (${x.status}; ${x.role}${x.organization ? ` at ${x.organization}` : ''}; ${x.joined}${x.ended ? `–${x.ended}` : ''}; ${
+                x.artifacts.length
+                  ? x.artifacts.map(a => a.label).join(', ')
+                  : 'no artifacts'
+              })`
+          )
+          .join(' | '),
+        writing: p.writing.map(w => w.label).join(', '),
+        links: p.links.map(l => `${l.label}: ${l.url}`).join(', '),
       }),
     })
   }

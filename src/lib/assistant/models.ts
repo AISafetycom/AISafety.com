@@ -33,6 +33,22 @@ export const MODELS: AssistantModel[] = [
 
 export const DEFAULT_MODEL_ID = 'claude-opus-5'
 
+/** The model the public endpoint runs. Production always uses
+ *  DEFAULT_MODEL_ID. Locally, ASSISTANT_DEV_MODEL in .env.local can pick a
+ *  cheaper pinned model (e.g. claude-haiku-4-5-20251001) so testing the
+ *  widget doesn't bill Opus rates; anything not in MODELS is refused loudly. */
+export function resolveModelId(): string {
+  const override = process.env.ASSISTANT_DEV_MODEL
+  if (!override || process.env.NODE_ENV === 'production')
+    return DEFAULT_MODEL_ID
+  if (!isKnownModelId(override)) {
+    throw new Error(
+      `ASSISTANT_DEV_MODEL "${override}" is not a pinned model (see src/lib/assistant/models.ts)`
+    )
+  }
+  return override
+}
+
 /** Fable-tier models think whether asked or not: the API rejects
  *  `thinking: { type: 'disabled' }` for them with a 400. */
 export function thinkingAlwaysOn(id: string): boolean {
