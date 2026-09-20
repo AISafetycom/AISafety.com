@@ -8,7 +8,7 @@ import ContributeButtons from '@/components/ContributeButtons'
 import { Community } from '@/lib/data/communities'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
 import { withUtm } from '@/lib/utm'
-import { placementsById } from '@/lib/placements'
+import { gridListings, placementsById } from '@/lib/placements'
 import { communityCardProps } from './card'
 
 interface CommunitiesClientProps {
@@ -139,6 +139,18 @@ export default function CommunitiesClient({
 
   const count = filteredCommunities.length
 
+  // Featured communities show in the grid only once a filter is on;
+  // unfiltered, the featured row above already has them.
+  const filtering =
+    platformFilters.length > 0 ||
+    activityFilters.length > 0 ||
+    focusFilters.length > 0
+  const gridCommunities = gridListings(
+    filteredCommunities,
+    placements,
+    filtering
+  )
+
   return (
     <>
       <FilterBar
@@ -177,7 +189,7 @@ export default function CommunitiesClient({
 
       <div className="flex gap-56px">
         <div className="collection-list padding-bottom-40px width-9-col">
-          {filteredCommunities.map(community => (
+          {gridCommunities.map(community => (
             <ListingCard
               key={community.id}
               {...communityCardProps(community)}

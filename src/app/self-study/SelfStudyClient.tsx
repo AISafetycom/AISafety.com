@@ -6,7 +6,7 @@ import FilterDropdown from '@/components/FilterDropdown'
 import ListingCard from '@/components/ListingCard'
 import ContributeButtons from '@/components/ContributeButtons'
 import type { Course } from '@/lib/data/self-study'
-import { placementsById } from '@/lib/placements'
+import { gridListings, placementsById } from '@/lib/placements'
 import { courseCardProps } from './card'
 
 interface SelfStudyClientProps {
@@ -93,6 +93,11 @@ export default function SelfStudyClient({ courses }: SelfStudyClientProps) {
     }
   }, [filteredCourses])
 
+  // Featured courses show in the grid only once a filter is on; unfiltered,
+  // the featured row above already has them.
+  const filtering = selectedCategories.length > 0 || selectedTypes.length > 0
+  const gridCourses = gridListings(filteredCourses, placements, filtering)
+
   return (
     <>
       {/* FilterBar lives above the grid (not inside the left column) so the
@@ -122,7 +127,7 @@ export default function SelfStudyClient({ courses }: SelfStudyClientProps) {
 
       <div className="flex gap-56px">
         <div className="collection-list padding-bottom-40px width-9-col">
-          {filteredCourses.map(course => (
+          {gridCourses.map(course => (
             <ListingCard
               key={course.id}
               {...courseCardProps(course)}
