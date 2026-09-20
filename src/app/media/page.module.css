@@ -1,0 +1,434 @@
+/* Press and media page. Layout only — the words live in content.ts / news.ts. */
+
+.page {
+  padding-bottom: 40px;
+}
+
+/* The two entry points under the standfirst. */
+.entryCards {
+  display: flex;
+  gap: 24px;
+}
+
+.entryCard {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 32px;
+  border: 1px solid color-mix(in srgb, var(--bright-teal-300) 30%, transparent);
+  border-radius: 16px;
+}
+
+.entryCard > a {
+  margin-top: auto;
+  /* The card is a flex column, which would stretch the button to its full
+     width; keep it the size of its label. */
+  align-self: flex-start;
+}
+
+/* Sections */
+.section {
+  padding-top: 80px;
+  /* An in-page link lands with the heading clear of the nav. */
+  scroll-margin-top: 40px;
+}
+
+.section h2 {
+  padding-bottom: 16px;
+}
+
+/* The entry buttons move keyboard focus to the section they glide to; a
+   whole-section focus ring would only be noise. */
+.section:focus {
+  outline: none;
+}
+
+.lead {
+  max-width: 640px;
+  color: var(--teal-300);
+  padding-bottom: 32px;
+}
+
+.prose {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 720px;
+  color: var(--teal-300);
+}
+
+.prose strong {
+  color: var(--white);
+  font-weight: 500;
+}
+
+/* Reporter resources: a bold lead line with its paragraphs under it. */
+.topics {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  max-width: 720px;
+  color: var(--teal-300);
+}
+
+.topic {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.inlineLink {
+  color: var(--bright-teal-300);
+}
+
+.inlineLink:hover {
+  opacity: 0.8;
+}
+
+/* Boilerplate: one block per length, each with a copy button. */
+.copyBlocks {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.copyBlock {
+  padding: 20px 24px;
+  background-color: var(--teal-850);
+  border: 1px solid var(--teal-700);
+  border-radius: 16px;
+}
+
+.copyHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.copyHead span {
+  color: var(--teal-400);
+  font-weight: 300;
+}
+
+.copyText {
+  margin: 0;
+  color: var(--teal-100);
+}
+
+.copyBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 18px;
+  background: transparent;
+  color: var(--white);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color var(--hover-transition),
+    border-color var(--hover-transition),
+    color var(--hover-transition);
+}
+
+.copyBtn:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.copyBtn[data-copied='true'] {
+  border-color: var(--bright-teal-300);
+  color: var(--bright-teal-300);
+}
+
+/* Key facts: a two-column definition list. */
+.facts {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  column-gap: 32px;
+  row-gap: 14px;
+  margin: 0;
+  max-width: 760px;
+}
+
+.facts dt {
+  color: var(--white);
+  font-weight: 500;
+}
+
+.facts dd {
+  margin: 0;
+  color: var(--teal-300);
+}
+
+.facts dd a {
+  color: var(--teal-300);
+  text-decoration: underline;
+  text-decoration-color: var(--teal-600);
+  text-underline-offset: 3px;
+}
+
+.facts dd a:hover {
+  color: var(--white);
+}
+
+.factsNote {
+  padding-top: 24px;
+  color: var(--teal-400);
+}
+
+/* People */
+.people {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 40px 56px;
+}
+
+.person {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.personHead {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.afterPeople {
+  padding-top: 40px;
+  color: var(--teal-300);
+}
+
+.person p {
+  color: var(--teal-300);
+}
+
+/* Recommended organizations: one linked name and a short note per line. */
+.orgList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 720px;
+  margin: 0;
+  padding: 24px 0 0 1.2em;
+  color: var(--teal-300);
+}
+
+.orgList li::marker {
+  color: var(--bright-teal-300);
+}
+
+/* Brand assets */
+.assetGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.assetCard {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--teal-700);
+  border-radius: 16px;
+  background-color: var(--teal-850);
+}
+
+.assetPreview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 120px;
+  padding: 24px 32px;
+}
+
+.assetPreview img {
+  max-width: 100%;
+  height: auto;
+}
+
+.onDark {
+  background-color: var(--teal-900);
+}
+
+.onLight {
+  background-color: var(--white);
+}
+
+.onTile {
+  padding: 0;
+}
+
+.onTile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.assetMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 20px 18px;
+}
+
+.assetNote {
+  color: var(--teal-400);
+}
+
+.assetLinks {
+  display: flex;
+  gap: 12px;
+  padding-top: 6px;
+}
+
+.assetLinks a {
+  color: var(--bright-teal-300);
+  font-weight: 500;
+}
+
+.assetLinks a:hover {
+  opacity: 0.8;
+}
+
+.shotGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.shot {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--teal-700);
+  border-radius: 12px;
+}
+
+.shot a:hover img {
+  border-color: var(--teal-500);
+}
+
+.kitRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding-top: 32px;
+}
+
+.subhead {
+  padding-top: 40px;
+  padding-bottom: 16px;
+}
+
+/* News */
+.newsList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: 760px;
+}
+
+.newsItem {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 16px;
+  padding: 14px 0;
+  border-top: 1px solid var(--teal-700);
+}
+
+.newsItem:last-child {
+  border-bottom: 1px solid var(--teal-700);
+}
+
+.newsDate {
+  color: var(--teal-400);
+}
+
+.newsTitle a {
+  color: var(--white);
+}
+
+.newsTitle a:hover {
+  color: var(--bright-teal-300);
+}
+
+.newsOutlet {
+  color: var(--teal-400);
+}
+
+/* Get in touch */
+.contactGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 40px 56px;
+}
+
+.contactCard {
+  /* Don't stretch to the height of the lists beside it. */
+  align-self: start;
+  padding: 32px;
+  border: 1px solid color-mix(in srgb, var(--bright-teal-300) 30%, transparent);
+  border-radius: 16px;
+}
+
+.email {
+  display: inline-block;
+  color: var(--bright-teal-300);
+  font-size: 22px;
+  letter-spacing: -0.5px;
+  padding: 8px 0 16px;
+}
+
+.email:hover {
+  opacity: 0.8;
+}
+
+.contactList {
+  margin: 0;
+  padding-left: 1.2em;
+  color: var(--teal-300);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+@media (max-width: 991px) {
+  .entryCards,
+  .people,
+  .assetGrid,
+  .shotGrid,
+  .contactGrid {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .facts {
+    grid-template-columns: 1fr;
+    row-gap: 4px;
+  }
+
+  .facts dt {
+    padding-top: 12px;
+  }
+
+  .newsItem {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}

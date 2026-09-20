@@ -1,4 +1,5 @@
 import Image from 'next/image'
+import Link from 'next/link'
 import Icon from '@/components/Icon'
 import styles from './page.module.css'
 
@@ -69,6 +70,13 @@ export default function AboutPage() {
               Send us an email
             </a>
           </div>
+          <p className="color-teal-300 padding-top-24px paragraph-small">
+            Journalist? Boilerplate, logos and a press contact are on the{' '}
+            <Link href="/media" className="color-light-teal">
+              press and media page
+            </Link>
+            .
+          </p>
         </div>
       </div>
 

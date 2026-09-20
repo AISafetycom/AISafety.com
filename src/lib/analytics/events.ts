@@ -107,6 +107,11 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   // `source` is the column heading, `label` the link text, `page` the path
   // the footer was on.
   'footer_click',
+  // The press and media page (/media): `source` is what was done ('copy' a
+  // boilerplate block, 'download' a logo/screenshot/kit, 'contact' = the
+  // press email link, 'jump' = one of the two entry buttons that glide down
+  // the page), `label` says which one, `url` the file or mailto.
+  'press_action',
   'chatbot_open',
   'chatbot_message',
   'chatbot_click',
@@ -2064,6 +2069,75 @@ export async function readDashboard(
     ),
     firstSeenBackfilled: true,
     ...aggregate(all, range, page, unique, sourceFilter, earliestByVid(all)),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Last month's visitor figure, for the press page (/media)
+// ---------------------------------------------------------------------------
+
+// A finished month never changes, so its figure is worked out once (one full
+// read of that month's events, the same aggregation the dashboard runs) and
+// then kept under this key for good. Every later page render costs one GET.
+const MONTHLY_VISITORS_KEY_PREFIX = 'aisafety:analytics:monthly-visitors:' // + 'YYYY-MM'
+
+export interface MonthlyVisitors {
+  /** The month the figures cover, 'YYYY-MM' in the dashboard's timezone. */
+  month: string
+  /** Distinct visitors among the month's page views: what the dashboard
+   *  shows as unique visitors for that month. */
+  visitors: number
+  /** Browsing sessions (30+ minutes of inactivity starts a new one). */
+  visits: number
+  /** Raw page views. */
+  views: number
+}
+
+/** The last complete calendar month before `now`, as its 'YYYY-MM' label and
+ *  inclusive epoch-ms bounds. The dashboard's timezone is UTC, so the month
+ *  boundaries are UTC too. Exported for the unit test. */
+export function lastCompleteMonth(now: number): {
+  month: string
+  range: DateRange
+} {
+  const date = new Date(now)
+  const startMs = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - 1, 1)
+  const endMs = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1) - 1
+  return {
+    month: new Date(startMs).toISOString().slice(0, 7),
+    range: { startMs, endMs },
+  }
+}
+
+/** Visitors in the last complete calendar month, or null when there is
+ *  nothing to show: no analytics store (contributor mode, CI), no data for
+ *  that month, or the store couldn't be read. Callers leave the figure out. */
+export async function readLastMonthVisitors(
+  now = Date.now()
+): Promise<MonthlyVisitors | null> {
+  const { month, range } = lastCompleteMonth(now)
+  const key = MONTHLY_VISITORS_KEY_PREFIX + month
+  try {
+    if (store) {
+      const kept = await store.get<MonthlyVisitors>(key)
+      if (kept && kept.month === month && kept.visitors > 0) return kept
+    }
+    const data = await readDashboard(range)
+    if (data.error || data.visits.uniqueVisitors === 0) return null
+    const figures: MonthlyVisitors = {
+      month,
+      visitors: data.visits.uniqueVisitors,
+      visits: data.visits.visitCount,
+      views: data.visits.totalViews,
+    }
+    if (store) await store.set(key, figures)
+    return figures
+  } catch (err) {
+    // Recoverable: the press page simply leaves the traffic row out.
+    console.warn(
+      `[analytics] last month's visitors unavailable: ${err instanceof Error ? err.message : String(err)}`
+    )
+    return null
   }
 }
 

@@ -15,6 +15,7 @@ const ROUTES = [
   '/hire',
   '/jobs',
   '/map',
+  '/media',
   '/media-channels',
   '/privacy',
   '/projects',

@@ -774,6 +774,14 @@ function livePageUrl(item: QueueItem): string {
   return `https://aisafety.com${item.page ?? ''}${view}${hash}`
 }
 
+/** The listing's name goes to the clipboard on the way to the live page,
+ *  ready to paste into the site search or Airtable. */
+function copyListingName(item: QueueItem): void {
+  navigator.clipboard
+    ?.writeText(splitTitle(item).name ?? item.title)
+    .catch(() => {})
+}
+
 function acceptLabel(item: QueueItem): string {
   if (item.type === 'Add') return 'Publish'
   if (item.type === 'Change') {
@@ -1978,6 +1986,16 @@ export default function QueueAdmin({
           }
           break
         }
+        case 'd':
+          // The page tag's link: the live page at this record's card, the
+          // name copied on the way, as a click on the tag does (Bryce, 19
+          // Sept 2026: "Make D open this link").
+          if (item?.page) {
+            e.preventDefault()
+            copyListingName(item)
+            window.open(livePageUrl(item), '_blank', 'noopener')
+          }
+          break
         case '?':
           e.preventDefault()
           setShowHelp(v => !v)
@@ -2356,6 +2374,13 @@ export default function QueueAdmin({
               </dt>
               <dd>open the listing&apos;s link in a new tab</dd>
               <dt>
+                <kbd>D</kbd>
+              </dt>
+              <dd>
+                open the listing&apos;s card on the live site (the page tag up
+                top), copying its name
+              </dd>
+              <dt>
                 <kbd>U</kbd>
               </dt>
               <dd>undo the last decision</dd>
@@ -2670,14 +2695,8 @@ function Detail({
                 href={livePageUrl(item)}
                 target="_blank"
                 rel="noreferrer"
-                title="Opens the live card and copies the listing's name"
-                onClick={() => {
-                  // The name goes to the clipboard on the way, ready to
-                  // paste into the site search or Airtable.
-                  navigator.clipboard
-                    ?.writeText(splitTitle(item).name ?? item.title)
-                    .catch(() => {})
-                }}
+                title="Opens the live card and copies the listing's name (D)"
+                onClick={() => copyListingName(item)}
               >
                 {pageLabel(item)}
               </a>
