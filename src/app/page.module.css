@@ -43,8 +43,14 @@
   isolation: isolate;
 }
 
-/* Training twin of the events card: same layout, its own photo. */
+/* Training twin of the events card: same layout, its own photo. Its featured
+   box is filled from Airtable, so a two-line name, a two-line date line and a
+   three-line blurb can outgrow the events card's fixed 375px. This card keeps
+   375px as its floor and grows only when the box needs the room, so the box
+   always keeps its padding under the "Learn more" button. */
 .card-full-width-training {
+  height: auto;
+  min-height: 375px;
   background-image:
     linear-gradient(to right, rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0) 75%),
     url('/images/training.webp');
