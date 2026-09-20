@@ -110,6 +110,21 @@
   transform: translate(-50%, 0) scale(1);
 }
 
+/* Wider expanded panel for pages whose answers carry full-width cards (the
+   /hire candidate cards need the 1056px container plus the body padding).
+   Only ever set together with .panelExpanded; the tablet rules below reset
+   the width like they do for the regular expanded panel. */
+.panelWide {
+  width: min(1092px, calc(100vw - 48px));
+}
+
+/* Strip under the header for controls a page hands the expanded panel
+   (see src/lib/assistant/panel-slot.ts). Same inset as the header. */
+.panelSlot {
+  padding: 10px 12px 10px 18px;
+  border-bottom: 1px solid var(--teal-800);
+}
+
 /* Header — slim, with label on left and controls right */
 
 .header {

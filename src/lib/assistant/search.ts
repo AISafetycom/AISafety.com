@@ -1,6 +1,5 @@
 import type { Catalog, Listing, ListingType } from './types'
 import { geocodeCity, haversineKm } from './geocode'
-import { REGION_MEMBERS_BY_LOWER_NAME } from '@/lib/regions'
 
 const STOPWORDS = new Set([
   'a',
@@ -81,16 +80,6 @@ function matchesFilter(listing: Listing, key: string, want: unknown): boolean {
   for (const c of candidates) {
     if (typeof c !== 'string' || !c) continue
     if (haveLower.includes(c.toLowerCase())) return true
-    // A `country` filter value that names a region ("Europe", "Asia"…)
-    // matches any listing whose country is a member of that region — same
-    // table the Jobs page's own Location filter uses (src/lib/regions.ts) —
-    // so the model can pass a region by name instead of listing every
-    // country in it (or, worse, skipping the filter and reasoning about
-    // geography from an unfiltered result itself).
-    if (key === 'country') {
-      const region = REGION_MEMBERS_BY_LOWER_NAME[c.toLowerCase()]
-      if (region?.has(have)) return true
-    }
   }
   return false
 }

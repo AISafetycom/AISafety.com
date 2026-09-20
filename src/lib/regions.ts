@@ -1,10 +1,7 @@
-// Shared region → member-country table. A "country" value (a job's
-// location, a candidate's country) can sometimes be a whole region instead
-// of a single country (80k's job data uses "Europe"; the assistant's
-// search_listings tool accepts a region name in a `country` filter so a
-// query like "in Europe" doesn't need every member country spelled out).
-// Wherever a country is checked against a region, member-country lookups go
-// through this one table so the two stay in sync.
+// Region → member-country table for the Jobs page's Location filter (80k's
+// job data sometimes lists a whole region, e.g. "Europe", instead of a single
+// country — see JobsClient.tsx). Kept in its own module so a future second
+// caller doesn't have to duplicate it.
 export const REGION_MEMBERS: Record<string, Set<string>> = {
   Europe: new Set([
     'UK',
@@ -102,16 +99,3 @@ export const REGION_MEMBERS: Record<string, Set<string>> = {
 }
 
 export const REGION_NAMES = Object.keys(REGION_MEMBERS)
-
-/** Case-insensitive region name → member set, for callers matching a
- *  free-typed filter value (e.g. the assistant's search_listings tool)
- *  rather than a fixed option list. */
-export const REGION_MEMBERS_BY_LOWER_NAME: Record<
-  string,
-  Set<string>
-> = Object.fromEntries(
-  Object.entries(REGION_MEMBERS).map(([name, members]) => [
-    name.toLowerCase(),
-    members,
-  ])
-)

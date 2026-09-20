@@ -106,7 +106,7 @@ export const SITE_PAGES = {
     path: '/hire',
     title: 'Hire',
     description:
-      'People actively working on AI safety projects, with their contributions and referrals from collaborators.',
-    icon: 'person-alt.svg',
+      'People actively working on AI safety projects: their focus areas, project history, and availability, with an assistant that can set the filters for you.',
+    icon: 'people.svg',
   },
 } as const satisfies Record<string, SitePage>

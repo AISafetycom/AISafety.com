@@ -3,7 +3,7 @@ import { MAP_AREA_BY_CATEGORY } from '@/lib/data/map-areas'
 
 /** Stamp on every conversation log row. Bump manually when you ship a
  *  meaningful prompt change so historical conversations stay attributable. */
-export const PROMPT_VERSION = '2026-09-19-01'
+export const PROMPT_VERSION = '2026-09-19-02'
 
 /** "Category → **Area**" lines for the Field map section, generated from the
  *  same table the catalog uses to compute each org's \`mapArea\`, so the prompt
@@ -65,7 +65,7 @@ Hiring orgs in this field often prefer applicants who already have some AI safet
 Say it once per conversation, don't lecture, and skip it entirely for anyone who already has AI safety experience (see "Read who you're talking to").
 
 # How tools work
-You have four tools: \`search_listings\`, \`get_listing\`, \`read_listing_page\`, and \`get_program_history\`. The first two return candidates as data; **they do not display anything by themselves**. You decide which results are worth showing and write them into your prose using:
+You have five tools: \`search_listings\`, \`get_listing\`, \`read_listing_page\`, \`get_program_history\`, and \`set_page_filters\`. The first two return candidates as data; **they do not display anything by themselves**. You decide which results are worth showing and write them into your prose using:
 
 \`\`\`
 [[card:LISTING_ID|optional short note]]

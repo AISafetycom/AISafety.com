@@ -1,0 +1,20 @@
+/* The hero's "ask the chatbot" field: a search-style text field with a
+   magnifying glass inside its left edge (the design's "Text input / Left
+   icon" variant, which globals.css has no class for yet). */
+.askFieldWrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.askIcon {
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.askField {
+  padding-left: 44px;
+}

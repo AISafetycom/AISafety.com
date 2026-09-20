@@ -15,6 +15,7 @@ import type {
   UIToolCall,
 } from '@/lib/assistant/types'
 import { extractChips, stripChipTokens } from '@/lib/assistant/tokens'
+import { announceAssistantTool } from '@/lib/assistant/page-events'
 import Composer from './Composer'
 import MessageContent from './MessageContent'
 import ToolCallPill from './ToolCallPill'
@@ -197,6 +198,9 @@ export interface ChatBodyHandle {
   clear: () => void
   /** Focus the composer input so the user can start typing immediately. */
   focusInput: () => void
+  /** Send a message as if the user typed it (used when a page hands the
+   *  widget a question, e.g. the /hire hero field — see page-events.ts). */
+  send: (text: string) => void
 }
 
 /** How one reply's request went, from the browser's point of view. See the
@@ -441,18 +445,6 @@ interface Props {
    *  retries — lets the public chatbot count engagement while the admin
    *  playground (which doesn't pass this) stays out of the numbers. */
   onUserSend?: () => void
-  /** Fires each time a tool call finishes, with its name, the arguments the
-   *  model actually used, and the listings it returned (deduped, empty when
-   *  it found nothing or the call failed). Lets a page-embedded search box
-   *  drive its own UI (e.g. filter a grid to the returned listings) from the
-   *  same data the chat cards are built from, without re-parsing the reply
-   *  text. `ok` is false for a failed/errored call. */
-  onToolResult?: (
-    name: string,
-    input: Record<string, unknown>,
-    listings: CitationRef[],
-    ok: boolean
-  ) => void
   /** Fires once when a reply's request goes out ('start') and once when it
    *  ends: 'received' (the stream finished and an answer showed), 'stopped'
    *  (the visitor pressed Stop / cleared the chat), or 'error' (the request
@@ -487,7 +479,6 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
     onLinkClick,
     onRate,
     onUserSend,
-    onToolResult,
     onTurnLifecycle,
     onHasMessagesChange,
     closeOnEscape,
@@ -512,15 +503,6 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
   useEffect(() => {
     onTurnLifecycleRef.current = onTurnLifecycle
   }, [onTurnLifecycle])
-  // Same for onToolResult.
-  const onToolResultRef = useRef(onToolResult)
-  useEffect(() => {
-    onToolResultRef.current = onToolResult
-  }, [onToolResult])
-  // Tool name by call id, so the tool_call_done handler (which doesn't carry
-  // the name in its payload) can still report it via onToolResult.
-  const toolNameByIdRef = useRef<Record<string, string>>({})
-
   // Hydrate from session storage (when key provided)
   useEffect(() => {
     if (!storageKey) return
@@ -598,15 +580,6 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
     abortRef.current = null
     setIsWaiting(false)
   }, [])
-
-  useImperativeHandle(
-    ref,
-    () => ({
-      clear: handleClear,
-      focusInput: () => composerRef.current?.focus(),
-    }),
-    [handleClear]
-  )
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort()
@@ -751,7 +724,6 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
               )
             } else if (eventType === 'tool_call_start') {
               lastToolTextOffset = streamingText.length
-              toolNameByIdRef.current[data.id] = data.name
               const newCall: UIToolCall = {
                 id: data.id,
                 name: data.name,
@@ -775,6 +747,14 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
             } else if (eventType === 'tool_call_done') {
               const incoming =
                 (data.listings as CitationRef[] | undefined) ?? []
+              // Let any page listening react (e.g. /hire applies
+              // set_page_filters to its pills). Fire-and-forget: a page with
+              // no listener is fine.
+              announceAssistantTool({
+                name: String(data.name ?? ''),
+                input: (data.input as Record<string, unknown>) ?? {},
+                ok: Boolean(data.ok),
+              })
               setMessages(prev =>
                 prev.map(m => {
                   if (m.id !== asstId) return m
@@ -807,12 +787,6 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
                     citations: allListings,
                   }
                 })
-              )
-              onToolResultRef.current?.(
-                toolNameByIdRef.current[data.id] ?? '',
-                (data.input as Record<string, unknown>) ?? {},
-                incoming,
-                Boolean(data.ok)
               )
             } else if (eventType === 'redo') {
               setMessages(prev =>
@@ -924,6 +898,16 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
       }
     },
     [bodyExtras, endpoint, isWaiting, messages]
+  )
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      clear: handleClear,
+      focusInput: () => composerRef.current?.focus(),
+      send: (text: string) => void send(text),
+    }),
+    [handleClear, send]
   )
 
   const handleChipClick = useCallback((chip: string) => void send(chip), [send])

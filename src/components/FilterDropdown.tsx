@@ -19,6 +19,11 @@ interface FilterDropdownProps {
    *  Renamed titles and options keep logging their original names via
    *  lib/filter-tracking, so history stays in one line. */
   trackingPage?: string
+  /** How the popover is placed. 'fixed' (default) pins it to the viewport so
+   *  the filter bar's horizontal scroll can't clip it. 'absolute' hangs it
+   *  under the pill instead — needed inside a transformed ancestor such as
+   *  the chatbot's expanded panel, where fixed coordinates would be off. */
+  popover?: 'fixed' | 'absolute'
 }
 
 // A single pill-shaped filter that opens a checkbox popover. Used in the
@@ -31,6 +36,7 @@ export default function FilterDropdown({
   onToggle,
   icon,
   trackingPage,
+  popover = 'fixed',
 }: FilterDropdownProps) {
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState({ top: 0, left: 0 })
@@ -53,21 +59,26 @@ export default function FilterDropdown({
       )
       setPos({ top: r.bottom + 8, left })
     }
-    position()
+    const fixed = popover === 'fixed'
+    if (fixed) position()
     const handleClick = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
         setOpen(false)
       }
     }
     document.addEventListener('mousedown', handleClick)
-    window.addEventListener('scroll', position, true)
-    window.addEventListener('resize', position)
+    if (fixed) {
+      window.addEventListener('scroll', position, true)
+      window.addEventListener('resize', position)
+    }
     return () => {
       document.removeEventListener('mousedown', handleClick)
-      window.removeEventListener('scroll', position, true)
-      window.removeEventListener('resize', position)
+      if (fixed) {
+        window.removeEventListener('scroll', position, true)
+        window.removeEventListener('resize', position)
+      }
     }
-  }, [open])
+  }, [open, popover])
 
   const label =
     selected.length === 0
@@ -87,7 +98,7 @@ export default function FilterDropdown({
         onClick={() => {
           // Pre-position before opening so the popover doesn't flash at 0,0
           // (the effect re-clamps once it's measured).
-          if (!open) {
+          if (!open && popover === 'fixed') {
             const r = buttonRef.current?.getBoundingClientRect()
             if (r) setPos({ top: r.bottom + 8, left: r.left })
           }
@@ -106,8 +117,10 @@ export default function FilterDropdown({
       {open && (
         <div
           ref={popoverRef}
-          className={`${styles.popover} border-plus-fill drop-shadow-extra-dark`}
-          style={{ top: pos.top, left: pos.left }}
+          className={`${styles.popover} ${popover === 'absolute' ? styles.popoverAbsolute : ''} border-plus-fill drop-shadow-extra-dark`}
+          style={
+            popover === 'fixed' ? { top: pos.top, left: pos.left } : undefined
+          }
         >
           <div className="flex flex-col gap-16px">
             {options.map(option => (

@@ -7,7 +7,7 @@ import type { ListingType } from '@/lib/assistant/types'
 // specific promise the (missing) listing can't back up.
 const BROWSE_LABEL: Record<ListingType, string> = {
   job: 'Browse jobs',
-  candidate: 'Browse Hire',
+  person: 'Browse Hire',
   funder: 'Browse funding',
   advisor: 'Browse advisors',
   community: 'Browse communities',
@@ -27,10 +27,11 @@ const TYPE_TO_PAGE = new Map<string, { path: string; label: string }>(
     { path: t.pagePath, label: BROWSE_LABEL[t.catalogType] },
   ])
 )
-// 'candidate' (/hire) has no Airtable table yet, so it isn't in
-// RESOURCE_TABLES (see the TODO in catalog-coverage.ts) — added directly so
-// a fabricated candidate card id still falls back to an honest page link.
-TYPE_TO_PAGE.set('candidate', { path: '/hire', label: BROWSE_LABEL.candidate })
+// 'person' (/hire) has no Airtable table (its data comes from Mangrove One's
+// API), so it isn't in RESOURCE_TABLES (see the TODO in catalog-coverage.ts)
+// — added directly so a fabricated person card id still falls back to an
+// honest page link.
+TYPE_TO_PAGE.set('person', { path: '/hire', label: BROWSE_LABEL.person })
 
 /** For a card id whose listing can't be resolved (the model fabricated it, or
  *  it's a real listing it never actually retrieved this turn), map its leading

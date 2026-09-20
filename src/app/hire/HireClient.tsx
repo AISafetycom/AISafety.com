@@ -1,324 +1,226 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import CandidateCard from '@/components/CandidateCard'
 import FilterBar from '@/components/FilterBar'
 import FilterDropdown from '@/components/FilterDropdown'
 import Icon from '@/components/Icon'
-import CandidateCard from '@/components/hire/CandidateCard'
-import HireAssistantSearch, {
-  type HireAssistantResult,
-} from '@/components/hire/HireAssistantSearch'
-import { Candidate, KNOWN_FOCUS_AREAS } from '@/lib/data/hire'
-import { placementsById } from '@/lib/placements'
 import { setPageContext } from '@/lib/assistant/page-context'
-import { filterItems, optionCounts } from '@/lib/filter-counts'
-import styles from './HireClient.module.css'
+import { setAssistantPanelSlot } from '@/lib/assistant/panel-slot'
+import {
+  ASSISTANT_TOOL_EVENT,
+  askAssistant,
+  type AssistantToolDetail,
+} from '@/lib/assistant/page-events'
+import {
+  EMPTY_PEOPLE_FILTERS,
+  PEOPLE_FILTER_KEYS,
+  PEOPLE_FILTER_LABELS,
+  matchesPeopleFilters,
+  peopleFilterOptions,
+  sanitizePeopleFilters,
+  type PeopleFilterKey,
+  type PeopleFilters,
+} from '@/lib/people-filters'
+import type { Person } from '@/lib/data/people'
+import styles from './page.module.css'
+
+const TRACKING_PAGE = 'Hire'
+
+// Example questions under the hero field. Each one is a full message:
+// clicking sends it to the chatbot as if typed.
+const PROMPT_IDEAS = [
+  'Interpretability researchers in Europe',
+  'Open to full-time roles',
+  'Referred by MATS mentors',
+]
 
 interface HireClientProps {
-  candidates: Candidate[]
+  people: Person[]
 }
 
-const availabilityOptions = ['Open to full-time roles', 'Available now']
+export default function HireClient({ people }: HireClientProps) {
+  const [filters, setFilters] = useState<PeopleFilters>(EMPTY_PEOPLE_FILTERS)
+  const options = useMemo(() => peopleFilterOptions(people), [people])
+  const [question, setQuestion] = useState('')
 
-const allPass = () => true
-
-export default function HireClient({ candidates }: HireClientProps) {
-  const [selectedFocus, setSelectedFocus] = useState<string[]>([])
-  const [selectedAvailability, setSelectedAvailability] = useState<string[]>([])
-  const [selectedCountries, setSelectedCountries] = useState<string[]>([])
-  const [selectedSkills, setSelectedSkills] = useState<string[]>([])
-  // Result of the question currently showing in the assistant search box
-  // (src/components/hire/HireAssistantSearch.tsx), built from the actual
-  // candidate listings its tool calls returned. While set, it takes over the
-  // grid and the Focus/Location checkboxes below instead of the manual
-  // filters — touching a filter (toggleFilter) exits back to manual mode.
-  const [assistantResult, setAssistantResult] =
-    useState<HireAssistantResult | null>(null)
-  // Whether the folded "other" tier (assistantResult.otherCandidateIds) is
-  // expanded. Reset to collapsed each time a new question is sent (see
-  // handleAssistantResult), so every answer starts folded.
-  const [showOthers, setShowOthers] = useState(false)
-
-  const handleAssistantResult = (result: HireAssistantResult | null) => {
-    if (result === null) setShowOthers(false)
-    setAssistantResult(result)
-  }
-
-  const candidateById = useMemo(
-    () => new Map(candidates.map(c => [c.id, c])),
-    [candidates]
-  )
-
-  const focusOptions = useMemo(() => {
-    const present = new Set(candidates.flatMap(c => c.focusAreas))
-    const known = KNOWN_FOCUS_AREAS.filter(a => present.has(a))
-    const other = [...present].filter(
-      a => !(KNOWN_FOCUS_AREAS as readonly string[]).includes(a)
-    )
-    return [...known, ...other.sort()]
-  }, [candidates])
-
-  const countryOptions = useMemo(() => {
-    const counts: Record<string, number> = {}
-    for (const c of candidates) counts[c.country] = (counts[c.country] || 0) + 1
-    return Object.keys(counts).sort((a, b) => counts[b] - counts[a])
-  }, [candidates])
-
-  const skillOptions = useMemo(() => {
-    const present = new Set(
-      candidates.flatMap(c => c.projects.flatMap(p => p.categories))
-    )
-    return [...present].sort()
-  }, [candidates])
-
-  const groups = useMemo(
-    () => ({
-      focus: {
-        selected: selectedFocus,
-        matches: (candidate: Candidate, value: string) =>
-          candidate.focusAreas.includes(value),
-      },
-      availability: {
-        selected: selectedAvailability,
-        matches: (candidate: Candidate, value: string) =>
-          value === 'Open to full-time roles'
-            ? candidate.openToFullTime
-            : candidate.availability.hasCapacity,
-      },
-      country: {
-        selected: selectedCountries,
-        matches: (candidate: Candidate, value: string) =>
-          candidate.country === value,
-      },
-      skill: {
-        selected: selectedSkills,
-        matches: (candidate: Candidate, value: string) =>
-          candidate.projects.some(p => p.categories.includes(value)),
-      },
-    }),
-    [selectedFocus, selectedAvailability, selectedCountries, selectedSkills]
-  )
-
-  const filteredCandidates = useMemo(
-    () => filterItems(candidates, allPass, groups),
-    [candidates, groups]
-  )
-
-  const focusCounts = useMemo(
-    () =>
-      optionCounts(
-        filterItems(candidates, allPass, groups, 'focus'),
-        focusOptions,
-        groups.focus.matches
-      ),
-    [candidates, groups, focusOptions]
-  )
-
-  const availabilityCounts = useMemo(
-    () =>
-      optionCounts(
-        filterItems(candidates, allPass, groups, 'availability'),
-        availabilityOptions,
-        groups.availability.matches
-      ),
-    [candidates, groups]
-  )
-
-  const countryCounts = useMemo(
-    () =>
-      optionCounts(
-        filterItems(candidates, allPass, groups, 'country'),
-        countryOptions,
-        groups.country.matches
-      ),
-    [candidates, groups, countryOptions]
-  )
-
-  const skillCounts = useMemo(
-    () =>
-      optionCounts(
-        filterItems(candidates, allPass, groups, 'skill'),
-        skillOptions,
-        groups.skill.matches
-      ),
-    [candidates, groups, skillOptions]
-  )
-
-  const toggleFilter = (
-    value: string,
-    current: string[],
-    setter: (v: string[]) => void
-  ) => {
-    // Touching a filter by hand exits the assistant's result view and hands
-    // control back to the manual filters, which were untouched underneath it.
-    setAssistantResult(null)
-    if (current.includes(value)) {
-      setter(current.filter(v => v !== value))
-    } else {
-      setter([...current, value])
+  // Faceted counts like the other listing pages: a dropdown's numbers ignore
+  // that dropdown's own selection but respect every other one.
+  const { filtered, counts } = useMemo(() => {
+    const countBy = (
+      key: PeopleFilterKey,
+      extract: (p: Person) => readonly string[]
+    ) => {
+      const out: Record<string, number> = {}
+      for (const p of people) {
+        if (!matchesPeopleFilters(p, filters, key)) continue
+        for (const value of extract(p)) out[value] = (out[value] || 0) + 1
+      }
+      return out
     }
-  }
+    return {
+      filtered: people.filter(p => matchesPeopleFilters(p, filters)),
+      counts: {
+        focus: countBy('focus', p => p.focusAreas),
+        hours: countBy('hours', p => (p.hoursBucket ? [p.hoursBucket] : [])),
+        region: countBy('region', p => [p.region]),
+        track: countBy('track', p => p.track),
+      },
+    }
+  }, [people, filters])
 
-  // While the assistant view is active, the primary tier (its first,
-  // most-on-target search this turn) floats to the top; anything only found
-  // by a later, broadened search folds under "Show N more" instead of mixing
-  // in — see HireAssistantSearch/hire-result.ts. An explicitly empty result
-  // (nothing found even after broadening) falls back to the manual list
-  // instead of a blank grid.
-  const activeResult =
-    assistantResult && assistantResult.primaryCandidateIds.length > 0
-      ? assistantResult
-      : null
+  const toggle = (key: PeopleFilterKey, value: string) =>
+    setFilters(current => ({
+      ...current,
+      [key]: current[key].includes(value)
+        ? current[key].filter(v => v !== value)
+        : [...current[key], value],
+    }))
 
-  const { primaryCandidates, otherCandidates } = useMemo(() => {
-    const idsToCandidates = (ids: string[]) =>
-      ids
-        .map(id => candidateById.get(id))
-        .filter((c): c is Candidate => Boolean(c))
-    return activeResult
-      ? {
-          primaryCandidates: idsToCandidates(activeResult.primaryCandidateIds),
-          otherCandidates: idsToCandidates(activeResult.otherCandidateIds),
-        }
-      : { primaryCandidates: filteredCandidates, otherCandidates: [] }
-  }, [activeResult, candidateById, filteredCandidates])
-
-  // Built from what's actually displayed, so a slot number always matches
-  // what the visitor saw — including while the assistant view reorders them.
-  const placements = useMemo(
-    () => placementsById([...primaryCandidates, ...otherCandidates]),
-    [primaryCandidates, otherCandidates]
-  )
-
-  // Publish current filter state for the assistant to read.
+  // Publish the current filters so the chatbot sees them as page state (and
+  // can tell the visitor what the list already shows).
   useEffect(() => {
     const state: Record<string, unknown> = {}
-    if (selectedFocus.length) state.focusAreas = selectedFocus
-    if (selectedAvailability.length) state.availability = selectedAvailability
-    if (selectedCountries.length) state.countries = selectedCountries
-    if (selectedSkills.length) state.skills = selectedSkills
+    for (const key of PEOPLE_FILTER_KEYS) {
+      if (filters[key].length) state[key] = filters[key]
+    }
     setPageContext({
       page: '/hire',
       filters: Object.keys(state).length > 0 ? state : undefined,
     })
     return () => setPageContext(null)
-  }, [selectedFocus, selectedAvailability, selectedCountries, selectedSkills])
+  }, [filters])
+
+  // The other direction: when the chatbot's set_page_filters tool runs for
+  // this page, apply it to the pills. Keys it doesn't mention are left alone.
+  useEffect(() => {
+    const onTool = (e: Event) => {
+      const detail = (e as CustomEvent<AssistantToolDetail>).detail
+      if (!detail || detail.name !== 'set_page_filters' || !detail.ok) return
+      if (detail.input.page && detail.input.page !== '/hire') return
+      const next = sanitizePeopleFilters(
+        detail.input.filters as Record<string, unknown> | undefined,
+        options
+      )
+      if (Object.keys(next).length === 0) return
+      setFilters(current => ({ ...current, ...next }))
+    }
+    window.addEventListener(ASSISTANT_TOOL_EVENT, onTool)
+    return () => window.removeEventListener(ASSISTANT_TOOL_EVENT, onTool)
+  }, [options])
+
+  const anyFilterActive = PEOPLE_FILTER_KEYS.some(k => filters[k].length > 0)
+
+  // The same pills twice: above the list, and inside the chatbot's expanded
+  // panel (whose scrim covers the page). Both read and write this
+  // component's state, so a change in either place, or by the assistant's
+  // tool, shows up in both.
+  const renderFilterBar = (inPanel: boolean) => {
+    const popover = inPanel ? 'absolute' : 'fixed'
+    return (
+      <FilterBar
+        count={filtered.length}
+        noun="person"
+        label={`${filtered.length} ${filtered.length === 1 ? 'person' : 'people'}`}
+        compact={inPanel}
+      >
+        {PEOPLE_FILTER_KEYS.map(key => (
+          <FilterDropdown
+            key={key}
+            trackingPage={TRACKING_PAGE}
+            title={PEOPLE_FILTER_LABELS[key]}
+            options={options[key]}
+            selected={filters[key]}
+            counts={counts[key]}
+            onToggle={v => toggle(key, v)}
+            popover={popover}
+          />
+        ))}
+      </FilterBar>
+    )
+  }
+
+  const panelFilterBar = renderFilterBar(true)
+  useEffect(() => {
+    setAssistantPanelSlot(panelFilterBar)
+    return () => setAssistantPanelSlot(null)
+  }, [panelFilterBar])
+
+  function ask(text: string) {
+    const trimmed = text.trim()
+    if (!trimmed) return
+    askAssistant({ message: trimmed, expand: true })
+    setQuestion('')
+  }
 
   return (
     <>
-      <HireAssistantSearch onResult={handleAssistantResult} />
-
-      <FilterBar
-        count={primaryCandidates.length}
-        noun="person"
-        label={`${primaryCandidates.length} ${primaryCandidates.length === 1 ? 'person' : 'people'}`}
+      <section
+        className="width-8-col margin-bottom-56px"
+        aria-label="Ask the assistant to find people"
       >
-        <FilterDropdown
-          trackingPage="Hire"
-          title="Focus"
-          icon="/images/icons/wrench.svg"
-          options={focusOptions}
-          selected={activeResult ? activeResult.focusAreas : selectedFocus}
-          counts={focusCounts}
-          onToggle={v => toggleFilter(v, selectedFocus, setSelectedFocus)}
-        />
-        <FilterDropdown
-          trackingPage="Hire"
-          title="Availability"
-          icon="/images/icons/timer.svg"
-          options={availabilityOptions}
-          selected={selectedAvailability}
-          counts={availabilityCounts}
-          onToggle={v =>
-            toggleFilter(v, selectedAvailability, setSelectedAvailability)
-          }
-        />
-        <FilterDropdown
-          trackingPage="Hire"
-          title="Location"
-          icon="/images/icons/pin.svg"
-          options={countryOptions}
-          selected={activeResult ? activeResult.countries : selectedCountries}
-          counts={countryCounts}
-          onToggle={v =>
-            toggleFilter(v, selectedCountries, setSelectedCountries)
-          }
-        />
-        <FilterDropdown
-          trackingPage="Hire"
-          title="Skills"
-          icon="/images/icons/briefcase.svg"
-          options={skillOptions}
-          selected={selectedSkills}
-          counts={skillCounts}
-          onToggle={v => toggleFilter(v, selectedSkills, setSelectedSkills)}
-        />
-      </FilterBar>
-
-      {assistantResult && (
-        <div className="flex items-center justify-between padding-bottom-24px">
-          <p className="paragraph-small color-teal-300">
-            {activeResult
-              ? 'Showing the people the assistant found.'
-              : "The assistant didn't find an exact match — showing everyone below."}
-          </p>
-          <button
-            type="button"
-            className="paragraph-xs-bold color-light-teal"
-            onClick={() => setAssistantResult(null)}
-          >
-            Clear
-          </button>
-        </div>
-      )}
-
-      <div
-        className={`flex flex-col gap-24px${activeResult && otherCandidates.length > 0 ? '' : ' padding-bottom-40px'}`}
-      >
-        {primaryCandidates.map(candidate => (
-          <CandidateCard
-            key={candidate.id}
-            candidate={candidate}
-            placement={placements.get(candidate.id)}
+        <div className="flex items-center gap-8px padding-bottom-12px">
+          <Icon
+            src="/images/icons/chat.svg"
+            className="color-teal-bright-300"
           />
+          <p className="paragraph-small color-white">
+            Describe your ideal candidate and let our chatbot find the right
+            people
+          </p>
+        </div>
+        {/* Enter submits; there is no separate send button in the design. */}
+        <form
+          className="flex items-center"
+          onSubmit={e => {
+            e.preventDefault()
+            ask(question)
+          }}
+        >
+          <div className={styles.askFieldWrap}>
+            <Icon
+              src="/images/icons/magnifying-glass.svg"
+              className={`color-teal-400 ${styles.askIcon}`}
+            />
+            <input
+              type="text"
+              className={`text-field ${styles.askField}`}
+              placeholder='e.g. "Who is building evals for agents and open to full-time work?"'
+              value={question}
+              onChange={e => setQuestion(e.target.value)}
+              aria-label="Describe your ideal candidate"
+              maxLength={4000}
+            />
+          </div>
+        </form>
+        <div className="flex flex-wrap gap-8px padding-top-12px">
+          {PROMPT_IDEAS.map(idea => (
+            <button
+              key={idea}
+              type="button"
+              className="button-secondary"
+              onClick={() => ask(idea)}
+            >
+              {idea}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {renderFilterBar(false)}
+
+      <div className="flex flex-col gap-40px padding-bottom-80px">
+        {filtered.map(person => (
+          <CandidateCard key={person.id} person={person} />
         ))}
-        {primaryCandidates.length === 0 && (
-          <p className="paragraph-small color-teal-300">Nothing found.</p>
+        {filtered.length === 0 && (
+          <p className="paragraph-small color-teal-300">
+            {anyFilterActive
+              ? 'No one matches these filters. Try removing one, or ask the assistant above.'
+              : 'No profiles listed yet.'}
+          </p>
         )}
       </div>
-
-      {activeResult && otherCandidates.length > 0 && (
-        <div className="padding-top-24px padding-bottom-40px">
-          <button
-            type="button"
-            className={`paragraph-small-bold ${styles.othersToggle}`}
-            onClick={() => setShowOthers(o => !o)}
-            aria-expanded={showOthers}
-          >
-            <span>
-              {showOthers ? 'Hide' : 'Show'} {otherCandidates.length} more{' '}
-              {otherCandidates.length === 1 ? 'person' : 'people'} outside this
-              search
-            </span>
-            <Icon
-              src="/images/icons/chevron-down.svg"
-              size={16}
-              className={`${styles.othersChevron} ${showOthers ? styles.othersChevronOpen : ''}`}
-            />
-          </button>
-          {showOthers && (
-            <div className="flex flex-col gap-24px padding-top-24px">
-              {otherCandidates.map(candidate => (
-                <CandidateCard
-                  key={candidate.id}
-                  candidate={candidate}
-                  placement={placements.get(candidate.id)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
     </>
   )
 }

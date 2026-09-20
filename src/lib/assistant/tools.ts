@@ -1,5 +1,15 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import type { Catalog, Listing, ListingType } from './types'
+import {
+  HOURS_BUCKETS,
+  REGIONS,
+  TRACK_RECORD_OPTIONS,
+  describePeopleFilters,
+  peopleFilterOptions,
+  sanitizePeopleFilters,
+  type PeopleFilters,
+} from '@/lib/people-filters'
+import { getPeople } from '@/lib/data/people'
 import { isReadableUrl, readPage } from './read-page'
 import { searchCatalog } from './search'
 import {
@@ -19,7 +29,7 @@ You should call this tool LIBERALLY. By default there is NO limit — the tool r
 
 ARGUMENTS:
 
-• \`type\` — listing type. One of: 'job', 'candidate', 'funder', 'advisor', 'community', 'course', 'founder-resource', 'project', 'media-channel', 'org', 'event', 'training'. Highly recommended.
+• \`type\` — listing type. One of: 'job', 'person', 'funder', 'advisor', 'community', 'course', 'founder-resource', 'project', 'media-channel', 'org', 'event', 'training'. Highly recommended.
 
 • \`query\` — optional free-text terms. Tokens are matched against name (×5 weight), organization (×3), meta fields (×2), and description (×1). Use the user's words, related keywords, or leave empty to browse by filter alone.
 
@@ -27,9 +37,9 @@ ARGUMENTS:
 
   Per type:
     job: skillSet ("Policy"|"Research"|"Software engineering"|"Operations"|"Outreach"|"Strategy"|"Legal"|"Data"|"Information security"|"Management"), minimumExperience ("Entry-level"|"Junior"|"Mid"|"Senior"), roleType ("Full-time"|"Part-time"|"Internship"), workLocation ("Remote"|"On-site"), location (city or country)
-    candidate: focusArea (e.g. "Interpretability"|"Evals"|"Agent safety"|"Alignment theory"|"Governance"|"Security"|"Biosecurity" — a person can carry more than one, comma-joined; substring match means filtering on one value matches anyone who carries it among others), country (a single country, e.g. "UK", OR a region name — "Europe"|"Asia"|"Middle East"|"North America"|"Latin America"|"South America"|"Africa"|"Oceania" — which matches every country in it), openToFullTime ("Yes"), availableNow ("Yes" — has open capacity for more work right now), skills (categories of work from their project history, e.g. "Coding"|"Research"|"Writing"|"Policy"|"Security")
+    person: focus (Mangrove's focus-area labels as they appear in results, e.g. "Evals & benchmarks", "Agent safety", "Interpretability", "Governance & policy" — multi-value; substring match, so "Evals" works), region (${REGIONS.map(f => `"${f}"`).join('|')} — coarse, from the member's time zone), hoursPerWeek (${HOURS_BUCKETS.map(f => `"${f}"`).join('|')} — capacity bucket; absent when the member gave no number), track (${TRACK_RECORD_OPTIONS.map(f => `"${f}"`).join('|')} — multi-value), location (free text: the member's city when known, else their IANA time zone). Results also carry timeZone, maxHoursPerWeek, maxConcurrentProjects, projectsCompleted, projectsCurrent, a \`projects\` string listing every project as "title (status; role at org; dates; artifacts)", \`writing\` (posts and papers), and profileUrl (the member's Mangrove profile — the way to contact them). People are listed on /hire; card them like any other listing.
       – These are PEOPLE (/hire), not organizations or roles — do not confuse with 'job' or 'org'. Use this when someone asks to find a person/contributor/collaborator rather than a listing to apply to.
-      – **When the question names a region alongside another criterion (e.g. "interpretability researchers in Europe"), put BOTH in filters on your FIRST candidate search** — \`filters: { focusArea: 'Interpretability', country: 'Europe' }\` — rather than searching one dimension and reasoning about the other yourself from an unfiltered result. The /hire page's search box floats whatever your first candidate search returns and folds anything from a later, broader search under a "show more" toggle — so the first call being fully scoped is what puts the right people in front of the visitor instead of a mixed set.
+      – See the separate \`set_page_filters\` tool: once you've settled on a set of people from a search here, use it to set the SAME constraints as the /hire page's own filter pills, so the visitor sees the grid narrow to match your answer instead of just reading it in your prose.
     funder: type ("Fund"|"Grant program"|"Platform"), recipientType ("Individuals"|"Organizations"), applicationStatus ("Open"|"Closed" — use this to filter open/closed funders; acceptingApplications holds display text like "Applications close 31 October 2026" and is NOT reliably filterable)
     community: platform ("Slack"|"Discord"|"In-person"), type, activityLevel ("Active"|"Quiet"), location
     course: category, courseType
@@ -74,11 +84,10 @@ EXAMPLES:
   // Browse all advisors
   search_listings({ type: 'advisor' })
 
-  // People open to full-time work, focused on interpretability or evals
-  search_listings({ type: 'candidate', filters: { focusArea: ['Interpretability', 'Evals'], openToFullTime: 'Yes' } })
-
   // Interpretability researchers in Europe — region AND focus in one call
-  search_listings({ type: 'candidate', filters: { focusArea: 'Interpretability', country: 'Europe' } })
+  search_listings({ type: 'person', filters: { focus: 'Interpretability', region: 'Europe' } })
+  // ...then, once you've settled on that set:
+  set_page_filters({ page: '/hire', filters: { focus: ['Interpretability'], region: ['Europe'] } })
 
   // Every org drawn in one Field map region (first category only)
   search_listings({ type: 'org', filters: { mapArea: 'Advocacy Anchorage' } })
@@ -98,7 +107,7 @@ EXAMPLES:
           type: 'string',
           enum: [
             'job',
-            'candidate',
+            'person',
             'funder',
             'advisor',
             'community',
@@ -205,6 +214,27 @@ Each round carries name, startDate (plus startDateApprox where the organizer onl
       required: [],
     },
   },
+  {
+    name: 'set_page_filters',
+    description: `Set the filter pills on the resource page the visitor is viewing so its list matches what you found. Only the /hire page supports this today. Use it right after you settle on a set of people from a search_listings({ type: 'person' }) call, passing the SAME constraints you searched with; the page updates live and the pills above the conversation reflect them, so tell the visitor in one short clause that you set the filters. Every value must be an exact option label: focus (a focus-area label exactly as it appears in person results, e.g. "Evals & benchmarks"), hours (${HOURS_BUCKETS.join(' | ')}), region (${REGIONS.join(' | ')}), track (${TRACK_RECORD_OPTIONS.join(' | ')}). Pass an empty array to clear a group; leave a key out to keep whatever the visitor has there. Page state in the context line shows the visitor's current pills — when THEY changed something by hand, respect it rather than overwriting it with your earlier choice. Never call this on other pages.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        page: { type: 'string', enum: ['/hire'] },
+        filters: {
+          type: 'object',
+          properties: {
+            focus: { type: 'array', items: { type: 'string' } },
+            hours: { type: 'array', items: { type: 'string' } },
+            region: { type: 'array', items: { type: 'string' } },
+            track: { type: 'array', items: { type: 'string' } },
+          },
+          additionalProperties: false,
+        },
+      },
+      required: ['page', 'filters'],
+    },
+  },
 ]
 
 interface SearchInput {
@@ -227,6 +257,66 @@ interface ReadListingPageInput {
 interface ProgramHistoryInput {
   id?: string
   query?: string
+}
+
+interface SetPageFiltersInput {
+  page?: string
+  filters?: Record<string, unknown>
+}
+
+/** Validates the model's filter request against the page's real option
+ *  labels. The widget applies the (already validated) input to the page
+ *  when it sees the tool_call_done event; the tool result tells the model
+ *  what actually stuck so it never claims a filter the page doesn't have. */
+async function executeSetPageFilters(
+  input: SetPageFiltersInput
+): Promise<ToolExecutionResult> {
+  if (input.page !== '/hire') {
+    return {
+      ok: false,
+      content: `set_page_filters only works on the /hire page (got ${JSON.stringify(input.page)}). On other pages, describe the filters to the visitor instead.`,
+      listings: [],
+    }
+  }
+  // Validate against the options the page really offers for today's people
+  // (focus labels come from the feed), so the model never claims a pill the
+  // visitor can't see.
+  const options = peopleFilterOptions(await getPeople())
+  const applied = sanitizePeopleFilters(input.filters, options)
+  const requested = input.filters ?? {}
+  const dropped: string[] = []
+  for (const [key, value] of Object.entries(requested)) {
+    const kept = applied[key as keyof PeopleFilters]
+    const wanted = Array.isArray(value) ? value : [value]
+    if (!kept) {
+      dropped.push(`${key} (not a filter on this page)`)
+      continue
+    }
+    for (const v of wanted) {
+      if (typeof v === 'string' && !kept.includes(v)) {
+        dropped.push(`${key}: ${JSON.stringify(v)} (not an option label)`)
+      }
+    }
+  }
+  if (Object.keys(applied).length === 0) {
+    return {
+      ok: false,
+      content: `Nothing applied — none of the values were option labels. Dropped: ${dropped.join('; ')}. Use the exact labels from the tool description.`,
+      listings: [],
+    }
+  }
+  const groups = Object.keys(applied).length
+  return {
+    ok: true,
+    content: JSON.stringify({
+      page: '/hire',
+      applied,
+      ...(dropped.length ? { dropped } : {}),
+      note: 'The page now shows people matching these pills (other groups unchanged). Tell the visitor briefly that you set the filters.',
+    }),
+    listings: [],
+    summary: `${groups} filter${groups === 1 ? '' : 's'} · ${describePeopleFilters(applied)}`,
+  }
 }
 
 /** Pre-computed application-window status for an event or training program,
@@ -572,6 +662,8 @@ export async function executeTool(
       return executeReadListingPage(safeInput as ReadListingPageInput, catalog)
     case 'get_program_history':
       return executeProgramHistory(safeInput as ProgramHistoryInput, catalog)
+    case 'set_page_filters':
+      return executeSetPageFilters(safeInput as SetPageFiltersInput)
     default:
       return {
         ok: false,

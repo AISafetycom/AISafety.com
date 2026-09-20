@@ -7,6 +7,9 @@ interface PageHeaderProps {
   title: string
   /** ISO date — renders a live "Updated X ago" line under the title. */
   lastUpdatedIso?: string | null
+  /** Custom line in the "Updated" slot instead of the live date (e.g. a data
+   *  source credit). Takes precedence over lastUpdatedIso. */
+  updatedLine?: ReactNode
   description: ReactNode
   id?: string
   topPadding?: string
@@ -25,6 +28,7 @@ interface PageHeaderProps {
 export default function PageHeader({
   title,
   lastUpdatedIso,
+  updatedLine,
   description,
   id,
   topPadding = 'padding-top-56px',
@@ -39,11 +43,17 @@ export default function PageHeader({
       <h1 className={`${topPadding} padding-bottom-8px`} id={id}>
         {title}
       </h1>
-      {lastUpdatedIso && (
-        <RelativeDate
-          iso={lastUpdatedIso}
-          className="paragraph-small color-teal-300 margin-bottom-40px"
-        />
+      {updatedLine ? (
+        <p className="paragraph-small color-teal-300 margin-bottom-40px">
+          {updatedLine}
+        </p>
+      ) : (
+        lastUpdatedIso && (
+          <RelativeDate
+            iso={lastUpdatedIso}
+            className="paragraph-small color-teal-300 margin-bottom-40px"
+          />
+        )
       )}
       <h2 className="width-7-col margin-bottom-56px">{description}</h2>
       {children}

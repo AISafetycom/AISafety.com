@@ -9,7 +9,7 @@ import {
   buildContextLine,
   type RequestContext,
 } from '@/lib/assistant/prompt'
-import { DEFAULT_MODEL_ID } from '@/lib/assistant/models'
+import { resolveModelId } from '@/lib/assistant/models'
 import {
   buildApiMessages,
   runAssistantStream,
@@ -278,7 +278,7 @@ export async function POST(req: NextRequest) {
         systemPrompt: PRODUCTION_PROMPT,
         pagesBlock: PAGES_BLOCK,
         donationGuide: await getDonationGuideText(),
-        model: DEFAULT_MODEL_ID,
+        model: resolveModelId(),
         apiMessages,
         catalog,
         send,

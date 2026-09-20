@@ -1,18 +1,31 @@
 import PageHeader from '@/components/PageHeader'
 import HireClient from './HireClient'
-import { getCandidates } from '@/lib/data/hire'
+import { getPeople } from '@/lib/data/people'
 import { pageMetadata } from '@/lib/page-metadata'
 import { SITE_PAGES } from '@/lib/site-pages'
 
 export const metadata = pageMetadata(SITE_PAGES.hire)
 
+// The data source credit under the title links to where the members'
+// profiles actually live (Mangrove One), per src/lib/data/people.ts.
+const DATA_SOURCE_NAME = 'Mangrove One'
+const DATA_SOURCE_URL = 'https://try.mangrove.one'
+
 export default async function HirePage() {
-  const candidates = await getCandidates()
+  const people = await getPeople()
 
   return (
     <div className="container-default">
       <PageHeader
         title="Hire"
+        updatedLine={
+          <>
+            Updated today with data from{' '}
+            <a href={DATA_SOURCE_URL} className="color-light-teal">
+              {DATA_SOURCE_NAME}
+            </a>
+          </>
+        }
         description={
           <>
             Find{' '}
@@ -23,19 +36,9 @@ export default async function HirePage() {
             collaborators.
           </>
         }
-      >
-        {/* Mock data (see src/lib/data/hire.ts) has no real freshness
-            signal, so there's no lastUpdatedIso to show here yet. This
-            "Updated today with data from Mangrove One" line matches the
-            mockup, but names a data partner that doesn't exist yet — copy
-            to confirm with Bryce/Melissa before this page goes live. */}
-        <p className="paragraph-small color-teal-300 padding-bottom-40px">
-          Updated today with data from{' '}
-          <span className="color-light-teal">Mangrove One</span>.
-        </p>
-      </PageHeader>
+      />
 
-      <HireClient candidates={candidates} />
+      <HireClient people={people} />
     </div>
   )
 }

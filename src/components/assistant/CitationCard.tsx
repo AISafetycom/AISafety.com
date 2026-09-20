@@ -37,7 +37,7 @@ function TypeIcon({ type }: { type: ListingType }) {
       return <Icon src="/images/icons/calendar.svg" size={16} />
     case 'training':
       return <Icon src="/images/icons/grad-cap.svg" size={16} />
-    case 'candidate':
+    case 'person':
       return <Icon src="/images/icons/person-alt.svg" size={16} />
   }
 }
@@ -61,8 +61,8 @@ function metaSummary(c: CitationRef): string {
   } else if (c.type === 'training') {
     if (c.meta.type) parts.push(c.meta.type)
     if (c.meta.stipend) parts.push(c.meta.stipend)
-  } else if (c.type === 'candidate') {
-    if (c.meta.focusArea) parts.push(c.meta.focusArea)
+  } else if (c.type === 'person') {
+    if (c.meta.focus) parts.push(c.meta.focus)
     if (c.meta.location) parts.push(c.meta.location)
   }
   return parts.join(' · ')

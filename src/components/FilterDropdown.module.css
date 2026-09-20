@@ -45,6 +45,13 @@
   padding: 20px;
 }
 
+/* Anchored under the pill instead (see the `popover` prop). */
+.popoverAbsolute {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+}
+
 /* Keep each option on one line so the popover hugs the widest one. */
 .option {
   white-space: nowrap;

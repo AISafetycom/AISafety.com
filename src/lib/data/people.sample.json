@@ -1,0 +1,759 @@
+[
+  {
+    "id": "4bb49ca8c0a8be9027915e7c9b49e437ed7d56eca1a2c441bccb4a7da7077bf0",
+    "handle": "aisha-iyer",
+    "displayName": "Aisha Iyer",
+    "profileUrl": "https://try.mangrove.one/u/aisha-iyer",
+    "avatar": {
+      "url": null,
+      "initials": "AI"
+    },
+    "interests": {
+      "summary": "PhD student, part time on this. Control-style protocols for untrusted agents: trusted monitoring, resampling, and the cost of each.",
+      "focusAreas": [
+        {
+          "slug": "agent-safety",
+          "label": "Agent safety"
+        },
+        {
+          "slug": "forecasting",
+          "label": "Forecasting & strategy"
+        }
+      ]
+    },
+    "workingOn": "PhD student, part time on this. Control-style protocols for untrusted agents: trusted monitoring, resampling, and the cost of each. Happy to do the engineering.",
+    "links": {
+      "linkedin": "https://www.linkedin.com/in/aisha-iyer-sandbox",
+      "x": null,
+      "github": null,
+      "website": "https://aisha-iyer.sandbox.mangrove.one"
+    },
+    "timeZone": "Asia/Singapore",
+    "capacity": {
+      "maxConcurrentProjects": 2,
+      "maxHoursPerWeek": 29
+    },
+    "projects": [
+      {
+        "id": "f7a45fce-e019-4437-a2e9-a983b8e45215",
+        "title": "Training stack supply-chain audit",
+        "kind": "independent",
+        "status": "Completed",
+        "role": "Project member",
+        "joinedAt": "2026-06-21T12:04:27.519Z",
+        "leftAt": null,
+        "outcome": "completed",
+        "organization": "Estuary Labs",
+        "artifacts": [
+          {
+            "id": "832744a0-c616-461b-a216-5b1a52e21a7f",
+            "title": "Eval results: Training stack supply-chain audit",
+            "url": "https://sandbox.mangrove.one/artifacts/832744a0",
+            "kind": "deliverable",
+            "at": "2026-09-01T12:04:27.519Z"
+          },
+          {
+            "id": "70f66913-6de8-4668-ae8f-b6ae3172571e",
+            "title": "Dataset card: Training stack supply-chain audit",
+            "url": "https://sandbox.mangrove.one/artifacts/70f66913",
+            "kind": "deliverable",
+            "at": "2026-08-28T12:04:27.519Z"
+          }
+        ]
+      },
+      {
+        "id": "e6f9dc48-de80-483a-ab34-4bb26c077f3f",
+        "title": "Reward proxy experiments",
+        "kind": "independent",
+        "status": "Cancelled",
+        "role": "Project member",
+        "joinedAt": "2026-06-09T12:04:27.519Z",
+        "leftAt": null,
+        "outcome": "cancelled",
+        "organization": "Northwind Safety Collective",
+        "artifacts": []
+      },
+      {
+        "id": "05aeb168-8b86-4f70-afff-8ffcd8116fd8",
+        "title": "Sandbagging detection eval suite",
+        "kind": "independent",
+        "status": "Active",
+        "role": "Project member",
+        "joinedAt": "2026-03-20T12:04:27.519Z",
+        "leftAt": null,
+        "outcome": "active",
+        "organization": null,
+        "artifacts": [
+          {
+            "id": "cb24284b-53a8-4ea8-aa2a-ddaa779461a6",
+            "title": "Slides: Sandbagging detection eval suite",
+            "url": "https://sandbox.mangrove.one/artifacts/cb24284b",
+            "kind": "deliverable",
+            "at": "2026-09-01T12:04:27.519Z"
+          },
+          {
+            "id": "66e66c3b-8c90-4ed5-a870-f658cd71184d",
+            "title": "Repository: Sandbagging detection eval suite",
+            "url": "https://sandbox.mangrove.one/artifacts/66e66c3b",
+            "kind": "deliverable",
+            "at": "2026-08-30T12:04:27.519Z"
+          }
+        ]
+      },
+      {
+        "id": "7b4d0e4c-67a2-4355-a67b-96ed26a0c994",
+        "title": "Hackathon: agents in the wild",
+        "kind": "hackathon",
+        "status": "Completed",
+        "role": "Project member",
+        "joinedAt": "2025-12-23T12:04:27.519Z",
+        "leftAt": null,
+        "outcome": "completed",
+        "organization": "Mangrove hackathon",
+        "artifacts": [
+          {
+            "id": "2825a359-d428-4d06-a0fb-871efadbb0ad",
+            "title": "Hackathon: agents in the wild: entry write-up",
+            "url": null,
+            "kind": "hackathon_submission",
+            "at": "2026-05-28T12:04:27.519Z"
+          }
+        ]
+      }
+    ],
+    "artifacts": [
+      {
+        "id": "832744a0-c616-461b-a216-5b1a52e21a7f",
+        "title": "Eval results: Training stack supply-chain audit",
+        "url": "https://sandbox.mangrove.one/artifacts/832744a0",
+        "kind": "deliverable",
+        "at": "2026-09-01T12:04:27.519Z",
+        "projectId": "f7a45fce-e019-4437-a2e9-a983b8e45215"
+      },
+      {
+        "id": "cb24284b-53a8-4ea8-aa2a-ddaa779461a6",
+        "title": "Slides: Sandbagging detection eval suite",
+        "url": "https://sandbox.mangrove.one/artifacts/cb24284b",
+        "kind": "deliverable",
+        "at": "2026-09-01T12:04:27.519Z",
+        "projectId": "05aeb168-8b86-4f70-afff-8ffcd8116fd8"
+      },
+      {
+        "id": "66e66c3b-8c90-4ed5-a870-f658cd71184d",
+        "title": "Repository: Sandbagging detection eval suite",
+        "url": "https://sandbox.mangrove.one/artifacts/66e66c3b",
+        "kind": "deliverable",
+        "at": "2026-08-30T12:04:27.519Z",
+        "projectId": "05aeb168-8b86-4f70-afff-8ffcd8116fd8"
+      },
+      {
+        "id": "70f66913-6de8-4668-ae8f-b6ae3172571e",
+        "title": "Dataset card: Training stack supply-chain audit",
+        "url": "https://sandbox.mangrove.one/artifacts/70f66913",
+        "kind": "deliverable",
+        "at": "2026-08-28T12:04:27.519Z",
+        "projectId": "f7a45fce-e019-4437-a2e9-a983b8e45215"
+      },
+      {
+        "id": "2825a359-d428-4d06-a0fb-871efadbb0ad",
+        "title": "Hackathon: agents in the wild: entry write-up",
+        "url": null,
+        "kind": "hackathon_submission",
+        "at": "2026-05-28T12:04:27.519Z",
+        "projectId": "7b4d0e4c-67a2-4355-a67b-96ed26a0c994"
+      }
+    ],
+    "updatedAt": "2026-09-19T13:24:49.258Z"
+  },
+  {
+    "id": "3d4c2cb1308d04bc48f551b84a5c91633212b95ef184467bdfe8cf916de1fb14",
+    "handle": "aisha-varga",
+    "displayName": "Aisha Varga",
+    "profileUrl": "https://try.mangrove.one/u/aisha-varga",
+    "avatar": {
+      "url": null,
+      "initials": "AV"
+    },
+    "interests": {
+      "summary": "Undergrad with one summer research program behind me. Tool-using agents fail in ways that static evals miss.",
+      "focusAreas": [
+        {
+          "slug": "agent-safety",
+          "label": "Agent safety"
+        }
+      ]
+    },
+    "workingOn": "Undergrad with one summer research program behind me. Tool-using agents fail in ways that static evals miss. I want to build monitoring that catches an agent going off-task in a live run.",
+    "links": {
+      "linkedin": "https://www.linkedin.com/in/aisha-varga-sandbox",
+      "x": null,
+      "github": null,
+      "website": null
+    },
+    "timeZone": "America/New_York",
+    "capacity": {
+      "maxConcurrentProjects": 1,
+      "maxHoursPerWeek": null
+    },
+    "projects": [
+      {
+        "id": "1969b582-cd68-42e1-aca8-dcf0fbbef33a",
+        "title": "Amplification reading and writing group",
+        "kind": "independent",
+        "status": "Current",
+        "role": "Project member",
+        "joinedAt": "2026-01-14T12:04:27.519Z",
+        "leftAt": "2026-07-18T12:04:27.519Z",
+        "outcome": "left",
+        "organization": null,
+        "artifacts": []
+      },
+      {
+        "id": "94212de4-a2ae-4e82-af89-8fb6484112d0",
+        "title": "Reading group mentorship pilot",
+        "kind": "independent",
+        "status": "Current",
+        "role": "Project member",
+        "joinedAt": "2025-11-20T12:04:27.519Z",
+        "leftAt": null,
+        "outcome": "active",
+        "organization": "Saltmarsh Policy Group",
+        "artifacts": []
+      }
+    ],
+    "artifacts": [],
+    "updatedAt": "2026-09-19T13:24:49.258Z"
+  },
+  {
+    "id": "fcaa93186c31018cd7d169e3da5af6bb324012355f79422cfd8a425dbee05189",
+    "handle": "arjun-osei",
+    "displayName": "Arjun Osei",
+    "profileUrl": "https://try.mangrove.one/u/arjun-osei",
+    "avatar": {
+      "url": null,
+      "initials": "AO"
+    },
+    "interests": {
+      "summary": "PhD student, part time on this. I run a local reading group and want to help a program scale its mentorship without losing quality.",
+      "focusAreas": [
+        {
+          "slug": "field-building",
+          "label": "Field-building & community"
+        },
+        {
+          "slug": "interpretability",
+          "label": "Interpretability"
+        }
+      ]
+    },
+    "workingOn": "PhD student, part time on this. I run a local reading group and want to help a program scale its mentorship without losing quality.",
+    "links": {
+      "linkedin": "https://www.linkedin.com/in/arjun-osei-sandbox",
+      "x": null,
+      "github": null,
+      "website": "https://arjun-osei.sandbox.mangrove.one"
+    },
+    "timeZone": "Europe/Berlin",
+    "capacity": {
+      "maxConcurrentProjects": 1,
+      "maxHoursPerWeek": 28
+    },
+    "projects": [
+      {
+        "id": "f49a31bb-b68b-4b1a-a34f-5dd64c71b9e0",
+        "title": "Governance briefing series",
+        "kind": "independent",
+        "status": "Debrief",
+        "role": "Project member",
+        "joinedAt": "2026-08-07T12:04:27.519Z",
+        "leftAt": null,
+        "outcome": "active",
+        "organization": null,
+        "artifacts": []
+      },
+      {
+        "id": "bb30cd89-d5ce-488e-a109-34477f013355",
+        "title": "Attribution graphs for a safety question",
+        "kind": "independent",
+        "status": "Completed",
+        "role": "Project member",
+        "joinedAt": "2026-04-03T12:04:27.519Z",
+        "leftAt": "2026-04-25T12:04:27.519Z",
+        "outcome": "left",
+        "organization": "Northwind Safety Collective",
+        "artifacts": [
+          {
+            "id": "acc87b40-7e75-4011-a053-c3504bd222d8",
+            "title": "Repository: Attribution graphs for a safety question",
+            "url": "https://sandbox.mangrove.one/artifacts/acc87b40",
+            "kind": "deliverable",
+            "at": "2026-04-24T12:04:27.519Z"
+          },
+          {
+            "id": "8e649ea4-781e-4fae-ab77-833f94e2d5f2",
+            "title": "Write-up: Attribution graphs for a safety question",
+            "url": "https://sandbox.mangrove.one/artifacts/8e649ea4",
+            "kind": "deliverable",
+            "at": "2026-04-21T12:04:27.519Z"
+          }
+        ]
+      },
+      {
+        "id": "a6b413f0-5a33-46fd-a5a1-e336089d5177",
+        "title": "Safety case template for agents",
+        "kind": "independent",
+        "status": "Debrief",
+        "role": "Project member",
+        "joinedAt": "2026-03-04T12:04:27.519Z",
+        "leftAt": null,
+        "outcome": "active",
+        "organization": "Estuary Labs",
+        "artifacts": [
+          {
+            "id": "424b8c4e-86f0-4568-a399-ec94ea3faea4",
+            "title": "Eval results: Safety case template for agents",
+            "url": "https://sandbox.mangrove.one/artifacts/424b8c4e",
+            "kind": "deliverable",
+            "at": "2026-08-22T12:04:27.519Z"
+          }
+        ]
+      },
+      {
+        "id": "eae4600d-c505-46ce-a212-d252d481595b",
+        "title": "Debate protocol toy implementation",
+        "kind": "independent",
+        "status": "Active",
+        "role": "Project advisor",
+        "joinedAt": "2026-02-11T12:04:27.519Z",
+        "leftAt": null,
+        "outcome": "active",
+        "organization": null,
+        "artifacts": [
+          {
+            "id": "70499ab1-fa28-4dfc-aab0-2407e133e89b",
+            "title": "Dataset card: Debate protocol toy implementation",
+            "url": "https://sandbox.mangrove.one/artifacts/70499ab1",
+            "kind": "deliverable",
+            "at": "2026-09-09T12:04:27.519Z"
+          }
+        ]
+      },
+      {
+        "id": "3c84337e-9b70-4ed9-a811-65810d05634d",
+        "title": "Sparse autoencoder feature audit on Gemma 2",
+        "kind": "independent",
+        "status": "Active",
+        "role": "Project advisor",
+        "joinedAt": "2026-01-15T12:04:27.519Z",
+        "leftAt": "2026-05-12T12:04:27.519Z",
+        "outcome": "left",
+        "organization": null,
+        "artifacts": [
+          {
+            "id": "a25db442-6d98-4059-ae54-9403fd0433f9",
+            "title": "Dataset card: Sparse autoencoder feature audit on Gemma 2",
+            "url": "https://sandbox.mangrove.one/artifacts/a25db442",
+            "kind": "deliverable",
+            "at": "2026-09-04T12:04:27.519Z"
+          },
+          {
+            "id": "87cf1917-d149-447f-a173-af4f68c26ac4",
+            "title": "Slides: Sparse autoencoder feature audit on Gemma 2",
+            "url": "https://sandbox.mangrove.one/artifacts/87cf1917",
+            "kind": "deliverable",
+            "at": "2026-08-23T12:04:27.519Z"
+          }
+        ]
+      }
+    ],
+    "artifacts": [
+      {
+        "id": "70499ab1-fa28-4dfc-aab0-2407e133e89b",
+        "title": "Dataset card: Debate protocol toy implementation",
+        "url": "https://sandbox.mangrove.one/artifacts/70499ab1",
+        "kind": "deliverable",
+        "at": "2026-09-09T12:04:27.519Z",
+        "projectId": "eae4600d-c505-46ce-a212-d252d481595b"
+      },
+      {
+        "id": "a25db442-6d98-4059-ae54-9403fd0433f9",
+        "title": "Dataset card: Sparse autoencoder feature audit on Gemma 2",
+        "url": "https://sandbox.mangrove.one/artifacts/a25db442",
+        "kind": "deliverable",
+        "at": "2026-09-04T12:04:27.519Z",
+        "projectId": "3c84337e-9b70-4ed9-a811-65810d05634d"
+      },
+      {
+        "id": "87cf1917-d149-447f-a173-af4f68c26ac4",
+        "title": "Slides: Sparse autoencoder feature audit on Gemma 2",
+        "url": "https://sandbox.mangrove.one/artifacts/87cf1917",
+        "kind": "deliverable",
+        "at": "2026-08-23T12:04:27.519Z",
+        "projectId": "3c84337e-9b70-4ed9-a811-65810d05634d"
+      },
+      {
+        "id": "424b8c4e-86f0-4568-a399-ec94ea3faea4",
+        "title": "Eval results: Safety case template for agents",
+        "url": "https://sandbox.mangrove.one/artifacts/424b8c4e",
+        "kind": "deliverable",
+        "at": "2026-08-22T12:04:27.519Z",
+        "projectId": "a6b413f0-5a33-46fd-a5a1-e336089d5177"
+      },
+      {
+        "id": "acc87b40-7e75-4011-a053-c3504bd222d8",
+        "title": "Repository: Attribution graphs for a safety question",
+        "url": "https://sandbox.mangrove.one/artifacts/acc87b40",
+        "kind": "deliverable",
+        "at": "2026-04-24T12:04:27.519Z",
+        "projectId": "bb30cd89-d5ce-488e-a109-34477f013355"
+      },
+      {
+        "id": "8e649ea4-781e-4fae-ab77-833f94e2d5f2",
+        "title": "Write-up: Attribution graphs for a safety question",
+        "url": "https://sandbox.mangrove.one/artifacts/8e649ea4",
+        "kind": "deliverable",
+        "at": "2026-04-21T12:04:27.519Z",
+        "projectId": "bb30cd89-d5ce-488e-a109-34477f013355"
+      }
+    ],
+    "updatedAt": "2026-09-19T13:24:49.258Z"
+  },
+  {
+    "id": "bf524635b839a7b050d0a6c52108e4ea28811822a9441bb48d36a66a4400ec45",
+    "handle": "chloe-fischer",
+    "displayName": "Chloe Fischer",
+    "profileUrl": "https://try.mangrove.one/u/chloe-fischer",
+    "avatar": {
+      "url": null,
+      "initials": "CF"
+    },
+    "interests": {
+      "summary": "Undergrad with one summer research program behind me. Building evals that are hard to game.",
+      "focusAreas": [
+        {
+          "slug": "evals",
+          "label": "Evals & benchmarks"
+        }
+      ]
+    },
+    "workingOn": "Undergrad with one summer research program behind me. Building evals that are hard to game. I care about sandbagging detection and about writing rubrics an outside grader can apply consistently.",
+    "links": {
+      "linkedin": "https://www.linkedin.com/in/chloe-fischer-sandbox",
+      "x": null,
+      "github": "https://github.com/chloe-fischer-sandbox",
+      "website": null
+    },
+    "timeZone": "Europe/London",
+    "capacity": {
+      "maxConcurrentProjects": 2,
+      "maxHoursPerWeek": 10
+    },
+    "projects": [
+      {
+        "id": "6bd72c95-c2be-4374-ae8b-f78370ea491d",
+        "title": "Control protocol cost model",
+        "kind": "independent",
+        "status": "Current",
+        "role": "Project lead",
+        "joinedAt": "2026-04-02T12:04:27.519Z",
+        "leftAt": null,
+        "outcome": "active",
+        "organization": null,
+        "artifacts": []
+      },
+      {
+        "id": "4fa53cea-d7bd-449d-a913-1e3c5ab71b59",
+        "title": "Trusted monitoring for coding agents",
+        "kind": "independent",
+        "status": "Current",
+        "role": "Project member",
+        "joinedAt": "2025-10-22T12:04:27.519Z",
+        "leftAt": null,
+        "outcome": "active",
+        "organization": null,
+        "artifacts": []
+      },
+      {
+        "id": "dc2c6868-2c19-41d6-a21f-f6bd678e5142",
+        "title": "Multimodal jailbreak harness",
+        "kind": "independent",
+        "status": "Active",
+        "role": "Project member",
+        "joinedAt": "2025-10-18T12:04:27.519Z",
+        "leftAt": null,
+        "outcome": "active",
+        "organization": null,
+        "artifacts": []
+      },
+      {
+        "id": "c5f2dfd0-0b5f-422c-a8fe-fab8376396d3",
+        "title": "Hackathon: evals that bite",
+        "kind": "hackathon",
+        "status": "Completed",
+        "role": "Project member",
+        "joinedAt": "2025-08-18T12:04:27.519Z",
+        "leftAt": null,
+        "outcome": "completed",
+        "organization": "Mangrove hackathon",
+        "artifacts": [
+          {
+            "id": "6bf7bdee-e008-40d1-a38e-48472d013f07",
+            "title": "Hackathon: evals that bite: demo video",
+            "url": "https://sandbox.mangrove.one/artifacts/6bf7bdee",
+            "kind": "hackathon_video",
+            "at": "2026-05-20T12:04:27.519Z"
+          },
+          {
+            "id": "b1ebe270-1250-4f0e-a388-e1c11576a250",
+            "title": "Hackathon: evals that bite: entry write-up",
+            "url": null,
+            "kind": "hackathon_submission",
+            "at": "2026-05-19T12:04:27.519Z"
+          },
+          {
+            "id": "1167fcc2-696c-4c1c-a710-e6f5b55b9e8a",
+            "title": "Hackathon: evals that bite: demo video",
+            "url": "https://sandbox.mangrove.one/artifacts/1167fcc2",
+            "kind": "hackathon_video",
+            "at": "2026-05-17T12:04:27.519Z"
+          }
+        ]
+      },
+      {
+        "id": "8b2d40a2-3dd7-4b95-a909-513172b3d124",
+        "title": "Chain-of-thought faithfulness probe",
+        "kind": "independent",
+        "status": "Completed",
+        "role": "Project advisor",
+        "joinedAt": "2025-08-17T12:04:27.519Z",
+        "leftAt": null,
+        "outcome": "completed",
+        "organization": null,
+        "artifacts": [
+          {
+            "id": "b4dbec3b-700c-4564-a544-0438e4894506",
+            "title": "Repository: Chain-of-thought faithfulness probe",
+            "url": "https://sandbox.mangrove.one/artifacts/b4dbec3b",
+            "kind": "deliverable",
+            "at": "2026-05-30T12:04:27.519Z"
+          },
+          {
+            "id": "cd66bdb1-c9df-423f-a0ae-e7f6a4ce2c1a",
+            "title": "Write-up: Chain-of-thought faithfulness probe",
+            "url": "https://sandbox.mangrove.one/artifacts/cd66bdb1",
+            "kind": "deliverable",
+            "at": "2026-05-28T12:04:27.519Z"
+          },
+          {
+            "id": "fb4d150e-0865-49a5-a98c-c25344880710",
+            "title": "Write-up: Chain-of-thought faithfulness probe",
+            "url": "https://sandbox.mangrove.one/artifacts/fb4d150e",
+            "kind": "deliverable",
+            "at": "2026-05-26T12:04:27.519Z"
+          }
+        ]
+      }
+    ],
+    "artifacts": [
+      {
+        "id": "b4dbec3b-700c-4564-a544-0438e4894506",
+        "title": "Repository: Chain-of-thought faithfulness probe",
+        "url": "https://sandbox.mangrove.one/artifacts/b4dbec3b",
+        "kind": "deliverable",
+        "at": "2026-05-30T12:04:27.519Z",
+        "projectId": "8b2d40a2-3dd7-4b95-a909-513172b3d124"
+      },
+      {
+        "id": "cd66bdb1-c9df-423f-a0ae-e7f6a4ce2c1a",
+        "title": "Write-up: Chain-of-thought faithfulness probe",
+        "url": "https://sandbox.mangrove.one/artifacts/cd66bdb1",
+        "kind": "deliverable",
+        "at": "2026-05-28T12:04:27.519Z",
+        "projectId": "8b2d40a2-3dd7-4b95-a909-513172b3d124"
+      },
+      {
+        "id": "fb4d150e-0865-49a5-a98c-c25344880710",
+        "title": "Write-up: Chain-of-thought faithfulness probe",
+        "url": "https://sandbox.mangrove.one/artifacts/fb4d150e",
+        "kind": "deliverable",
+        "at": "2026-05-26T12:04:27.519Z",
+        "projectId": "8b2d40a2-3dd7-4b95-a909-513172b3d124"
+      },
+      {
+        "id": "6bf7bdee-e008-40d1-a38e-48472d013f07",
+        "title": "Hackathon: evals that bite: demo video",
+        "url": "https://sandbox.mangrove.one/artifacts/6bf7bdee",
+        "kind": "hackathon_video",
+        "at": "2026-05-20T12:04:27.519Z",
+        "projectId": "c5f2dfd0-0b5f-422c-a8fe-fab8376396d3"
+      },
+      {
+        "id": "b1ebe270-1250-4f0e-a388-e1c11576a250",
+        "title": "Hackathon: evals that bite: entry write-up",
+        "url": null,
+        "kind": "hackathon_submission",
+        "at": "2026-05-19T12:04:27.519Z",
+        "projectId": "c5f2dfd0-0b5f-422c-a8fe-fab8376396d3"
+      },
+      {
+        "id": "1167fcc2-696c-4c1c-a710-e6f5b55b9e8a",
+        "title": "Hackathon: evals that bite: demo video",
+        "url": "https://sandbox.mangrove.one/artifacts/1167fcc2",
+        "kind": "hackathon_video",
+        "at": "2026-05-17T12:04:27.519Z",
+        "projectId": "c5f2dfd0-0b5f-422c-a8fe-fab8376396d3"
+      }
+    ],
+    "updatedAt": "2026-09-19T13:24:49.258Z"
+  },
+  {
+    "id": "3b776049b1e4e87fb2801f0625606a397387850437f1c8f725a120be3493059b",
+    "handle": "chloe-rahman",
+    "displayName": "Chloe Rahman",
+    "profileUrl": "https://try.mangrove.one/u/chloe-rahman",
+    "avatar": {
+      "url": null,
+      "initials": "CR"
+    },
+    "interests": {
+      "summary": "Came from security engineering; the threat models felt familiar. Onboarding materials for people coming into AI safety from adjacent fields.",
+      "focusAreas": [
+        {
+          "slug": "field-building",
+          "label": "Field-building & community"
+        },
+        {
+          "slug": "agent-safety",
+          "label": "Agent safety"
+        },
+        {
+          "slug": "robustness",
+          "label": "Robustness & adversarial"
+        }
+      ]
+    },
+    "workingOn": "Came from security engineering; the threat models felt familiar. Onboarding materials for people coming into AI safety from adjacent fields. I want to test them on real newcomers.",
+    "links": {
+      "linkedin": "https://www.linkedin.com/in/chloe-rahman-sandbox",
+      "x": null,
+      "github": "https://github.com/chloe-rahman-sandbox",
+      "website": "https://chloe-rahman.sandbox.mangrove.one"
+    },
+    "timeZone": "Asia/Kolkata",
+    "capacity": {
+      "maxConcurrentProjects": 1,
+      "maxHoursPerWeek": 24
+    },
+    "projects": [
+      {
+        "id": "d54a53c9-fe06-47e3-ae0a-f0392bca3da5",
+        "title": "Compute threshold reporting explainer",
+        "kind": "independent",
+        "status": "Active",
+        "role": "Project member",
+        "joinedAt": "2026-06-27T12:04:27.519Z",
+        "leftAt": null,
+        "outcome": "active",
+        "organization": null,
+        "artifacts": []
+      }
+    ],
+    "artifacts": [],
+    "updatedAt": "2026-09-19T13:24:49.258Z"
+  },
+  {
+    "id": "ffab54352ae600c37846a9d8139a2fe6b653f853191932e08098099486712973",
+    "handle": "daniel-tanaka",
+    "displayName": "Daniel Tanaka",
+    "profileUrl": "https://try.mangrove.one/u/daniel-tanaka",
+    "avatar": {
+      "url": null,
+      "initials": "DT"
+    },
+    "interests": {
+      "summary": "Policy background, learning the technical side fast. I want to work on incident reporting standards for deployed models, with a legal and a technical person in the same room.",
+      "focusAreas": [
+        {
+          "slug": "governance",
+          "label": "Governance & policy"
+        },
+        {
+          "slug": "security",
+          "label": "Security & cyber"
+        }
+      ]
+    },
+    "workingOn": "Policy background, learning the technical side fast. I want to work on incident reporting standards for deployed models, with a legal and a technical person in the same room.",
+    "links": {
+      "linkedin": "https://www.linkedin.com/in/daniel-tanaka-sandbox",
+      "x": null,
+      "github": "https://github.com/daniel-tanaka-sandbox",
+      "website": "https://daniel-tanaka.sandbox.mangrove.one"
+    },
+    "timeZone": "Asia/Kolkata",
+    "capacity": {
+      "maxConcurrentProjects": 3,
+      "maxHoursPerWeek": 16
+    },
+    "projects": [
+      {
+        "id": "f7a45fce-e019-4437-a2e9-a983b8e45215",
+        "title": "Training stack supply-chain audit",
+        "kind": "independent",
+        "status": "Completed",
+        "role": "Project member",
+        "joinedAt": "2026-06-22T12:04:27.519Z",
+        "leftAt": null,
+        "outcome": "completed",
+        "organization": "Estuary Labs",
+        "artifacts": [
+          {
+            "id": "832744a0-c616-461b-a216-5b1a52e21a7f",
+            "title": "Eval results: Training stack supply-chain audit",
+            "url": "https://sandbox.mangrove.one/artifacts/832744a0",
+            "kind": "deliverable",
+            "at": "2026-09-01T12:04:27.519Z"
+          },
+          {
+            "id": "70f66913-6de8-4668-ae8f-b6ae3172571e",
+            "title": "Dataset card: Training stack supply-chain audit",
+            "url": "https://sandbox.mangrove.one/artifacts/70f66913",
+            "kind": "deliverable",
+            "at": "2026-08-28T12:04:27.519Z"
+          }
+        ]
+      },
+      {
+        "id": "5668b550-8334-48f1-ae91-2fbaa332a650",
+        "title": "Model weight exfiltration tabletop",
+        "kind": "independent",
+        "status": "Active",
+        "role": "Project member",
+        "joinedAt": "2025-08-21T12:04:27.519Z",
+        "leftAt": null,
+        "outcome": "active",
+        "organization": "Tidewater Institute",
+        "artifacts": []
+      }
+    ],
+    "artifacts": [
+      {
+        "id": "832744a0-c616-461b-a216-5b1a52e21a7f",
+        "title": "Eval results: Training stack supply-chain audit",
+        "url": "https://sandbox.mangrove.one/artifacts/832744a0",
+        "kind": "deliverable",
+        "at": "2026-09-01T12:04:27.519Z",
+        "projectId": "f7a45fce-e019-4437-a2e9-a983b8e45215"
+      },
+      {
+        "id": "70f66913-6de8-4668-ae8f-b6ae3172571e",
+        "title": "Dataset card: Training stack supply-chain audit",
+        "url": "https://sandbox.mangrove.one/artifacts/70f66913",
+        "kind": "deliverable",
+        "at": "2026-08-28T12:04:27.519Z",
+        "projectId": "f7a45fce-e019-4437-a2e9-a983b8e45215"
+      }
+    ],
+    "updatedAt": "2026-09-19T13:24:49.258Z"
+  }
+]
