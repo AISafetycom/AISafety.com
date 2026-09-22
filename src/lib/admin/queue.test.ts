@@ -21,7 +21,14 @@ vi.mock('next/cache', () => ({
 vi.mock('./session', () => ({ sealToken: vi.fn() }))
 vi.mock('@/lib/assistant/catalog', () => ({ getCatalog: vi.fn() }))
 
-import { closeHandledRows, handledOutside, type QueueItem } from './queue'
+import {
+  acceptItem,
+  asAttachmentWrite,
+  closeHandledRows,
+  handledOutside,
+  undoItem,
+  type QueueItem,
+} from './queue'
 
 const QUEUE = 'tblonlKwIFJ7Aa8QN'
 const EVENTS = 'tblXbN9swwldwq8f7'
@@ -219,5 +226,149 @@ describe('closeHandledRows', () => {
     ])
     expect(closed).toEqual([rid('q2')])
     expect(patches.map(p => p.path)).toEqual([`${QUEUE}/${rid('q2')}`])
+  })
+})
+
+describe('asAttachmentWrite', () => {
+  const link = 'https://try.mangrove.one/logo-final/apple-touch-icon-180-b1.png'
+
+  it('turns a picture link, as text or a list of text, into {url, filename}', () => {
+    expect(asAttachmentWrite(link)).toEqual([
+      { url: link, filename: 'apple-touch-icon-180-b1.png' },
+    ])
+    expect(asAttachmentWrite([link, 'https://x.org/a.webp'])).toEqual([
+      { url: link, filename: 'apple-touch-icon-180-b1.png' },
+      { url: 'https://x.org/a.webp', filename: 'a.webp' },
+    ])
+  })
+
+  it('keeps a proposal\u2019s {url, filename} and a stored picture\u2019s {id}', () => {
+    expect(asAttachmentWrite([{ url: link, filename: 'mark.png' }])).toEqual([
+      { url: link, filename: 'mark.png' },
+    ])
+    expect(
+      asAttachmentWrite([{ id: 'attTChgufrPH55BIp', filename: 'old.webp' }])
+    ).toEqual([{ id: 'attTChgufrPH55BIp' }])
+  })
+
+  it('is nothing for text that is not a link, and empty for no picture', () => {
+    expect(asAttachmentWrite('game-night-hackathon.webp (old badge)')).toBe(
+      null
+    )
+    expect(asAttachmentWrite(['https://x.org/a.png', 'a description'])).toBe(
+      null
+    )
+    expect(asAttachmentWrite(null)).toEqual([])
+    expect(asAttachmentWrite([])).toEqual([])
+  })
+})
+
+// Applying and undoing a change to a picture field, against a stand-in
+// for Airtable: the base's schema (one meta read) and a patch log.
+describe('picture fields on Apply and Undo', () => {
+  const link = 'https://try.mangrove.one/logo-final/apple-touch-icon-180-b1.png'
+  const blob =
+    'https://vfnmdozpctvdobh7.public.blob.vercel-storage.com/queue-logos/mangrove-2026-09-22.png'
+  let patches: { path: string; fields: Record<string, unknown> }[]
+
+  beforeEach(() => {
+    patches = []
+    process.env.AIRTABLE_TOKEN = 'test-token'
+    process.env.AIRTABLE_BASE_ID = 'appTest'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          tables: [
+            {
+              id: EVENTS,
+              fields: [
+                { id: 'fldName', name: 'Name', type: 'singleLineText' },
+                { id: 'fldLogo', name: 'Logo', type: 'multipleAttachments' },
+                { id: 'fldHost', name: 'Host name', type: 'singleLineText' },
+              ],
+            },
+          ],
+        })
+      )
+    )
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(
+      async (path: string, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          const body = JSON.parse(String(init.body)) as {
+            fields: Record<string, unknown>
+          }
+          patches.push({ path, fields: body.fields })
+        }
+        return new Response('{}', { status: 200 })
+      }
+    )
+  })
+
+  const logoChange = (over: Partial<QueueItem> = {}) =>
+    item({
+      type: 'Change',
+      source: 'Broom',
+      changes: [
+        {
+          field: 'Logo',
+          from: 'game-night-hackathon.webp (old tree-in-circle badge)',
+          to: link,
+        },
+      ],
+      ...over,
+    })
+
+  it('writes a logo named by its link as an attachment, whether proposed or edited', async () => {
+    await acceptItem(logoChange(), {})
+    expect(patches[0]).toEqual({
+      path: `${EVENTS}/${rid('live')}`,
+      fields: {
+        Logo: [{ url: link, filename: 'apple-touch-icon-180-b1.png' }],
+      },
+    })
+
+    patches = []
+    await acceptItem(logoChange(), { Logo: blob })
+    expect(patches[0].fields).toEqual({
+      Logo: [{ url: blob, filename: 'mangrove-2026-09-22.png' }],
+    })
+    // The row is marked Applied, not Failed.
+    expect(patches[1].path).toBe(`${QUEUE}/${rid('q1')}`)
+    expect(patches[1].fields[STATUS]).toBe('Applied')
+  })
+
+  it('refuses text that is not a picture, in plain words, before Airtable sees it', async () => {
+    await expect(
+      acceptItem(logoChange(), { Logo: 'the new arches mark' })
+    ).rejects.toThrow(
+      '"Logo" takes a picture link, and "the new arches mark" is not one.'
+    )
+    // Nothing reached the record; the row records the failure.
+    expect(patches.map(p => p.path)).toEqual([`${QUEUE}/${rid('q1')}`])
+    expect(patches[0].fields[STATUS]).toBe('Failed')
+    expect(patches[0].fields[ERROR]).toContain('takes a picture link')
+  })
+
+  it('on Undo, puts the other fields back and leaves a logo whose old side is only described', async () => {
+    await undoItem(
+      logoChange({
+        status: 'Applied',
+        changes: [
+          {
+            field: 'Logo',
+            from: 'game-night-hackathon.webp (old badge)',
+            to: link,
+          },
+          { field: 'Host name', from: 'Mangrove', to: 'Mangrove Games' },
+        ],
+      })
+    )
+    expect(patches[0]).toEqual({
+      path: `${EVENTS}/${rid('live')}`,
+      fields: { 'Host name': 'Mangrove' },
+    })
+    expect(patches[1].fields[STATUS]).toBe('Pending')
   })
 })
