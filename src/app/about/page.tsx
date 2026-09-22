@@ -162,7 +162,7 @@ export default function AboutPage() {
                   Melissa Samworth
                 </p>
                 <p className="paragraph-small color-teal-300">
-                  Product design, front-end development
+                  Product, strategy, design
                 </p>
               </div>
             </div>
