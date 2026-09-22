@@ -21,11 +21,13 @@ vi.mock('next/cache', () => ({
 vi.mock('./session', () => ({ sealToken: vi.fn() }))
 vi.mock('@/lib/assistant/catalog', () => ({ getCatalog: vi.fn() }))
 
+import { getCatalog } from '@/lib/assistant/catalog'
 import {
   acceptItem,
   asAttachmentWrite,
   closeHandledRows,
   handledOutside,
+  queueTargets,
   undoItem,
   type QueueItem,
 } from './queue'
@@ -370,5 +372,56 @@ describe('picture fields on Apply and Undo', () => {
       fields: { 'Host name': 'Mangrove' },
     })
     expect(patches[1].fields[STATUS]).toBe('Pending')
+  })
+})
+
+describe('queueTargets', () => {
+  beforeEach(() => {
+    vi.mocked(getCatalog).mockReset()
+    mocks.listAll.mockReset()
+  })
+
+  it('answers each target’s logo and link from the site’s catalog', async () => {
+    vi.mocked(getCatalog).mockResolvedValue({
+      listings: [
+        {
+          id: `organization:${rid('org')}`,
+          logo: 'https://v5.airtableusercontent.com/org.png',
+          url: 'https://example.org/',
+        },
+        // a community without a join link: the catalog stands in a "#"
+        {
+          id: `community:${rid('comm')}`,
+          logo: 'https://v5.airtableusercontent.com/comm.png',
+          url: '#',
+        },
+        // an advisor reached by email, which is no link to open
+        {
+          id: `person:${rid('adv')}`,
+          logo: null,
+          url: 'mailto:someone@example.org',
+        },
+      ],
+    } as never)
+    const found = await queueTargets([
+      { table: EVENTS, record: rid('org') },
+      { table: EVENTS, record: rid('comm') },
+      { table: EVENTS, record: rid('adv') },
+      { table: EVENTS, record: rid('unknown') },
+      { table: 'not-a-table', record: rid('org') },
+    ])
+    expect(found.links).toEqual({ [rid('org')]: 'https://example.org/' })
+    expect(found.logos).toEqual({
+      [rid('org')]: 'https://v5.airtableusercontent.com/org.png',
+      [rid('comm')]: 'https://v5.airtableusercontent.com/comm.png',
+    })
+  })
+
+  it('is empty when the catalog cannot be built', async () => {
+    vi.mocked(getCatalog).mockRejectedValue(new Error('Airtable is down'))
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const found = await queueTargets([{ table: EVENTS, record: rid('org') }])
+    expect(found).toEqual({ logos: {}, links: {} })
+    spy.mockRestore()
   })
 })

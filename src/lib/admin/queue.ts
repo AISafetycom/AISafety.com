@@ -190,25 +190,38 @@ function toChanges(v: unknown): ProposedChange[] {
   return out
 }
 
-/** Record id → logo URL for every published listing, from the chatbot's
- *  catalog (cached five minutes; its ids are "<type>:<record id>"). Empty
- *  when the catalog cannot be built: the list is not worth an error. */
-async function catalogLogos(): Promise<Map<string, string>> {
-  const out = new Map<string, string>()
+/** What the page shows for a target record beyond the row itself: its
+ *  logo and the listing's own link (a web address; the catalog's "#" and
+ *  mailto: stand-ins are left out). */
+export interface TargetLookup {
+  logos: Record<string, string>
+  links: Record<string, string>
+}
+
+/** Record id → logo and link for every published listing, from the
+ *  chatbot's catalog (cached five minutes; its ids are "<type>:<record
+ *  id>"). Empty when the catalog cannot be built: the list is not worth
+ *  an error. */
+async function catalogTargets(): Promise<{
+  logos: Map<string, string>
+  links: Map<string, string>
+}> {
+  const logos = new Map<string, string>()
+  const links = new Map<string, string>()
   try {
     for (const l of (await getCatalog()).listings) {
       const rec = l.id.slice(l.id.indexOf(':') + 1)
-      if (l.logo && isRecordId(rec) && !isExpiredAttachment(l.logo)) {
-        out.set(rec, l.logo)
-      }
+      if (!isRecordId(rec)) continue
+      if (l.logo && !isExpiredAttachment(l.logo)) logos.set(rec, l.logo)
+      if (l.url && /^https?:\/\//.test(l.url)) links.set(rec, l.url)
     }
   } catch (e) {
     console.error(
-      '[admin-queue] catalog logos',
+      '[admin-queue] catalog targets',
       e instanceof Error ? e.message : e
     )
   }
-  return out
+  return { logos, links }
 }
 
 /** Airtable attachment links carry their expiry (ms since the epoch) as a
@@ -436,7 +449,7 @@ const LIST_FORMULA =
 
 /** The rows, and nothing else: one paginated read of the Queue table, so
  *  the page has its list in about a second. A logo here comes only from
- *  the proposal snapshot; the rest arrive through queueLogos() once the
+ *  the proposal snapshot; the rest arrive through queueTargets() once the
  *  list is on screen, because those need the site's catalog (every table,
  *  seconds when its cache is cold, which every accept makes it) and a read
  *  per table for unpublished targets. */
@@ -448,14 +461,17 @@ export async function listQueue(): Promise<QueueItem[]> {
   return rows.map(r => rowToItem(r))
 }
 
-/** Logo URL by target record for the rows that came without one: the
- *  site's catalog for published listings, then one batched read per table
- *  for the rest (Comb's unpublished Adds). Records without a picture are
- *  left out. Never throws: a missing logo is not worth an error. */
-export async function queueLogos(
+/** Logo and link by target record for the rows that came without one:
+ *  the site's catalog for published listings (which is where a Change's
+ *  link comes from: its proposal names only the fields it edits), then
+ *  one batched read per table for the logos of the rest (Comb's
+ *  unpublished Adds, whose link the proposal carries). Records without a
+ *  picture, or without a link, are left out of that map. Never throws: a
+ *  missing logo or link is not worth an error. */
+export async function queueTargets(
   targets: { table: string; record: string }[]
-): Promise<Record<string, string>> {
-  const out: Record<string, string> = {}
+): Promise<TargetLookup> {
+  const out: TargetLookup = { logos: {}, links: {} }
   // record → table, deduplicated
   const wanted = new Map<string, string>()
   for (const t of targets) {
@@ -464,15 +480,19 @@ export async function queueLogos(
     }
   }
   if (!wanted.size) return out
-  const catalog = await catalogLogos()
+  const catalog = await catalogTargets()
   const rest: { table: string; record: string }[] = []
   for (const [record, table] of wanted) {
-    const url = catalog.get(record)
-    if (url) out[record] = url
+    const link = catalog.links.get(record)
+    if (link) out.links[record] = link
+    const logo = catalog.logos.get(record)
+    if (logo) out.logos[record] = logo
     else rest.push({ table, record })
   }
   if (rest.length) {
-    for (const [record, url] of await targetLogos(rest)) out[record] = url
+    for (const [record, url] of await targetLogos(rest)) {
+      out.logos[record] = url
+    }
   }
   return out
 }
