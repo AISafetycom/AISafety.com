@@ -94,6 +94,7 @@ export default function AboutPage() {
           <div className="width-6-col-narrow">
             <div className="flex gap-16px items-center padding-bottom-24px">
               <Image
+                className={styles.teamPhoto}
                 src="/images/soeren.png"
                 alt="Søren Elverlin"
                 width={72}
@@ -120,6 +121,7 @@ export default function AboutPage() {
           <div className="width-6-col-narrow">
             <div className="flex gap-16px items-center padding-bottom-24px">
               <Image
+                className={styles.teamPhoto}
                 src="/images/bryce.png"
                 alt="Bryce Robertson"
                 width={72}
@@ -149,6 +151,7 @@ export default function AboutPage() {
           <div className="width-6-col-narrow">
             <div className="flex gap-16px items-center padding-bottom-24px">
               <Image
+                className={styles.teamPhoto}
                 src="/images/melissa.png"
                 alt="Melissa Samworth"
                 width={72}
@@ -174,7 +177,13 @@ export default function AboutPage() {
 
           <div className="width-6-col-narrow">
             <div className="flex gap-16px items-center padding-bottom-24px">
-              <Image src="/images/plex.png" alt="plex" width={72} height={72} />
+              <Image
+                className={styles.teamPhoto}
+                src="/images/plex.png"
+                alt="plex"
+                width={72}
+                height={72}
+              />
               <div>
                 <p className="paragraph-default-bold padding-bottom-4px">
                   plex
