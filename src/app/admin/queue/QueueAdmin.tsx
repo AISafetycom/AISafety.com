@@ -677,36 +677,59 @@ function proposedEdits(item: QueueItem): Record<string, unknown> {
     : {}
 }
 
-/** The list arrives without most logos so it lands at once; this asks for
- *  the pictures of the rows that came without one (the site's catalog,
- *  then the records themselves for unpublished targets) and answers with
- *  a URL by target record. Best effort: no logo is not worth an error. */
-/** Records whose picture has been asked for already, so a refresh of the
- *  list asks only for the rows that are new to it. */
-const askedLogos = new Set<string>()
+/** What the lookup answers: a logo and the listing's own link, each by
+ *  target record, for the records that have one. */
+interface TargetLookup {
+  logos: Record<string, string>
+  links: Record<string, string>
+}
+const NO_TARGETS: TargetLookup = { logos: {}, links: {} }
 
-async function loadLogos(items: QueueItem[]): Promise<Record<string, string>> {
+/** The list arrives without most logos, and a Change row without its
+ *  listing's link (its proposal names only the fields it edits), so it
+ *  lands at once; this asks for the pictures and links of the rows that
+ *  came without one (the site's catalog, then the records themselves for
+ *  unpublished targets) and answers with each by target record. Best
+ *  effort: no logo or link is not worth an error. */
+/** Records whose picture and link have been asked for already, so a
+ *  refresh of the list asks only for the rows that are new to it. */
+const askedTargets = new Set<string>()
+
+async function loadTargets(items: QueueItem[]): Promise<TargetLookup> {
   const targets: { table: string; record: string }[] = []
   for (const i of items) {
-    if (i.logo || !i.targetTable || !i.targetRecord) continue
-    if (askedLogos.has(i.targetRecord)) continue
-    askedLogos.add(i.targetRecord)
+    if ((i.logo && i.url) || !i.targetTable || !i.targetRecord) continue
+    if (askedTargets.has(i.targetRecord)) continue
+    askedTargets.add(i.targetRecord)
     targets.push({ table: i.targetTable, record: i.targetRecord })
   }
-  if (!targets.length) return {}
+  if (!targets.length) return NO_TARGETS
   try {
     const res = await fetch(`${API}/logos`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ targets }),
     })
-    const data = (await res.json()) as { logos?: Record<string, string> }
-    if (res.ok && data.logos) return data.logos
+    const data = (await res.json()) as Partial<TargetLookup>
+    if (res.ok && (data.logos || data.links)) {
+      return { logos: data.logos ?? {}, links: data.links ?? {} }
+    }
   } catch {
     // not answered: asked again below
   }
-  for (const t of targets) askedLogos.delete(t.record)
-  return {}
+  for (const t of targets) askedTargets.delete(t.record)
+  return NO_TARGETS
+}
+
+/** The row with the picture and link the lookup found for it, when the
+ *  row came without them. */
+function withTarget(i: QueueItem, found: TargetLookup): QueueItem {
+  const rec = i.targetRecord
+  if (!rec) return i
+  const logo = !i.logo && found.logos[rec] ? found.logos[rec] : null
+  const url = !i.url && found.links[rec] ? found.links[rec] : null
+  if (!logo && !url) return i
+  return { ...i, logo: logo ?? i.logo, url: url ?? i.url }
 }
 
 /** Build every open item's card in one request and hold them ready, so
@@ -1180,25 +1203,26 @@ export default function QueueAdmin({
         }
         // A decision still on its way: the page's own version stands.
         if (pendingRef.current[i.id]) return was
-        // The list comes without most pictures; the one on the page stays.
-        return i.logo || !was.logo ? i : { ...i, logo: was.logo }
+        // The list comes without most pictures, and a Change without its
+        // listing's link; the ones on the page stay.
+        return {
+          ...i,
+          logo: i.logo ?? was.logo,
+          url: i.url ?? was.url,
+        }
       })
       setItems(next)
       setAgent(data.agent ?? null)
-      // The list is on screen now; the pictures and the cards follow in
-      // the background, each filled in as it arrives. A refresh asks only
-      // for what is new to it.
-      void loadLogos(next).then(logos => {
-        if (!Object.keys(logos).length) return
-        setItems(prev =>
-          prev
-            ? prev.map(i =>
-                !i.logo && i.targetRecord && logos[i.targetRecord]
-                  ? { ...i, logo: logos[i.targetRecord] }
-                  : i
-              )
-            : prev
+      // The list is on screen now; the pictures, the links and the cards
+      // follow in the background, each filled in as it arrives. A refresh
+      // asks only for what is new to it.
+      void loadTargets(next).then(found => {
+        if (
+          !Object.keys(found.logos).length &&
+          !Object.keys(found.links).length
         )
+          return
+        setItems(prev => (prev ? prev.map(i => withTarget(i, found)) : prev))
       })
       void preloadCards(before ? fresh : next)
     } catch (e) {
@@ -1498,9 +1522,9 @@ export default function QueueAdmin({
       )
     setLogo(null)
     // The load-time lookup already asked for this record; ask once more.
-    if (item.targetRecord) askedLogos.delete(item.targetRecord)
-    void loadLogos([{ ...item, logo: null }]).then(logos => {
-      const url = item.targetRecord ? logos[item.targetRecord] : undefined
+    if (item.targetRecord) askedTargets.delete(item.targetRecord)
+    void loadTargets([{ ...item, logo: null }]).then(found => {
+      const url = item.targetRecord ? found.logos[item.targetRecord] : undefined
       if (url && !deadLogos.has(url)) setLogo(url)
     })
   }, [])
