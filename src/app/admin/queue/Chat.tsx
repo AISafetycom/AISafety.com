@@ -988,6 +988,10 @@ function statusLine(live: Part[]): string {
   return 'Thinking…'
 }
 
+function isCommand(label: string): boolean {
+  return label.startsWith('Ran: ')
+}
+
 function lastText(parts: Part[]): number {
   for (let i = parts.length - 1; i >= 0; i--)
     if (parts[i].t === 'text') return i
@@ -1020,7 +1024,11 @@ function Parts({
   return (
     <div className={styles.chatFable}>
       {parts.map((p, i) =>
-        p.t === 'tool' ? null : p.t === 'note' ? (
+        // The "Ran: <command>" lines stay in the thread saved on the Mac but
+        // are not shown here (Bryce, 23 Sept 2026: "I don't want to see all
+        // this ugly grey text").
+        p.t === 'tool' ||
+        (p.t === 'note' && isCommand(p.label)) ? null : p.t === 'note' ? (
           <p key={i} className={styles.chatTool}>
             {p.label}
           </p>
