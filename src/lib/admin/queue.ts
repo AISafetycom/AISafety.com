@@ -1465,6 +1465,28 @@ export async function rejectItem(
   await patchQueueRow(item.id, fields)
 }
 
+/** What one save changes on the row: with `keys` (the fields the page
+ *  touched since its last save), only those keys move – set to the page's
+ *  value, or dropped when the page no longer edits them – and every other
+ *  key keeps what the row holds. So a page that opened the item before
+ *  another page (or the chat) edited it cannot wipe those edits with its
+ *  own save (Bryce, 23 Sept 2026: a Short name edit took a logo edit off
+ *  the row – "it and the logos disappeared"). Without `keys` the page's
+ *  edits replace the row's, as before. */
+export function mergeEdits(
+  current: Record<string, unknown> | null,
+  edits: Record<string, unknown>,
+  keys?: string[]
+): Record<string, unknown> {
+  if (!keys) return edits
+  const out: Record<string, unknown> = { ...(current ?? {}) }
+  for (const k of keys) {
+    if (k in edits) out[k] = edits[k]
+    else delete out[k]
+  }
+  return out
+}
+
 /** The page's pending edits, kept on the row so they are still there after
  *  a reload (and for the chat, which reads them). They reach the live base
  *  only through acceptItem. Since 14 Sept 2026 this is also how a change
@@ -1474,11 +1496,13 @@ export async function rejectItem(
 export async function saveEdits(
   item: QueueItem,
   edits: Record<string, unknown>,
-  replyDraft?: string
+  replyDraft?: string,
+  keys?: string[]
 ): Promise<void> {
   requireOpen(item)
+  const merged = mergeEdits(item.edits, edits, keys)
   const fields: Record<string, unknown> = {
-    [F.edits]: Object.keys(edits).length ? JSON.stringify(edits) : null,
+    [F.edits]: Object.keys(merged).length ? JSON.stringify(merged) : null,
   }
   // The reply draft as edited on the page (the chat can rewrite it) is
   // kept on the row too; only for items that carry one, and it stays a

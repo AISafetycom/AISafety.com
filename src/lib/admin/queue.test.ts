@@ -28,6 +28,7 @@ import {
   asAttachmentWrite,
   closeHandledRows,
   handledOutside,
+  mergeEdits,
   queueTargets,
   undoItem,
   type QueueItem,
@@ -449,5 +450,33 @@ describe('asAttachmentPreview', () => {
     )
     expect(asAttachmentPreview(null)).toBe(null)
     expect(asAttachmentPreview([])).toEqual([])
+  })
+})
+
+describe('mergeEdits', () => {
+  const onRow = {
+    'Short name': 'Generality Labs',
+    'Logo (for cards)': 'https://generality.org/assets/logo-glyph.svg',
+  }
+
+  it('moves only the keys the page touched, keeping the rest of the row', () => {
+    // A page that read the row before the logo edit landed edits Short name.
+    expect(
+      mergeEdits(onRow, { 'Short name': 'Generality' }, ['Short name'])
+    ).toEqual({
+      'Short name': 'Generality',
+      'Logo (for cards)': 'https://generality.org/assets/logo-glyph.svg',
+    })
+    // An edit taken back on the page drops off the row.
+    expect(mergeEdits(onRow, {}, ['Short name'])).toEqual({
+      'Logo (for cards)': 'https://generality.org/assets/logo-glyph.svg',
+    })
+  })
+
+  it('replaces the row\u2019s edits when no keys are named', () => {
+    expect(mergeEdits(onRow, { Scale: 'Medium' })).toEqual({ Scale: 'Medium' })
+    expect(mergeEdits(null, { Scale: 'Medium' }, ['Scale'])).toEqual({
+      Scale: 'Medium',
+    })
   })
 })

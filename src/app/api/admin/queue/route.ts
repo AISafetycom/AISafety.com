@@ -140,7 +140,10 @@ export async function POST(req: NextRequest) {
       await saveEdits(
         item,
         sanitiseEdits(body.edits),
-        typeof body.replyDraft === 'string' ? body.replyDraft : undefined
+        typeof body.replyDraft === 'string' ? body.replyDraft : undefined,
+        Array.isArray(body.keys)
+          ? body.keys.filter((k): k is string => typeof k === 'string')
+          : undefined
       )
       return json({ item: await getQueueItem(id) })
     } else {

@@ -1536,6 +1536,12 @@ export default function QueueAdmin({
   // they change (one save per item, the last one wins), so they are still
   // there after a reload. The live base is untouched until Accept.
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  // The fields each item's edits changed since its last save. The save
+  // names them, and the row moves only those keys – so this page cannot
+  // wipe an edit another page (or the chat) put on the row after this
+  // page read it (Bryce, 23 Sept 2026: a Short name edit took the logo
+  // edits off the row).
+  const touchedKeys = useRef<Record<string, Set<string>>>({})
   const draftsRef = useRef(drafts)
   draftsRef.current = drafts
   const setDraft = useCallback(
@@ -1560,10 +1566,20 @@ export default function QueueAdmin({
       if (!patch.edits && patch.reply === undefined) return
       const merged = { ...(draftsRef.current[id] ?? FRESH), ...patch }
       const row = itemsRef.current?.find(i => i.id === id)
+      if (patch.edits) {
+        const touched = (touchedKeys.current[id] ??= new Set())
+        for (const k of new Set([
+          ...Object.keys(was.edits),
+          ...Object.keys(patch.edits),
+        ])) {
+          if (was.edits[k] !== patch.edits[k]) touched.add(k)
+        }
+      }
       const body: Record<string, unknown> = {
         id,
         action: 'edit',
         edits: merged.edits,
+        keys: [...(touchedKeys.current[id] ?? [])],
       }
       if (patch.reply !== undefined && row?.replyDraft !== null) {
         // Back to "as it came" means the row's own draft is saved again.
@@ -1571,13 +1587,42 @@ export default function QueueAdmin({
       }
       clearTimeout(saveTimers.current[id])
       saveTimers.current[id] = setTimeout(() => {
+        delete touchedKeys.current[id]
+        // The edits stay on the page and go with Accept whatever happens
+        // here; a save that does not land is said, not swallowed, so a
+        // reload losing them is no surprise (Bryce, 23 Sept 2026).
+        const failed = (detail: string) => {
+          for (const k of body.keys as string[]) {
+            ;(touchedKeys.current[id] ??= new Set()).add(k)
+          }
+          setDrafts(prev => ({
+            ...prev,
+            [id]: {
+              ...(prev[id] ?? FRESH),
+              error: `The edits were not saved on the row (${detail}). They are still on the page and go with Accept; a reload would lose them.`,
+            },
+          }))
+        }
         void fetch(API, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
-        }).catch(() => {
-          // best effort: the edits are still on the page and go with Accept
         })
+          .then(async res => {
+            if (res.ok) {
+              setDrafts(prev =>
+                prev[id]?.error?.startsWith('The edits were not saved')
+                  ? { ...prev, [id]: { ...prev[id], error: null } }
+                  : prev
+              )
+              return
+            }
+            const data = (await res.json().catch(() => ({}))) as {
+              error?: string
+            }
+            failed(data.error ?? `HTTP ${res.status}`)
+          })
+          .catch(() => failed('no answer from the site'))
       }, 800)
     },
     []
