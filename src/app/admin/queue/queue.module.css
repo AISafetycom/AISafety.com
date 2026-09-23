@@ -2118,6 +2118,9 @@ select.input {
 }
 
 .chatInput {
+  /* A block, not inline: an inline box leaves a line's worth of space
+     under itself, which pushed the paperclip below the middle. */
+  display: block;
   width: 100%;
   min-height: 36px;
   max-height: 180px;
