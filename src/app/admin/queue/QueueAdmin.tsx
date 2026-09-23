@@ -12,6 +12,18 @@ import type {
   QueueItem,
 } from '@/lib/admin/queue'
 import { missingFields } from '@/lib/admin/queue-needed'
+import {
+  itemParts,
+  markRanges,
+  matchDoc,
+  parseQuery,
+  searchDoc,
+} from '@/lib/admin/queue-search'
+import type {
+  SearchDoc,
+  SearchHit,
+  SearchQuery,
+} from '@/lib/admin/queue-search'
 import Icon from '@/components/Icon'
 import { activityIcon } from '@/app/communities/activity-icon'
 import { isAcceptingApplications } from '@/lib/funding-status'
@@ -92,6 +104,19 @@ const PAGE_ORDER = [
 ]
 const NO_PAGE_LABEL = 'No page'
 
+// A search lists the items named by it first, then those that mention it
+// somewhere else (Comb's source line, a description, Fable's notes).
+const SEARCH_GROUPS: { key: 'name' | 'other'; label: string }[] = [
+  { key: 'name', label: 'Name matches' },
+  { key: 'other', label: 'Other matches' },
+]
+
+const KIND_WORD: Record<QueueItem['type'], string> = {
+  Add: 'Addition',
+  Change: 'Change',
+  Rule: 'Rule',
+}
+
 /** One resource page's items within a section. `key` is the page label
  *  ('/training', '/training (recurring)', '' for no page). */
 type PageGroup = { key: string; label: string; items: QueueItem[] }
@@ -149,6 +174,7 @@ const ICON = {
   done: '/images/icons/check-in-circle.svg',
   pencil: '/images/icons/pencil-small.svg',
   chevron: '/images/icons/chevron-down.svg',
+  search: '/images/icons/magnifying-glass.svg',
 } as const
 
 function sourceIcon(item: QueueItem): string {
@@ -1060,6 +1086,14 @@ export default function QueueAdmin({
   })
   // Folded page sub-groups, keyed "<section>:<page label>".
   const [foldedPages, setFoldedPages] = useState<Record<string, boolean>>({})
+  // The search box above the list (/ gets there). While it holds a word
+  // the list shows every open item that matches, whatever its kind, with
+  // folded groups open, and the done list keeps only its matches (Bryce,
+  // 23 Sept 2026: "please add a search feature").
+  const [query, setQuery] = useState('')
+  const search = useMemo(() => parseQuery(query), [query])
+  const searching = search !== null
+  const searchRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const detailRef = useRef<HTMLDivElement>(null)
@@ -1145,6 +1179,9 @@ export default function QueueAdmin({
     foldPage(foldKey, !foldedPages[foldKey])
 
   const chooseKind = (next: Kind) => {
+    // During a search the segments count its matches; picking one leaves
+    // the search for that kind.
+    setQuery('')
     setKind(next)
     // An item from the other view must not stay in focus: let the
     // focus-keeping effect pick the first item of this one.
@@ -1284,6 +1321,8 @@ export default function QueueAdmin({
       const id = hashId()
       if (!id) return
       wantedRef.current = id
+      // A search could hide the linked item.
+      setQuery('')
       // Re-run the effect above with the items already loaded.
       setItems(prev => (prev ? [...prev] : prev))
     }
@@ -1326,6 +1365,31 @@ export default function QueueAdmin({
   // with Fable's Publish verdicts first, each section split by resource
   // page. W/Q and auto-advance walk it, opening a folded page as they
   // reach it; a folded section is passed over.
+  // What search looks through, per item. Built again only when the list
+  // changes, so each key typed just runs the words over it.
+  const searchDocs = useMemo(() => {
+    const docs = new Map<string, SearchDoc>()
+    for (const item of items ?? []) {
+      const { name, heading } = splitTitle(item)
+      docs.set(
+        item.id,
+        searchDoc(
+          itemParts(item, {
+            title: name ?? item.title,
+            heading,
+            page: pageLabel(item),
+            source:
+              item.source === 'Comb' && item.sourceExcerpt
+                ? foundLabel(item.sourceExcerpt)
+                : item.sourceExcerpt,
+          }),
+          [item.id, item.targetRecord ?? '']
+        )
+      )
+    }
+    return docs
+  }, [items])
+
   const ordered = useMemo(() => {
     const groups: Record<Section, QueueItem[]> = {
       requests: [],
@@ -1340,7 +1404,12 @@ export default function QueueAdmin({
       rules: 0,
     }
     let open = 0
+    // During a search: what each matching item matched, for its row.
+    const hits = new Map<string, SearchHit>()
     for (const item of items ?? []) {
+      const doc = search ? searchDocs.get(item.id) : undefined
+      const hit = search && doc ? matchDoc(doc, search) : null
+      if (hit) hits.set(item.id, hit)
       if (!isOpen(item)) {
         // Today's decisions, plus one linked from the address bar however
         // old: that link promised to show it.
@@ -1351,6 +1420,13 @@ export default function QueueAdmin({
       }
       open++
       const k = kindOf(item)
+      if (search) {
+        // Every kind at once; the segments count the matches of each.
+        if (!hit) continue
+        perKind[k]++
+        groups[sectionOf(item)].push(item)
+        continue
+      }
       perKind[k]++
       if (k === kind) groups[sectionOf(item)].push(item)
     }
@@ -1363,6 +1439,7 @@ export default function QueueAdmin({
     groups.rules.sort(newest)
     groups.comb.sort(byVerdict)
     done.sort((a, b) => ((a.decidedAt ?? '') < (b.decidedAt ?? '') ? 1 : -1))
+    const doneHits = search ? done.filter(i => hits.has(i.id)) : done
     // Sub-heads only where a section spans more than one page; a section on
     // a single page lists its items as they are.
     const pages: Record<Section, PageGroup[]> = {
@@ -1380,8 +1457,23 @@ export default function QueueAdmin({
     // on screen.
     const walk: QueueItem[] = []
     const foldOf = new Map<string, string>()
+    // During a search the list is two groups instead of the sections: the
+    // items with every word in their name, then the rest, each in the
+    // order the sections would give them. Folded groups hide nothing.
+    const found: Record<'name' | 'other', QueueItem[]> = { name: [], other: [] }
+    if (search) {
+      for (const s of SECTIONS) {
+        const inOrder = pages[s].length
+          ? pages[s].flatMap(p => p.items)
+          : groups[s]
+        for (const item of inOrder) {
+          found[hits.get(item.id)?.inName ? 'name' : 'other'].push(item)
+        }
+      }
+      walk.push(...found.name, ...found.other)
+    }
     for (const s of SECTIONS) {
-      if (collapsed[s]) continue
+      if (search || collapsed[s]) continue
       if (!pages[s].length) {
         walk.push(...groups[s])
         continue
@@ -1394,9 +1486,32 @@ export default function QueueAdmin({
         }
       }
     }
-    const flat = walk.filter(i => !foldedPages[foldOf.get(i.id) ?? ''])
-    return { groups, pages, done, flat, walk, foldOf, open, perKind }
-  }, [items, collapsed, foldedPages, kind, dayStart, selectedId])
+    const flat = search
+      ? walk
+      : walk.filter(i => !foldedPages[foldOf.get(i.id) ?? ''])
+    return {
+      groups,
+      pages,
+      done,
+      doneHits,
+      hits,
+      found,
+      flat,
+      walk,
+      foldOf,
+      open,
+      perKind,
+    }
+  }, [
+    items,
+    collapsed,
+    foldedPages,
+    kind,
+    dayStart,
+    selectedId,
+    search,
+    searchDocs,
+  ])
 
   const selected = useMemo(() => {
     if (!items) return null
@@ -1417,7 +1532,9 @@ export default function QueueAdmin({
       return
     }
     if (selectedId && ordered.walk.some(i => i.id === selectedId)) return
-    if (selected && isOpen(selected)) return
+    // Outside a search an open item stays in focus though its group is
+    // folded; during one, focus moves to the first match.
+    if (selected && isOpen(selected) && !searching) return
     if (selected && !isOpen(selected) && showDone) return
     // The first item on screen; with every page folded, the first there
     // is, with its page opened.
@@ -1435,6 +1552,7 @@ export default function QueueAdmin({
     selectedId,
     selected,
     showDone,
+    searching,
   ])
 
   // The card of the item after this one is fetched now, so W/auto-advance
@@ -1662,6 +1780,17 @@ export default function QueueAdmin({
     },
     [ordered.walk, selectedId, reveal]
   )
+
+  /** Leave the search. The item in focus stays in focus, shown among its
+   *  own kind with its page open, so a search can be used to jump to one
+   *  item and carry on from there. */
+  const clearSearch = useCallback(() => {
+    setQuery('')
+    if (!selected || !isOpen(selected)) return
+    if (kindOf(selected) !== kind) setKind(kindOf(selected))
+    foldPage(`${sectionOf(selected)}:${pageLabel(selected) ?? ''}`, false)
+    select(selected.id)
+  }, [selected, kind, foldPage, select])
 
   // After an accept: have the Mac agent save the reply draft in Gmail now,
   // and tell the toast and the row how it went. If the agent is not
@@ -2065,6 +2194,11 @@ export default function QueueAdmin({
             window.open(livePageUrl(item), '_blank', 'noopener')
           }
           break
+        case '/':
+          e.preventDefault()
+          searchRef.current?.focus()
+          searchRef.current?.select()
+          break
         case '?':
           e.preventDefault()
           setShowHelp(v => !v)
@@ -2073,7 +2207,7 @@ export default function QueueAdmin({
           if (showHelp) setShowHelp(false)
           else if (item && d.mode !== 'idle') {
             setDraft(item.id, { mode: 'idle', chip: null, other: '' })
-          }
+          } else if (searching) clearSearch()
           break
       }
     }
@@ -2094,7 +2228,17 @@ export default function QueueAdmin({
     agentChat,
     items,
     select,
+    searching,
+    clearSearch,
   ])
+
+  // Enter or the down arrow in the search box goes to the first match, so
+  // W, Q, A and R carry on from there.
+  const toMatches = () => {
+    searchRef.current?.blur()
+    const first = ordered.flat[0]
+    if (first) select(first.id)
+  }
 
   const waiting = ordered.open
   const doneToday = ordered.done.length
@@ -2135,9 +2279,13 @@ export default function QueueAdmin({
             {KINDS.map(k => (
               <button
                 key={k.key}
-                className={kind === k.key ? styles.segOn : ''}
+                className={kind === k.key && !searching ? styles.segOn : ''}
                 onClick={() => chooseKind(k.key)}
-                title={k.title}
+                title={
+                  searching
+                    ? `Matches among the ${k.label.toLowerCase()}; click to leave the search and show them all`
+                    : k.title
+                }
               >
                 {k.label}
                 <span className={styles.segCount}>
@@ -2194,96 +2342,212 @@ export default function QueueAdmin({
 
       {items && (
         <div className={styles.split}>
-          <div className={styles.list} ref={listRef}>
-            {SECTIONS.map(section => {
-              const list = ordered.groups[section]
-              if (
-                list.length === 0 &&
-                (section !== 'requests' || kind === 'rules')
-              )
-                return null
-              return (
-                <div key={section} className={styles.group}>
+          <div className={styles.listCol}>
+            <div className={styles.searchBar}>
+              <label
+                className={`${styles.search} ${searching ? styles.searchOn : ''}`}
+              >
+                <Icon src={ICON.search} />
+                <input
+                  ref={searchRef}
+                  className={styles.searchInput}
+                  type="text"
+                  value={query}
+                  onChange={e => {
+                    setQuery(e.target.value)
+                    if (listRef.current) listRef.current.scrollTop = 0
+                  }}
+                  onKeyDown={e => {
+                    if (e.nativeEvent.isComposing) return
+                    if (e.key === 'Escape') {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      clearSearch()
+                      e.currentTarget.blur()
+                    } else if (e.key === 'Enter' || e.key === 'ArrowDown') {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      toMatches()
+                    }
+                  }}
+                  placeholder="Search the queue"
+                  aria-label="Search the queue"
+                  autoComplete="off"
+                  spellCheck={false}
+                  enterKeyHint="search"
+                />
+                {query ? (
                   <button
-                    className={styles.groupHead}
-                    onClick={() => toggleGroup(section)}
-                    aria-expanded={!collapsed[section]}
+                    type="button"
+                    className={styles.searchClear}
+                    onClick={() => {
+                      clearSearch()
+                      searchRef.current?.focus()
+                    }}
+                    title="Clear the search (Esc)"
+                    aria-label="Clear the search"
                   >
-                    {SECTION_LABEL[section]}
-                    <span className={styles.groupCount}>{list.length}</span>
-                    <span
-                      className={`${styles.groupChevron} ${collapsed[section] ? styles.groupChevronClosed : ''}`}
-                    >
-                      <Icon src={ICON.chevron} size={12} />
-                    </span>
+                    <Icon src={ICON.x} size={12} />
                   </button>
-                  {collapsed[section] ? null : list.length === 0 ? (
-                    <div className={styles.groupEmpty}>Nothing waiting</div>
-                  ) : ordered.pages[section].length ? (
-                    ordered.pages[section].map(page => {
-                      const foldKey = `${section}:${page.key}`
-                      const folded = foldedPages[foldKey] === true
-                      return (
-                        <div key={page.key} className={styles.pageGroup}>
-                          <button
-                            className={styles.pageHead}
-                            onClick={() => togglePage(foldKey)}
-                            aria-expanded={!folded}
-                          >
-                            {page.label}
-                            <span className={styles.groupCount}>
-                              {page.items.length}
-                            </span>
-                            <span
-                              className={`${styles.groupChevron} ${folded ? styles.groupChevronClosed : ''}`}
-                            >
-                              <Icon src={ICON.chevron} size={12} />
-                            </span>
-                          </button>
-                          {folded
-                            ? null
-                            : page.items.map(item => (
-                                <Row
-                                  key={item.id}
-                                  item={item}
-                                  active={item.id === selectedId && !showDone}
-                                  working={pending[item.id] ?? null}
-                                  failed={
-                                    !pending[item.id] &&
-                                    Boolean(draft(item.id).error)
-                                  }
-                                  showPage={false}
-                                  onClick={() => select(item.id)}
-                                  onLogoError={() => logoDied(item)}
-                                />
-                              ))}
-                        </div>
-                      )
-                    })
-                  ) : (
-                    list.map(item => (
-                      <Row
-                        key={item.id}
-                        item={item}
-                        active={item.id === selectedId && !showDone}
-                        working={pending[item.id] ?? null}
-                        failed={
-                          !pending[item.id] && Boolean(draft(item.id).error)
-                        }
-                        onClick={() => select(item.id)}
-                        onLogoError={() => logoDied(item)}
-                      />
-                    ))
+                ) : (
+                  <kbd className={styles.searchKey} title="Press / to search">
+                    /
+                  </kbd>
+                )}
+              </label>
+              {searching && (
+                <div className={styles.searchMeta} role="status">
+                  {ordered.flat.length === 0
+                    ? 'No matches waiting'
+                    : `${ordered.flat.length} ${ordered.flat.length === 1 ? 'match' : 'matches'} waiting`}
+                  {ordered.doneHits.length > 0 && (
+                    <>
+                      {' · '}
+                      <button
+                        className={`${styles.linkButton} ${showDone ? styles.linkButtonOn : ''}`}
+                        onClick={() => setShowDone(v => !v)}
+                      >
+                        {ordered.doneHits.length} done today
+                      </button>
+                    </>
                   )}
                 </div>
-              )
-            })}
+              )}
+            </div>
+            <div className={styles.list} ref={listRef}>
+              {searching && ordered.flat.length === 0 && (
+                <p className={styles.searchEmpty}>
+                  Search looks through every open item, whatever its kind, and
+                  today&apos;s decisions: names, links, fields, messages and
+                  Fable&apos;s notes. Each word you type has to start a word
+                  there.
+                </p>
+              )}
+              {searching &&
+                SEARCH_GROUPS.map(g => {
+                  const list = ordered.found[g.key]
+                  if (!list.length) return null
+                  return (
+                    <div key={g.key} className={styles.group}>
+                      <div
+                        className={`${styles.groupHead} ${styles.groupHeadStatic}`}
+                      >
+                        {g.label}
+                        <span className={styles.groupCount}>{list.length}</span>
+                      </div>
+                      {list.map(item => (
+                        <Row
+                          key={item.id}
+                          item={item}
+                          active={item.id === selectedId && !showDone}
+                          working={pending[item.id] ?? null}
+                          failed={
+                            !pending[item.id] && Boolean(draft(item.id).error)
+                          }
+                          showKind
+                          search={search}
+                          hit={ordered.hits.get(item.id)}
+                          onClick={() => select(item.id)}
+                          onLogoError={() => logoDied(item)}
+                        />
+                      ))}
+                    </div>
+                  )
+                })}
+              {!searching &&
+                SECTIONS.map(section => {
+                  const list = ordered.groups[section]
+                  if (
+                    list.length === 0 &&
+                    (section !== 'requests' || kind === 'rules')
+                  )
+                    return null
+                  return (
+                    <div key={section} className={styles.group}>
+                      <button
+                        className={styles.groupHead}
+                        onClick={() => toggleGroup(section)}
+                        aria-expanded={!collapsed[section]}
+                      >
+                        {SECTION_LABEL[section]}
+                        <span className={styles.groupCount}>{list.length}</span>
+                        <span
+                          className={`${styles.groupChevron} ${collapsed[section] ? styles.groupChevronClosed : ''}`}
+                        >
+                          <Icon src={ICON.chevron} size={12} />
+                        </span>
+                      </button>
+                      {collapsed[section] ? null : list.length === 0 ? (
+                        <div className={styles.groupEmpty}>Nothing waiting</div>
+                      ) : ordered.pages[section].length ? (
+                        ordered.pages[section].map(page => {
+                          const foldKey = `${section}:${page.key}`
+                          const folded = foldedPages[foldKey] === true
+                          return (
+                            <div key={page.key} className={styles.pageGroup}>
+                              <button
+                                className={styles.pageHead}
+                                onClick={() => togglePage(foldKey)}
+                                aria-expanded={!folded}
+                              >
+                                {page.label}
+                                <span className={styles.groupCount}>
+                                  {page.items.length}
+                                </span>
+                                <span
+                                  className={`${styles.groupChevron} ${folded ? styles.groupChevronClosed : ''}`}
+                                >
+                                  <Icon src={ICON.chevron} size={12} />
+                                </span>
+                              </button>
+                              {folded
+                                ? null
+                                : page.items.map(item => (
+                                    <Row
+                                      key={item.id}
+                                      item={item}
+                                      active={
+                                        item.id === selectedId && !showDone
+                                      }
+                                      working={pending[item.id] ?? null}
+                                      failed={
+                                        !pending[item.id] &&
+                                        Boolean(draft(item.id).error)
+                                      }
+                                      showPage={false}
+                                      onClick={() => select(item.id)}
+                                      onLogoError={() => logoDied(item)}
+                                    />
+                                  ))}
+                            </div>
+                          )
+                        })
+                      ) : (
+                        list.map(item => (
+                          <Row
+                            key={item.id}
+                            item={item}
+                            active={item.id === selectedId && !showDone}
+                            working={pending[item.id] ?? null}
+                            failed={
+                              !pending[item.id] && Boolean(draft(item.id).error)
+                            }
+                            onClick={() => select(item.id)}
+                            onLogoError={() => logoDied(item)}
+                          />
+                        ))
+                      )}
+                    </div>
+                  )
+                })}
+            </div>
           </div>
 
           <div className={styles.detail} ref={detailRef}>
             {showDone ? (
               <DoneList
-                items={ordered.done}
+                items={ordered.doneHits}
+                search={search}
                 busyFor={id => draft(id).busy}
                 errorFor={id => draft(id).error}
                 onUndo={canEdit ? item => void act(item, 'undo') : null}
@@ -2310,7 +2574,11 @@ export default function QueueAdmin({
               />
             ) : (
               <div className={styles.emptyDetail}>
-                {waiting === 0 ? 'All clear.' : 'Pick an item on the left.'}
+                {searching && ordered.flat.length === 0
+                  ? 'Nothing waiting matches the search.'
+                  : waiting === 0
+                    ? 'All clear.'
+                    : 'Pick an item on the left.'}
               </div>
             )}
           </div>
@@ -2424,6 +2692,14 @@ export default function QueueAdmin({
               </dt>
               <dd>next / previous item</dd>
               <dt>
+                <kbd>/</kbd>
+              </dt>
+              <dd>
+                search every open item, whatever its kind, and today&apos;s
+                decisions; <kbd>Enter</kbd> goes to the first match,{' '}
+                <kbd>Esc</kbd> leaves the search
+              </dd>
+              <dt>
                 <kbd>A</kbd>
               </dt>
               <dd>accept</dd>
@@ -2486,6 +2762,9 @@ function Row({
   working,
   failed,
   showPage = true,
+  showKind = false,
+  search = null,
+  hit,
   onClick,
   onLogoError,
 }: {
@@ -2497,6 +2776,12 @@ function Row({
   failed: boolean
   /** Off under a page sub-head, which already names the page. */
   showPage?: boolean
+  /** On in search results, which mix additions, changes and rules. */
+  showKind?: boolean
+  /** The search in the box, if any: its words are marked in the name. */
+  search?: SearchQuery | null
+  /** What the search matched here: an excerpt when it is off the row. */
+  hit?: SearchHit
   onClick: () => void
   /** The picture's link has stopped working. */
   onLogoError: () => void
@@ -2526,9 +2811,10 @@ function Row({
       )}
       <span className={styles.rowBody}>
         <span className={styles.rowTitle}>
-          {splitTitle(item).name ?? item.title}
+          <Marked text={splitTitle(item).name ?? item.title} search={search} />
         </span>
         <span className={styles.rowMeta}>
+          {showKind && <span>{KIND_WORD[item.type]}</span>}
           {item.source !== 'Comb' && <span>{item.source}</span>}
           {showPage && item.page && <span>{pageLabel(item)}</span>}
           {item.verdict && (
@@ -2556,9 +2842,43 @@ function Row({
             </span>
           )}
         </span>
+        {hit?.excerpt && (
+          <span className={styles.rowExcerpt}>
+            <span className={styles.rowExcerptLabel}>{hit.excerpt.label}</span>
+            <Marked text={hit.excerpt.text} marks={hit.excerpt.marks} />
+          </span>
+        )}
       </span>
     </button>
   )
+}
+
+/** Text with the stretches a search matched marked: given as `marks`, or
+ *  found from the words of `search`. */
+function Marked({
+  text,
+  search = null,
+  marks,
+}: {
+  text: string
+  search?: SearchQuery | null
+  marks?: Array<[number, number]>
+}) {
+  const ranges = marks ?? (search ? markRanges(text, search.words) : [])
+  if (!ranges.length) return <>{text}</>
+  const out: React.ReactNode[] = []
+  let at = 0
+  ranges.forEach(([from, to], i) => {
+    if (from > at) out.push(text.slice(at, from))
+    out.push(
+      <mark key={i} className={styles.mark}>
+        {text.slice(from, to)}
+      </mark>
+    )
+    at = to
+  })
+  if (at < text.length) out.push(text.slice(at))
+  return <>{out}</>
 }
 
 function dotClass(item: QueueItem): string {
@@ -4163,11 +4483,14 @@ function ReplyDraft({
 
 function DoneList({
   items,
+  search,
   busyFor,
   errorFor,
   onUndo,
 }: {
   items: QueueItem[]
+  /** The search in the box: `items` are its matches only. */
+  search: SearchQuery | null
   busyFor: (id: string) => boolean
   errorFor: (id: string) => string | null
   /** Null for a view-only session: decisions are shown, not undone. */
@@ -4185,6 +4508,13 @@ function DoneList({
         Published listings and field changes reach the site within about three
         minutes.
       </p>
+      {search && (
+        <p className={styles.note}>
+          {items.length
+            ? 'Only the decisions that match the search.'
+            : 'Nothing done today matches the search.'}
+        </p>
+      )}
       <div className={styles.doneList}>
         {items.map(item => (
           <div key={item.id} className={styles.doneRow}>
@@ -4200,7 +4530,10 @@ function DoneList({
             )}
             <span className={styles.rowBody}>
               <span className={styles.rowTitle}>
-                {splitTitle(item).name ?? item.title}
+                <Marked
+                  text={splitTitle(item).name ?? item.title}
+                  search={search}
+                />
               </span>
               <span className={styles.rowMeta}>
                 {item.source !== 'Comb' && <span>{item.source}</span>}
