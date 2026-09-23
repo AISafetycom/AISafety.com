@@ -4,7 +4,12 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import { auditCardCitations, extractCitations } from './citations'
-import { modelDisplayName, thinkingAlwaysOn, thinkingParam } from './models'
+import {
+  modelDisplayName,
+  outputConfig,
+  thinkingAlwaysOn,
+  thinkingParam,
+} from './models'
 import { looksLikeAnswerText, splitAnswerRedoMessage } from './split-answer'
 import { TOOL_DEFINITIONS, executeTool } from './tools'
 import type { Catalog, ChatMessage, CitationRef, Listing } from './types'
@@ -426,9 +431,14 @@ export async function runAssistantStream(
           max_tokens: thinkingAlwaysOn(model) ? MAX_TOKENS * 4 : MAX_TOKENS,
           // Off wherever the API allows it: the assistant does its reasoning in
           // visible text ending with the [[/thinking]] marker. Fable-tier
-          // models can't have it off (a 400), so for them the field is left
-          // out and the thinking blocks they return are echoed back below.
+          // models and Opus 5.5 can't have it off (a 400), so for them the
+          // field is left out and the thinking blocks they return are echoed
+          // back below.
           thinking: thinkingParam(model),
+          // A visitor is waiting on a live reply, so the production model runs
+          // at medium effort: enough thinking for a good answer without a long
+          // pause before the first visible text.
+          output_config: outputConfig(model, 'medium'),
           system: [
             { type: 'text', text: systemPrompt },
             { type: 'text', text: pagesBlock },

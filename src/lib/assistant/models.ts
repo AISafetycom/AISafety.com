@@ -20,9 +20,9 @@ export const MODELS: AssistantModel[] = [
     longLabel: 'Sonnet 5 — balanced',
   },
   {
-    id: 'claude-opus-5',
-    shortLabel: 'Opus 5',
-    longLabel: 'Opus 5',
+    id: 'claude-opus-5-5',
+    shortLabel: 'Opus 5.5',
+    longLabel: 'Opus 5.5',
   },
   {
     id: 'claude-fable-5-1',
@@ -31,12 +31,28 @@ export const MODELS: AssistantModel[] = [
   },
 ]
 
-export const DEFAULT_MODEL_ID = 'claude-opus-5'
+export const DEFAULT_MODEL_ID = 'claude-opus-5-5'
 
-/** Fable-tier models think whether asked or not: the API rejects
- *  `thinking: { type: 'disabled' }` for them with a 400. */
+/** Fable-tier models and Opus 5.5 think whether asked or not: the API
+ *  rejects `thinking: { type: 'disabled' }` for them with a 400. */
 export function thinkingAlwaysOn(id: string): boolean {
-  return /^claude-(fable|mythos)-/.test(id)
+  return /^claude-(fable|mythos)-/.test(id) || id === 'claude-opus-5-5'
+}
+
+/** Effort levels the API accepts for the models that take the setting. */
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+/** The `output_config` request field. Opus 5.5 defaults to medium effort
+ *  where Opus 5 defaulted to high, so the production model names its level
+ *  instead of inheriting whatever the API's default happens to be. The
+ *  playground's other models keep their own defaults, and Haiku 4.5 rejects
+ *  the field outright. */
+export function outputConfig(
+  id: string,
+  effort: Effort
+): { effort: Effort } | undefined {
+  if (id !== DEFAULT_MODEL_ID || /^claude-haiku-/.test(id)) return undefined
+  return { effort }
 }
 
 /** The `thinking` request field for a model. The assistant reasons in visible
