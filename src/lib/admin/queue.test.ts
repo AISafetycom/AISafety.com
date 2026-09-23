@@ -24,6 +24,7 @@ vi.mock('@/lib/assistant/catalog', () => ({ getCatalog: vi.fn() }))
 import { getCatalog } from '@/lib/assistant/catalog'
 import {
   acceptItem,
+  asAttachmentPreview,
   asAttachmentWrite,
   closeHandledRows,
   handledOutside,
@@ -423,5 +424,30 @@ describe('queueTargets', () => {
     const found = await queueTargets([{ table: EVENTS, record: rid('org') }])
     expect(found).toEqual({ logos: {}, links: {} })
     spy.mockRestore()
+  })
+})
+
+describe('asAttachmentPreview', () => {
+  const link = 'https://generality.org/assets/logo-glyph.svg'
+
+  it('shows a picture named by its link on the card, one or several', () => {
+    expect(asAttachmentPreview(link)).toEqual([
+      { url: link, filename: 'logo-glyph.svg' },
+    ])
+    expect(asAttachmentPreview(`${link}, https://x.org/a.webp`)).toEqual([
+      { url: link, filename: 'logo-glyph.svg' },
+      { url: 'https://x.org/a.webp', filename: 'a.webp' },
+    ])
+    expect(asAttachmentPreview([{ url: link, filename: 'mark.svg' }])).toEqual([
+      { url: link, filename: 'mark.svg' },
+    ])
+  })
+
+  it('leaves anything that is not a picture link as it came', () => {
+    expect(asAttachmentPreview('old badge, replaced')).toBe(
+      'old badge, replaced'
+    )
+    expect(asAttachmentPreview(null)).toBe(null)
+    expect(asAttachmentPreview([])).toEqual([])
   })
 })

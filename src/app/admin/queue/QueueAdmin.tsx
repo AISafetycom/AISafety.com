@@ -3066,6 +3066,16 @@ function Detail({
 const IMAGE_URL =
   /\.(png|jpe?g|webp|gif|svg)(\?|$)|airtableusercontent\.com|blob\.vercel-storage\.com/i
 
+/** The picture links in an edit's text – one, or several separated by
+ *  commas – or null when it names no link (a note about the old file). */
+function imageLinks(text: string): string[] | null {
+  const links = text
+    .split(',')
+    .map(x => x.trim())
+    .filter(x => /^https?:\/\//i.test(x))
+  return links.length ? links : null
+}
+
 function isImageList(v: unknown): v is string[] {
   return (
     Array.isArray(v) &&
@@ -3341,11 +3351,17 @@ function Fields({
       )
     }
     if (isAttachment || isImageList(v)) {
+      // An edit names a picture by its link (the chat's edits, or a saved
+      // row's); the slot shows that picture, marked as edited, in place of
+      // what the record holds (Bryce, 23 Sept 2026: "I don't see the logos
+      // in their fields").
+      const editedUrls = edited ? imageLinks(d.edits[k]) : null
       return (
         <ImageSlot
           itemId={item.id}
           field={k}
-          urls={isImageList(v) ? v : []}
+          urls={editedUrls ?? (isImageList(v) ? v : [])}
+          edited={editedUrls !== null}
           canUpload={isAttachment && !revising}
           onDone={urls => onImage(k, urls)}
         />
@@ -3478,12 +3494,15 @@ function ImageSlot({
   itemId,
   field,
   urls,
+  edited = false,
   canUpload,
   onDone,
 }: {
   itemId: string
   field: string
   urls: string[]
+  /** The pictures shown come from an edit on the page, not the record. */
+  edited?: boolean
   canUpload: boolean
   onDone: (urls: string[]) => void
 }) {
@@ -3625,6 +3644,12 @@ function ImageSlot({
                   <span className={styles.pictureName}>{meta.filename}</span>
                 )}
                 {line && <span className={styles.pictureMeta}>{line}</span>}
+              </span>
+            )}
+            {edited && !meta && (
+              <span className={styles.thumbDetails}>
+                <span className={styles.pictureName}>{fileNameOf(src)}</span>
+                <span className={styles.pictureMeta}>edited</span>
               </span>
             )}
           </span>

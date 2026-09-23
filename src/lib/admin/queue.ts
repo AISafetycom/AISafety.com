@@ -733,10 +733,8 @@ export async function getPreviewListing(
   )
   if (!res.ok) return null
   const raw = (await res.json()) as AirtableRow<Record<string, unknown>>
-  const byName = Object.keys(edits).length
-    ? new Map((await getTableSchema(table)).map(f => [f.name, f.id]))
-    : new Map<string, string>()
-  return mapPreview(table, raw, edits, byName)
+  const schema = Object.keys(edits).length ? await getTableSchema(table) : []
+  return mapPreview(table, raw, edits, schema)
 }
 
 export interface PreviewTarget {
@@ -761,9 +759,7 @@ export async function getPreviewListings(
     byTable.set(t.table, list)
   }
   for (const [table, list] of byTable) {
-    const byName = new Map(
-      (await getTableSchema(table)).map(f => [f.name, f.id])
-    )
+    const schema = await getTableSchema(table)
     for (let i = 0; i < list.length; i += 40) {
       const chunk = list.slice(i, i + 40)
       const params = new URLSearchParams()
@@ -785,7 +781,7 @@ export async function getPreviewListings(
               table,
               { ...r, fields: { ...r.fields } },
               t.edits,
-              byName
+              schema
             )
           : null
       }
@@ -794,17 +790,43 @@ export async function getPreviewListings(
   return out
 }
 
+/** A picture edit as the page's mappers read one: `[{url, filename}]`.
+ *  The chat and the row's saved edits name a picture by its link (text, or
+ *  links separated by commas), and a mapper sees only Airtable's shape –
+ *  so a link stayed invisible on the card until Accept (Bryce, 23 Sept
+ *  2026: "I don't see the logos in their fields"). Anything that is not a
+ *  picture link is left as it came. */
+export function asAttachmentPreview(v: unknown): unknown {
+  const parts =
+    typeof v === 'string'
+      ? v
+          .split(',')
+          .map(x => x.trim())
+          .filter(Boolean)
+      : v
+  const files = asAttachmentWrite(parts)
+  if (!files || !files.length) return v
+  const shown = files.filter(
+    (f): f is { url: string; filename: string } =>
+      isRecord(f) && typeof f.url === 'string'
+  )
+  return shown.length ? shown : v
+}
+
 /** The record with the edits laid over it (by field name → id), mapped by
  *  that table's own record-to-listing function. */
 function mapPreview(
   table: string,
   raw: AirtableRow<Record<string, unknown>>,
   edits: Record<string, unknown>,
-  byName: Map<string, string>
+  schema: FieldInfo[]
 ): PreviewListing | null {
+  const byName = new Map(schema.map(f => [f.name, f]))
   for (const [name, value] of Object.entries(edits)) {
-    const id = byName.get(name)
-    if (id) raw.fields[id] = value
+    const f = byName.get(name)
+    if (!f) continue
+    raw.fields[f.id] =
+      f.type === 'multipleAttachments' ? asAttachmentPreview(value) : value
   }
   const rec = raw as unknown as AirtableRawRecord
   const wrap = (kind: PreviewKind, listing: unknown): PreviewListing | null =>
