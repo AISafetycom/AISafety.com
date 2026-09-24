@@ -177,6 +177,21 @@ const ICON = {
   search: '/images/icons/magnifying-glass.svg',
 } as const
 
+// Each section's head carries its icon in its source colour.
+const SECTION_ICON: Record<Section, string> = {
+  requests: ICON.requests,
+  broom: ICON.broom,
+  rules: ICON.rule,
+  comb: ICON.comb,
+}
+
+const SECTION_TONE: Record<Section, string> = {
+  requests: styles.dotEmail,
+  broom: styles.dotBroom,
+  rules: styles.dotRule,
+  comb: styles.dotComb,
+}
+
 function sourceIcon(item: QueueItem): string {
   if (item.type === 'Rule' || item.source === 'Teach') return ICON.rule
   switch (item.source) {
@@ -2473,6 +2488,11 @@ export default function QueueAdmin({
                         onClick={() => toggleGroup(section)}
                         aria-expanded={!collapsed[section]}
                       >
+                        <span
+                          className={`${styles.groupIcon} ${SECTION_TONE[section]}`}
+                        >
+                          <Icon src={SECTION_ICON[section]} size={16} />
+                        </span>
                         {SECTION_LABEL[section]}
                         <span className={styles.groupCount}>{list.length}</span>
                         <span
@@ -2494,14 +2514,14 @@ export default function QueueAdmin({
                                 onClick={() => togglePage(foldKey)}
                                 aria-expanded={!folded}
                               >
-                                {page.label}
-                                <span className={styles.groupCount}>
-                                  {page.items.length}
-                                </span>
                                 <span
-                                  className={`${styles.groupChevron} ${folded ? styles.groupChevronClosed : ''}`}
+                                  className={`${styles.pageChevron} ${folded ? styles.groupChevronClosed : ''}`}
                                 >
                                   <Icon src={ICON.chevron} size={12} />
+                                </span>
+                                {page.label}
+                                <span className={styles.pageCount}>
+                                  {page.items.length}
                                 </span>
                               </button>
                               {folded
