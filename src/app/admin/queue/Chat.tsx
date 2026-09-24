@@ -22,7 +22,8 @@ import styles from './queue.module.css'
 // A reply's parts: its prose, what it was doing at that point (shown only
 // while it is still answering – one line that changes; Bryce, 14 Sept 2026:
 // "I don't really care what it's doing, I just want to know it's doing
-// stuff"), and notes worth keeping ("Saved a memory: …").
+// stuff"), and notes worth keeping ("Saved a memory: …"). Of the prose only
+// the answer shows, not the lines written between lookups (answerPart).
 type Part =
   | { t: 'text'; text: string }
   | { t: 'tool'; label: string }
@@ -1003,14 +1004,26 @@ function isCommand(label: string): boolean {
   return label.startsWith('Ran: ')
 }
 
-function lastText(parts: Part[]): number {
-  for (let i = parts.length - 1; i >= 0; i--)
-    if (parts[i].t === 'text') return i
+/** The one piece of prose a reply shows: its answer. Text written between
+ *  lookups is Fable thinking out loud ("I'll read the record…", "Next I
+ *  need…") and is hidden (Bryce, 24 Sept 2026: "I don't want to see the
+ *  thinking process"). A finished reply shows its last piece of text; one
+ *  still coming shows text only once nothing has followed it, so a line
+ *  written before a lookup goes when the lookup starts. */
+function answerPart(parts: Part[], streaming: boolean): number {
+  if (streaming)
+    return parts.length && parts[parts.length - 1].t === 'text'
+      ? parts.length - 1
+      : -1
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i]
+    if (p.t === 'text' && p.text.trim()) return i
+  }
   return -1
 }
 
-/** Fable's reply: prose with any ```edits blocks turned into Apply cards,
- *  and the muted lines saying what was looked up on the way. */
+/** Fable's reply: its answer, with any ```edits blocks turned into Apply
+ *  cards, and the notes worth keeping ("Saved a memory: …"). */
 function Parts({
   parts,
   edits,
@@ -1032,6 +1045,7 @@ function Parts({
   streaming?: boolean
   cap: DescCap
 }) {
+  const answer = answerPart(parts, Boolean(streaming))
   return (
     <div className={styles.chatFable}>
       {parts.map((p, i) =>
@@ -1053,7 +1067,8 @@ function Parts({
             onSetEdits={onSetEdits}
             onSetReply={onSetReply}
             undo={undo}
-            caret={Boolean(streaming) && i === lastText(parts)}
+            caret={Boolean(streaming) && i === answer}
+            blocksOnly={i !== answer}
             cap={cap}
           />
         )
@@ -1071,6 +1086,7 @@ function Prose({
   onSetReply,
   undo,
   caret,
+  blocksOnly,
   cap,
 }: {
   text: string
@@ -1081,6 +1097,9 @@ function Prose({
   onSetReply: (text: string | null) => void
   undo?: () => void
   caret: boolean
+  /** Text that isn't the answer: only its edits and reply cards show, so a
+   *  change Fable proposed before its last lookup still has its Undo. */
+  blocksOnly: boolean
   cap: DescCap
 }) {
   const out: React.ReactNode[] = []
@@ -1088,7 +1107,7 @@ function Prose({
   let n = 0
   for (const m of text.matchAll(BLOCK_RE)) {
     const i = m.index ?? 0
-    if (i > last)
+    if (i > last && !blocksOnly)
       out.push(<Markdown key={`t${n}`} text={text.slice(last, i)} />)
     if (m[1] === 'reply') {
       out.push(
@@ -1123,7 +1142,7 @@ function Prose({
     last = i + m[0].length
     n++
   }
-  if (last < text.length)
+  if (last < text.length && !blocksOnly)
     out.push(<Markdown key={`t${n}`} text={text.slice(last)} />)
   return (
     <>
