@@ -4,6 +4,7 @@ import {
   contentDigest,
   FitError,
   formatLocal,
+  liveCampaignsNamed,
   previewText,
   ReorderError,
   reorderHtml,
@@ -329,5 +330,34 @@ describe('setFitHtml', () => {
     expect(() => setFitHtml(html, 'g0', 'zz', 'x')).toThrow(FitError)
     expect(() => setFitHtml(html, 'g9', 'a', 'x')).toThrow(FitError)
     expect(() => setFitHtml('<p>x</p>', 'g0', 'a', 'x')).toThrow(FitError)
+  })
+})
+
+describe('liveCampaignsNamed', () => {
+  const name = 'Events · Week 40, 2026'
+  const c = (id: string, status: string, n = name) => ({ id, name: n, status })
+
+  it('finds live campaigns of the same issue: scheduled, sending, paused, sent, held', () => {
+    const found = liveCampaignsNamed(
+      [c('1', '1'), c('2', '2'), c('3', '3'), c('5', '5'), c('7', '7')],
+      '99',
+      name
+    )
+    expect(found.map(x => x.id)).toEqual(['1', '2', '3', '5', '7'])
+  })
+
+  it('ignores the draft itself, other drafts, stopped/disabled sends and other issues', () => {
+    const found = liveCampaignsNamed(
+      [
+        c('99', '1'),
+        c('10', '0'),
+        c('11', '4'),
+        c('12', '6'),
+        c('13', '5', 'Events · Week 39, 2026'),
+      ],
+      '99',
+      name
+    )
+    expect(found).toEqual([])
   })
 })

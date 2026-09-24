@@ -42,7 +42,14 @@ interface Draft {
 interface Recent {
   id: string
   name: string
-  status: 'scheduled' | 'sending' | 'sent' | 'stopped' | 'paused'
+  status:
+    | 'scheduled'
+    | 'sending'
+    | 'sent'
+    | 'stopped'
+    | 'paused'
+    | 'held'
+    | 'disabled'
   scheduledFor: string | null
   sentAt: string | null
   sentTo: number
@@ -176,6 +183,7 @@ export default function NewsletterAdmin({
         problems?: string[]
         campaignId?: string
         sdate?: string
+        held?: boolean
       }
       if (res.status === 401 && body.error === 'reauth') {
         // The session is older than the approval step allows: confirm with
@@ -191,7 +199,9 @@ export default function NewsletterAdmin({
       }
       setNotice({
         kind: 'ok',
-        text: `Approved. “${draft.name}” is scheduled to send at ${when(body.sdate ?? null)} (campaign ${body.campaignId}). Nothing more to do.`,
+        text: body.held
+          ? `Approved. ActiveCampaign is holding “${draft.name}” for its own review first (campaign ${body.campaignId}) – it goes out once they approve it. Nothing more to do; don’t approve it again.`
+          : `Approved. “${draft.name}” is scheduled to send at ${when(body.sdate ?? null)} (campaign ${body.campaignId}). Nothing more to do.`,
       })
       if (previewId === draft.id) setPreviewId(null)
       await load()
@@ -467,8 +477,12 @@ export default function NewsletterAdmin({
                   <td>
                     {r.status === 'sent' ? (
                       <span className={styles.statusOk}>sent</span>
-                    ) : r.status === 'stopped' ? (
-                      <span className={styles.statusBad}>stopped</span>
+                    ) : r.status === 'stopped' || r.status === 'disabled' ? (
+                      <span className={styles.statusBad}>{r.status}</span>
+                    ) : r.status === 'held' ? (
+                      <span title="ActiveCampaign is reviewing this send; it goes out once they approve it">
+                        held for review
+                      </span>
                     ) : (
                       r.status
                     )}

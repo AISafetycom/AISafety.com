@@ -175,7 +175,17 @@ export interface DraftSummary {
 export interface SentSummary {
   id: string
   name: string
-  status: 'scheduled' | 'sending' | 'sent' | 'stopped' | 'paused'
+  /** 'held' = ActiveCampaign's "Pending Approval" (its compliance team
+   *  reviews some sends, e.g. a new account's first big one); it goes out
+   *  once they approve it. */
+  status:
+    | 'scheduled'
+    | 'sending'
+    | 'sent'
+    | 'stopped'
+    | 'paused'
+    | 'held'
+    | 'disabled'
   scheduledFor: string | null
   sentAt: string | null
   sentTo: number
@@ -184,12 +194,32 @@ export interface SentSummary {
   listNames: string[]
 }
 
+// ActiveCampaign's campaign statuses (0 = draft is handled separately). 6 and
+// 7 are "Disabled" and "Pending Approval" in AC's API reference.
 const STATUS_NAMES: Record<string, SentSummary['status']> = {
   '1': 'scheduled',
   '2': 'sending',
   '3': 'paused',
   '4': 'stopped',
   '5': 'sent',
+  '6': 'disabled',
+  '7': 'held',
+}
+
+/** Statuses meaning an issue has gone, is going, or will go out: scheduled,
+ *  sending, paused, sent, held for review. Stopped and disabled campaigns
+ *  send nothing more, so approving the issue again is allowed after those. */
+const LIVE_STATUSES = new Set(['1', '2', '3', '5', '7'])
+
+/** Other campaigns carrying this issue's name that are live — candidates for
+ *  "this issue already went out" (the caller checks they were on the same
+ *  list; a test-list send of the same issue doesn't count). */
+export function liveCampaignsNamed<
+  C extends { id: string; name: string; status: string },
+>(campaigns: C[], draftId: string, name: string): C[] {
+  return campaigns.filter(
+    c => c.id !== draftId && c.name === name && LIVE_STATUSES.has(c.status)
+  )
 }
 
 async function campaignListIds(campaignId: string): Promise<string[]> {
@@ -791,6 +821,9 @@ export class DraftProblemError extends Error {
 export interface ScheduledSend {
   /** The new, sending campaign (the draft shell is deleted). */
   campaignId: string
+  /** ActiveCampaign is holding the send for its compliance review ("Pending
+   *  Approval"); it goes out once they approve it. */
+  held: boolean
   draftId: string
   sdate: string | null
   listName: string | null
@@ -811,6 +844,16 @@ export async function approveAndSend(
     throw new DraftProblemError(
       problems.length > 0 ? problems : ['no message on the draft']
     )
+  }
+  // Never schedule the same issue to the same list twice: an earlier approval
+  // may have gone through even though the page showed an error (or two tabs
+  // were open), and a second one would reach every subscriber again.
+  for (const c of liveCampaignsNamed(campaigns, draftId, draft.name)) {
+    if ((await campaignListIds(c.id)).includes(listId)) {
+      throw new DraftProblemError([
+        `this issue already went to this list as campaign ${c.id} (${c.status === '7' ? 'held for review' : STATUS_NAMES[c.status]}) – approving it again would send it twice`,
+      ])
+    }
   }
   const offset = await accountUtcOffset()
   const sdate = formatLocal(
@@ -835,7 +878,11 @@ export async function approveAndSend(
   const newId = String(created.id)
   const live = (await v3<{ campaign: RawCampaign }>(`campaigns/${newId}`))
     .campaign
-  if (live.status !== '1' && live.status !== '2') {
+  // '7' = ActiveCampaign holds the send for its compliance review. The
+  // campaign exists and will go out once they approve it, so this counts as
+  // scheduled: the draft shell must go, or it could be approved a second time.
+  const held = live.status === '7'
+  if (live.status !== '1' && live.status !== '2' && !held) {
     throw new Error(
       `scheduled campaign ${newId} has status ${STATUS_NAMES[live.status] ?? live.status} — check the ActiveCampaign dashboard`
     )
@@ -844,10 +891,11 @@ export async function approveAndSend(
   await v1('campaign_delete', { id: draftId })
   const names = await listNames()
   console.info(
-    `[newsletter] draft ${draftId} approved → campaign ${newId} scheduled for ${live.sdate ?? sdate} on list ${listId}`
+    `[newsletter] draft ${draftId} approved → campaign ${newId} ${held ? 'held for ActiveCampaign review' : 'scheduled'} for ${live.sdate ?? sdate} on list ${listId}`
   )
   return {
     campaignId: newId,
+    held,
     draftId,
     sdate: live.sdate ?? sdate,
     listName: names.get(listId) ?? null,
