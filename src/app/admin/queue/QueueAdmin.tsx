@@ -1697,12 +1697,18 @@ export default function QueueAdmin({
         if (historyRef.current.length > 50) historyRef.current.shift()
         if (why === 'edit') redoRef.current = []
       }
+      // An item with no draft on the page yet (after a reload, or after an
+      // Accept/Undo) starts from the edits saved on its row, never from a
+      // blank draft: a blank one made the first click on any field drop the
+      // saved edits from the page, and Accept then sent only what was left
+      // (Bryce, 24 Sept 2026: the NeurIPS drinks Description edit was lost
+      // when he set its Deadline after a reload).
       setDrafts(prev => ({
         ...prev,
-        [id]: { ...(prev[id] ?? FRESH), ...patch },
+        [id]: { ...(prev[id] ?? draftOfRow(itemsRef.current, id)), ...patch },
       }))
       if (!patch.edits && patch.reply === undefined) return
-      const merged = { ...(draftsRef.current[id] ?? FRESH), ...patch }
+      const merged = { ...was, ...patch }
       const row = itemsRef.current?.find(i => i.id === id)
       if (patch.edits) {
         const touched = (touchedKeys.current[id] ??= new Set())
@@ -1736,7 +1742,7 @@ export default function QueueAdmin({
           setDrafts(prev => ({
             ...prev,
             [id]: {
-              ...(prev[id] ?? FRESH),
+              ...(prev[id] ?? draftOfRow(itemsRef.current, id)),
               error: `The edits were not saved on the row (${detail}). They are still on the page and go with Accept; a reload would lose them.`,
             },
           }))
