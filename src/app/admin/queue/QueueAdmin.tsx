@@ -180,19 +180,14 @@ const ICON = {
   search: '/images/icons/magnifying-glass.svg',
 } as const
 
-// Each section's head carries its icon in its source colour.
+// Each section's head carries its icon, in grey: colour in the list is kept
+// for the verdicts, and a teal Comb or amber Requests icon read as Publish
+// and Unsure (Bryce, 24 Sept 2026).
 const SECTION_ICON: Record<Section, string> = {
   requests: ICON.requests,
   broom: ICON.broom,
   rules: ICON.rule,
   comb: ICON.comb,
-}
-
-const SECTION_TONE: Record<Section, string> = {
-  requests: styles.dotEmail,
-  broom: styles.dotBroom,
-  rules: styles.dotRule,
-  comb: styles.dotComb,
 }
 
 function sourceIcon(item: QueueItem): string {
@@ -2514,9 +2509,7 @@ export default function QueueAdmin({
                         onClick={() => toggleGroup(section)}
                         aria-expanded={!collapsed[section]}
                       >
-                        <span
-                          className={`${styles.groupIcon} ${SECTION_TONE[section]}`}
-                        >
+                        <span className={styles.groupIcon}>
                           <Icon src={SECTION_ICON[section]} size={16} />
                         </span>
                         {SECTION_LABEL[section]}
@@ -2856,9 +2849,7 @@ function Row({
           onError={onLogoError}
         />
       ) : (
-        <span
-          className={`${styles.rowLogo} ${styles.rowLogoEmpty} ${dotClass(item)}`}
-        >
+        <span className={`${styles.rowLogo} ${styles.rowLogoEmpty}`}>
           <Icon src={sourceIcon(item)} />
         </span>
       )}
@@ -2949,14 +2940,6 @@ function Marked({
   })
   if (at < text.length) out.push(text.slice(at))
   return <>{out}</>
-}
-
-function dotClass(item: QueueItem): string {
-  if (item.source === 'Email' || item.source === 'Form') return styles.dotEmail
-  if (item.source === 'Discord') return styles.dotDiscord
-  if (item.source === 'Broom') return styles.dotBroom
-  if (item.type === 'Rule') return styles.dotRule
-  return styles.dotComb
 }
 
 function verdictClass(item: QueueItem): string {
@@ -3139,7 +3122,7 @@ function Detail({
       <div className={styles.detailMain}>
         <div className={styles.detailHead}>
           <div className={styles.pills}>
-            <span className={`${styles.pill} ${dotClass(item)}`}>
+            <span className={styles.pill}>
               <Icon src={sourceIcon(item)} size={12} />
               {item.source}
             </span>
@@ -4649,9 +4632,7 @@ function DoneList({
               // eslint-disable-next-line @next/next/no-img-element
               <img className={styles.rowLogo} src={item.logo} alt="" />
             ) : (
-              <span
-                className={`${styles.rowLogo} ${styles.rowLogoEmpty} ${dotClass(item)}`}
-              >
+              <span className={`${styles.rowLogo} ${styles.rowLogoEmpty}`}>
                 <Icon src={sourceIcon(item)} />
               </span>
             )}

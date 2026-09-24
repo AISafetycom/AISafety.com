@@ -22,11 +22,6 @@
   --q-warn-soft: #fff4e0;
   --q-sel: #eaf4f1;
   --q-shadow: 0 1px 2px rgba(20, 24, 28, 0.06);
-  --q-email: #c2410c;
-  --q-discord: #5b4bd6;
-  --q-broom: #b45309;
-  --q-rule: #6d28d9;
-  --q-comb: #0f766e;
 
   margin: 0;
   /* Height is set from JS to fill the viewport below the admin header. */
@@ -60,11 +55,6 @@
   --q-warn-soft: #3a2d14;
   --q-sel: #1f2c2a;
   --q-shadow: none;
-  --q-email: #fb923c;
-  --q-discord: #a78bfa;
-  --q-broom: #f59e0b;
-  --q-rule: #c084fc;
-  --q-comb: #5ed1c1;
 }
 
 .queue a {
@@ -375,8 +365,11 @@
   cursor: default;
 }
 
+/* Where an item came from is shown in grey (the heads, the source pill, a
+   row with no logo): colour is kept for the verdicts. */
 .groupIcon {
   display: inline-flex;
+  color: var(--q-muted);
 }
 
 .groupChevron {
@@ -491,26 +484,6 @@
 
 .undoIcon {
   margin-right: 2px;
-}
-
-.dotEmail {
-  color: var(--q-email);
-}
-
-.dotDiscord {
-  color: var(--q-discord);
-}
-
-.dotBroom {
-  color: var(--q-broom);
-}
-
-.dotRule {
-  color: var(--q-rule);
-}
-
-.dotComb {
-  color: var(--q-comb);
 }
 
 .rowBody {
@@ -706,7 +679,8 @@
   border-radius: 999px;
   font-size: 12px;
   font-weight: 500;
-  border: 1px solid currentColor;
+  color: var(--q-text-2);
+  border: 1px solid var(--q-border-strong);
 }
 
 /* The page, in the top row: the same small caps as the section headings. */
@@ -772,6 +746,7 @@
   justify-content: center;
   background: none;
   border: 1px dashed var(--q-border-strong);
+  color: var(--q-muted);
 }
 
 .finding {
