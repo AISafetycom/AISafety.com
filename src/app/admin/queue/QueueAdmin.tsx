@@ -2013,7 +2013,7 @@ export default function QueueAdmin({
     return () => clearTimeout(t)
   }, [undoable])
 
-  // Keyboard: W/Q or arrows move, A/Enter accept, R reject, N note, U undo,
+  // Keyboard: Tab/Shift+Tab or arrows move, A/Enter accept, R reject, N note, U undo,
   // ? help, Esc cancel. Ignored while typing.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -2092,12 +2092,16 @@ export default function QueueAdmin({
       const item = selected
       const d = item ? draft(item.id) : FRESH
       switch (e.key) {
-        case 'w':
+        case 'Tab':
+          // Tab and Shift+Tab step through the list, in place of W and Q
+          // (Bryce, 24 Sept 2026). Inside a text box Tab still leaves it.
+          e.preventDefault()
+          move(e.shiftKey ? -1 : 1)
+          break
         case 'ArrowDown':
           e.preventDefault()
           move(1)
           break
-        case 'q':
         case 'ArrowUp':
           e.preventDefault()
           move(-1)
@@ -2688,7 +2692,7 @@ export default function QueueAdmin({
             <div className={styles.helpTitle}>Keyboard</div>
             <dl className={styles.helpList}>
               <dt>
-                <kbd>W</kbd> <kbd>Q</kbd>
+                <kbd>Tab</kbd> / <kbd>⇧</kbd> <kbd>Tab</kbd>
               </dt>
               <dd>next / previous item</dd>
               <dt>
