@@ -145,7 +145,7 @@ interface DescCap {
   cap: number
 }
 const PROJECTS_TABLE = 'tblHT29QNgMYKB8iW'
-function descriptionCap(item: QueueItem): DescCap {
+export function descriptionCap(item: QueueItem): DescCap {
   return {
     field:
       item.targetTable === PROJECTS_TABLE
@@ -153,6 +153,17 @@ function descriptionCap(item: QueueItem): DescCap {
         : 'Description',
     cap: item.page === '/events' || item.page === '/training' ? 220 : 180,
   }
+}
+
+/** A description's length against its page's cap, in red once over. */
+export function CharCount({ n, cap }: { n: number; cap: number }) {
+  return (
+    <span className={n > cap ? styles.chatCountOver : styles.chatCount}>
+      {n > cap
+        ? `${n} characters – over the ${cap} cap`
+        : `${n} / ${cap} characters`}
+    </span>
+  )
 }
 
 export default function Chat({
@@ -1166,17 +1177,7 @@ function EditsCard({
             <span className={styles.label}>{k}</span>
             <span>
               {usable[k]}
-              {n !== null && (
-                <span
-                  className={
-                    n > cap.cap ? styles.chatCountOver : styles.chatCount
-                  }
-                >
-                  {n > cap.cap
-                    ? `${n} characters – over the ${cap.cap} cap`
-                    : `${n} / ${cap.cap} characters`}
-                </span>
-              )}
+              {n !== null && <CharCount n={n} cap={cap.cap} />}
             </span>
           </div>
         )

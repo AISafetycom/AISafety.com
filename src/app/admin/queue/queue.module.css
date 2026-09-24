@@ -563,8 +563,10 @@
   border-radius: 8px;
   background: var(--aside-bg);
   /* The chat below the verdict can run long: the panel scrolls on its
-     own, the box to type in stays at its foot. */
-  max-height: calc(100vh - 200px);
+     own, the box to type in stays at its foot. The height leaves room for
+     the two bars above and the Accept bar below, which otherwise covered
+     the foot and left "Start over" on its edge (Bryce, 24 Sept 2026). */
+  max-height: calc(100vh - 250px);
   overflow-y: auto;
 }
 
@@ -1263,6 +1265,18 @@
 @container (max-width: 719px) {
   .cardRow {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Name, link and description beside an addition's card: the column is
+   narrow, so each name sits over its value, as in the grid below. */
+@container (min-width: 720px) {
+  .fieldsBeside {
+    gap: 14px;
+  }
+  .fieldsBeside .fieldRow {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
   }
 }
 
@@ -2106,12 +2120,19 @@ select.input {
   font-weight: 600;
 }
 
+/* The panel gives up its bottom padding to the box to type in, which then
+   sits flush on the panel's edge with its own padding under "Start over"
+   (a negative margin here left 30px in one browser and none in another). */
+.detailAside:has(.chatInputRow) {
+  padding-bottom: 0;
+}
+
 .chatInputRow {
   position: sticky;
   bottom: 0;
   display: grid;
   gap: 6px;
-  margin: 0 -18px -16px;
+  margin: 0 -18px;
   padding: 10px 18px 14px;
   background: var(--aside-bg);
   border-top: 1px solid var(--q-border);

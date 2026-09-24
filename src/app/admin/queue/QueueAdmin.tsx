@@ -34,7 +34,7 @@ import SitePreview, {
   prefetchPreview,
   seedPreviews,
 } from './SitePreview'
-import Chat from './Chat'
+import Chat, { CharCount, descriptionCap } from './Chat'
 import styles from './queue.module.css'
 
 // The Queue is a triage tool Bryce sits in for long stretches, so it has its
@@ -3103,17 +3103,6 @@ function Detail({
                   {linkLabel(item.sourceLink)}
                 </a>
               )}
-              {item.url && (
-                <a
-                  href={item.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={styles.withIcon}
-                >
-                  <Icon src={ICON.external} size={12} />
-                  {item.url.replace(/^https?:\/\//, '').replace(/\/$/, '')}
-                </a>
-              )}
             </div>
           </div>
           {/* Where Comb found the listing heads the panel on the right;
@@ -3158,18 +3147,33 @@ function Detail({
             excerptBlock
           ))}
 
-        {/* Edits typed on the page, in the field's own shape. */}
+        {/* Edits typed on the page, in the field's own shape. Name, link
+            and description sit beside the card, in the room it leaves
+            (Bryce, 24 Sept 2026); the other fields follow under both. */}
         {item.type === 'Add' &&
           item.targetTable &&
           item.targetRecord &&
           (live || item.fields) && (
             <>
-              <SitePreview
-                table={item.targetTable ?? ''}
-                record={item.targetRecord ?? ''}
-                edits={editsToSave()}
-              />
+              <div className={styles.cardRow}>
+                <SitePreview
+                  table={item.targetTable ?? ''}
+                  record={item.targetRecord ?? ''}
+                  edits={editsToSave()}
+                />
+                <Fields
+                  part="main"
+                  item={item}
+                  fields={live?.fields ?? item.fields ?? {}}
+                  schema={live?.schema ?? []}
+                  onImage={onImage}
+                  d={d}
+                  setD={setD}
+                  readOnly={readOnly}
+                />
+              </div>
               <Fields
+                part="rest"
                 item={item}
                 fields={live?.fields ?? item.fields ?? {}}
                 schema={live?.schema ?? []}
@@ -3624,6 +3628,7 @@ function isBlank(v: unknown): boolean {
 }
 
 function Fields({
+  part,
   item,
   fields,
   schema,
@@ -3632,6 +3637,9 @@ function Fields({
   setD,
   readOnly,
 }: {
+  /** "main" is name, link and description, which sit beside the card;
+   *  "rest" is everything else, under it. */
+  part: 'main' | 'rest'
   item: QueueItem
   fields: Record<string, unknown>
   schema: FieldInfo[]
@@ -3671,6 +3679,9 @@ function Fields({
     !HOUSEKEEPING.test(k) && !COMPUTED_TYPES.has(types.get(k) ?? '')
   const rest = entries.filter(e => !seen.has(e[0]) && editable(e))
   const revising = item.status === 'Revising' || readOnly
+  // The description's length against its page's cap, as the chat's edit
+  // card counts it (Bryce, 24 Sept 2026).
+  const cap = descriptionCap(item)
 
   // Name, link and description keep a row each, and so does every picture
   // (an empty logo slot is the point). Every other filled field sits in a
@@ -3703,6 +3714,7 @@ function Fields({
         <FieldEditor
           info={info}
           value={empty && !edited ? '' : value}
+          cap={k === cap.field ? cap.cap : undefined}
           onSave={text => {
             // Saving what was already there is not an edit.
             const same = text === (empty ? '' : show(v))
@@ -3787,7 +3799,15 @@ function Fields({
       >
         {e[0]}
       </span>
-      <span className={styles.value}>{valueOf(e)}</span>
+      <span className={styles.value}>
+        {valueOf(e)}
+        {e[0] === cap.field && d.editing !== e[0] && (
+          <Counted
+            text={e[0] in d.edits ? d.edits[e[0]] : show(e[1])}
+            cap={cap.cap}
+          />
+        )}
+      </span>
     </div>
   )
   const cell = (e: [string, unknown]) => {
@@ -3814,9 +3834,16 @@ function Fields({
       </div>
     )
   }
+  if (part === 'main') {
+    return (
+      <div className={`${styles.fields} ${styles.fieldsBeside}`}>
+        {main.map(row)}
+      </div>
+    )
+  }
+  if (!pictures.length && !filled.length && !unset.length) return null
   return (
     <div className={styles.fields}>
-      {main.map(row)}
       {pictures.map(row)}
       {filled.length > 0 && (
         <div className={styles.fieldGrid}>{filled.map(cell)}</div>
@@ -4086,19 +4113,29 @@ function ImageSlot({
  *  field's own options, toggle chips for a multi-select, a date or number
  *  input, else a text box. Values travel as text (lists comma-joined) and
  *  coerceEdits turns them back into the field's shape. */
+/** The count under a description; none while it is empty. */
+function Counted({ text, cap }: { text: string; cap: number }) {
+  const n = text.trim().length
+  return n ? <CharCount n={n} cap={cap} /> : null
+}
+
 function FieldEditor({
   info,
   value,
+  cap,
   onSave,
   onCancel,
 }: {
   info: FieldInfo | undefined
   value: string
+  /** A length cap counted against as you type (the description's). */
+  cap?: number
   onSave: (text: string) => void
   onCancel: () => void
 }) {
   const type = info?.type
   const choices = info?.choices ?? []
+  const [typed, setTyped] = useState(value)
   const [picked, setPicked] = useState<string[]>(() =>
     value
       .split(',')
@@ -4199,22 +4236,28 @@ function FieldEditor({
     )
   }
   return (
-    <textarea
-      ref={fitToText}
-      onInput={e => fitToText(e.currentTarget)}
-      className={styles.input}
-      rows={value.length > 120 ? 5 : 2}
-      autoFocus
-      defaultValue={value}
-      onKeyDown={e => {
-        esc(e)
-        if (isDoneKey(e)) {
-          e.preventDefault()
-          save(e.currentTarget.value)
-        }
-      }}
-      onBlur={e => save(e.target.value)}
-    />
+    <>
+      <textarea
+        ref={fitToText}
+        onInput={e => {
+          fitToText(e.currentTarget)
+          setTyped(e.currentTarget.value)
+        }}
+        className={styles.input}
+        rows={value.length > 120 ? 5 : 2}
+        autoFocus
+        defaultValue={value}
+        onKeyDown={e => {
+          esc(e)
+          if (isDoneKey(e)) {
+            e.preventDefault()
+            save(e.currentTarget.value)
+          }
+        }}
+        onBlur={e => save(e.target.value)}
+      />
+      {cap !== undefined && <Counted text={typed} cap={cap} />}
+    </>
   )
 }
 
