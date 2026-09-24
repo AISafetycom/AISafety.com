@@ -3147,8 +3147,8 @@ function Detail({
             excerptBlock
           ))}
 
-        {/* Edits typed on the page, in the field's own shape. Name, link
-            and description sit beside the card, in the room it leaves
+        {/* Edits typed on the page, in the field's own shape. Name, link,
+            description and logo sit beside the card, in the room it leaves
             (Bryce, 24 Sept 2026); the other fields follow under both. */}
         {item.type === 'Add' &&
           item.targetTable &&
@@ -3637,8 +3637,8 @@ function Fields({
   setD,
   readOnly,
 }: {
-  /** "main" is name, link and description, which sit beside the card;
-   *  "rest" is everything else, under it. */
+  /** "main" is name, link, description and the pictures, which sit beside
+   *  the card; "rest" is every other field, under it. */
   part: 'main' | 'rest'
   item: QueueItem
   fields: Record<string, unknown>
@@ -3838,13 +3838,13 @@ function Fields({
     return (
       <div className={`${styles.fields} ${styles.fieldsBeside}`}>
         {main.map(row)}
+        {pictures.map(row)}
       </div>
     )
   }
-  if (!pictures.length && !filled.length && !unset.length) return null
+  if (!filled.length && !unset.length) return null
   return (
     <div className={styles.fields}>
-      {pictures.map(row)}
       {filled.length > 0 && (
         <div className={styles.fieldGrid}>{filled.map(cell)}</div>
       )}

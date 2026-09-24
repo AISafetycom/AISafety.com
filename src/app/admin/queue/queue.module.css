@@ -1268,8 +1268,8 @@
   }
 }
 
-/* Name, link and description beside an addition's card: the column is
-   narrow, so each name sits over its value, as in the grid below. */
+/* Name, link, description and logo beside an addition's card: the column
+   is narrow, so each name sits over its value, as in the grid below. */
 @container (min-width: 720px) {
   .fieldsBeside {
     gap: 14px;
@@ -1393,8 +1393,6 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 14px 22px;
-  padding-top: 12px;
-  border-top: 1px dashed var(--q-border);
 }
 
 .fieldCell {
