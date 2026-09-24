@@ -1788,6 +1788,13 @@ select.input {
   flex: 1;
 }
 
+/* The decision picked in the search results, marked as a list row is. */
+.doneRowActive {
+  background: var(--q-sel);
+  border-color: var(--q-accent);
+  box-shadow: inset 3px 0 0 var(--q-accent);
+}
+
 .doneActions {
   display: flex;
   align-items: center;

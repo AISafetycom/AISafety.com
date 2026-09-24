@@ -105,10 +105,13 @@ const PAGE_ORDER = [
 const NO_PAGE_LABEL = 'No page'
 
 // A search lists the items named by it first, then those that mention it
-// somewhere else (Comb's source line, a description, Fable's notes).
-const SEARCH_GROUPS: { key: 'name' | 'other'; label: string }[] = [
+// somewhere else (Comb's source line, a description, Fable's notes), then
+// today's decisions that match (Bryce, 24 Sept 2026: "search should also
+// search things done today").
+const SEARCH_GROUPS: { key: 'name' | 'other' | 'done'; label: string }[] = [
   { key: 'name', label: 'Name matches' },
   { key: 'other', label: 'Other matches' },
+  { key: 'done', label: 'Done today' },
 ]
 
 const KIND_WORD: Record<QueueItem['type'], string> = {
@@ -1103,8 +1106,9 @@ export default function QueueAdmin({
   const [foldedPages, setFoldedPages] = useState<Record<string, boolean>>({})
   // The search box above the list (/ gets there). While it holds a word
   // the list shows every open item that matches, whatever its kind, with
-  // folded groups open, and the done list keeps only its matches (Bryce,
-  // 23 Sept 2026: "please add a search feature").
+  // folded groups open, then today's decisions that match; the done list
+  // keeps only its matches (Bryce, 23 Sept 2026: "please add a search
+  // feature").
   const [query, setQuery] = useState('')
   const search = useMemo(() => parseQuery(query), [query])
   const searching = search !== null
@@ -1472,10 +1476,16 @@ export default function QueueAdmin({
     // on screen.
     const walk: QueueItem[] = []
     const foldOf = new Map<string, string>()
-    // During a search the list is two groups instead of the sections: the
+    // During a search the list is groups instead of the sections: the
     // items with every word in their name, then the rest, each in the
-    // order the sections would give them. Folded groups hide nothing.
-    const found: Record<'name' | 'other', QueueItem[]> = { name: [], other: [] }
+    // order the sections would give them, then today's decisions that
+    // match, newest first. Folded groups hide nothing. The decisions are
+    // not in `walk`: Tab and auto-advance only go through open items.
+    const found: Record<'name' | 'other' | 'done', QueueItem[]> = {
+      name: [],
+      other: [],
+      done: doneHits,
+    }
     if (search) {
       for (const s of SECTIONS) {
         const inOrder = pages[s].length
@@ -1771,6 +1781,14 @@ export default function QueueAdmin({
         ?.querySelector<HTMLElement>(`[data-id="${id}"]`)
         ?.scrollIntoView({ block: 'nearest' })
     })
+  }, [])
+
+  /** Put one of today's decisions in focus: the done list opens with it
+   *  marked, where it can be undone. A and R pass it by, as it is no
+   *  longer open; S and D still open its link and its card. */
+  const showDecided = useCallback((id: string) => {
+    setSelectedId(id)
+    setShowDone(true)
   }, [])
 
   /** Put an item in focus, opening the page it sits under if that is
@@ -2257,6 +2275,7 @@ export default function QueueAdmin({
     searchRef.current?.blur()
     const first = ordered.flat[0]
     if (first) select(first.id)
+    else if (ordered.doneHits[0]) showDecided(ordered.doneHits[0].id)
   }
 
   const waiting = ordered.open
@@ -2434,18 +2453,21 @@ export default function QueueAdmin({
               )}
             </div>
             <div className={styles.list} ref={listRef}>
-              {searching && ordered.flat.length === 0 && (
-                <p className={styles.searchEmpty}>
-                  Search looks through every open item, whatever its kind, and
-                  today&apos;s decisions: names, links, fields, messages and
-                  Fable&apos;s notes. Each word you type has to start a word
-                  there.
-                </p>
-              )}
+              {searching &&
+                ordered.flat.length === 0 &&
+                ordered.doneHits.length === 0 && (
+                  <p className={styles.searchEmpty}>
+                    Search looks through every open item, whatever its kind, and
+                    today&apos;s decisions: names, links, fields, messages and
+                    Fable&apos;s notes. Each word you type has to start a word
+                    there.
+                  </p>
+                )}
               {searching &&
                 SEARCH_GROUPS.map(g => {
                   const list = ordered.found[g.key]
                   if (!list.length) return null
+                  const decided = g.key === 'done'
                   return (
                     <div key={g.key} className={styles.group}>
                       <div
@@ -2458,7 +2480,9 @@ export default function QueueAdmin({
                         <Row
                           key={item.id}
                           item={item}
-                          active={item.id === selectedId && !showDone}
+                          active={
+                            item.id === selectedId && showDone === decided
+                          }
                           working={pending[item.id] ?? null}
                           failed={
                             !pending[item.id] && Boolean(draft(item.id).error)
@@ -2466,7 +2490,9 @@ export default function QueueAdmin({
                           showKind
                           search={search}
                           hit={ordered.hits.get(item.id)}
-                          onClick={() => select(item.id)}
+                          onClick={() =>
+                            decided ? showDecided(item.id) : select(item.id)
+                          }
                           onLogoError={() => logoDied(item)}
                         />
                       ))}
@@ -2568,9 +2594,12 @@ export default function QueueAdmin({
           </div>
 
           <div className={styles.detail} ref={detailRef}>
-            {showDone ? (
+            {showDone ||
+            (searching && !ordered.flat.length && ordered.doneHits.length) ? (
+              // A search that matches only decisions shows them here.
               <DoneList
                 items={ordered.doneHits}
+                activeId={selectedId}
                 search={search}
                 busyFor={id => draft(id).busy}
                 errorFor={id => draft(id).error}
@@ -2841,11 +2870,28 @@ function Row({
           {showKind && <span>{KIND_WORD[item.type]}</span>}
           {item.source !== 'Comb' && <span>{item.source}</span>}
           {showPage && item.page && <span>{pageLabel(item)}</span>}
-          {item.verdict && (
-            <span className={`${styles.withIcon} ${verdictClass(item)}`}>
-              <Icon src={verdictIcon(item)} size={12} />
-              {item.verdict}
-            </span>
+          {/* A decision (in search results) says what was done, not
+              what Fable thought. */}
+          {!isOpen(item) ? (
+            <>
+              <span
+                className={`${styles.withIcon} ${item.status === 'Rejected' ? styles.no : styles.yes}`}
+              >
+                <Icon
+                  src={item.status === 'Rejected' ? ICON.x : ICON.check}
+                  size={12}
+                />
+                {doneLabel(item)}
+              </span>
+              <span>{ago(item.decidedAt)}</span>
+            </>
+          ) : (
+            item.verdict && (
+              <span className={`${styles.withIcon} ${verdictClass(item)}`}>
+                <Icon src={verdictIcon(item)} size={12} />
+                {item.verdict}
+              </span>
+            )
           )}
           {item.status === 'Revising' && (
             <span className={styles.withIcon}>
@@ -4550,12 +4596,15 @@ function ReplyDraft({
 
 function DoneList({
   items,
+  activeId,
   search,
   busyFor,
   errorFor,
   onUndo,
 }: {
   items: QueueItem[]
+  /** The decision picked in the search results: marked and scrolled to. */
+  activeId: string | null
   /** The search in the box: `items` are its matches only. */
   search: SearchQuery | null
   busyFor: (id: string) => boolean
@@ -4563,6 +4612,13 @@ function DoneList({
   /** Null for a view-only session: decisions are shown, not undone. */
   onUndo: ((item: QueueItem) => void) | null
 }) {
+  const listRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!activeId) return
+    listRef.current
+      ?.querySelector<HTMLElement>(`[data-id="${activeId}"]`)
+      ?.scrollIntoView({ block: 'nearest' })
+  }, [activeId])
   return (
     <div className={styles.detailInner}>
       <h2 className={`${styles.title} ${styles.withIcon}`}>
@@ -4582,9 +4638,13 @@ function DoneList({
             : 'Nothing done today matches the search.'}
         </p>
       )}
-      <div className={styles.doneList}>
+      <div className={styles.doneList} ref={listRef}>
         {items.map(item => (
-          <div key={item.id} className={styles.doneRow}>
+          <div
+            key={item.id}
+            data-id={item.id}
+            className={`${styles.doneRow} ${item.id === activeId ? styles.doneRowActive : ''}`}
+          >
             {item.logo ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img className={styles.rowLogo} src={item.logo} alt="" />
