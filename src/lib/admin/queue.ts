@@ -1446,10 +1446,9 @@ export async function rejectItem(
   reason: string
 ): Promise<void> {
   requireOpen(item)
+  // The reason is optional (Bryce, 24 Sept 2026: "I should be able to
+  // reject without a reason").
   const why = reason.trim()
-  if (!why && item.type !== 'Rule') {
-    throw new QueueError('A reason is needed so the bots can learn from it.')
-  }
   const stamp = now()
   const fields: Record<string, unknown> = {
     [F.status]: 'Rejected',

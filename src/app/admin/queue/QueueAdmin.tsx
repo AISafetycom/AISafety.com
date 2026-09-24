@@ -1939,7 +1939,9 @@ export default function QueueAdmin({
           const draftPending = action === 'accept' && wantsDraft(updated)
           const text =
             action === 'reject'
-              ? `Rejected · ${updated.rejectReason ?? ''}`
+              ? updated.rejectReason
+                ? `Rejected · ${updated.rejectReason}`
+                : 'Rejected'
               : doneLabel(updated)
           if (undoAfterRef.current.delete(item.id)) {
             // U was pressed while it was on its way: straight back.
@@ -2137,7 +2139,7 @@ export default function QueueAdmin({
         case 'a':
         case 'Enter':
           // Only A accepts (Bryce, 11 Sept 2026: Enter is too easy to hit);
-          // Enter still confirms a reject once a reason is picked.
+          // Enter still confirms a reject, with or without a reason.
           if (
             e.key === 'a' &&
             item &&
@@ -2157,9 +2159,9 @@ export default function QueueAdmin({
               ),
             })
           } else if (
+            e.key === 'Enter' &&
             item &&
             d.mode === 'reject' &&
-            (d.chip || d.other.trim() || item.type === 'Rule') &&
             !d.busy
           ) {
             e.preventDefault()
@@ -2754,7 +2756,8 @@ export default function QueueAdmin({
               </dt>
               <dd>
                 reject, then <kbd>1</kbd>–<kbd>3</kbd> picks a reason and
-                rejects at once; or type one and press <kbd>Enter</kbd>
+                rejects at once; or type one (or none) and press{' '}
+                <kbd>Enter</kbd>
               </dd>
               <dt>
                 <kbd>F</kbd>
@@ -3409,7 +3412,7 @@ function Detail({
               {item.rejectChips.map((chip, i) => (
                 // Picking a reason IS the rejection: no Confirm step after
                 // it (Bryce, 11 Sept 2026). Confirm stays for a typed
-                // reason and for rules, which need none.
+                // reason, or none (Bryce, 24 Sept 2026).
                 <button
                   key={chip}
                   className={`${styles.chip} ${d.chip === chip ? styles.chipOn : ''}`}
@@ -3423,20 +3426,39 @@ function Detail({
                   <span>{chip}</span>
                 </button>
               ))}
+              {/* Focused as the panel opens, so a reason can be typed
+                  straight away (Bryce, 24 Sept 2026). While it is still
+                  empty the number keys keep picking a chip, and Esc
+                  cancels the reject as it does outside the box. */}
               <input
+                autoFocus
                 className={`${styles.input} ${styles.other}`}
                 placeholder="Other reason…"
                 value={d.other}
                 onChange={e => setD({ other: e.target.value, chip: null })}
                 onKeyDown={e => {
-                  if (e.key === 'Enter' && reason) act('reject', { reason })
+                  if (e.metaKey || e.ctrlKey || e.altKey) return
+                  const chip = d.other
+                    ? undefined
+                    : item.rejectChips[Number(e.key) - 1]
+                  if (/^[1-9]$/.test(e.key) && chip && !d.busy) {
+                    e.preventDefault()
+                    setD({ chip })
+                    act('reject', { reason: chip })
+                  } else if (e.key === 'Enter' && !d.busy) {
+                    e.preventDefault()
+                    act('reject', { reason })
+                  } else if (e.key === 'Escape' && !d.busy) {
+                    e.stopPropagation()
+                    setD({ mode: 'idle', chip: null, other: '' })
+                  }
                 }}
               />
             </div>
             <div className={styles.buttons}>
               <button
                 className={`${styles.button} ${styles.danger}`}
-                disabled={d.busy || (!reason && item.type !== 'Rule')}
+                disabled={d.busy}
                 onClick={() => act('reject', { reason })}
               >
                 <Icon src={ICON.x} size={12} />
