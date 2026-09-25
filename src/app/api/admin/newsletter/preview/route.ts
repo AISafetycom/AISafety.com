@@ -1,5 +1,5 @@
 /*
-  GET /api/admin/newsletter/preview?draft=<id>
+  GET /api/admin/newsletter/preview?draft=<id>[&m=<message id>]
 
   The draft's email HTML, as a subscriber will see it (personalisation tags
   neutralised), for the sandboxed preview frame on /admin/newsletter.
@@ -31,8 +31,13 @@ export async function GET(req: NextRequest) {
   // (seen as net::ERR_BLOCKED_BY_CLIENT on the first local test).
   const id = req.nextUrl.searchParams.get('draft') ?? ''
   if (!/^\d+$/.test(id)) return new Response('bad draft id', { status: 400 })
+  // The message id the page listed for this draft: one ActiveCampaign read
+  // instead of two.
+  const m = req.nextUrl.searchParams.get('m') ?? ''
+  if (m && !/^\d+$/.test(m))
+    return new Response('bad message id', { status: 400 })
   try {
-    const html = await previewHtml(id)
+    const html = await previewHtml(id, m || undefined)
     if (html == null)
       return new Response('not a pipeline draft', { status: 404 })
     // Every link opens in a new tab: inside the sandboxed frame a click

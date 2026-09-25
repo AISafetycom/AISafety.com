@@ -1,7 +1,7 @@
 /*
   POST /api/admin/newsletter/card
-       body { campaign, group, key, fields?: { name: text }, fit?: text,
-              listing?: text }
+       body { campaign, group, key, message?, fields?: { name: text },
+              fit?: text, listing?: text }
 
   Edits text on one card inside a pipeline draft in ActiveCampaign: any of
   its fields (`title`, `m0`… lines under the title, `desc`, `b0`… rows at the
@@ -11,7 +11,9 @@
   The page saves by itself as Bryce types (25 Sept 2026), one card at a
   time. `listing` writes that text to the listing's Description in Airtable
   instead — his "Use this description on the site too" button, a separate
-  call so typing never touches the site.
+  call so typing never touches the site. `message` (the id the page listed)
+  lets the draft's message be read alongside the checks: one round trip
+  less on every save.
   Approvers only (canSendNewsletter) — it edits the email but sends nothing,
   so no fresh-session requirement.
   → { cards } for a text edit, { listing: { ok, table } | { ok: false,
@@ -62,10 +64,8 @@ export async function POST(req: NextRequest) {
   } catch {
     return json({ error: 'body must be JSON' }, 400)
   }
-  const { campaign, group, key, fields, fit, listing } = (body ?? {}) as Record<
-    string,
-    unknown
-  >
+  const { campaign, group, key, fields, fit, listing, message } = (body ??
+    {}) as Record<string, unknown>
   const campaignId = String(campaign ?? '')
   const values: Record<string, string> = {}
   let fieldsOk = fields === undefined
@@ -87,6 +87,8 @@ export async function POST(req: NextRequest) {
     fieldsOk &&
     (fit === undefined ||
       (typeof fit === 'string' && fit.length <= MAX_LENGTH)) &&
+    (message === undefined ||
+      (typeof message === 'string' && /^\d+$/.test(message))) &&
     (listing === undefined ||
       (typeof listing === 'string' &&
         listing.trim() !== '' &&
@@ -117,7 +119,8 @@ export async function POST(req: NextRequest) {
       group as string,
       key as string,
       values,
-      fit as string | undefined
+      fit as string | undefined,
+      message as string | undefined
     )
     return json(result)
   } catch (err) {

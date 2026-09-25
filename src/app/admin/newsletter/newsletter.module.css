@@ -109,14 +109,6 @@
   border-radius: 8px;
 }
 
-/* Save order / Reset stay in view at the bottom of the scrolling panel. */
-.reorderActions {
-  position: sticky;
-  bottom: -14px; /* flush with the panel's bottom edge, over .reorder's padding */
-  padding: 10px 0 14px;
-  background: var(--teal-900);
-}
-
 @media (max-width: 1100px) {
   .previewRow {
     flex-direction: column;

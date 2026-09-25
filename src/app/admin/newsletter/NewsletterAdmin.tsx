@@ -33,6 +33,9 @@ const RECORD_KEY_RE = /^rec[A-Za-z0-9]{14}$/
 
 /** How long after the last keystroke the editor saves by itself. */
 const AUTOSAVE_DELAY_MS = 900
+/** How long after a card is dropped (or moved with the arrow keys) the new
+ *  order saves itself. */
+const ORDER_SAVE_DELAY_MS = 500
 
 interface CardGroup {
   id: string
@@ -42,6 +45,9 @@ interface CardGroup {
 
 interface Draft {
   id: string
+  /** The draft's message: sent with every save and the preview so the server
+   *  can read it alongside its checks (ActiveCampaign is slow per request). */
+  messageId: string | null
   name: string
   subject: string
   fromEmail: string
@@ -477,7 +483,9 @@ export default function NewsletterAdmin({
                     // allows nothing else); no allow-same-origin, so it
                     // can't reach this page.
                     sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
-                    src={`/api/admin/newsletter/preview?draft=${draft.id}&v=${previewNonce}#y=${previewY}`}
+                    src={`/api/admin/newsletter/preview?draft=${draft.id}${
+                      draft.messageId ? `&m=${draft.messageId}` : ''
+                    }&v=${previewNonce}#y=${previewY}`}
                   />
                 </div>
               )}
@@ -689,6 +697,7 @@ function ReorderPanel({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             campaign: draft.id,
+            message: draft.messageId ?? undefined,
             group: gid,
             key,
             fields,
@@ -837,45 +846,91 @@ function ReorderPanel({
     if (from >= 0 && to >= 0) move(gid, from, to)
   }
 
-  async function save() {
-    setSaving(true)
-    setError(null)
-    try {
-      const order = Object.fromEntries(
-        groups.map(g => [g.id, g.cards.map(c => c.key)])
-      )
-      const res = await fetch('/api/admin/newsletter/reorder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaign: draft.id, order }),
-      })
-      const body = (await res.json()) as {
-        error?: string
-        problems?: string[]
-        cards?: CardGroup[]
+  /** Write the current card order into the draft (moves save themselves —
+   *  Bryce, 25 Sept 2026 — so there is no Save order button). Waits for a
+   *  text save in flight; keeps the order on screen as it is, so a card
+   *  moved while this was saving is saved next. */
+  async function saveOrder(): Promise<boolean> {
+    if (inFlight.current) await inFlight.current
+    const order = Object.fromEntries(
+      groups.map(g => [g.id, g.cards.map(c => c.key)])
+    )
+    const run = (async () => {
+      setSaving(true)
+      setError(null)
+      try {
+        const res = await fetch('/api/admin/newsletter/reorder', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            campaign: draft.id,
+            message: draft.messageId ?? undefined,
+            order,
+          }),
+        })
+        const body = (await res.json()) as {
+          error?: string
+          problems?: string[]
+          cards?: CardGroup[]
+        }
+        if (!res.ok || !body.cards) {
+          throw new Error(
+            body.problems?.length
+              ? body.problems.join('; ')
+              : (body.error ?? `HTTP ${res.status}`)
+          )
+        }
+        onSaved(body.cards, '')
+        return true
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+        return false
+      } finally {
+        setSaving(false)
       }
-      if (!res.ok || !body.cards) {
-        throw new Error(
-          body.problems?.length
-            ? body.problems.join('; ')
-            : (body.error ?? `HTTP ${res.status}`)
-        )
-      }
-      setGroups(body.cards.map(g => ({ ...g, cards: [...g.cards] })))
-      onSaved(body.cards, 'Order saved to the draft.')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setSaving(false)
-    }
+    })()
+    inFlight.current = run
+    const ok = await run
+    inFlight.current = null
+    return ok
   }
+
+  // ActiveCampaign sometimes takes 10+ seconds a request; say so rather than
+  // leave "Saving…" looking stuck.
+  const busy = saving || savingCard
+  const [slow, setSlow] = useState(false)
+  useEffect(() => {
+    if (!busy) {
+      setSlow(false)
+      return
+    }
+    const timer = window.setTimeout(() => setSlow(true), 6000)
+    return () => window.clearTimeout(timer)
+  }, [busy])
+  const slowNote = slow ? ' ActiveCampaign is answering slowly right now.' : ''
+
+  const saveOrderRef = useRef(saveOrder)
+  useEffect(() => {
+    saveOrderRef.current = saveOrder
+  })
+  const orderKey = JSON.stringify(keysOf(groups))
+  useEffect(() => {
+    // Not mid-drag, not while a save runs, and only when the order on screen
+    // differs from the draft's.
+    if (!dirty || drag || saving || savingCard || error) return
+    const timer = window.setTimeout(
+      () => void saveOrderRef.current(),
+      ORDER_SAVE_DELAY_MS
+    )
+    return () => window.clearTimeout(timer)
+  }, [orderKey, dirty, drag, saving, savingCard, error])
 
   return (
     <div className={styles.reorder}>
       <p className={adminStyles.sectionHint}>
         Drag a listing to move it. Cards stay within their section.
-        {editable && ' Edit changes any text on a card.'} Saving writes into the
-        draft (the preview updates); it sends nothing.
+        {editable && ' Edit changes any text on a card.'} Everything saves into
+        the draft by itself and the preview updates; nothing is sent.
       </p>
       {groups.map(g => (
         <div key={g.id} className={styles.reorderGroup}>
@@ -896,11 +951,10 @@ function ReorderPanel({
                       ? ` ${styles.reorderRowDragging}`
                       : ''
                   }`}
-                  draggable={!saving && !open}
+                  draggable={!open}
                   tabIndex={0}
                   aria-label={`${c.title}, position ${i + 1} of ${g.cards.length}. Arrow keys move it.`}
                   onKeyDown={e => {
-                    if (saving) return
                     if (e.key === 'ArrowUp' && i > 0) {
                       e.preventDefault()
                       move(g.id, i, i - 1)
@@ -1093,7 +1147,7 @@ function ReorderPanel({
                         : emptyField
                           ? `Not saved yet: the ${emptyField.label.toLowerCase()} can’t be empty.`
                           : savingCard
-                            ? 'Saving…'
+                            ? `Saving…${slowNote}`
                             : pendingKey
                               ? 'Saves when you pause typing.'
                               : savedOnce
@@ -1107,30 +1161,33 @@ function ReorderPanel({
           </ol>
         </div>
       ))}
-      {error && <p className={styles.noticeError}>Not saved: {error}</p>}
-      <div className={`${styles.actions} ${styles.reorderActions}`}>
-        <button
-          type="button"
-          className={styles.buttonPrimary}
-          disabled={!dirty || saving}
-          onClick={() => void save()}
+      {(error || saving || dirty) && (
+        <p
+          className={error ? styles.noticeError : styles.notice}
+          role="status"
+          aria-live="polite"
         >
-          {saving ? 'Saving…' : 'Save order'}
-        </button>
-        <button
-          type="button"
-          className={styles.button}
-          disabled={!dirty || saving}
-          onClick={() =>
-            setGroups(original.map(g => ({ ...g, cards: [...g.cards] })))
-          }
-        >
-          Reset
-        </button>
-        {!dirty && !saving && (
-          <span className={styles.notice}>Order matches the draft.</span>
-        )}
-      </div>
+          {error ? (
+            <>
+              Order not saved: {error}{' '}
+              <button
+                type="button"
+                className={styles.rowButton}
+                onClick={() => {
+                  setError(null)
+                  void saveOrder()
+                }}
+              >
+                Try again
+              </button>
+            </>
+          ) : saving ? (
+            `Saving the new order…${slowNote}`
+          ) : (
+            'The new order saves in a moment.'
+          )}
+        </p>
+      )}
     </div>
   )
 }

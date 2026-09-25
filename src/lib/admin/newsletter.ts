@@ -67,9 +67,10 @@ function apiKey(): string {
 }
 
 /** Gateway errors ActiveCampaign's edge returns for a few seconds at a time
- *  (a 502 page from Cloudflare, 25 Sept 2026). Reads retry them; writes never
- *  retry, because a write may have landed before the error came back. */
-const TRANSIENT_STATUSES = new Set([502, 503, 504])
+ *  (a 502 page from Cloudflare, 25 Sept 2026), and its rate limit (429, five
+ *  requests a second). Reads retry them; writes never retry, because a write
+ *  may have landed before the error came back. */
+const TRANSIENT_STATUSES = new Set([429, 502, 503, 504])
 const READ_RETRY_DELAYS_MS = [1000, 3000]
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -98,7 +99,10 @@ async function v3<T = any>(path: string): Promise<T> {
   }
 }
 
-async function v3put(path: string, body: unknown): Promise<void> {
+/** PUT, returning what ActiveCampaign answers — for a message, the message
+ *  as stored, so a write needs no separate read to check it. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function v3put<T = any>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${base()}/api/3/${path}`, {
     method: 'PUT',
     headers: { 'Api-Token': apiKey(), 'Content-Type': 'application/json' },
@@ -107,10 +111,54 @@ async function v3put(path: string, body: unknown): Promise<void> {
   })
   if (!res.ok) {
     throw new Error(
-      `ActiveCampaign PUT ${path.split('?')[0]}: ${res.status} ${await res.text()}`
+      `ActiveCampaign PUT ${path.split('?')[0]}: ${res.status} ${(await res.text()).slice(0, 500)}`
     )
   }
+  return (await res.json().catch(() => ({}))) as T
 }
+
+/* ─── Fewer, parallel reads ───────────────────────────────────────────────
+   ActiveCampaign can take 10+ seconds per request (25 Sept 2026), so the page
+   asks as little as it can, side by side: the drafts and the recent sends
+   (read at the same time) share one campaigns read and one lists read, a sent
+   campaign's lists are remembered (they never change), and per-draft reads
+   run a few at a time — never more, AC allows five requests a second. */
+
+const shared = new Map<string, { at: number; value: Promise<unknown> }>()
+
+function sharedRead<T>(
+  key: string,
+  ttlMs: number,
+  read: () => Promise<T>
+): Promise<T> {
+  const hit = shared.get(key)
+  if (hit && Date.now() - hit.at < ttlMs) return hit.value as Promise<T>
+  const value = read()
+  shared.set(key, { at: Date.now(), value })
+  value.catch(() => shared.delete(key))
+  return value
+}
+
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const out = new Array<R>(items.length)
+  let next = 0
+  async function worker() {
+    while (next < items.length) {
+      const i = next++
+      out[i] = await fn(items[i])
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker)
+  )
+  return out
+}
+
+const sentListIds = new Map<string, string[]>()
 
 async function v1(
   action: string,
@@ -260,10 +308,12 @@ async function message(messageId: string): Promise<RawMessage> {
 }
 
 async function listNames(): Promise<Map<string, string>> {
-  const data = await v3<{ lists: Array<{ id: string; name: string }> }>(
-    'lists?limit=100'
-  )
-  return new Map((data.lists ?? []).map(l => [String(l.id), l.name]))
+  return sharedRead('lists', 5 * 60_000, async () => {
+    const data = await v3<{ lists: Array<{ id: string; name: string }> }>(
+      'lists?limit=100'
+    )
+    return new Map((data.lists ?? []).map(l => [String(l.id), l.name]))
+  })
 }
 
 /** Active contacts on a list — the number an approved send goes to. */
@@ -280,29 +330,29 @@ async function activeContactCount(listId: string): Promise<number | null> {
 }
 
 async function allCampaigns(): Promise<RawCampaign[]> {
-  const data = await v3<{ campaigns: RawCampaign[] }>(
-    'campaigns?limit=100&orders[cdate]=DESC'
-  )
-  return data.campaigns ?? []
+  return sharedRead('campaigns', 5_000, async () => {
+    const data = await v3<{ campaigns: RawCampaign[] }>(
+      'campaigns?limit=100&orders[cdate]=DESC'
+    )
+    return data.campaigns ?? []
+  })
 }
 
-/** The checks `ac.py verify` runs, as a list of problems (empty = OK). */
-async function checkDraft(
+/** The checks `ac.py verify` runs, as a list of problems (empty = OK), on
+ *  what has already been read. */
+function draftProblems(
   campaign: RawCampaign,
+  listIds: string[],
+  messageIds: string[],
+  msg: RawMessage | null,
   expectedListId: string | null
-): Promise<{
-  problems: string[]
-  listIds: string[]
-  messageId: string | null
-  msg: RawMessage | null
-}> {
+): string[] {
   const problems: string[] = []
   if (campaign.status !== '0') {
     problems.push(
       `campaign status is ${STATUS_NAMES[campaign.status] ?? campaign.status}, expected draft`
     )
   }
-  const listIds = await campaignListIds(campaign.id)
   if (listIds.length !== 1) {
     problems.push(
       `campaign is wired to ${listIds.length} lists, expected exactly one`
@@ -312,14 +362,11 @@ async function checkDraft(
       `campaign is wired to list ${listIds[0]}, expected ${expectedListId}`
     )
   }
-  const messageIds = await campaignMessageIds(campaign.id)
-  let msg: RawMessage | null = null
   if (messageIds.length !== 1) {
     problems.push(
       `campaign has ${messageIds.length} messages, expected exactly one`
     )
-  } else {
-    msg = await message(messageIds[0])
+  } else if (msg) {
     const html = msg.html ?? ''
     const m = MARKER_RE.exec(html)
     if (!m) {
@@ -332,24 +379,69 @@ async function checkDraft(
       )
     }
   }
-  return { problems, listIds, messageId: messageIds[0] ?? null, msg }
+  return problems
+}
+
+/** Read a draft and run the checks. The campaign, its lists and its messages
+ *  are read side by side; `knownMessageId` (the page sends the one it
+ *  listed) lets the message be read alongside them too, confirmed against
+ *  the campaign's own message list afterwards. */
+async function readDraft(
+  draftId: string,
+  expectedListId: string | null,
+  knownMessageId?: string
+): Promise<{
+  campaign: RawCampaign
+  problems: string[]
+  listIds: string[]
+  messageId: string | null
+  msg: RawMessage | null
+}> {
+  const [campaign, listIds, messageIds, early] = await Promise.all([
+    v3<{ campaign?: RawCampaign }>(`campaigns/${draftId}`)
+      .then(d => d.campaign ?? null)
+      .catch((err: Error) => {
+        if (/: 404 /.test(err.message)) return null
+        throw err
+      }),
+    campaignListIds(draftId),
+    campaignMessageIds(draftId),
+    knownMessageId
+      ? message(knownMessageId).catch(() => null)
+      : Promise.resolve(null),
+  ])
+  if (!campaign) throw new DraftProblemError(['draft campaign not found'])
+  const messageId = messageIds.length === 1 ? messageIds[0] : null
+  const msg =
+    messageId == null
+      ? null
+      : early && messageId === knownMessageId
+        ? early
+        : await message(messageId)
+  return {
+    campaign,
+    problems: draftProblems(campaign, listIds, messageIds, msg, expectedListId),
+    listIds,
+    messageId,
+    msg,
+  }
 }
 
 /** Pipeline drafts waiting for approval: draft campaigns whose message carries
  *  the content marker. Hand-made drafts in AC never show here. */
 export async function listDrafts(): Promise<DraftSummary[]> {
-  const campaigns = await allCampaigns()
-  const names = await listNames()
-  const out: DraftSummary[] = []
-  for (const c of campaigns) {
-    if (c.status !== '0') continue
-    const messageIds = await campaignMessageIds(c.id)
-    if (messageIds.length === 0) continue
+  const [campaigns, names] = await Promise.all([allCampaigns(), listNames()])
+  const drafts = campaigns.filter(c => c.status === '0')
+  const rows = await mapLimit(drafts, 3, async c => {
+    const [messageIds, listIds] = await Promise.all([
+      campaignMessageIds(c.id),
+      campaignListIds(c.id),
+    ])
+    if (messageIds.length === 0) return null
     const msg = await message(messageIds[0])
-    if (!MARKER_RE.test(msg.html ?? '')) continue
-    const { problems, listIds } = await checkDraft(c, null)
+    if (!MARKER_RE.test(msg.html ?? '')) return null
     const listId = listIds.length === 1 ? listIds[0] : null
-    out.push({
+    const row: DraftSummary = {
       id: c.id,
       name: c.name,
       subject: msg.subject,
@@ -360,12 +452,13 @@ export async function listDrafts(): Promise<DraftSummary[]> {
       listId,
       listName: listId ? (names.get(listId) ?? null) : null,
       activeContacts: listId ? await activeContactCount(listId) : null,
-      problems,
+      problems: draftProblems(c, listIds, messageIds, msg, null),
       preview: previewText(msg.html ?? ''),
       cards: cardGroups(msg.html ?? ''),
-    })
-  }
-  return out
+    }
+    return row
+  })
+  return rows.filter((r): r is DraftSummary => r !== null)
 }
 
 const PREHEADER_RE = /<div style="display:none[^"]*"[^>]*>([\s\S]*?)<\/div>/
@@ -410,8 +503,7 @@ function escapeHtml(s: string): string {
 
 /** The most recent sends (and anything scheduled or stuck), newest first. */
 export async function listRecent(limit = 12): Promise<SentSummary[]> {
-  const campaigns = await allCampaigns()
-  const names = await listNames()
+  const [campaigns, names] = await Promise.all([allCampaigns(), listNames()])
   const recent = campaigns
     .filter(c => c.status in STATUS_NAMES)
     .sort((a, b) =>
@@ -420,10 +512,16 @@ export async function listRecent(limit = 12): Promise<SentSummary[]> {
       )
     )
     .slice(0, limit)
-  const out: SentSummary[] = []
-  for (const c of recent) {
-    const listIds = await campaignListIds(c.id)
-    out.push({
+  const lists = await mapLimit(recent, 3, async c => {
+    const known = sentListIds.get(c.id)
+    if (known) return known
+    const ids = await campaignListIds(c.id)
+    if (c.status === '5') sentListIds.set(c.id, ids)
+    return ids
+  })
+  return recent.map((c, i) => {
+    const listIds = lists[i]
+    return {
       id: c.id,
       name: c.name,
       status: STATUS_NAMES[c.status],
@@ -433,9 +531,8 @@ export async function listRecent(limit = 12): Promise<SentSummary[]> {
       uniqueOpens: c.uniqueopens == null ? null : Number(c.uniqueopens),
       unsubscribes: c.unsubscribes == null ? null : Number(c.unsubscribes),
       listNames: listIds.map(id => names.get(id) ?? `list ${id}`),
-    })
-  }
-  return out
+    }
+  })
 }
 
 /* ─── Reorderable cards ─────────────────────────────────────────────── */
@@ -916,7 +1013,8 @@ export async function editDraftCard(
   gid: string,
   key: string,
   values: Record<string, string>,
-  fit?: string
+  fit?: string,
+  knownMessageId?: string
 ): Promise<{ cards: CardGroup[] }> {
   if (Object.keys(values).length === 0 && fit === undefined)
     throw new FieldError('nothing to change')
@@ -932,7 +1030,8 @@ export async function editDraftCard(
     `card ${gid}:${key} edited (${[
       ...Object.keys(values),
       ...(fit !== undefined ? ['fit'] : []),
-    ].join(', ')})`
+    ].join(', ')})`,
+    knownMessageId
   )
 }
 
@@ -942,14 +1041,16 @@ export async function editDraftCard(
  *  re-check the live message. Returns the new card order. */
 export async function reorderDraft(
   draftId: string,
-  order: Record<string, string[]>
+  order: Record<string, string[]>,
+  knownMessageId?: string
 ): Promise<{ cards: CardGroup[] }> {
   return rewriteDraft(
     draftId,
     body => reorderHtml(body, order),
     `reordered: ${Object.entries(order)
       .map(([g, k]) => `${g}=${k.join(',')}`)
-      .join(' ')}`
+      .join(' ')}`,
+    knownMessageId
   )
 }
 
@@ -971,16 +1072,19 @@ export async function editDraftFit(
 
 /** The write path shared by every edit: verify the draft (same checks as
  *  approval), apply `change` to the message body, re-stamp the content
- *  marker, write it back through the v3 API and re-check the live message. */
+ *  marker, write it back through the v3 API and check the stored message AC
+ *  answers with. Two round trips when the page passes the message id. */
 async function rewriteDraft(
   draftId: string,
   change: (body: string) => { html: string; text: string },
-  logLine: string
+  logLine: string,
+  knownMessageId?: string
 ): Promise<{ cards: CardGroup[] }> {
-  const campaigns = await allCampaigns()
-  const draft = campaigns.find(c => c.id === draftId)
-  if (!draft) throw new DraftProblemError(['draft campaign not found'])
-  const { problems, messageId, msg } = await checkDraft(draft, null)
+  const { problems, messageId, msg } = await readDraft(
+    draftId,
+    null,
+    knownMessageId
+  )
   if (problems.length > 0 || !messageId || !msg) {
     throw new DraftProblemError(
       problems.length > 0 ? problems : ['no message on the draft']
@@ -989,9 +1093,14 @@ async function rewriteDraft(
   const body = (msg.html ?? '').replace(MARKER_RE, '')
   const { html, text } = change(body)
   const stamped = `<!--aisafety-issue:${contentDigest(html)}-->` + html
-  await v3put(`messages/${messageId}`, { message: { html: stamped, text } })
-  const live = await message(messageId)
-  const liveHtml = live.html ?? ''
+  const stored = await v3put<{ message?: RawMessage }>(
+    `messages/${messageId}`,
+    { message: { html: stamped, text } }
+  )
+  const liveHtml =
+    typeof stored.message?.html === 'string'
+      ? stored.message.html
+      : ((await message(messageId)).html ?? '')
   const m = MARKER_RE.exec(liveHtml)
   if (!m || m[1] !== contentDigest(liveHtml)) {
     throw new Error(
@@ -1006,10 +1115,20 @@ async function rewriteDraft(
 
 /** The message HTML as a subscriber will see it, with AC's personalisation
  *  tags neutralised so the preview renders cleanly. */
-export async function previewHtml(campaignId: string): Promise<string | null> {
-  const messageIds = await campaignMessageIds(campaignId)
-  if (messageIds.length !== 1) return null
-  const msg = await message(messageIds[0])
+export async function previewHtml(
+  campaignId: string,
+  messageId?: string
+): Promise<string | null> {
+  // With the message id the page listed, one read instead of two (AC can take
+  // 10+ seconds a request). Only pipeline emails (content marker) show either way.
+  let id = messageId
+  if (!id) {
+    const messageIds = await campaignMessageIds(campaignId)
+    if (messageIds.length !== 1) return null
+    id = messageIds[0]
+  }
+  const msg = await message(id).catch(() => null)
+  if (!msg) return null
   const html = msg.html ?? ''
   if (!MARKER_RE.test(html)) return null
   return html
@@ -1072,7 +1191,7 @@ export async function approveAndSend(
   const campaigns = await allCampaigns()
   const draft = campaigns.find(c => c.id === draftId)
   if (!draft) throw new DraftProblemError(['draft campaign not found'])
-  const { problems, messageId } = await checkDraft(draft, listId)
+  const { problems, messageId } = await readDraft(draftId, listId)
   if (problems.length > 0 || !messageId) {
     throw new DraftProblemError(
       problems.length > 0 ? problems : ['no message on the draft']
