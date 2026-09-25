@@ -9,7 +9,7 @@ export const LISTING_POLICY_MD = String.raw`# What we list on AISafety.com
 
 If we declined a suggestion of yours, or you're wondering whether to send one, this is how we decide.
 
-**A note before you read.** This doc is a work in progress. Claude drafted it based on an analysis of what the humans running the site have chosen to accept and decline. Fundamentally, we're trying to reduce the chance of us all dying, and this is our best attempt at drawing the lines that serve that. Our policies will continue to be refined with time.
+**A note before you read.** This page is a work in progress. Claude drafted it based on an analysis of what the humans running the site have chosen to accept and decline. Fundamentally, we're trying to reduce the chance of us all dying, and this is our best attempt at drawing the lines that serve that. Our policies will continue to be refined with time.
 
 ## What do you mean by "AI safety"?
 
