@@ -1,0 +1,127 @@
+/*
+  POST /api/admin/newsletter/card
+       body { campaign, group, key, fields?: { name: text }, fit?: text,
+              updateListing?: boolean }
+
+  Edits text on one card inside a pipeline draft in ActiveCampaign: any of
+  its fields (`title`, `m0`… lines under the title, `desc`, `b0`… rows at the
+  bottom — plain text, not empty) and, on funding cards, the "Consider
+  applying if" line (`fit`; empty removes it). Rebuilds the plain-text
+  version and re-stamps the content marker so the draft still verifies.
+  With `updateListing` and a changed `desc`, the same description is also
+  written to the listing in Airtable (Bryce ticks this per edit).
+  Approvers only (canSendNewsletter) — it edits the email but sends nothing,
+  so no fresh-session requirement.
+  → { cards, listing?: { ok, table } | { ok: false, reason } }
+    409 with { problems } when the draft fails verification, 400 for a bad
+    card, field or body.
+*/
+
+import { NextRequest } from 'next/server'
+import { canSendNewsletter } from '@/lib/admin/auth'
+import {
+  DraftProblemError,
+  editDraftCard,
+  FieldError,
+  FitError,
+  isNewsletterConfigured,
+} from '@/lib/admin/newsletter'
+import { updateListingDescription } from '@/lib/admin/newsletter-listing'
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
+/** Longer than any text on a card; a guard, not a house style. */
+const MAX_LENGTH = 2000
+const FIELD_NAME_RE = /^(title|desc|[mb]\d{1,2})$/
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+    },
+  })
+}
+
+export async function POST(req: NextRequest) {
+  if (!(await canSendNewsletter())) return json({ error: 'unauthorized' }, 401)
+  if (!isNewsletterConfigured()) {
+    return json(
+      { error: 'ACTIVECAMPAIGN_URL / ACTIVECAMPAIGN_KEY not set' },
+      503
+    )
+  }
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    return json({ error: 'body must be JSON' }, 400)
+  }
+  const { campaign, group, key, fields, fit, updateListing } = (body ??
+    {}) as Record<string, unknown>
+  const campaignId = String(campaign ?? '')
+  const values: Record<string, string> = {}
+  let fieldsOk = fields === undefined
+  if (fields && typeof fields === 'object' && !Array.isArray(fields)) {
+    fieldsOk = Object.entries(fields).every(
+      ([name, value]) =>
+        FIELD_NAME_RE.test(name) &&
+        typeof value === 'string' &&
+        value.length <= MAX_LENGTH
+    )
+    if (fieldsOk) Object.assign(values, fields)
+  }
+  const valid =
+    /^\d+$/.test(campaignId) &&
+    typeof group === 'string' &&
+    /^g\d+$/.test(group) &&
+    typeof key === 'string' &&
+    /^[A-Za-z0-9_-]+$/.test(key) &&
+    fieldsOk &&
+    (fit === undefined || (typeof fit === 'string' && fit.length <= MAX_LENGTH))
+  if (!valid) {
+    return json(
+      {
+        error:
+          'body must be { campaign: id, group: gN, key, fields?: { name: text }, fit?: text, updateListing?: boolean }',
+      },
+      400
+    )
+  }
+  try {
+    const result = await editDraftCard(
+      campaignId,
+      group as string,
+      key as string,
+      values,
+      fit as string | undefined
+    )
+    if (updateListing === true && typeof values.desc === 'string') {
+      const listing = await updateListingDescription(
+        key as string,
+        values.desc.replace(/\s+/g, ' ').trim()
+      )
+      if (!listing.ok)
+        console.error(
+          `[newsletter] listing update ${key} failed: ${listing.reason}`
+        )
+      return json({ ...result, listing })
+    }
+    return json(result)
+  } catch (err) {
+    if (err instanceof DraftProblemError) {
+      return json({ error: err.message, problems: err.problems }, 409)
+    }
+    if (err instanceof FieldError || err instanceof FitError) {
+      return json({ error: err.message }, 400)
+    }
+    const message = err instanceof Error ? err.message : String(err)
+    console.error(`[newsletter] card edit ${campaignId} failed: ${message}`)
+    return json(
+      { error: 'Saving the text failed; details are in the server log.' },
+      502
+    )
+  }
+}

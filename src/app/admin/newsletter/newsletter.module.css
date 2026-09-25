@@ -390,6 +390,33 @@
   outline-offset: 1px;
 }
 
+/* Card text editor (25 Sept 2026): one block per piece of text on the card.
+   Short fields (title, rows) start one or two lines tall; the description
+   keeps the tall box. */
+.fieldBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fieldShort {
+  min-height: 0;
+}
+
+.fieldActions {
+  display: flex;
+  gap: 6px;
+}
+
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--teal-200);
+  cursor: pointer;
+}
+
 /* Loading: the ActiveCampaign read takes several seconds, so the wait is
    shown where the drafts will appear (Bryce, 16 Sept 2026). */
 .loading {

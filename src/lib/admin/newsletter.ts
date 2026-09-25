@@ -373,8 +373,12 @@ function stripHtml(fragment: string): string {
     .replace(/&lsquo;/g, '\u2018')
     .replace(/&ndash;/g, '\u2013')
     .replace(/&mdash;/g, '\u2014')
+    .replace(/&middot;/g, '\u00b7')
+    .replace(/&#x([0-9a-f]+);/gi, (_, h: string) =>
+      String.fromCodePoint(parseInt(h, 16))
+    )
+    .replace(/&#(\d+);/g, (_, d: string) => String.fromCodePoint(Number(d)))
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&amp;/g, '&')
@@ -433,6 +437,25 @@ export interface CardInfo {
   /** Pen's original line as plain text, from the manifest, so an edit can
    *  be recognised and undone. Null for drafts built before 16 Sept 2026. */
   pipelineFit: string | null
+  /** Every piece of text on the card that can be edited, in the order the
+   *  email shows it (title, lines under it, description, rows at the
+   *  bottom). Empty for drafts built before 25 Sept 2026. */
+  fields: CardField[]
+}
+
+export interface CardField {
+  /** The marker name: `title`, `m0`… (lines under the title), `desc`,
+   *  `b0`… (rows at the bottom). */
+  name: string
+  /** What the editor calls it ("Title", "Dates", "Stipend"…). */
+  label: string
+  /** The text now, plain. */
+  value: string
+  /** The text as the pipeline built it, when it has been edited since;
+   *  null when it never was. */
+  original: string | null
+  /** The text carries a link, which a plain-text edit would drop. */
+  hasLink: boolean
 }
 
 export interface CardGroup {
@@ -450,6 +473,8 @@ interface ManifestCard {
   logo?: string | null
   /** Funding cards: Pen's "Consider applying if" HTML ('' when none). */
   fit?: string
+  /** Text as built, per field, recorded on the field's first edit. */
+  o?: Record<string, string>
 }
 
 interface Manifest {
@@ -507,7 +532,12 @@ export function cardGroups(html: string): CardGroup[] | null {
   if (!manifest) return null
   const info = new Map<
     string,
-    { title: string; logo: string | null; fit: string | null }
+    {
+      title: string
+      logo: string | null
+      fit: string | null
+      o: Record<string, string>
+    }
   >()
   for (const g of manifest.groups)
     for (const c of g.cards)
@@ -515,6 +545,7 @@ export function cardGroups(html: string): CardGroup[] | null {
         title: c.title,
         logo: typeof c.logo === 'string' && c.logo ? c.logo : null,
         fit: typeof c.fit === 'string' ? c.fit : null,
+        o: c.o && typeof c.o === 'object' ? c.o : {},
       })
   const groups = new Map<string, CardGroup>(
     manifest.groups.map(g => [g.id, { id: g.id, label: g.label, cards: [] }])
@@ -531,6 +562,7 @@ export function cardGroups(html: string): CardGroup[] | null {
       logo: meta?.logo ?? null,
       fit: fit ? stripHtml(fit[1]) : pipelineFit != null ? '' : null,
       pipelineFit: pipelineFit != null ? stripHtml(pipelineFit) : null,
+      fields: cardFields(b.raw, meta?.o ?? {}, meta?.fit != null),
     })
   }
   const out = [...groups.values()].filter(g => g.cards.length > 0)
@@ -701,6 +733,189 @@ export function setFitHtml(
   const order: Record<string, string[]> = {}
   for (const b of cardBlocks(out)) (order[b.gid] ??= []).push(b.key)
   return { html: out, text: rebuildText(manifest, order) }
+}
+
+/* ─── Card text (title, lines, description, rows) ───────────────────── */
+
+// render.py wraps every piece of text on a card in `<!--f:NAME-->…<!--/f-->`
+// (rows: `<!--f:NAME:ICON-->`). `setFieldsHtml()` is the same algorithm as
+// render.py `set_fields()` — keep them in step.
+const FIELD_RE = /<!--f:([a-z]+\d*)(?::([a-z0-9-]+))?-->([\s\S]*?)<!--\/f-->/g
+
+export class FieldError extends Error {}
+
+/** What a row is, from the icon the renderer chose for it. */
+const ICON_LABELS: Record<string, string> = {
+  pin: 'Location',
+  computer: 'Location',
+  calendar: 'Dates',
+  person: 'Host',
+  money: 'Stipend',
+  'money-off': 'Stipend',
+  timer: 'Time commitment',
+  'timer-half': 'Time commitment',
+  'entry-low': 'Entry bar',
+  'entry-mid': 'Entry bar',
+  'entry-high': 'Entry bar',
+  paper: 'Applications',
+  'paper-closed': 'Applications',
+  'form-check': 'Accepting applications',
+  'form-pause': 'Accepting applications',
+  target: 'Detail',
+}
+
+function fieldLabel(name: string, icon: string | undefined, funding: boolean) {
+  if (name === 'title') return 'Title'
+  if (name === 'desc') return 'Description'
+  if (icon === 'tag') return funding ? 'Type' : 'Cost'
+  return (icon && ICON_LABELS[icon]) || 'Detail'
+}
+
+function cardFields(
+  raw: string,
+  origs: Record<string, string>,
+  funding: boolean
+): CardField[] {
+  const out: CardField[] = []
+  for (const m of raw.matchAll(FIELD_RE)) {
+    const orig = origs[m[1]]
+    const value = stripHtml(m[3])
+    out.push({
+      name: m[1],
+      label: fieldLabel(m[1], m[2], funding),
+      value,
+      original:
+        typeof orig === 'string' && stripHtml(orig) !== value
+          ? stripHtml(orig)
+          : null,
+      hasLink: /<a\s/i.test(m[3]),
+    })
+  }
+  return out
+}
+
+/** The card's text segment with `old` swapped for `next` (both plain): a
+ *  whole line first (after its "* " or "  " lead), else the first
+ *  occurrence inside a line; unchanged when `old` isn't there. */
+function replacePlain(segment: string, old: string, next: string): string {
+  if (!old || old === next) return segment
+  const lines = segment.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i]
+    const lead = l.startsWith('* ') || l.startsWith('  ') ? l.slice(0, 2) : ''
+    if (l.slice(lead.length) === old) {
+      lines[i] = lead + next
+      return lines.join('\n')
+    }
+  }
+  for (let i = 0; i < lines.length; i++) {
+    const at = lines[i].indexOf(old)
+    if (at >= 0) {
+      lines[i] = lines[i].slice(0, at) + next + lines[i].slice(at + old.length)
+      return lines.join('\n')
+    }
+  }
+  return segment
+}
+
+/** Pure: the email with text on one card replaced — `values` maps field
+ *  names to HTML fragments — the manifest updated (the text as built is
+ *  kept under `o` on a field's first edit, the title follows an edited
+ *  title) and the plain-text email rebuilt in the cards' current order.
+ *  Mirrors render.py `set_fields()`. */
+export function setFieldsRaw(
+  html: string,
+  gid: string,
+  key: string,
+  values: Record<string, string>
+): { html: string; text: string } {
+  const manifest = readManifest(html)
+  if (!manifest) throw new FieldError('no card manifest in this email')
+  const block = cardBlocks(html).find(b => b.gid === gid && b.key === key)
+  if (!block) throw new FieldError(`unknown card ${gid}:${key}`)
+  const entry = manifest.groups
+    .find(g => g.id === gid)
+    ?.cards.find(c => c.key === key)
+  if (!entry)
+    throw new FieldError(`card ${gid}:${key} is missing from the manifest`)
+  const names = new Set([...block.raw.matchAll(FIELD_RE)].map(m => m[1]))
+  for (const name of Object.keys(values)) {
+    if (!names.has(name))
+      throw new FieldError(`card ${gid}:${key} has no '${name}' text`)
+  }
+  const seg = manifest.text.find(s => s.c === `${gid}:${key}`)
+  const card = block.raw.replace(
+    FIELD_RE,
+    (whole, name: string, icon: string | undefined, old: string) => {
+      const next = Object.prototype.hasOwnProperty.call(values, name)
+        ? values[name]
+        : undefined
+      if (next === undefined || next === old) return whole
+      entry.o ??= {}
+      if (!Object.prototype.hasOwnProperty.call(entry.o, name))
+        entry.o[name] = old
+      if (seg) seg.t = replacePlain(seg.t, stripHtml(old), stripHtml(next))
+      if (name === 'title') entry.title = stripHtml(next)
+      return `<!--f:${name}${icon ? `:${icon}` : ''}-->${next}<!--/f-->`
+    }
+  )
+  const encoded = Buffer.from(JSON.stringify(manifest), 'utf8').toString(
+    'base64'
+  )
+  const out = (
+    html.slice(0, block.start) +
+    card +
+    html.slice(block.end)
+  ).replace(MANIFEST_RE, () => `<!--aisafety-cards:${encoded}-->`)
+  const order: Record<string, string[]> = {}
+  for (const b of cardBlocks(out)) (order[b.gid] ??= []).push(b.key)
+  return { html: out, text: rebuildText(manifest, order) }
+}
+
+/** `setFieldsRaw()` for plain text from the editor: whitespace collapsed,
+ *  escaped. A field can't be emptied (a line with no text would still show
+ *  its icon). */
+export function setFieldsHtml(
+  html: string,
+  gid: string,
+  key: string,
+  values: Record<string, string>
+): { html: string; text: string } {
+  const escaped: Record<string, string> = {}
+  for (const [name, value] of Object.entries(values)) {
+    const clean = value.replace(/\s+/g, ' ').trim()
+    if (!clean) throw new FieldError(`the ${name} text can't be empty`)
+    escaped[name] = escapeHtml(clean)
+  }
+  return setFieldsRaw(html, gid, key, escaped)
+}
+
+/** Edit text on one card inside a draft — any of its fields, and on funding
+ *  cards the "Consider applying if" line — in one write: verify, rewrite
+ *  HTML + text, re-stamp, write back, re-check. Returns the cards. */
+export async function editDraftCard(
+  draftId: string,
+  gid: string,
+  key: string,
+  values: Record<string, string>,
+  fit?: string
+): Promise<{ cards: CardGroup[] }> {
+  if (Object.keys(values).length === 0 && fit === undefined)
+    throw new FieldError('nothing to change')
+  return rewriteDraft(
+    draftId,
+    body => {
+      let out = { html: body, text: '' }
+      if (Object.keys(values).length > 0)
+        out = setFieldsHtml(out.html, gid, key, values)
+      if (fit !== undefined) out = setFitHtml(out.html, gid, key, fit)
+      return out
+    },
+    `card ${gid}:${key} edited (${[
+      ...Object.keys(values),
+      ...(fit !== undefined ? ['fit'] : []),
+    ].join(', ')})`
+  )
 }
 
 /** Move the cards of a draft into `order` ({ groupId: keys }) inside

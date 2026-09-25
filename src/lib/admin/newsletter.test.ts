@@ -2,14 +2,18 @@ import { describe, expect, it } from 'vitest'
 import {
   cardGroups,
   contentDigest,
+  FieldError,
   FitError,
   formatLocal,
   liveCampaignsNamed,
   previewText,
   ReorderError,
   reorderHtml,
+  setFieldsHtml,
   setFitHtml,
 } from './newsletter'
+import { createHash } from 'node:crypto'
+import cardEdit from './__fixtures__/newsletter-card-edit.json'
 
 // Fixtures generated with the pipeline's own function
 // (~/Newsletter/ac.py content_digest) on 3 September 2026. The two sides
@@ -97,6 +101,7 @@ describe('cardGroups', () => {
             logo: null,
             fit: null,
             pipelineFit: null,
+            fields: [],
           },
           {
             key: 'b',
@@ -104,6 +109,7 @@ describe('cardGroups', () => {
             logo: null,
             fit: null,
             pipelineFit: null,
+            fields: [],
           },
           {
             key: 'c',
@@ -111,6 +117,7 @@ describe('cardGroups', () => {
             logo: null,
             fit: null,
             pipelineFit: null,
+            fields: [],
           },
         ],
       },
@@ -359,5 +366,69 @@ describe('liveCampaignsNamed', () => {
       name
     )
     expect(found).toEqual([])
+  })
+})
+
+/* ─── Card text edits (mirrors ~/Newsletter/render.py set_fields) ─────── */
+
+describe('card text fields', () => {
+  const { input, group, key, values } = cardEdit
+
+  it('lists every piece of text on a card, labelled by what it is', () => {
+    const card = cardGroups(input)![0].cards.find(c => c.key === key)!
+    expect(card.fields.map(f => [f.name, f.label])).toEqual([
+      ['title', 'Title'],
+      ['m0', 'Location'],
+      ['m1', 'Dates'],
+      ['desc', 'Description'],
+      ['b0', 'Stipend'],
+      ['b1', 'Time commitment'],
+      ['b2', 'Entry bar'],
+      ['b3', 'Applications'],
+    ])
+    expect(card.fields[2].value).toBe('1 week · Starts 5–11 October')
+    expect(card.fields.every(f => f.original === null)).toBe(true)
+  })
+
+  it('gives byte-identical output to the pipeline (render.py set_fields)', () => {
+    const out = setFieldsHtml(input, group, key, values)
+    expect(createHash('sha256').update(out.html, 'utf8').digest('hex')).toBe(
+      cardEdit.expectedHtmlSha256
+    )
+    expect(out.text).toBe(cardEdit.expectedText)
+  })
+
+  it('remembers the text as built, so the edit shows and can be undone', () => {
+    const out = setFieldsHtml(input, group, key, values)
+    const card = cardGroups(out.html)![0].cards.find(c => c.key === key)!
+    expect(card.title).toBe('Lens Academy: Deep Learning Theory')
+    const desc = card.fields.find(f => f.name === 'desc')!
+    expect(desc.value).toBe('A new description & more <b>.')
+    expect(desc.original).toMatch(/^Studies the mathematics/)
+    // Putting Pen's text back clears the "edited" state.
+    const back = setFieldsHtml(out.html, group, key, {
+      desc: desc.original!,
+    })
+    const again = cardGroups(back.html)![0].cards.find(c => c.key === key)!
+    expect(again.fields.find(f => f.name === 'desc')!.original).toBeNull()
+  })
+
+  it('leaves the other cards alone', () => {
+    const before = cardGroups(input)![0].cards.filter(c => c.key !== key)
+    const out = setFieldsHtml(input, group, key, values)
+    const after = cardGroups(out.html)![0].cards.filter(c => c.key !== key)
+    expect(after).toEqual(before)
+  })
+
+  it('refuses empty text, unknown fields and unknown cards', () => {
+    expect(() => setFieldsHtml(input, group, key, { title: '  ' })).toThrow(
+      FieldError
+    )
+    expect(() => setFieldsHtml(input, group, key, { b9: 'x' })).toThrow(
+      FieldError
+    )
+    expect(() =>
+      setFieldsHtml(input, group, 'recNope', { title: 'x' })
+    ).toThrow(FieldError)
   })
 })

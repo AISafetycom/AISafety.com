@@ -13,7 +13,23 @@ interface CardInfo {
   fit: string | null
   /** Pen's original line, to show what changed and offer it back. */
   pipelineFit: string | null
+  /** Every piece of text on the card (title, lines under it, description,
+   *  rows at the bottom); empty for drafts built before 25 Sept 2026. */
+  fields: CardField[]
 }
+
+interface CardField {
+  name: string
+  label: string
+  value: string
+  /** The text as built, when it has been edited since; null otherwise. */
+  original: string | null
+  hasLink: boolean
+}
+
+/** Pen stamps each item with its Airtable record id; only those cards can
+ *  pass a description on to the site's listing. */
+const RECORD_KEY_RE = /^rec[A-Za-z0-9]{14}$/
 
 interface CardGroup {
   id: string
@@ -537,14 +553,18 @@ function ReorderPanel({
   const [error, setError] = useState<string | null>(null)
   const dirty =
     JSON.stringify(keysOf(groups)) !== JSON.stringify(keysOf(original))
-  /** The card whose fit line is open for editing, and the text in the box. */
+  /** The card open in the editor, and the text in its boxes. */
   const [editing, setEditing] = useState<{ gid: string; key: string } | null>(
     null
   )
+  const [values, setValues] = useState<Record<string, string>>({})
   const [fitText, setFitText] = useState('')
-  const [savingFit, setSavingFit] = useState(false)
-  const [fitError, setFitError] = useState<string | null>(null)
-  const editable = groups.some(g => g.cards.some(c => c.fit !== null))
+  const [updateListing, setUpdateListing] = useState(false)
+  const [savingCard, setSavingCard] = useState(false)
+  const [cardError, setCardError] = useState<string | null>(null)
+  const editable = groups.some(g =>
+    g.cards.some(c => c.fields.length > 0 || c.fit !== null)
+  )
 
   // Chrome doesn't always fire dragend on a row React moved in the DOM while
   // it was being dragged, which left that row dimmed after the drop (Bryce,
@@ -575,28 +595,54 @@ function ReorderPanel({
 
   function openEditor(gid: string, card: CardInfo) {
     setEditing({ gid, key: card.key })
+    setValues(Object.fromEntries(card.fields.map(f => [f.name, f.value])))
     setFitText(card.fit ?? '')
-    setFitError(null)
+    setUpdateListing(false)
+    setCardError(null)
   }
 
-  async function saveFit(gid: string, card: CardInfo) {
-    setSavingFit(true)
-    setFitError(null)
+  /** The boxes that differ from the card as saved. */
+  function changesFor(card: CardInfo) {
+    const fields: Record<string, string> = {}
+    for (const f of card.fields) {
+      const v = (values[f.name] ?? f.value).trim()
+      if (v !== f.value.trim()) fields[f.name] = v
+    }
+    const fit =
+      card.fit !== null && fitText.trim() !== card.fit.trim()
+        ? fitText.trim()
+        : undefined
+    return { fields, fit }
+  }
+
+  async function saveCard(gid: string, card: CardInfo) {
+    const { fields, fit } = changesFor(card)
+    const empty = card.fields.find(f => f.name in fields && !fields[f.name])
+    if (empty) {
+      setCardError(`the ${empty.label.toLowerCase()} can’t be empty`)
+      return
+    }
+    const withListing = updateListing && 'desc' in fields
+    setSavingCard(true)
+    setCardError(null)
     try {
-      const res = await fetch('/api/admin/newsletter/fit', {
+      const res = await fetch('/api/admin/newsletter/card', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           campaign: draft.id,
           group: gid,
           key: card.key,
-          fit: fitText,
+          fields,
+          ...(fit !== undefined ? { fit } : {}),
+          updateListing: withListing,
         }),
       })
       const body = (await res.json()) as {
         error?: string
         problems?: string[]
         cards?: CardGroup[]
+        listing?: { ok: true } | { ok: false; reason: string }
       }
       if (!res.ok || !body.cards) {
         throw new Error(
@@ -614,21 +660,31 @@ function ReorderPanel({
           ...g,
           cards: g.cards.map(c => {
             const s = saved.get(`${g.id}:${c.key}`)
-            return s ? { ...c, fit: s.fit, pipelineFit: s.pipelineFit } : c
+            return s
+              ? {
+                  ...c,
+                  title: s.title,
+                  fit: s.fit,
+                  pipelineFit: s.pipelineFit,
+                  fields: s.fields,
+                }
+              : c
           }),
         }))
       )
       setEditing(null)
-      onSaved(
-        body.cards,
-        fitText.trim()
-          ? `Text saved to the draft for ${card.title}.`
-          : `Line removed from the draft for ${card.title}.`
-      )
+      const title = saved.get(`${gid}:${card.key}`)?.title ?? card.title
+      let text = `Saved to the draft for ${title}.`
+      if (body.listing?.ok)
+        text +=
+          ' The description on the site was updated too; it shows there in two or three minutes.'
+      else if (body.listing)
+        text += ` The site’s listing was NOT updated: ${body.listing.reason}.`
+      onSaved(body.cards, text)
     } catch (err) {
-      setFitError(err instanceof Error ? err.message : String(err))
+      setCardError(err instanceof Error ? err.message : String(err))
     } finally {
-      setSavingFit(false)
+      setSavingCard(false)
     }
   }
 
@@ -693,8 +749,8 @@ function ReorderPanel({
     <div className={styles.reorder}>
       <p className={adminStyles.sectionHint}>
         Drag a listing to move it. Cards stay within their section.
-        {editable && ' Edit changes a card’s “Consider applying if” line.'}{' '}
-        Saving writes into the draft (the preview updates); it sends nothing.
+        {editable && ' Edit changes any text on a card.'} Saving writes into the
+        draft (the preview updates); it sends nothing.
       </p>
       {groups.map(g => (
         <div key={g.id} className={styles.reorderGroup}>
@@ -704,7 +760,9 @@ function ReorderPanel({
           <ol className={styles.reorderList}>
             {g.cards.map((c, i) => {
               const open = editing?.gid === g.id && editing.key === c.key
-              const edited = c.pipelineFit != null && c.fit !== c.pipelineFit
+              const edited =
+                (c.pipelineFit != null && c.fit !== c.pipelineFit) ||
+                c.fields.some(f => f.original !== null)
               return [
                 <li
                   key={c.key}
@@ -762,11 +820,11 @@ function ReorderPanel({
                       <span className={styles.rowEdited}> · edited</span>
                     )}
                   </span>
-                  {c.fit !== null && (
+                  {(c.fields.length > 0 || c.fit !== null) && (
                     <button
                       type="button"
                       className={styles.rowButton}
-                      disabled={saving || savingFit}
+                      disabled={saving || savingCard}
                       aria-expanded={open}
                       onClick={() =>
                         open ? setEditing(null) : openEditor(g.id, c)
@@ -777,21 +835,131 @@ function ReorderPanel({
                   )}
                 </li>,
                 open && (
-                  <li key={`${c.key}-fit`} className={styles.fitEditor}>
-                    <label className={styles.fitLabel}>
-                      Consider applying if
-                      <textarea
-                        className={styles.fitTextarea}
-                        value={fitText}
-                        rows={4}
-                        autoFocus
-                        disabled={savingFit}
-                        onChange={e => setFitText(e.target.value)}
-                      />
-                    </label>
-                    {fitError && (
+                  <li key={`${c.key}-edit`} className={styles.fitEditor}>
+                    {c.fields.map((f, n) => {
+                      const v = values[f.name] ?? f.value
+                      return (
+                        <div key={f.name} className={styles.fieldBlock}>
+                          <label className={styles.fitLabel}>
+                            {f.label}
+                            <textarea
+                              className={`${styles.fitTextarea} ${
+                                f.name === 'desc' ? '' : styles.fieldShort
+                              }`}
+                              value={v}
+                              rows={
+                                f.name === 'desc'
+                                  ? 6
+                                  : f.name === 'title'
+                                    ? 2
+                                    : 1
+                              }
+                              autoFocus={n === 0}
+                              disabled={savingCard}
+                              onChange={e =>
+                                setValues(vs => ({
+                                  ...vs,
+                                  [f.name]: e.target.value,
+                                }))
+                              }
+                            />
+                          </label>
+                          {f.hasLink && (
+                            <p className={styles.notice}>
+                              This text has a link in it; saving an edit here
+                              drops the link.
+                            </p>
+                          )}
+                          {(f.original !== null ||
+                            v.trim() !== f.value.trim()) && (
+                            <div className={styles.fieldActions}>
+                              {f.original !== null &&
+                                v.trim() !== f.original.trim() && (
+                                  <button
+                                    type="button"
+                                    className={styles.rowButton}
+                                    disabled={savingCard}
+                                    title={f.original}
+                                    onClick={() =>
+                                      setValues(vs => ({
+                                        ...vs,
+                                        [f.name]: f.original ?? '',
+                                      }))
+                                    }
+                                  >
+                                    Pen’s text
+                                  </button>
+                                )}
+                              {v.trim() !== f.value.trim() && (
+                                <button
+                                  type="button"
+                                  className={styles.rowButton}
+                                  disabled={savingCard}
+                                  onClick={() =>
+                                    setValues(vs => ({
+                                      ...vs,
+                                      [f.name]: f.value,
+                                    }))
+                                  }
+                                >
+                                  Undo
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          {f.name === 'desc' && RECORD_KEY_RE.test(c.key) && (
+                            <label className={styles.checkRow}>
+                              <input
+                                type="checkbox"
+                                checked={updateListing}
+                                disabled={
+                                  savingCard || v.trim() === f.value.trim()
+                                }
+                                onChange={e =>
+                                  setUpdateListing(e.target.checked)
+                                }
+                              />
+                              Also update this description on the site
+                            </label>
+                          )}
+                        </div>
+                      )
+                    })}
+                    {c.fit !== null && (
+                      <div className={styles.fieldBlock}>
+                        <label className={styles.fitLabel}>
+                          Consider applying if
+                          <textarea
+                            className={styles.fitTextarea}
+                            value={fitText}
+                            rows={4}
+                            autoFocus={c.fields.length === 0}
+                            disabled={savingCard}
+                            onChange={e => setFitText(e.target.value)}
+                          />
+                        </label>
+                        {c.pipelineFit != null &&
+                          fitText.trim() !== c.pipelineFit.trim() && (
+                            <div className={styles.fieldActions}>
+                              <button
+                                type="button"
+                                className={styles.rowButton}
+                                disabled={savingCard}
+                                title={
+                                  c.pipelineFit ||
+                                  'Pen wrote no line for this card'
+                                }
+                                onClick={() => setFitText(c.pipelineFit ?? '')}
+                              >
+                                Pen’s text
+                              </button>
+                            </div>
+                          )}
+                      </div>
+                    )}
+                    {cardError && (
                       <p className={styles.noticeError}>
-                        Not saved: {fitError}
+                        Not saved: {cardError}
                       </p>
                     )}
                     <div className={styles.actions}>
@@ -799,34 +967,22 @@ function ReorderPanel({
                         type="button"
                         className={styles.buttonPrimary}
                         disabled={
-                          savingFit || fitText.trim() === (c.fit ?? '').trim()
+                          savingCard ||
+                          (Object.keys(changesFor(c).fields).length === 0 &&
+                            changesFor(c).fit === undefined)
                         }
-                        onClick={() => void saveFit(g.id, c)}
+                        onClick={() => void saveCard(g.id, c)}
                       >
-                        {savingFit ? 'Saving…' : 'Save text'}
+                        {savingCard ? 'Saving…' : 'Save text'}
                       </button>
                       <button
                         type="button"
                         className={styles.button}
-                        disabled={savingFit}
+                        disabled={savingCard}
                         onClick={() => setEditing(null)}
                       >
                         Cancel
                       </button>
-                      {c.pipelineFit != null &&
-                        fitText.trim() !== c.pipelineFit.trim() && (
-                          <button
-                            type="button"
-                            className={styles.button}
-                            disabled={savingFit}
-                            title={
-                              c.pipelineFit || 'Pen wrote no line for this card'
-                            }
-                            onClick={() => setFitText(c.pipelineFit ?? '')}
-                          >
-                            Pen’s text
-                          </button>
-                        )}
                     </div>
                   </li>
                 ),
