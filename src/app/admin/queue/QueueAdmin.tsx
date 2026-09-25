@@ -606,8 +606,18 @@ const DESC_KEYS = /description/i
  *  the record as read live (or as proposed). */
 function listingLink(
   item: QueueItem,
-  fields: Record<string, unknown> | null | undefined
+  fields: Record<string, unknown> | null | undefined,
+  overrides: Record<string, unknown> = {}
 ): string | null {
+  // A Change that moves the listing's link (a rename, a new domain) means
+  // the NEW address, as the page shows it on the card – Bryce, 25 Sept 2026,
+  // Atlas Computing → Atlas Ignota: "S is going to the old link". So the
+  // proposed value and any edit typed on the page win over the stored one.
+  for (const [k, v] of Object.entries(overrides)) {
+    if (URL_KEYS.test(k) && typeof v === 'string' && /^https?:\/\//.test(v)) {
+      return v
+    }
+  }
   if (item.url) return item.url
   for (const [k, v] of Object.entries(fields ?? item.fields ?? {})) {
     if (URL_KEYS.test(k) && typeof v === 'string' && /^https?:\/\//.test(v)) {
@@ -2217,7 +2227,12 @@ export default function QueueAdmin({
         case 's': {
           // The shown listing's own link, in a new tab (Bryce, 17 Sept
           // 2026: "make S open the link for the currently shown listing").
-          const href = item ? listingLink(item, live[item.id]?.fields) : null
+          const href = item
+            ? listingLink(item, live[item.id]?.fields, {
+                ...proposedEdits(item),
+                ...d.edits,
+              })
+            : null
           if (href) {
             e.preventDefault()
             window.open(href, '_blank', 'noopener')
