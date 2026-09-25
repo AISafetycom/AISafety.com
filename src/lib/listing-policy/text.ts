@@ -65,7 +65,7 @@ Each page adds its own bar, and seriousness is a separate gate: on topic isn't t
 - Rationalist and forecasting community conferences are listed when a good share of the program is x-risk people, even if the page never says AI safety. A festival where x-risk is a handful of sessions among many isn't.
 - A listed community's talk is fine if it's about x-risk, and a meetup around an off-topic talk isn't.
 - We also weigh what the speaker actually works on. If their work is in an out-of-scope field (AI ethics, AI welfare) and the event page only hints at x-risk, the talk is out.
-- A social counts when it exists so the AI safety community can connect. An event that mainly promotes the host organization doesn't, and neither does a session that is mostly the host explaining its own stance, strategy, or theory of change.
+- A social counts when it exists so the AI safety community can connect. An event that mainly promotes the host organization (an anniversary or launch party, for example) doesn't, and neither does a session that is mostly the host explaining its own stance, strategy, or theory of change.
 - One-off networking or panel events about AI safety are fine even when business or investor oriented.
 - Side events of an already-listed conference are generally out.
 - An event needs a date. An announced event with no date yet is too early.
@@ -118,7 +118,7 @@ Each page adds its own bar, and seriousness is a separate gate: on topic isn't t
 
 **/jobs** – synced from the 80,000 Hours job board.
 - Vacancies only, internships included: roles tagged as fellowship, course, funding, or volunteering are not listed.
-- Submit roles to 80,000 Hours directly.
+- Submit roles to 80,000 Hours directly, using their [Propose a vacancy](https://jobs.80000hours.org/submit-role) form.
 
 **/donation-guide** – a curated guide with no listings.
 
@@ -140,5 +140,5 @@ An existing listing isn't a guarantee, and we review and remove listings often.
 - **Tell us if we misread you.** If we missed x-risk work on your site or picked the wrong page, show us where. Reply to our email or use the "Send us an email" button.
 - **Suggest a correction.** If you think another listing shouldn't be there, use "Suggest correction" on that page and say why.
 
-Last updated: 17 September 2026
+Last updated: 25 September 2026
 `
