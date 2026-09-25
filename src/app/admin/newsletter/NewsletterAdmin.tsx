@@ -1108,7 +1108,7 @@ function ReorderPanel({
         </div>
       ))}
       {error && <p className={styles.noticeError}>Not saved: {error}</p>}
-      <div className={styles.actions}>
+      <div className={`${styles.actions} ${styles.reorderActions}`}>
         <button
           type="button"
           className={styles.buttonPrimary}

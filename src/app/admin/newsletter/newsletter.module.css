@@ -102,6 +102,19 @@
   max-width: 100%;
   position: sticky;
   top: 86px; /* under the sticky admin header */
+  /* Never taller than the preview beside it (the .previewFrame height): a
+     long card editor scrolls inside the panel instead (Bryce, 25 Sept 2026). */
+  max-height: 820px;
+  overflow-y: auto;
+  border-radius: 8px;
+}
+
+/* Save order / Reset stay in view at the bottom of the scrolling panel. */
+.reorderActions {
+  position: sticky;
+  bottom: -14px; /* flush with the panel's bottom edge, over .reorder's padding */
+  padding: 10px 0 14px;
+  background: var(--teal-900);
 }
 
 @media (max-width: 1100px) {
@@ -112,6 +125,8 @@
     position: static;
     flex-basis: auto;
     width: 100%;
+    max-height: none;
+    overflow-y: visible;
   }
 }
 
