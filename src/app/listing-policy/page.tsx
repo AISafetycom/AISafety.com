@@ -32,12 +32,26 @@ const PAGE_PATHS = new Set([
   '/donation-guide',
 ])
 
+// A page path mentioned in running text ("belong on /communities") links too.
+function linkPagePaths(text: string) {
+  return text.split(/(?<![\w/])(\/[a-z-]+)(?![\w/-])/).map((piece, i) =>
+    PAGE_PATHS.has(piece) ? (
+      <Link key={i} href={piece} className="color-light-teal">
+        {piece}
+      </Link>
+    ) : (
+      piece
+    )
+  )
+}
+
 function Inline({ text }: { text: string }) {
   return (
     <>
       {parseInline(text).map((part, i) => {
-        if (part.kind === 'text')
-          return <Fragment key={i}>{part.text}</Fragment>
+        if (part.kind === 'text') {
+          return <Fragment key={i}>{linkPagePaths(part.text)}</Fragment>
+        }
         if (part.kind === 'link') {
           return (
             <a
