@@ -31,6 +31,9 @@ interface CardField {
  *  pass a description on to the site's listing. */
 const RECORD_KEY_RE = /^rec[A-Za-z0-9]{14}$/
 
+/** How long after the last keystroke the editor saves by itself. */
+const AUTOSAVE_DELAY_MS = 900
+
 interface CardGroup {
   id: string
   label: string
@@ -115,8 +118,15 @@ export default function NewsletterAdmin({
   const [loadError, setLoadError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [previewId, setPreviewId] = useState<string | null>(null)
-  /** Bumped after a reorder so the preview frame reloads the new order. */
+  /** Bumped after a reorder or a text edit so the preview frame reloads. */
   const [previewNonce, setPreviewNonce] = useState(0)
+  /** Where the reader is in the preview (the frame posts it as it scrolls),
+   *  and the position the frame was last loaded with. Only the second one
+   *  goes into the frame's URL, and only changes together with the nonce, so
+   *  scrolling never reloads the frame. */
+  const previewScroll = useRef(0)
+  const previewFrame = useRef<HTMLIFrameElement | null>(null)
+  const [previewY, setPreviewY] = useState(0)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<Draft | null>(null)
   const [notice, setNotice] = useState<{
@@ -231,8 +241,27 @@ export default function NewsletterAdmin({
     }
   }
 
+  useEffect(() => {
+    function onMessage(e: MessageEvent) {
+      if (e.source !== previewFrame.current?.contentWindow) return
+      const y = (e.data as { aisafetyPreviewScroll?: unknown } | null)
+        ?.aisafetyPreviewScroll
+      if (typeof y === 'number' && Number.isFinite(y) && y >= 0)
+        previewScroll.current = y
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [])
+
+  function togglePreview(id: string) {
+    previewScroll.current = 0
+    setPreviewY(0)
+    setPreviewId(previewId === id ? null : id)
+  }
+
   /** A reorder or a text edit was written into the draft: keep the cards,
-   *  reload the preview, say so. */
+   *  reload the preview where the reader was, say so (an empty `text` = an
+   *  autosave, which reports inside the editor instead). */
   function draftChanged(draftId: string, cards: CardGroup[], text: string) {
     setData(d =>
       d
@@ -242,8 +271,9 @@ export default function NewsletterAdmin({
           }
         : d
     )
+    setPreviewY(previewScroll.current)
     setPreviewNonce(n => n + 1)
-    setNotice({ kind: 'ok', text })
+    if (text) setNotice({ kind: 'ok', text })
   }
 
   return (
@@ -407,9 +437,7 @@ export default function NewsletterAdmin({
                 <button
                   type="button"
                   className={styles.button}
-                  onClick={() =>
-                    setPreviewId(previewId === draft.id ? null : draft.id)
-                  }
+                  onClick={() => togglePreview(draft.id)}
                 >
                   {previewId === draft.id ? 'Hide preview' : 'Preview'}
                 </button>
@@ -440,12 +468,16 @@ export default function NewsletterAdmin({
                     </div>
                   )}
                   <iframe
+                    ref={previewFrame}
                     title={`Preview of ${draft.subject}`}
                     className={styles.previewFrame}
                     // Links in the email open in a new, ordinary tab (the
-                    // preview sets <base target="_blank">); nothing else.
-                    sandbox="allow-popups allow-popups-to-escape-sandbox"
-                    src={`/api/admin/newsletter/preview?draft=${draft.id}&v=${previewNonce}`}
+                    // preview sets <base target="_blank">). The only script
+                    // is the preview's own scroll keeper (the route's CSP
+                    // allows nothing else); no allow-same-origin, so it
+                    // can't reach this page.
+                    sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
+                    src={`/api/admin/newsletter/preview?draft=${draft.id}&v=${previewNonce}#y=${previewY}`}
                   />
                 </div>
               )}
@@ -559,9 +591,19 @@ function ReorderPanel({
   )
   const [values, setValues] = useState<Record<string, string>>({})
   const [fitText, setFitText] = useState('')
-  const [updateListing, setUpdateListing] = useState(false)
   const [savingCard, setSavingCard] = useState(false)
   const [cardError, setCardError] = useState<string | null>(null)
+  /** At least one save went through since the editor opened. */
+  const [savedOnce, setSavedOnce] = useState(false)
+  /** The last "put this description on the site" for the open card. */
+  const [listing, setListing] = useState<{
+    key: string
+    text: string
+    status: 'saving' | 'done' | { error: string }
+  } | null>(null)
+  /** The save in flight (text saves itself — Bryce, 25 Sept 2026 — so a
+   *  second one waits for it rather than racing it). */
+  const inFlight = useRef<Promise<boolean> | null>(null)
   const editable = groups.some(g =>
     g.cards.some(c => c.fields.length > 0 || c.fit !== null)
   )
@@ -593,20 +635,19 @@ function ReorderPanel({
     }
   }, [drag])
 
-  function openEditor(gid: string, card: CardInfo) {
-    setEditing({ gid, key: card.key })
-    setValues(Object.fromEntries(card.fields.map(f => [f.name, f.value])))
-    setFitText(card.fit ?? '')
-    setUpdateListing(false)
-    setCardError(null)
-  }
+  const editingCard =
+    (editing &&
+      groups
+        .find(g => g.id === editing.gid)
+        ?.cards.find(c => c.key === editing.key)) ||
+    null
 
   /** The boxes that differ from the card as saved. */
   function changesFor(card: CardInfo) {
     const fields: Record<string, string> = {}
     for (const f of card.fields) {
-      const v = (values[f.name] ?? f.value).trim()
-      if (v !== f.value.trim()) fields[f.name] = v
+      const v = (values[f.name] ?? f.value).replace(/\s+/g, ' ').trim()
+      if (v !== f.value) fields[f.name] = v
     }
     const fit =
       card.fit !== null && fitText.trim() !== card.fit.trim()
@@ -615,16 +656,132 @@ function ReorderPanel({
     return { fields, fit }
   }
 
-  async function saveCard(gid: string, card: CardInfo) {
-    const { fields, fit } = changesFor(card)
-    const empty = card.fields.find(f => f.name in fields && !fields[f.name])
-    if (empty) {
-      setCardError(`the ${empty.label.toLowerCase()} can’t be empty`)
-      return
-    }
-    const withListing = updateListing && 'desc' in fields
-    setSavingCard(true)
+  const pending = editingCard ? changesFor(editingCard) : null
+  const pendingKey =
+    pending &&
+    (Object.keys(pending.fields).length > 0 || pending.fit !== undefined)
+      ? JSON.stringify(pending)
+      : ''
+  const emptyField =
+    (editingCard &&
+      pending &&
+      editingCard.fields.find(
+        f => f.name in pending.fields && !pending.fields[f.name]
+      )) ||
+    null
+
+  /** Write the open card's changed text into the draft. Resolves true when
+   *  there was nothing to save or the save went through. */
+  async function saveCard(): Promise<boolean> {
+    if (inFlight.current) await inFlight.current
+    if (!editing || !editingCard) return true
+    const { fields, fit } = changesFor(editingCard)
+    if (Object.keys(fields).length === 0 && fit === undefined) return true
+    if (emptyField) return false
+    const gid = editing.gid
+    const key = editing.key
+    const run = (async () => {
+      setSavingCard(true)
+      setCardError(null)
+      try {
+        const res = await fetch('/api/admin/newsletter/card', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            campaign: draft.id,
+            group: gid,
+            key,
+            fields,
+            ...(fit !== undefined ? { fit } : {}),
+          }),
+        })
+        const body = (await res.json()) as {
+          error?: string
+          problems?: string[]
+          cards?: CardGroup[]
+        }
+        if (!res.ok || !body.cards) {
+          throw new Error(
+            body.problems?.length
+              ? body.problems.join('; ')
+              : (body.error ?? `HTTP ${res.status}`)
+          )
+        }
+        // The saved text becomes the card's baseline; what's in the boxes
+        // stays (it may already be ahead of this save), and any unsaved drag
+        // order stays too.
+        const saved = new Map(
+          body.cards.flatMap(g => g.cards.map(c => [`${g.id}:${c.key}`, c]))
+        )
+        setGroups(gs =>
+          gs.map(g => ({
+            ...g,
+            cards: g.cards.map(c => {
+              const s = saved.get(`${g.id}:${c.key}`)
+              return s
+                ? {
+                    ...c,
+                    title: s.title,
+                    fit: s.fit,
+                    pipelineFit: s.pipelineFit,
+                    fields: s.fields,
+                  }
+                : c
+            }),
+          }))
+        )
+        setSavedOnce(true)
+        onSaved(body.cards, '')
+        return true
+      } catch (err) {
+        setCardError(err instanceof Error ? err.message : String(err))
+        return false
+      } finally {
+        setSavingCard(false)
+      }
+    })()
+    inFlight.current = run
+    const ok = await run
+    inFlight.current = null
+    return ok
+  }
+
+  // Saves itself a moment after the typing stops (and at once when a box
+  // loses focus, below). The ref holds this render's saveCard, so the timer
+  // always saves what's in the boxes now.
+  const saveRef = useRef(saveCard)
+  useEffect(() => {
+    saveRef.current = saveCard
+  })
+  useEffect(() => {
+    if (!pendingKey || savingCard || emptyField) return
+    const timer = window.setTimeout(
+      () => void saveRef.current(),
+      AUTOSAVE_DELAY_MS
+    )
+    return () => window.clearTimeout(timer)
+  }, [pendingKey, savingCard, emptyField])
+
+  async function openEditor(gid: string, card: CardInfo) {
+    if (!(await saveCard())) return
+    setEditing({ gid, key: card.key })
+    setValues(Object.fromEntries(card.fields.map(f => [f.name, f.value])))
+    setFitText(card.fit ?? '')
     setCardError(null)
+    setSavedOnce(false)
+    setListing(null)
+  }
+
+  async function closeEditor() {
+    if (await saveCard()) setEditing(null)
+  }
+
+  /** "Put this description on the site too": the listing's Description in
+   *  Airtable gets the text in the box (Bryce decides each time). */
+  async function pushListing(gid: string, card: CardInfo) {
+    const text = (values.desc ?? '').replace(/\s+/g, ' ').trim()
+    if (!text) return
+    setListing({ key: card.key, text, status: 'saving' })
     try {
       const res = await fetch('/api/admin/newsletter/card', {
         method: 'POST',
@@ -633,58 +790,26 @@ function ReorderPanel({
           campaign: draft.id,
           group: gid,
           key: card.key,
-          fields,
-          ...(fit !== undefined ? { fit } : {}),
-          updateListing: withListing,
+          listing: text,
         }),
       })
       const body = (await res.json()) as {
         error?: string
-        problems?: string[]
-        cards?: CardGroup[]
         listing?: { ok: true } | { ok: false; reason: string }
       }
-      if (!res.ok || !body.cards) {
-        throw new Error(
-          body.problems?.length
-            ? body.problems.join('; ')
-            : (body.error ?? `HTTP ${res.status}`)
-        )
-      }
-      // Take the saved text, keep any unsaved drag order as it is.
-      const saved = new Map(
-        body.cards.flatMap(g => g.cards.map(c => [`${g.id}:${c.key}`, c]))
-      )
-      setGroups(gs =>
-        gs.map(g => ({
-          ...g,
-          cards: g.cards.map(c => {
-            const s = saved.get(`${g.id}:${c.key}`)
-            return s
-              ? {
-                  ...c,
-                  title: s.title,
-                  fit: s.fit,
-                  pipelineFit: s.pipelineFit,
-                  fields: s.fields,
-                }
-              : c
-          }),
-        }))
-      )
-      setEditing(null)
-      const title = saved.get(`${gid}:${card.key}`)?.title ?? card.title
-      let text = `Saved to the draft for ${title}.`
-      if (body.listing?.ok)
-        text +=
-          ' The description on the site was updated too; it shows there in two or three minutes.'
-      else if (body.listing)
-        text += ` The site’s listing was NOT updated: ${body.listing.reason}.`
-      onSaved(body.cards, text)
+      if (!res.ok || !body.listing)
+        throw new Error(body.error ?? `HTTP ${res.status}`)
+      setListing({
+        key: card.key,
+        text,
+        status: body.listing.ok ? 'done' : { error: body.listing.reason },
+      })
     } catch (err) {
-      setCardError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setSavingCard(false)
+      setListing({
+        key: card.key,
+        text,
+        status: { error: err instanceof Error ? err.message : String(err) },
+      })
     }
   }
 
@@ -824,10 +949,10 @@ function ReorderPanel({
                     <button
                       type="button"
                       className={styles.rowButton}
-                      disabled={saving || savingCard}
+                      disabled={saving}
                       aria-expanded={open}
                       onClick={() =>
-                        open ? setEditing(null) : openEditor(g.id, c)
+                        void (open ? closeEditor() : openEditor(g.id, c))
                       }
                     >
                       {open ? 'Close' : 'Edit'}
@@ -838,6 +963,11 @@ function ReorderPanel({
                   <li key={`${c.key}-edit`} className={styles.fitEditor}>
                     {c.fields.map((f, n) => {
                       const v = values[f.name] ?? f.value
+                      const vPlain = v.replace(/\s+/g, ' ').trim()
+                      const onSite =
+                        listing?.key === c.key && listing.text === vPlain
+                          ? listing.status
+                          : null
                       return (
                         <div key={f.name} className={styles.fieldBlock}>
                           <label className={styles.fitLabel}>
@@ -855,73 +985,66 @@ function ReorderPanel({
                                     : 1
                               }
                               autoFocus={n === 0}
-                              disabled={savingCard}
                               onChange={e =>
                                 setValues(vs => ({
                                   ...vs,
                                   [f.name]: e.target.value,
                                 }))
                               }
+                              onBlur={() => void saveCard()}
                             />
                           </label>
                           {f.hasLink && (
                             <p className={styles.notice}>
-                              This text has a link in it; saving an edit here
-                              drops the link.
+                              This text has a link in it; editing it here drops
+                              the link.
                             </p>
                           )}
-                          {(f.original !== null ||
-                            v.trim() !== f.value.trim()) && (
-                            <div className={styles.fieldActions}>
-                              {f.original !== null &&
-                                v.trim() !== f.original.trim() && (
-                                  <button
-                                    type="button"
-                                    className={styles.rowButton}
-                                    disabled={savingCard}
-                                    title={f.original}
-                                    onClick={() =>
-                                      setValues(vs => ({
-                                        ...vs,
-                                        [f.name]: f.original ?? '',
-                                      }))
-                                    }
-                                  >
-                                    Pen’s text
-                                  </button>
-                                )}
-                              {v.trim() !== f.value.trim() && (
+                          {f.original !== null &&
+                            vPlain !== f.original.trim() && (
+                              <div className={styles.fieldActions}>
                                 <button
                                   type="button"
                                   className={styles.rowButton}
-                                  disabled={savingCard}
+                                  title={f.original}
                                   onClick={() =>
                                     setValues(vs => ({
                                       ...vs,
-                                      [f.name]: f.value,
+                                      [f.name]: f.original ?? '',
                                     }))
                                   }
                                 >
-                                  Undo
+                                  Pen’s text
                                 </button>
-                              )}
-                            </div>
-                          )}
-                          {f.name === 'desc' && RECORD_KEY_RE.test(c.key) && (
-                            <label className={styles.checkRow}>
-                              <input
-                                type="checkbox"
-                                checked={updateListing}
-                                disabled={
-                                  savingCard || v.trim() === f.value.trim()
-                                }
-                                onChange={e =>
-                                  setUpdateListing(e.target.checked)
-                                }
-                              />
-                              Also update this description on the site
-                            </label>
-                          )}
+                              </div>
+                            )}
+                          {f.name === 'desc' &&
+                            RECORD_KEY_RE.test(c.key) &&
+                            (f.original !== null || vPlain !== f.value) &&
+                            (onSite === 'done' ? (
+                              <p className={styles.noticeOk}>
+                                ✓ The site’s listing has this description now
+                                (it shows there in two or three minutes).
+                              </p>
+                            ) : (
+                              <div className={styles.fieldActions}>
+                                <button
+                                  type="button"
+                                  className={styles.rowButton}
+                                  disabled={!vPlain || onSite === 'saving'}
+                                  onClick={() => void pushListing(g.id, c)}
+                                >
+                                  {onSite === 'saving'
+                                    ? 'Updating the site…'
+                                    : 'Use this description on the site too'}
+                                </button>
+                                {onSite && typeof onSite === 'object' && (
+                                  <span className={styles.noticeError}>
+                                    Site not updated: {onSite.error}
+                                  </span>
+                                )}
+                              </div>
+                            ))}
                         </div>
                       )
                     })}
@@ -934,8 +1057,8 @@ function ReorderPanel({
                             value={fitText}
                             rows={4}
                             autoFocus={c.fields.length === 0}
-                            disabled={savingCard}
                             onChange={e => setFitText(e.target.value)}
+                            onBlur={() => void saveCard()}
                           />
                         </label>
                         {c.pipelineFit != null &&
@@ -944,7 +1067,6 @@ function ReorderPanel({
                               <button
                                 type="button"
                                 className={styles.rowButton}
-                                disabled={savingCard}
                                 title={
                                   c.pipelineFit ||
                                   'Pen wrote no line for this card'
@@ -957,33 +1079,27 @@ function ReorderPanel({
                           )}
                       </div>
                     )}
-                    {cardError && (
-                      <p className={styles.noticeError}>
-                        Not saved: {cardError}
-                      </p>
-                    )}
-                    <div className={styles.actions}>
-                      <button
-                        type="button"
-                        className={styles.buttonPrimary}
-                        disabled={
-                          savingCard ||
-                          (Object.keys(changesFor(c).fields).length === 0 &&
-                            changesFor(c).fit === undefined)
-                        }
-                        onClick={() => void saveCard(g.id, c)}
-                      >
-                        {savingCard ? 'Saving…' : 'Save text'}
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.button}
-                        disabled={savingCard}
-                        onClick={() => setEditing(null)}
-                      >
-                        Cancel
-                      </button>
-                    </div>
+                    <p
+                      className={
+                        cardError || emptyField
+                          ? styles.noticeError
+                          : styles.notice
+                      }
+                      role="status"
+                      aria-live="polite"
+                    >
+                      {cardError
+                        ? `Not saved: ${cardError}`
+                        : emptyField
+                          ? `Not saved yet: the ${emptyField.label.toLowerCase()} can’t be empty.`
+                          : savingCard
+                            ? 'Saving…'
+                            : pendingKey
+                              ? 'Saves when you pause typing.'
+                              : savedOnce
+                                ? 'All changes saved to the draft.'
+                                : 'Changes save by themselves as you type.'}
+                    </p>
                   </li>
                 ),
               ]

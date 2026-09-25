@@ -1,18 +1,21 @@
 /*
   POST /api/admin/newsletter/card
        body { campaign, group, key, fields?: { name: text }, fit?: text,
-              updateListing?: boolean }
+              listing?: text }
 
   Edits text on one card inside a pipeline draft in ActiveCampaign: any of
   its fields (`title`, `m0`… lines under the title, `desc`, `b0`… rows at the
   bottom — plain text, not empty) and, on funding cards, the "Consider
   applying if" line (`fit`; empty removes it). Rebuilds the plain-text
   version and re-stamps the content marker so the draft still verifies.
-  With `updateListing` and a changed `desc`, the same description is also
-  written to the listing in Airtable (Bryce ticks this per edit).
+  The page saves by itself as Bryce types (25 Sept 2026), one card at a
+  time. `listing` writes that text to the listing's Description in Airtable
+  instead — his "Use this description on the site too" button, a separate
+  call so typing never touches the site.
   Approvers only (canSendNewsletter) — it edits the email but sends nothing,
   so no fresh-session requirement.
-  → { cards, listing?: { ok, table } | { ok: false, reason } }
+  → { cards } for a text edit, { listing: { ok, table } | { ok: false,
+    reason } } for a listing update
     409 with { problems } when the draft fails verification, 400 for a bad
     card, field or body.
 */
@@ -59,8 +62,10 @@ export async function POST(req: NextRequest) {
   } catch {
     return json({ error: 'body must be JSON' }, 400)
   }
-  const { campaign, group, key, fields, fit, updateListing } = (body ??
-    {}) as Record<string, unknown>
+  const { campaign, group, key, fields, fit, listing } = (body ?? {}) as Record<
+    string,
+    unknown
+  >
   const campaignId = String(campaign ?? '')
   const values: Record<string, string> = {}
   let fieldsOk = fields === undefined
@@ -80,15 +85,31 @@ export async function POST(req: NextRequest) {
     typeof key === 'string' &&
     /^[A-Za-z0-9_-]+$/.test(key) &&
     fieldsOk &&
-    (fit === undefined || (typeof fit === 'string' && fit.length <= MAX_LENGTH))
+    (fit === undefined ||
+      (typeof fit === 'string' && fit.length <= MAX_LENGTH)) &&
+    (listing === undefined ||
+      (typeof listing === 'string' &&
+        listing.trim() !== '' &&
+        listing.length <= MAX_LENGTH))
   if (!valid) {
     return json(
       {
         error:
-          'body must be { campaign: id, group: gN, key, fields?: { name: text }, fit?: text, updateListing?: boolean }',
+          'body must be { campaign: id, group: gN, key, fields?: { name: text }, fit?: text } or { campaign, group, key, listing: text }',
       },
       400
     )
+  }
+  if (typeof listing === 'string') {
+    const result = await updateListingDescription(
+      key as string,
+      listing.replace(/\s+/g, ' ').trim()
+    )
+    if (!result.ok)
+      console.error(
+        `[newsletter] listing update ${key} failed: ${result.reason}`
+      )
+    return json({ listing: result })
   }
   try {
     const result = await editDraftCard(
@@ -98,17 +119,6 @@ export async function POST(req: NextRequest) {
       values,
       fit as string | undefined
     )
-    if (updateListing === true && typeof values.desc === 'string') {
-      const listing = await updateListingDescription(
-        key as string,
-        values.desc.replace(/\s+/g, ' ').trim()
-      )
-      if (!listing.ok)
-        console.error(
-          `[newsletter] listing update ${key} failed: ${listing.reason}`
-        )
-      return json({ ...result, listing })
-    }
     return json(result)
   } catch (err) {
     if (err instanceof DraftProblemError) {

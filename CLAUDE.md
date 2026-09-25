@@ -32,7 +32,7 @@ docs/                    css-guidelines, api + changelog, architecture notes
 ## Airtable is the database
 
 - **Reference fields by permanent field ID, never by name.** Each data file has a `FIELD` map of IDs with the field name as a comment, and records are fetched with `returnFieldsByFieldId`. Renames in Airtable then cannot break the site. If you change a helper's signature, grep every call site.
-- **Only records with Publish? checked and Hide? unchecked are live** (`publishedFormula` in `src/lib/data/airtable.ts`). Code never sets those two fields. The site's only Airtable writes are the admin map editor (x and y, or Scale), the chatbot conversation log, the admin's annotations on that log, the Queue's decisions, and a listing's Description when the owner edits a newsletter card and ticks "Also update this description on the site".
+- **Only records with Publish? checked and Hide? unchecked are live** (`publishedFormula` in `src/lib/data/airtable.ts`). Code never sets those two fields. The site's only Airtable writes are the admin map editor (x and y, or Scale), the chatbot conversation log, the admin's annotations on that log, the Queue's decisions, and a listing's Description when the owner edits a newsletter card and presses "Use this description on the site too".
 - **Never put a raw Airtable attachment URL in a page or API response.** They expire within hours. Attachments are mirrored to Vercel Blob and the Blob URL is what gets served.
 - **Pages are prerendered at build time; runtime readers use an hourly cache** (`unstable_cache`, tag `airtable-records`). A Vercel cron calls `/api/check-rebuild` every minute; when a published row has changed it clears that cache and triggers a redeploy through a deploy hook, so an Airtable edit reaches the live site in about two to three minutes. Preview mode (`/admin/preview`, Next Draft Mode) bypasses the caches for that admin only.
 - **Airtable allows five requests per second per base.** Don't add uncached Airtable reads on request paths; go through `fetchAirtableRecords` and the existing data functions.
@@ -128,3 +128,13 @@ Most contributors, including everyone at the September 2026 hackathon, don't hav
 - `docs/architecture.md` — how the pieces fit: data layer, freshness, Data API, chatbot, analytics, admin, crons, env vars
 - `docs/development-guide.md` — setup, commands, and recipes for adding a page or an Airtable table
 - `README.md` — contributor mode and team setup
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->
