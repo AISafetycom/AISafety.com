@@ -66,18 +66,36 @@ function apiKey(): string {
   return process.env.ACTIVECAMPAIGN_KEY ?? ''
 }
 
+/** Gateway errors ActiveCampaign's edge returns for a few seconds at a time
+ *  (a 502 page from Cloudflare, 25 Sept 2026). Reads retry them; writes never
+ *  retry, because a write may have landed before the error came back. */
+const TRANSIENT_STATUSES = new Set([502, 503, 504])
+const READ_RETRY_DELAYS_MS = [1000, 3000]
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function v3<T = any>(path: string): Promise<T> {
-  const res = await fetch(`${base()}/api/3/${path}`, {
-    headers: { 'Api-Token': apiKey() },
-    cache: 'no-store',
-  })
-  if (!res.ok) {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`${base()}/api/3/${path}`, {
+      headers: { 'Api-Token': apiKey() },
+      cache: 'no-store',
+    })
+    if (res.ok) return res.json() as Promise<T>
+    const delay = READ_RETRY_DELAYS_MS[attempt]
+    if (TRANSIENT_STATUSES.has(res.status) && delay !== undefined) {
+      console.warn(
+        `[newsletter] ActiveCampaign ${path.split('?')[0]}: ${res.status}, retrying in ${delay} ms`
+      )
+      await new Promise(r => setTimeout(r, delay))
+      continue
+    }
+    // AC's gateway errors are whole HTML pages; keep the log line readable.
+    const text = TRANSIENT_STATUSES.has(res.status)
+      ? 'gateway error from ActiveCampaign'
+      : (await res.text()).slice(0, 500)
     throw new Error(
-      `ActiveCampaign ${path.split('?')[0]}: ${res.status} ${await res.text()}`
+      `ActiveCampaign ${path.split('?')[0]}: ${res.status} ${text}`
     )
   }
-  return res.json() as Promise<T>
 }
 
 async function v3put(path: string, body: unknown): Promise<void> {
