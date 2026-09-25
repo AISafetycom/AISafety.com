@@ -11,6 +11,7 @@ import {
   thinkingParam,
 } from './models'
 import { looksLikeAnswerText, splitAnswerRedoMessage } from './split-answer'
+import { LISTING_POLICY_BLOCK } from './prompt'
 import { TOOL_DEFINITIONS, executeTool } from './tools'
 import type { Catalog, ChatMessage, CitationRef, Listing } from './types'
 
@@ -443,6 +444,7 @@ export async function runAssistantStream(
             { type: 'text', text: systemPrompt },
             { type: 'text', text: pagesBlock },
             { type: 'text', text: donationGuide },
+            { type: 'text', text: LISTING_POLICY_BLOCK },
             {
               type: 'text',
               text: `You are currently running on ${modelDisplayName(model)}. If a user asks what model powers you, this is the answer.`,

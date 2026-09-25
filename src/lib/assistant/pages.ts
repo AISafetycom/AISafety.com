@@ -226,6 +226,21 @@ export const PAGES: PageInfo[] = [
       'What are you looking for? I can point you to jobs, funders, communities, courses, and other curated listings, or answer a quick question about AI safety.',
     chips: ['Who maintains this site?', 'How is this site funded?'],
   },
+  {
+    path: '/listing-policy',
+    title: 'Listing policy',
+    purpose:
+      'What the site lists on each resource page, and how suggestions are decided.',
+    audience:
+      'People deciding whether to suggest a listing, or asking why one was declined.',
+    greeting:
+      'Wondering whether something would be listed? Tell me what it is and which page it fits, and I can check it against the policy.',
+    chips: [
+      'Would my local group qualify?',
+      'Why was my suggestion declined?',
+      'What counts as AI safety here?',
+    ],
+  },
 ]
 
 export const DEFAULT_GREETING =
