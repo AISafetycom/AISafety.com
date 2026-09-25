@@ -2636,7 +2636,6 @@ export default function QueueAdmin({
                 d={draft(selected.id)}
                 setD={patch => setDraft(selected.id, patch)}
                 act={(action, extra) => void act(selected, action, extra)}
-                agentOnline={agent ? agentOnline : null}
                 chatAgent={canEdit && agentChat ? agent : null}
                 chatFocus={chatFocus}
                 readOnly={!canEdit}
@@ -2980,7 +2979,6 @@ function Detail({
   d,
   setD,
   act,
-  agentOnline,
   chatAgent,
   chatFocus,
   readOnly,
@@ -2993,8 +2991,6 @@ function Detail({
   d: Draft
   setD: (patch: Partial<Draft>) => void
   act: (action: Action, extra?: Record<string, unknown>) => void
-  /** null: no agent configured; true/false: whether it answered a ping. */
-  agentOnline: boolean | null
   /** The Mac agent, when it is up and can chat; null hides the panel. */
   chatAgent: AgentInfo | null
   chatFocus: number
@@ -3115,11 +3111,7 @@ function Detail({
           ) : item.replyStatus === 'Failed' ? (
             `The draft could not be saved${item.error ? `: ${item.error}` : '.'}`
           ) : isOpen(item) ? (
-            agentOnline ? (
-              `${acceptLabel(item)} saves this as a Gmail draft at once. Nothing is sent.`
-            ) : (
-              `${acceptLabel(item)} saves this as a Gmail draft (${WORKER_NOTE}). Nothing is sent.`
-            )
+            `${acceptLabel(item)} saves this as a Gmail draft. Nothing is sent.`
           ) : (
             replyLabel(item)
           )}
