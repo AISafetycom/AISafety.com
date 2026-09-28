@@ -74,7 +74,11 @@ export async function loadLinkList(listId: string): Promise<LinkList | null> {
   if (!LIST_ID_RE.test(listId)) return null
   const hit = lists.get(listId)
   if (hit) return hit
-  const read = fetch(`${LINKS_BASE}${listId}.json`, { cache: 'force-cache' })
+  // Resolved under the links folder and refused if it escapes it, so the id
+  // from the address can never point the read anywhere else.
+  const url = new URL(`${listId}.json`, LINKS_BASE)
+  if (!url.href.startsWith(LINKS_BASE)) return null
+  const read = fetch(url, { cache: 'force-cache' })
     .then(async res => (res.ok ? parseLinkList(await res.json()) : null))
     .catch(err => {
       console.warn(
