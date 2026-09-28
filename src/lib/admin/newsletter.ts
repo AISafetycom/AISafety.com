@@ -1258,7 +1258,11 @@ export async function approveAndSend(
     name: draft.name,
     status: 1,
     public: 0,
-    tracklinks: 'all',
+    // Off (28 Sept 2026): ActiveCampaign's click tracker
+    // (alignment23684.emlnk9.com) dropped about half the connections after
+    // ~5 s from 8 test locations, so readers got "This site can't be
+    // reached". Links go straight to their pages. Same flag in ac.py.
+    tracklinks: 'none',
     // Off: ActiveCampaign's Google Analytics link tracking would append its
     // own utm_source/medium/content/campaign after the ones the renderer has
     // already put on every aisafety.com link (issue #20, 16 Sept 2026: two
