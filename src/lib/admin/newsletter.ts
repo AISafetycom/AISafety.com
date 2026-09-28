@@ -40,6 +40,7 @@
 */
 
 import { createHash } from 'node:crypto'
+import { type CampaignClicks, readClicks } from '@/lib/newsletter-clicks'
 
 const MARKER_RE = /<!--aisafety-issue:([0-9a-f]{16})-->/
 /** Minutes between approval and the send. AC rejects sdates in the past and
@@ -284,6 +285,10 @@ export interface SentSummary {
   uniqueOpens: number | null
   unsubscribes: number | null
   listNames: string[]
+  /** Clicks counted on aisafety.com (the email's links go through
+   *  /api/nl since 28 Sept 2026); zero for older sends, whose links went
+   *  through ActiveCampaign's tracker. */
+  clicks: CampaignClicks
 }
 
 // ActiveCampaign's campaign statuses (0 = draft is handled separately). 6 and
@@ -538,13 +543,16 @@ export async function listRecent(limit = 12): Promise<SentSummary[]> {
       )
     )
     .slice(0, limit)
-  const lists = await mapLimit(recent, 3, async c => {
-    const known = sentListIds.get(c.id)
-    if (known) return known
-    const ids = await campaignListIds(c.id)
-    if (c.status === '5') sentListIds.set(c.id, ids)
-    return ids
-  })
+  const [lists, clicks] = await Promise.all([
+    mapLimit(recent, 3, async c => {
+      const known = sentListIds.get(c.id)
+      if (known) return known
+      const ids = await campaignListIds(c.id)
+      if (c.status === '5') sentListIds.set(c.id, ids)
+      return ids
+    }),
+    readClicks(recent.map(c => c.name)),
+  ])
   return recent.map((c, i) => {
     const listIds = lists[i]
     return {
@@ -557,6 +565,7 @@ export async function listRecent(limit = 12): Promise<SentSummary[]> {
       uniqueOpens: c.uniqueopens == null ? null : Number(c.uniqueopens),
       unsubscribes: c.unsubscribes == null ? null : Number(c.unsubscribes),
       listNames: listIds.map(id => names.get(id) ?? `list ${id}`),
+      clicks: clicks.get(c.name) ?? { total: 0, links: [] },
     }
   })
 }
