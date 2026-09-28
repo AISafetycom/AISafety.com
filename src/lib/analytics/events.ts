@@ -194,17 +194,19 @@ const FIRST_SEEN_BACKFILLED_KEY = 'aisafety:analytics:first-seen-backfilled'
 // pipeline of these stays well under Upstash's response-size limits.
 const FIRST_SEEN_CHUNK = 1000
 // Backstop only — never reached by real traffic. Clicks and chatbot events ran
-// ~15k/month as of July 2026; page-view tracking (added 15 July 2026) is
-// estimated to lift organic volume to ~50–100k/month, so this is ~1.5–3×
-// headroom. It bounds what a scripted abuser who stays under the per-IP rate
-// limit can grow a month list to: at the cap a month is ~45 MB of organic
-// events, inside the shared free-tier database's 256 MB (which the chatbot
-// rate limiter also lives in) — but if months ever actually run near the cap,
-// that database needs a paid plan or per-day rollups, not just a bigger cap.
-// recordEvent warns in the logs whenever the cap actually trims, and the
-// dashboard shows a warning banner from MONTH_CAP_WARN_RATIO up — so organic
-// growth approaching the cap is visible well before data quietly disappears.
-const MONTH_CAP = 150_000
+// ~15k/month as of July 2026; with page-view tracking (added 15 July 2026)
+// September 2026 reached 133k by the 28th (~145k for the month), so the cap
+// was raised from 150k to 300k on 28 September 2026: ~2× headroom. It bounds
+// what a scripted abuser who stays under the per-IP rate limit can grow a
+// month list to: at the cap a month is ~90 MB of events, and every month is
+// kept in the shared free-tier database's 256 MB (which the chatbot rate
+// limiter also lives in) — at ~45 MB per organic month that fills within a
+// few months, so the database needs a paid plan or per-day rollups, not just
+// a bigger cap. recordEvent warns in the logs whenever the cap actually trims,
+// and the dashboard shows a warning banner from MONTH_CAP_WARN_RATIO up — so
+// organic growth approaching the cap is visible well before data quietly
+// disappears.
+const MONTH_CAP = 300_000
 // Share of MONTH_CAP at which the dashboard starts warning: early enough to
 // raise the cap (one constant, redeploy) before anything is actually trimmed.
 const MONTH_CAP_WARN_RATIO = 0.75
