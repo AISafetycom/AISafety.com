@@ -193,23 +193,21 @@ const FIRST_SEEN_BACKFILLED_KEY = 'aisafety:analytics:first-seen-backfilled'
 // Visitor ids per HMGET when looking up first-seen timestamps; a full
 // pipeline of these stays well under Upstash's response-size limits.
 const FIRST_SEEN_CHUNK = 1000
-// Backstop only — never reached by real traffic. Clicks and chatbot events ran
-// ~15k/month as of July 2026; with page-view tracking (added 15 July 2026)
-// September 2026 reached 133k by the 28th (~145k for the month), so the cap
-// was raised from 150k to 300k on 28 September 2026: ~2× headroom. It bounds
-// what a scripted abuser who stays under the per-IP rate limit can grow a
-// month list to: at the cap a month is ~90 MB of events. Storage isn't the
-// constraint — the database (shared with the chatbot rate limiter) is on
-// Upstash's Pay As You Go plan with a 10 GB data size limit, so ~45 MB per
-// organic month lasts for years. The bigger limit is the dashboard, which
-// reads every event in its range. recordEvent warns in the logs whenever the
-// cap actually trims, and the dashboard shows a warning banner from
-// MONTH_CAP_WARN_RATIO up — so organic growth approaching the cap is visible
-// well before data quietly disappears.
-const MONTH_CAP = 300_000
-// Share of MONTH_CAP at which the dashboard starts warning: early enough to
-// raise the cap (one constant, redeploy) before anything is actually trimmed.
-const MONTH_CAP_WARN_RATIO = 0.75
+// Month lists have no size cap: events are never deleted automatically. (Until
+// 28 September 2026 a per-month backstop trimmed a month's OLDEST events once
+// it passed 150k, later 300k — in an attack that throws away real visitors'
+// data and keeps the junk, so it went.) Storage isn't the constraint: the
+// database (shared with the chatbot rate limiter) is on Upstash's Pay As You
+// Go plan with a 10 GB data size limit, ~33M events, while organic traffic
+// runs ~145k events (~45 MB) a month as of September 2026. The per-IP rate
+// limit bounds each scripted abuser to ~350k events a day; junk from an attack
+// is cleaned up afterwards by hand. The practical limit is the dashboard,
+// which reads every event in its range, so a flood makes it slow until then.
+//
+// The dashboard warns when the newest month already holds more than this many
+// times the whole previous month — a flood worth checking, or real growth
+// worth knowing about. Relative, so it needs no raising as traffic grows.
+const HIGH_TRAFFIC_RATIO = 2
 // Month lists are read in slices of this many events, each slice as its OWN
 // REST request (a pipeline wouldn't help — the client sends a pipeline as one
 // HTTP call whose single response would still carry everything), so no
@@ -328,22 +326,12 @@ export async function recordEvent(event: AnalyticsEvent): Promise<void> {
       // First time we see this browser? Remember when. NX keeps the earliest.
       const writeFirstSeen = !!vid && !firstSeenWritten.has(vid)
       if (writeFirstSeen) p.hsetnx(FIRST_SEEN_KEY, vid, Date.parse(event.ts))
-      const [len] = (await p.exec()) as [number, ...unknown[]]
+      await p.exec()
       if (registerMonth) registeredMonths.add(month)
       if (writeFirstSeen) {
         if (firstSeenWritten.size >= FIRST_SEEN_CACHE_CAP)
           firstSeenWritten.clear()
         firstSeenWritten.add(vid)
-      }
-      // Abuse backstop, applied only when actually over the cap. Trimming the
-      // tail on every write would also destabilise readMonths' tail-anchored
-      // slices, so the common case must stay pure-LPUSH. Never silent: real
-      // data loss (an attack, or organic growth outgrowing the cap) is logged.
-      if (len > MONTH_CAP) {
-        console.warn(
-          `[analytics] month ${month} is over its ${MONTH_CAP}-event backstop cap (${len}) — trimming oldest events. If this is organic traffic, raise MONTH_CAP.`
-        )
-        await store.ltrim(MONTH_KEY_PREFIX + month, 0, MONTH_CAP - 1)
       }
       return
     }
@@ -707,11 +695,16 @@ export interface DashboardData {
    *  visit. Always true for the dev file store, which derives first-seen
    *  from the whole file. */
   firstSeenBackfilled: boolean
-  /** Months whose event count has reached MONTH_CAP_WARN_RATIO of the backstop
-   *  cap — the dashboard shows a warning so the cap can be raised before it
-   *  trims anything. Checked across the whole store, not just the selected
-   *  range. Normally empty. */
-  nearCap: { month: string; count: number; cap: number }[]
+  /** Set when the newest stored month already holds more than
+   *  HIGH_TRAFFIC_RATIO times the whole previous month — the dashboard warns
+   *  so a flood gets checked. Independent of the selected range. Normally
+   *  null. */
+  highTraffic: {
+    month: string
+    count: number
+    prevMonth: string
+    prevCount: number
+  } | null
 }
 
 const EMPTY: Omit<DashboardData, 'source'> = {
@@ -800,7 +793,7 @@ const EMPTY: Omit<DashboardData, 'source'> = {
   firstSeenBackfilled: true,
   correlations: [],
   recent: [],
-  nearCap: [],
+  highTraffic: null,
 }
 
 /** Source filters offered on map pages. 'untracked' = neither map nor cards. */
@@ -1008,7 +1001,7 @@ function aggregate(
   firstSeen: Map<string, number> = new Map()
 ): Omit<
   DashboardData,
-  'source' | 'error' | 'oldestTs' | 'nearCap' | 'firstSeenBackfilled'
+  'source' | 'error' | 'oldestTs' | 'highTraffic' | 'firstSeenBackfilled'
 > {
   const inRange = all.filter(e => {
     const t = Date.parse(e.ts)
@@ -1875,11 +1868,7 @@ function uniqueUsers(events: AnalyticsEvent[]): number {
  *  read in READ_CHUNK slices addressed FROM THE TAIL: normal writes only ever
  *  prepend at the head, so tail-relative indices stay stable and a read can't
  *  double-count or skip events mid-way. Events arriving after the length
- *  snapshot simply aren't part of this read — the next refresh has them. (The
- *  one exception to head-only writes is the backstop trim on a month over
- *  MONTH_CAP, which eats the tail; a trim landing mid-read can shift a few
- *  seam events between slices. That's transient, per-read, abuse-only noise —
- *  the stored data stays correct.)
+ *  snapshot simply aren't part of this read — the next refresh has them.
  *
  *  Each slice is awaited as its OWN request, deliberately not pipelined: the
  *  client sends a pipeline as a single HTTP call, whose one response would
@@ -1911,20 +1900,29 @@ async function readMonths(
   return out
 }
 
-/** The months at or past the warn share of the backstop cap, given every
- *  stored month's event count. Shared by both backends so the dashboard's
- *  early warning behaves identically in dev and prod. */
-function nearCapMonths(
+/** The newest month, if it already holds more than HIGH_TRAFFIC_RATIO times
+ *  the whole month before it, given every stored month's event count (any
+ *  order). Shared by both backends so the dashboard's warning behaves
+ *  identically in dev and prod. */
+function highTrafficMonth(
   counts: { month: string; count: number }[]
-): DashboardData['nearCap'] {
-  return counts
-    .filter(c => c.count >= MONTH_CAP * MONTH_CAP_WARN_RATIO)
-    .map(c => ({ ...c, cap: MONTH_CAP }))
+): DashboardData['highTraffic'] {
+  const sorted = [...counts].sort((a, b) => a.month.localeCompare(b.month))
+  const latest = sorted[sorted.length - 1]
+  const prev = sorted[sorted.length - 2]
+  if (!latest || !prev || latest.count <= HIGH_TRAFFIC_RATIO * prev.count)
+    return null
+  return {
+    month: latest.month,
+    count: latest.count,
+    prevMonth: prev.month,
+    prevCount: prev.count,
+  }
 }
 
 /** Every stored month with its event count, oldest first. The lengths come as
  *  one pipeline of integers — cheap, so callers can afford them for the whole
- *  store (the near-cap warning and the backfill both need every month). */
+ *  store (the high-traffic warning and the backfill both need every month). */
 async function storedMonths(
   db: Redis
 ): Promise<{ month: string; len: number }[]> {
@@ -2041,7 +2039,7 @@ export async function readDashboard(
       return {
         source: 'redis',
         oldestTs: oldestEvent?.ts,
-        nearCap: nearCapMonths(
+        highTraffic: highTrafficMonth(
           byMonth.map(b => ({ month: b.month, count: b.len }))
         ),
         firstSeenBackfilled: backfilled === 1,
@@ -2066,7 +2064,7 @@ export async function readDashboard(
   return {
     source: 'local-file',
     oldestTs: all[all.length - 1]?.ts, // newest-first, so the oldest is last
-    nearCap: nearCapMonths(
+    highTraffic: highTrafficMonth(
       [...devMonthCounts.entries()].map(([month, count]) => ({ month, count }))
     ),
     firstSeenBackfilled: true,

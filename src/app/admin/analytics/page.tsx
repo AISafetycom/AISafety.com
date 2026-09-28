@@ -745,15 +745,16 @@ export default async function AnalyticsPage({
         </div>
       </div>
 
-      {data.nearCap.map(({ month, count, cap }) => (
-        <div key={month} className={styles.capWarning}>
-          ⚠ {formatMonth(month)} already holds {count.toLocaleString()} events –{' '}
-          {Math.round((100 * count) / cap)}% of the {cap.toLocaleString()}
-          -per-month safety cap. At the cap, the month&apos;s oldest events
-          start being deleted. If this is real traffic rather than abuse, raise
-          the cap now (MONTH_CAP in the analytics code) so nothing is lost.
+      {data.highTraffic && (
+        <div className={styles.trafficWarning}>
+          ⚠ Unusually high traffic: {formatMonth(data.highTraffic.month)}{' '}
+          already holds {data.highTraffic.count.toLocaleString()} events, more
+          than twice all of {formatMonth(data.highTraffic.prevMonth)} (
+          {data.highTraffic.prevCount.toLocaleString()}). Check it&apos;s real
+          visitors rather than a script flooding the tracker. Nothing is deleted
+          either way.
         </div>
-      ))}
+      )}
 
       <DateRangePicker activeKey={range.key} from={range.from} to={range.to} />
 

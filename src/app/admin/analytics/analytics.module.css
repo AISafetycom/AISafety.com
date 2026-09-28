@@ -40,10 +40,10 @@
   cursor: help;
 }
 
-/* A storage month nearing its safety cap — an act-now warning, so amber and
- * impossible to miss, shown on every tab. Same warning tones as the admin
- * log's degraded-card note. */
-.capWarning {
+/* The newest month running at over twice the previous one — a check-this
+ * warning, so amber and impossible to miss, shown on every tab. Same warning
+ * tones as the admin log's degraded-card note. */
+.trafficWarning {
   margin-bottom: 16px;
   padding: 10px 14px;
   font-size: 13px;
