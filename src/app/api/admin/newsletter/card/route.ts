@@ -125,10 +125,13 @@ export async function POST(req: NextRequest) {
     return json(result)
   } catch (err) {
     if (err instanceof DraftProblemError) {
-      return json({ error: err.message, problems: err.problems }, 409)
+      return json(
+        { error: 'the draft failed its checks', problems: err.problems },
+        409
+      )
     }
     if (err instanceof FieldError || err instanceof FitError) {
-      return json({ error: err.message }, 400)
+      return json({ error: err.detail }, 400)
     }
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[newsletter] card edit ${campaignId} failed: ${message}`)

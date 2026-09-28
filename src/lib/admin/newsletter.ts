@@ -66,6 +66,32 @@ function apiKey(): string {
   return process.env.ACTIVECAMPAIGN_KEY ?? ''
 }
 
+/** The account's v3 API root; every v3 call is resolved under it. */
+function v3root(): string {
+  return `${base()}/api/3/`
+}
+
+/** Resolve `path` under the v3 API root and refuse anything that escapes it,
+ *  so an id that arrived in a request can never point a call at another path
+ *  or host (the same guard as `airtableRequest`). */
+function v3url(path: string): URL {
+  const root = v3root()
+  const url = new URL(path, root)
+  if (url.origin !== new URL(root).origin || !url.href.startsWith(root)) {
+    throw new Error('ActiveCampaign request path escapes the API')
+  }
+  return url
+}
+
+/** ActiveCampaign ids are plain numbers. Ids reach these helpers from request
+ *  bodies and query strings (the routes check them too); anything else is
+ *  refused before it can become part of a URL. */
+function acId(id: string): string {
+  if (!/^\d{1,12}$/.test(id))
+    throw new Error(`not an ActiveCampaign id: ${id.slice(0, 20)}`)
+  return id
+}
+
 /** Gateway errors ActiveCampaign's edge returns for a few seconds at a time
  *  (a 502 page from Cloudflare, 25 Sept 2026), and its rate limit (429, five
  *  requests a second). Reads retry them; writes never retry, because a write
@@ -76,7 +102,7 @@ const READ_RETRY_DELAYS_MS = [1000, 3000]
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function v3<T = any>(path: string): Promise<T> {
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(`${base()}/api/3/${path}`, {
+    const res = await fetch(v3url(path), {
       headers: { 'Api-Token': apiKey() },
       cache: 'no-store',
     })
@@ -103,7 +129,7 @@ async function v3<T = any>(path: string): Promise<T> {
  *  as stored, so a write needs no separate read to check it. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function v3put<T = any>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${base()}/api/3/${path}`, {
+  const res = await fetch(v3url(path), {
     method: 'PUT',
     headers: { 'Api-Token': apiKey(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -290,20 +316,20 @@ export function liveCampaignsNamed<
 
 async function campaignListIds(campaignId: string): Promise<string[]> {
   const data = await v3<{ campaignLists: Array<{ list: string }> }>(
-    `campaigns/${campaignId}/campaignLists`
+    `campaigns/${acId(campaignId)}/campaignLists`
   )
   return (data.campaignLists ?? []).map(l => String(l.list))
 }
 
 async function campaignMessageIds(campaignId: string): Promise<string[]> {
   const data = await v3<{ campaignMessages: Array<{ messageid: string }> }>(
-    `campaigns/${campaignId}/campaignMessages`
+    `campaigns/${acId(campaignId)}/campaignMessages`
   )
   return (data.campaignMessages ?? []).map(m => String(m.messageid))
 }
 
 async function message(messageId: string): Promise<RawMessage> {
-  const data = await v3<{ message: RawMessage }>(`messages/${messageId}`)
+  const data = await v3<{ message: RawMessage }>(`messages/${acId(messageId)}`)
   return data.message
 }
 
@@ -398,7 +424,7 @@ async function readDraft(
   msg: RawMessage | null
 }> {
   const [campaign, listIds, messageIds, early] = await Promise.all([
-    v3<{ campaign?: RawCampaign }>(`campaigns/${draftId}`)
+    v3<{ campaign?: RawCampaign }>(`campaigns/${acId(draftId)}`)
       .then(d => d.campaign ?? null)
       .catch((err: Error) => {
         if (/: 404 /.test(err.message)) return null
@@ -760,7 +786,15 @@ const SUBLINK_OPEN = '<div style="margin-top:8px;">'
 /** The description block the fit line lives in. */
 const DESCRIPTION_OPEN_RE = /<div class="pb"[^>]*>/
 
-export class FitError extends Error {}
+/** A "Consider applying if" edit the page can't make; `detail` is written
+ *  for the page (routes send it, never a caught error's message). */
+export class FitError extends Error {
+  readonly detail: string
+  constructor(detail: string) {
+    super(detail)
+    this.detail = detail
+  }
+}
 
 function fitDiv(fitHtml: string): string {
   return `<div style="margin-top:12px;"><span style="font-weight:600;">Consider applying if</span>: ${fitHtml}</div>`
@@ -857,7 +891,14 @@ export function setFitHtml(
 // render.py `set_fields()` — keep them in step.
 const FIELD_RE = /<!--f:([a-z]+\d*)(?::([a-z0-9-]+))?-->([\s\S]*?)<!--\/f-->/g
 
-export class FieldError extends Error {}
+/** A text edit the page can't make; `detail` is written for the page. */
+export class FieldError extends Error {
+  readonly detail: string
+  constructor(detail: string) {
+    super(detail)
+    this.detail = detail
+  }
+}
 
 /** What a row is, from the icon the renderer chose for it. */
 const ICON_LABELS: Record<string, string> = {
@@ -1094,7 +1135,7 @@ async function rewriteDraft(
   const { html, text } = change(body)
   const stamped = `<!--aisafety-issue:${contentDigest(html)}-->` + html
   const stored = await v3put<{ message?: RawMessage }>(
-    `messages/${messageId}`,
+    `messages/${acId(messageId)}`,
     { message: { html: stamped, text } }
   )
   const liveHtml =

@@ -99,9 +99,15 @@ export async function updateListingDescription(
       )
     return { ok: true, table }
   } catch (err) {
+    // The page gets a plain line; what went wrong stays in the server log.
+    console.error(
+      `[newsletter] listing update ${recordId} failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    )
     return {
       ok: false,
-      reason: err instanceof Error ? err.message : String(err),
+      reason: 'Airtable couldn’t be reached; details are in the server log',
     }
   }
 }
