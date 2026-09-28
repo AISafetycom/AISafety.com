@@ -66,22 +66,70 @@ function apiKey(): string {
   return process.env.ACTIVECAMPAIGN_KEY ?? ''
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function v3<T = any>(path: string): Promise<T> {
-  const res = await fetch(`${base()}/api/3/${path}`, {
-    headers: { 'Api-Token': apiKey() },
-    cache: 'no-store',
-  })
-  if (!res.ok) {
-    throw new Error(
-      `ActiveCampaign ${path.split('?')[0]}: ${res.status} ${await res.text()}`
-    )
-  }
-  return res.json() as Promise<T>
+/** The account's v3 API root; every v3 call is resolved under it. */
+function v3root(): string {
+  return `${base()}/api/3/`
 }
 
-async function v3put(path: string, body: unknown): Promise<void> {
-  const res = await fetch(`${base()}/api/3/${path}`, {
+/** Resolve `path` under the v3 API root and refuse anything that escapes it,
+ *  so an id that arrived in a request can never point a call at another path
+ *  or host (the same guard as `airtableRequest`). */
+function v3url(path: string): URL {
+  const root = v3root()
+  const url = new URL(path, root)
+  if (url.origin !== new URL(root).origin || !url.href.startsWith(root)) {
+    throw new Error('ActiveCampaign request path escapes the API')
+  }
+  return url
+}
+
+/** ActiveCampaign ids are plain numbers. Ids reach these helpers from request
+ *  bodies and query strings (the routes check them too); anything else is
+ *  refused before it can become part of a URL. */
+function acId(id: string): string {
+  if (!/^\d{1,12}$/.test(id))
+    throw new Error(`not an ActiveCampaign id: ${id.slice(0, 20)}`)
+  return id
+}
+
+/** Gateway errors ActiveCampaign's edge returns for a few seconds at a time
+ *  (a 502 page from Cloudflare, 25 Sept 2026), and its rate limit (429, five
+ *  requests a second). Reads retry them; writes never retry, because a write
+ *  may have landed before the error came back. */
+const TRANSIENT_STATUSES = new Set([429, 502, 503, 504])
+const READ_RETRY_DELAYS_MS = [1000, 3000]
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function v3<T = any>(path: string): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(v3url(path), {
+      headers: { 'Api-Token': apiKey() },
+      cache: 'no-store',
+    })
+    if (res.ok) return res.json() as Promise<T>
+    const delay = READ_RETRY_DELAYS_MS[attempt]
+    if (TRANSIENT_STATUSES.has(res.status) && delay !== undefined) {
+      console.warn(
+        `[newsletter] ActiveCampaign ${path.split('?')[0]}: ${res.status}, retrying in ${delay} ms`
+      )
+      await new Promise(r => setTimeout(r, delay))
+      continue
+    }
+    // AC's gateway errors are whole HTML pages; keep the log line readable.
+    const text = TRANSIENT_STATUSES.has(res.status)
+      ? 'gateway error from ActiveCampaign'
+      : (await res.text()).slice(0, 500)
+    throw new Error(
+      `ActiveCampaign ${path.split('?')[0]}: ${res.status} ${text}`
+    )
+  }
+}
+
+/** PUT, returning what ActiveCampaign answers — for a message, the message
+ *  as stored, so a write needs no separate read to check it. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function v3put<T = any>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(v3url(path), {
     method: 'PUT',
     headers: { 'Api-Token': apiKey(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -89,10 +137,54 @@ async function v3put(path: string, body: unknown): Promise<void> {
   })
   if (!res.ok) {
     throw new Error(
-      `ActiveCampaign PUT ${path.split('?')[0]}: ${res.status} ${await res.text()}`
+      `ActiveCampaign PUT ${path.split('?')[0]}: ${res.status} ${(await res.text()).slice(0, 500)}`
     )
   }
+  return (await res.json().catch(() => ({}))) as T
 }
+
+/* ─── Fewer, parallel reads ───────────────────────────────────────────────
+   ActiveCampaign can take 10+ seconds per request (25 Sept 2026), so the page
+   asks as little as it can, side by side: the drafts and the recent sends
+   (read at the same time) share one campaigns read and one lists read, a sent
+   campaign's lists are remembered (they never change), and per-draft reads
+   run a few at a time — never more, AC allows five requests a second. */
+
+const shared = new Map<string, { at: number; value: Promise<unknown> }>()
+
+function sharedRead<T>(
+  key: string,
+  ttlMs: number,
+  read: () => Promise<T>
+): Promise<T> {
+  const hit = shared.get(key)
+  if (hit && Date.now() - hit.at < ttlMs) return hit.value as Promise<T>
+  const value = read()
+  shared.set(key, { at: Date.now(), value })
+  value.catch(() => shared.delete(key))
+  return value
+}
+
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const out = new Array<R>(items.length)
+  let next = 0
+  async function worker() {
+    while (next < items.length) {
+      const i = next++
+      out[i] = await fn(items[i])
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker)
+  )
+  return out
+}
+
+const sentListIds = new Map<string, string[]>()
 
 async function v1(
   action: string,
@@ -224,28 +316,30 @@ export function liveCampaignsNamed<
 
 async function campaignListIds(campaignId: string): Promise<string[]> {
   const data = await v3<{ campaignLists: Array<{ list: string }> }>(
-    `campaigns/${campaignId}/campaignLists`
+    `campaigns/${acId(campaignId)}/campaignLists`
   )
   return (data.campaignLists ?? []).map(l => String(l.list))
 }
 
 async function campaignMessageIds(campaignId: string): Promise<string[]> {
   const data = await v3<{ campaignMessages: Array<{ messageid: string }> }>(
-    `campaigns/${campaignId}/campaignMessages`
+    `campaigns/${acId(campaignId)}/campaignMessages`
   )
   return (data.campaignMessages ?? []).map(m => String(m.messageid))
 }
 
 async function message(messageId: string): Promise<RawMessage> {
-  const data = await v3<{ message: RawMessage }>(`messages/${messageId}`)
+  const data = await v3<{ message: RawMessage }>(`messages/${acId(messageId)}`)
   return data.message
 }
 
 async function listNames(): Promise<Map<string, string>> {
-  const data = await v3<{ lists: Array<{ id: string; name: string }> }>(
-    'lists?limit=100'
-  )
-  return new Map((data.lists ?? []).map(l => [String(l.id), l.name]))
+  return sharedRead('lists', 5 * 60_000, async () => {
+    const data = await v3<{ lists: Array<{ id: string; name: string }> }>(
+      'lists?limit=100'
+    )
+    return new Map((data.lists ?? []).map(l => [String(l.id), l.name]))
+  })
 }
 
 /** Active contacts on a list — the number an approved send goes to. */
@@ -262,29 +356,29 @@ async function activeContactCount(listId: string): Promise<number | null> {
 }
 
 async function allCampaigns(): Promise<RawCampaign[]> {
-  const data = await v3<{ campaigns: RawCampaign[] }>(
-    'campaigns?limit=100&orders[cdate]=DESC'
-  )
-  return data.campaigns ?? []
+  return sharedRead('campaigns', 5_000, async () => {
+    const data = await v3<{ campaigns: RawCampaign[] }>(
+      'campaigns?limit=100&orders[cdate]=DESC'
+    )
+    return data.campaigns ?? []
+  })
 }
 
-/** The checks `ac.py verify` runs, as a list of problems (empty = OK). */
-async function checkDraft(
+/** The checks `ac.py verify` runs, as a list of problems (empty = OK), on
+ *  what has already been read. */
+function draftProblems(
   campaign: RawCampaign,
+  listIds: string[],
+  messageIds: string[],
+  msg: RawMessage | null,
   expectedListId: string | null
-): Promise<{
-  problems: string[]
-  listIds: string[]
-  messageId: string | null
-  msg: RawMessage | null
-}> {
+): string[] {
   const problems: string[] = []
   if (campaign.status !== '0') {
     problems.push(
       `campaign status is ${STATUS_NAMES[campaign.status] ?? campaign.status}, expected draft`
     )
   }
-  const listIds = await campaignListIds(campaign.id)
   if (listIds.length !== 1) {
     problems.push(
       `campaign is wired to ${listIds.length} lists, expected exactly one`
@@ -294,14 +388,11 @@ async function checkDraft(
       `campaign is wired to list ${listIds[0]}, expected ${expectedListId}`
     )
   }
-  const messageIds = await campaignMessageIds(campaign.id)
-  let msg: RawMessage | null = null
   if (messageIds.length !== 1) {
     problems.push(
       `campaign has ${messageIds.length} messages, expected exactly one`
     )
-  } else {
-    msg = await message(messageIds[0])
+  } else if (msg) {
     const html = msg.html ?? ''
     const m = MARKER_RE.exec(html)
     if (!m) {
@@ -314,24 +405,69 @@ async function checkDraft(
       )
     }
   }
-  return { problems, listIds, messageId: messageIds[0] ?? null, msg }
+  return problems
+}
+
+/** Read a draft and run the checks. The campaign, its lists and its messages
+ *  are read side by side; `knownMessageId` (the page sends the one it
+ *  listed) lets the message be read alongside them too, confirmed against
+ *  the campaign's own message list afterwards. */
+async function readDraft(
+  draftId: string,
+  expectedListId: string | null,
+  knownMessageId?: string
+): Promise<{
+  campaign: RawCampaign
+  problems: string[]
+  listIds: string[]
+  messageId: string | null
+  msg: RawMessage | null
+}> {
+  const [campaign, listIds, messageIds, early] = await Promise.all([
+    v3<{ campaign?: RawCampaign }>(`campaigns/${acId(draftId)}`)
+      .then(d => d.campaign ?? null)
+      .catch((err: Error) => {
+        if (/: 404 /.test(err.message)) return null
+        throw err
+      }),
+    campaignListIds(draftId),
+    campaignMessageIds(draftId),
+    knownMessageId
+      ? message(knownMessageId).catch(() => null)
+      : Promise.resolve(null),
+  ])
+  if (!campaign) throw new DraftProblemError(['draft campaign not found'])
+  const messageId = messageIds.length === 1 ? messageIds[0] : null
+  const msg =
+    messageId == null
+      ? null
+      : early && messageId === knownMessageId
+        ? early
+        : await message(messageId)
+  return {
+    campaign,
+    problems: draftProblems(campaign, listIds, messageIds, msg, expectedListId),
+    listIds,
+    messageId,
+    msg,
+  }
 }
 
 /** Pipeline drafts waiting for approval: draft campaigns whose message carries
  *  the content marker. Hand-made drafts in AC never show here. */
 export async function listDrafts(): Promise<DraftSummary[]> {
-  const campaigns = await allCampaigns()
-  const names = await listNames()
-  const out: DraftSummary[] = []
-  for (const c of campaigns) {
-    if (c.status !== '0') continue
-    const messageIds = await campaignMessageIds(c.id)
-    if (messageIds.length === 0) continue
+  const [campaigns, names] = await Promise.all([allCampaigns(), listNames()])
+  const drafts = campaigns.filter(c => c.status === '0')
+  const rows = await mapLimit(drafts, 3, async c => {
+    const [messageIds, listIds] = await Promise.all([
+      campaignMessageIds(c.id),
+      campaignListIds(c.id),
+    ])
+    if (messageIds.length === 0) return null
     const msg = await message(messageIds[0])
-    if (!MARKER_RE.test(msg.html ?? '')) continue
-    const { problems, listIds } = await checkDraft(c, null)
+    if (!MARKER_RE.test(msg.html ?? '')) return null
     const listId = listIds.length === 1 ? listIds[0] : null
-    out.push({
+    const row: DraftSummary = {
       id: c.id,
       name: c.name,
       subject: msg.subject,
@@ -342,12 +478,13 @@ export async function listDrafts(): Promise<DraftSummary[]> {
       listId,
       listName: listId ? (names.get(listId) ?? null) : null,
       activeContacts: listId ? await activeContactCount(listId) : null,
-      problems,
+      problems: draftProblems(c, listIds, messageIds, msg, null),
       preview: previewText(msg.html ?? ''),
       cards: cardGroups(msg.html ?? ''),
-    })
-  }
-  return out
+    }
+    return row
+  })
+  return rows.filter((r): r is DraftSummary => r !== null)
 }
 
 const PREHEADER_RE = /<div style="display:none[^"]*"[^>]*>([\s\S]*?)<\/div>/
@@ -373,8 +510,12 @@ function stripHtml(fragment: string): string {
     .replace(/&lsquo;/g, '\u2018')
     .replace(/&ndash;/g, '\u2013')
     .replace(/&mdash;/g, '\u2014')
+    .replace(/&middot;/g, '\u00b7')
+    .replace(/&#x([0-9a-f]+);/gi, (_, h: string) =>
+      String.fromCodePoint(parseInt(h, 16))
+    )
+    .replace(/&#(\d+);/g, (_, d: string) => String.fromCodePoint(Number(d)))
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&amp;/g, '&')
@@ -388,8 +529,7 @@ function escapeHtml(s: string): string {
 
 /** The most recent sends (and anything scheduled or stuck), newest first. */
 export async function listRecent(limit = 12): Promise<SentSummary[]> {
-  const campaigns = await allCampaigns()
-  const names = await listNames()
+  const [campaigns, names] = await Promise.all([allCampaigns(), listNames()])
   const recent = campaigns
     .filter(c => c.status in STATUS_NAMES)
     .sort((a, b) =>
@@ -398,10 +538,16 @@ export async function listRecent(limit = 12): Promise<SentSummary[]> {
       )
     )
     .slice(0, limit)
-  const out: SentSummary[] = []
-  for (const c of recent) {
-    const listIds = await campaignListIds(c.id)
-    out.push({
+  const lists = await mapLimit(recent, 3, async c => {
+    const known = sentListIds.get(c.id)
+    if (known) return known
+    const ids = await campaignListIds(c.id)
+    if (c.status === '5') sentListIds.set(c.id, ids)
+    return ids
+  })
+  return recent.map((c, i) => {
+    const listIds = lists[i]
+    return {
       id: c.id,
       name: c.name,
       status: STATUS_NAMES[c.status],
@@ -411,9 +557,8 @@ export async function listRecent(limit = 12): Promise<SentSummary[]> {
       uniqueOpens: c.uniqueopens == null ? null : Number(c.uniqueopens),
       unsubscribes: c.unsubscribes == null ? null : Number(c.unsubscribes),
       listNames: listIds.map(id => names.get(id) ?? `list ${id}`),
-    })
-  }
-  return out
+    }
+  })
 }
 
 /* ─── Reorderable cards ─────────────────────────────────────────────── */
@@ -433,6 +578,25 @@ export interface CardInfo {
   /** Pen's original line as plain text, from the manifest, so an edit can
    *  be recognised and undone. Null for drafts built before 16 Sept 2026. */
   pipelineFit: string | null
+  /** Every piece of text on the card that can be edited, in the order the
+   *  email shows it (title, lines under it, description, rows at the
+   *  bottom). Empty for drafts built before 25 Sept 2026. */
+  fields: CardField[]
+}
+
+export interface CardField {
+  /** The marker name: `title`, `m0`… (lines under the title), `desc`,
+   *  `b0`… (rows at the bottom). */
+  name: string
+  /** What the editor calls it ("Title", "Dates", "Stipend"…). */
+  label: string
+  /** The text now, plain. */
+  value: string
+  /** The text as the pipeline built it, when it has been edited since;
+   *  null when it never was. */
+  original: string | null
+  /** The text carries a link, which a plain-text edit would drop. */
+  hasLink: boolean
 }
 
 export interface CardGroup {
@@ -450,6 +614,8 @@ interface ManifestCard {
   logo?: string | null
   /** Funding cards: Pen's "Consider applying if" HTML ('' when none). */
   fit?: string
+  /** Text as built, per field, recorded on the field's first edit. */
+  o?: Record<string, string>
 }
 
 interface Manifest {
@@ -507,7 +673,12 @@ export function cardGroups(html: string): CardGroup[] | null {
   if (!manifest) return null
   const info = new Map<
     string,
-    { title: string; logo: string | null; fit: string | null }
+    {
+      title: string
+      logo: string | null
+      fit: string | null
+      o: Record<string, string>
+    }
   >()
   for (const g of manifest.groups)
     for (const c of g.cards)
@@ -515,6 +686,7 @@ export function cardGroups(html: string): CardGroup[] | null {
         title: c.title,
         logo: typeof c.logo === 'string' && c.logo ? c.logo : null,
         fit: typeof c.fit === 'string' ? c.fit : null,
+        o: c.o && typeof c.o === 'object' ? c.o : {},
       })
   const groups = new Map<string, CardGroup>(
     manifest.groups.map(g => [g.id, { id: g.id, label: g.label, cards: [] }])
@@ -531,6 +703,7 @@ export function cardGroups(html: string): CardGroup[] | null {
       logo: meta?.logo ?? null,
       fit: fit ? stripHtml(fit[1]) : pipelineFit != null ? '' : null,
       pipelineFit: pipelineFit != null ? stripHtml(pipelineFit) : null,
+      fields: cardFields(b.raw, meta?.o ?? {}, meta?.fit != null),
     })
   }
   const out = [...groups.values()].filter(g => g.cards.length > 0)
@@ -613,7 +786,15 @@ const SUBLINK_OPEN = '<div style="margin-top:8px;">'
 /** The description block the fit line lives in. */
 const DESCRIPTION_OPEN_RE = /<div class="pb"[^>]*>/
 
-export class FitError extends Error {}
+/** A "Consider applying if" edit the page can't make; `detail` is written
+ *  for the page (routes send it, never a caught error's message). */
+export class FitError extends Error {
+  readonly detail: string
+  constructor(detail: string) {
+    super(detail)
+    this.detail = detail
+  }
+}
 
 function fitDiv(fitHtml: string): string {
   return `<div style="margin-top:12px;"><span style="font-weight:600;">Consider applying if</span>: ${fitHtml}</div>`
@@ -703,20 +884,214 @@ export function setFitHtml(
   return { html: out, text: rebuildText(manifest, order) }
 }
 
+/* ─── Card text (title, lines, description, rows) ───────────────────── */
+
+// render.py wraps every piece of text on a card in `<!--f:NAME-->…<!--/f-->`
+// (rows: `<!--f:NAME:ICON-->`). `setFieldsHtml()` is the same algorithm as
+// render.py `set_fields()` — keep them in step.
+const FIELD_RE = /<!--f:([a-z]+\d*)(?::([a-z0-9-]+))?-->([\s\S]*?)<!--\/f-->/g
+
+/** A text edit the page can't make; `detail` is written for the page. */
+export class FieldError extends Error {
+  readonly detail: string
+  constructor(detail: string) {
+    super(detail)
+    this.detail = detail
+  }
+}
+
+/** What a row is, from the icon the renderer chose for it. */
+const ICON_LABELS: Record<string, string> = {
+  pin: 'Location',
+  computer: 'Location',
+  calendar: 'Dates',
+  person: 'Host',
+  money: 'Stipend',
+  'money-off': 'Stipend',
+  timer: 'Time commitment',
+  'timer-half': 'Time commitment',
+  'entry-low': 'Entry bar',
+  'entry-mid': 'Entry bar',
+  'entry-high': 'Entry bar',
+  paper: 'Applications',
+  'paper-closed': 'Applications',
+  'form-check': 'Accepting applications',
+  'form-pause': 'Accepting applications',
+  target: 'Detail',
+}
+
+function fieldLabel(name: string, icon: string | undefined, funding: boolean) {
+  if (name === 'title') return 'Title'
+  if (name === 'desc') return 'Description'
+  if (icon === 'tag') return funding ? 'Type' : 'Cost'
+  return (icon && ICON_LABELS[icon]) || 'Detail'
+}
+
+function cardFields(
+  raw: string,
+  origs: Record<string, string>,
+  funding: boolean
+): CardField[] {
+  const out: CardField[] = []
+  for (const m of raw.matchAll(FIELD_RE)) {
+    const orig = origs[m[1]]
+    const value = stripHtml(m[3])
+    out.push({
+      name: m[1],
+      label: fieldLabel(m[1], m[2], funding),
+      value,
+      original:
+        typeof orig === 'string' && stripHtml(orig) !== value
+          ? stripHtml(orig)
+          : null,
+      hasLink: /<a\s/i.test(m[3]),
+    })
+  }
+  return out
+}
+
+/** The card's text segment with `old` swapped for `next` (both plain): a
+ *  whole line first (after its "* " or "  " lead), else the first
+ *  occurrence inside a line; unchanged when `old` isn't there. */
+function replacePlain(segment: string, old: string, next: string): string {
+  if (!old || old === next) return segment
+  const lines = segment.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i]
+    const lead = l.startsWith('* ') || l.startsWith('  ') ? l.slice(0, 2) : ''
+    if (l.slice(lead.length) === old) {
+      lines[i] = lead + next
+      return lines.join('\n')
+    }
+  }
+  for (let i = 0; i < lines.length; i++) {
+    const at = lines[i].indexOf(old)
+    if (at >= 0) {
+      lines[i] = lines[i].slice(0, at) + next + lines[i].slice(at + old.length)
+      return lines.join('\n')
+    }
+  }
+  return segment
+}
+
+/** Pure: the email with text on one card replaced — `values` maps field
+ *  names to HTML fragments — the manifest updated (the text as built is
+ *  kept under `o` on a field's first edit, the title follows an edited
+ *  title) and the plain-text email rebuilt in the cards' current order.
+ *  Mirrors render.py `set_fields()`. */
+export function setFieldsRaw(
+  html: string,
+  gid: string,
+  key: string,
+  values: Record<string, string>
+): { html: string; text: string } {
+  const manifest = readManifest(html)
+  if (!manifest) throw new FieldError('no card manifest in this email')
+  const block = cardBlocks(html).find(b => b.gid === gid && b.key === key)
+  if (!block) throw new FieldError(`unknown card ${gid}:${key}`)
+  const entry = manifest.groups
+    .find(g => g.id === gid)
+    ?.cards.find(c => c.key === key)
+  if (!entry)
+    throw new FieldError(`card ${gid}:${key} is missing from the manifest`)
+  const names = new Set([...block.raw.matchAll(FIELD_RE)].map(m => m[1]))
+  for (const name of Object.keys(values)) {
+    if (!names.has(name))
+      throw new FieldError(`card ${gid}:${key} has no '${name}' text`)
+  }
+  const seg = manifest.text.find(s => s.c === `${gid}:${key}`)
+  const card = block.raw.replace(
+    FIELD_RE,
+    (whole, name: string, icon: string | undefined, old: string) => {
+      const next = Object.prototype.hasOwnProperty.call(values, name)
+        ? values[name]
+        : undefined
+      if (next === undefined || next === old) return whole
+      entry.o ??= {}
+      if (!Object.prototype.hasOwnProperty.call(entry.o, name))
+        entry.o[name] = old
+      if (seg) seg.t = replacePlain(seg.t, stripHtml(old), stripHtml(next))
+      if (name === 'title') entry.title = stripHtml(next)
+      return `<!--f:${name}${icon ? `:${icon}` : ''}-->${next}<!--/f-->`
+    }
+  )
+  const encoded = Buffer.from(JSON.stringify(manifest), 'utf8').toString(
+    'base64'
+  )
+  const out = (
+    html.slice(0, block.start) +
+    card +
+    html.slice(block.end)
+  ).replace(MANIFEST_RE, () => `<!--aisafety-cards:${encoded}-->`)
+  const order: Record<string, string[]> = {}
+  for (const b of cardBlocks(out)) (order[b.gid] ??= []).push(b.key)
+  return { html: out, text: rebuildText(manifest, order) }
+}
+
+/** `setFieldsRaw()` for plain text from the editor: whitespace collapsed,
+ *  escaped. A field can't be emptied (a line with no text would still show
+ *  its icon). */
+export function setFieldsHtml(
+  html: string,
+  gid: string,
+  key: string,
+  values: Record<string, string>
+): { html: string; text: string } {
+  const escaped: Record<string, string> = {}
+  for (const [name, value] of Object.entries(values)) {
+    const clean = value.replace(/\s+/g, ' ').trim()
+    if (!clean) throw new FieldError(`the ${name} text can't be empty`)
+    escaped[name] = escapeHtml(clean)
+  }
+  return setFieldsRaw(html, gid, key, escaped)
+}
+
+/** Edit text on one card inside a draft — any of its fields, and on funding
+ *  cards the "Consider applying if" line — in one write: verify, rewrite
+ *  HTML + text, re-stamp, write back, re-check. Returns the cards. */
+export async function editDraftCard(
+  draftId: string,
+  gid: string,
+  key: string,
+  values: Record<string, string>,
+  fit?: string,
+  knownMessageId?: string
+): Promise<{ cards: CardGroup[] }> {
+  if (Object.keys(values).length === 0 && fit === undefined)
+    throw new FieldError('nothing to change')
+  return rewriteDraft(
+    draftId,
+    body => {
+      let out = { html: body, text: '' }
+      if (Object.keys(values).length > 0)
+        out = setFieldsHtml(out.html, gid, key, values)
+      if (fit !== undefined) out = setFitHtml(out.html, gid, key, fit)
+      return out
+    },
+    `card ${gid}:${key} edited (${[
+      ...Object.keys(values),
+      ...(fit !== undefined ? ['fit'] : []),
+    ].join(', ')})`,
+    knownMessageId
+  )
+}
+
 /** Move the cards of a draft into `order` ({ groupId: keys }) inside
  *  ActiveCampaign: verify the draft first (same checks as approval), rewrite
  *  the message HTML + text, re-stamp the content marker, write it back, and
  *  re-check the live message. Returns the new card order. */
 export async function reorderDraft(
   draftId: string,
-  order: Record<string, string[]>
+  order: Record<string, string[]>,
+  knownMessageId?: string
 ): Promise<{ cards: CardGroup[] }> {
   return rewriteDraft(
     draftId,
     body => reorderHtml(body, order),
     `reordered: ${Object.entries(order)
       .map(([g, k]) => `${g}=${k.join(',')}`)
-      .join(' ')}`
+      .join(' ')}`,
+    knownMessageId
   )
 }
 
@@ -738,16 +1113,19 @@ export async function editDraftFit(
 
 /** The write path shared by every edit: verify the draft (same checks as
  *  approval), apply `change` to the message body, re-stamp the content
- *  marker, write it back through the v3 API and re-check the live message. */
+ *  marker, write it back through the v3 API and check the stored message AC
+ *  answers with. Two round trips when the page passes the message id. */
 async function rewriteDraft(
   draftId: string,
   change: (body: string) => { html: string; text: string },
-  logLine: string
+  logLine: string,
+  knownMessageId?: string
 ): Promise<{ cards: CardGroup[] }> {
-  const campaigns = await allCampaigns()
-  const draft = campaigns.find(c => c.id === draftId)
-  if (!draft) throw new DraftProblemError(['draft campaign not found'])
-  const { problems, messageId, msg } = await checkDraft(draft, null)
+  const { problems, messageId, msg } = await readDraft(
+    draftId,
+    null,
+    knownMessageId
+  )
   if (problems.length > 0 || !messageId || !msg) {
     throw new DraftProblemError(
       problems.length > 0 ? problems : ['no message on the draft']
@@ -756,9 +1134,14 @@ async function rewriteDraft(
   const body = (msg.html ?? '').replace(MARKER_RE, '')
   const { html, text } = change(body)
   const stamped = `<!--aisafety-issue:${contentDigest(html)}-->` + html
-  await v3put(`messages/${messageId}`, { message: { html: stamped, text } })
-  const live = await message(messageId)
-  const liveHtml = live.html ?? ''
+  const stored = await v3put<{ message?: RawMessage }>(
+    `messages/${acId(messageId)}`,
+    { message: { html: stamped, text } }
+  )
+  const liveHtml =
+    typeof stored.message?.html === 'string'
+      ? stored.message.html
+      : ((await message(messageId)).html ?? '')
   const m = MARKER_RE.exec(liveHtml)
   if (!m || m[1] !== contentDigest(liveHtml)) {
     throw new Error(
@@ -773,10 +1156,20 @@ async function rewriteDraft(
 
 /** The message HTML as a subscriber will see it, with AC's personalisation
  *  tags neutralised so the preview renders cleanly. */
-export async function previewHtml(campaignId: string): Promise<string | null> {
-  const messageIds = await campaignMessageIds(campaignId)
-  if (messageIds.length !== 1) return null
-  const msg = await message(messageIds[0])
+export async function previewHtml(
+  campaignId: string,
+  messageId?: string
+): Promise<string | null> {
+  // With the message id the page listed, one read instead of two (AC can take
+  // 10+ seconds a request). Only pipeline emails (content marker) show either way.
+  let id = messageId
+  if (!id) {
+    const messageIds = await campaignMessageIds(campaignId)
+    if (messageIds.length !== 1) return null
+    id = messageIds[0]
+  }
+  const msg = await message(id).catch(() => null)
+  if (!msg) return null
   const html = msg.html ?? ''
   if (!MARKER_RE.test(html)) return null
   return html
@@ -839,7 +1232,7 @@ export async function approveAndSend(
   const campaigns = await allCampaigns()
   const draft = campaigns.find(c => c.id === draftId)
   if (!draft) throw new DraftProblemError(['draft campaign not found'])
-  const { problems, messageId } = await checkDraft(draft, listId)
+  const { problems, messageId } = await readDraft(draftId, listId)
   if (problems.length > 0 || !messageId) {
     throw new DraftProblemError(
       problems.length > 0 ? problems : ['no message on the draft']

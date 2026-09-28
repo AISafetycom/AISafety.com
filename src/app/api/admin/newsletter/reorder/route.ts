@@ -46,13 +46,17 @@ export async function POST(req: NextRequest) {
   } catch {
     return json({ error: 'body must be JSON' }, 400)
   }
-  const { campaign, order } = (body ?? {}) as {
+  const { campaign, order, message } = (body ?? {}) as {
     campaign?: unknown
     order?: unknown
+    /** The message id the page listed: read alongside the checks. */
+    message?: unknown
   }
   const campaignId = String(campaign ?? '')
   const valid =
     /^\d+$/.test(campaignId) &&
+    (message === undefined ||
+      (typeof message === 'string' && /^\d+$/.test(message))) &&
     order != null &&
     typeof order === 'object' &&
     !Array.isArray(order) &&
@@ -72,7 +76,8 @@ export async function POST(req: NextRequest) {
   try {
     const result = await reorderDraft(
       campaignId,
-      order as Record<string, string[]>
+      order as Record<string, string[]>,
+      message as string | undefined
     )
     return json(result)
   } catch (err) {

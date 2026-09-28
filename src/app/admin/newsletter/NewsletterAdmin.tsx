@@ -13,7 +13,29 @@ interface CardInfo {
   fit: string | null
   /** Pen's original line, to show what changed and offer it back. */
   pipelineFit: string | null
+  /** Every piece of text on the card (title, lines under it, description,
+   *  rows at the bottom); empty for drafts built before 25 Sept 2026. */
+  fields: CardField[]
 }
+
+interface CardField {
+  name: string
+  label: string
+  value: string
+  /** The text as built, when it has been edited since; null otherwise. */
+  original: string | null
+  hasLink: boolean
+}
+
+/** Pen stamps each item with its Airtable record id; only those cards can
+ *  pass a description on to the site's listing. */
+const RECORD_KEY_RE = /^rec[A-Za-z0-9]{14}$/
+
+/** How long after the last keystroke the editor saves by itself. */
+const AUTOSAVE_DELAY_MS = 900
+/** How long after a card is dropped (or moved with the arrow keys) the new
+ *  order saves itself. */
+const ORDER_SAVE_DELAY_MS = 500
 
 interface CardGroup {
   id: string
@@ -23,6 +45,9 @@ interface CardGroup {
 
 interface Draft {
   id: string
+  /** The draft's message: sent with every save and the preview so the server
+   *  can read it alongside its checks (ActiveCampaign is slow per request). */
+  messageId: string | null
   name: string
   subject: string
   fromEmail: string
@@ -99,8 +124,15 @@ export default function NewsletterAdmin({
   const [loadError, setLoadError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [previewId, setPreviewId] = useState<string | null>(null)
-  /** Bumped after a reorder so the preview frame reloads the new order. */
+  /** Bumped after a reorder or a text edit so the preview frame reloads. */
   const [previewNonce, setPreviewNonce] = useState(0)
+  /** Where the reader is in the preview (the frame posts it as it scrolls),
+   *  and the position the frame was last loaded with. Only the second one
+   *  goes into the frame's URL, and only changes together with the nonce, so
+   *  scrolling never reloads the frame. */
+  const previewScroll = useRef(0)
+  const previewFrame = useRef<HTMLIFrameElement | null>(null)
+  const [previewY, setPreviewY] = useState(0)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<Draft | null>(null)
   const [notice, setNotice] = useState<{
@@ -215,8 +247,27 @@ export default function NewsletterAdmin({
     }
   }
 
+  useEffect(() => {
+    function onMessage(e: MessageEvent) {
+      if (e.source !== previewFrame.current?.contentWindow) return
+      const y = (e.data as { aisafetyPreviewScroll?: unknown } | null)
+        ?.aisafetyPreviewScroll
+      if (typeof y === 'number' && Number.isFinite(y) && y >= 0)
+        previewScroll.current = y
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [])
+
+  function togglePreview(id: string) {
+    previewScroll.current = 0
+    setPreviewY(0)
+    setPreviewId(previewId === id ? null : id)
+  }
+
   /** A reorder or a text edit was written into the draft: keep the cards,
-   *  reload the preview, say so. */
+   *  reload the preview where the reader was, say so (an empty `text` = an
+   *  autosave, which reports inside the editor instead). */
   function draftChanged(draftId: string, cards: CardGroup[], text: string) {
     setData(d =>
       d
@@ -226,8 +277,9 @@ export default function NewsletterAdmin({
           }
         : d
     )
+    setPreviewY(previewScroll.current)
     setPreviewNonce(n => n + 1)
-    setNotice({ kind: 'ok', text })
+    if (text) setNotice({ kind: 'ok', text })
   }
 
   return (
@@ -391,9 +443,7 @@ export default function NewsletterAdmin({
                 <button
                   type="button"
                   className={styles.button}
-                  onClick={() =>
-                    setPreviewId(previewId === draft.id ? null : draft.id)
-                  }
+                  onClick={() => togglePreview(draft.id)}
                 >
                   {previewId === draft.id ? 'Hide preview' : 'Preview'}
                 </button>
@@ -424,12 +474,18 @@ export default function NewsletterAdmin({
                     </div>
                   )}
                   <iframe
+                    ref={previewFrame}
                     title={`Preview of ${draft.subject}`}
                     className={styles.previewFrame}
                     // Links in the email open in a new, ordinary tab (the
-                    // preview sets <base target="_blank">); nothing else.
-                    sandbox="allow-popups allow-popups-to-escape-sandbox"
-                    src={`/api/admin/newsletter/preview?draft=${draft.id}&v=${previewNonce}`}
+                    // preview sets <base target="_blank">). The only script
+                    // is the preview's own scroll keeper (the route's CSP
+                    // allows nothing else); no allow-same-origin, so it
+                    // can't reach this page.
+                    sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
+                    src={`/api/admin/newsletter/preview?draft=${draft.id}${
+                      draft.messageId ? `&m=${draft.messageId}` : ''
+                    }&v=${previewNonce}#y=${previewY}`}
                   />
                 </div>
               )}
@@ -537,14 +593,28 @@ function ReorderPanel({
   const [error, setError] = useState<string | null>(null)
   const dirty =
     JSON.stringify(keysOf(groups)) !== JSON.stringify(keysOf(original))
-  /** The card whose fit line is open for editing, and the text in the box. */
+  /** The card open in the editor, and the text in its boxes. */
   const [editing, setEditing] = useState<{ gid: string; key: string } | null>(
     null
   )
+  const [values, setValues] = useState<Record<string, string>>({})
   const [fitText, setFitText] = useState('')
-  const [savingFit, setSavingFit] = useState(false)
-  const [fitError, setFitError] = useState<string | null>(null)
-  const editable = groups.some(g => g.cards.some(c => c.fit !== null))
+  const [savingCard, setSavingCard] = useState(false)
+  const [cardError, setCardError] = useState<string | null>(null)
+  /** At least one save went through since the editor opened. */
+  const [savedOnce, setSavedOnce] = useState(false)
+  /** The last "put this description on the site" for the open card. */
+  const [listing, setListing] = useState<{
+    key: string
+    text: string
+    status: 'saving' | 'done' | { error: string }
+  } | null>(null)
+  /** The save in flight (text saves itself — Bryce, 25 Sept 2026 — so a
+   *  second one waits for it rather than racing it). */
+  const inFlight = useRef<Promise<boolean> | null>(null)
+  const editable = groups.some(g =>
+    g.cards.some(c => c.fields.length > 0 || c.fit !== null)
+  )
 
   // Chrome doesn't always fire dragend on a row React moved in the DOM while
   // it was being dragged, which left that row dimmed after the drop (Bryce,
@@ -573,62 +643,182 @@ function ReorderPanel({
     }
   }, [drag])
 
-  function openEditor(gid: string, card: CardInfo) {
-    setEditing({ gid, key: card.key })
-    setFitText(card.fit ?? '')
-    setFitError(null)
+  const editingCard =
+    (editing &&
+      groups
+        .find(g => g.id === editing.gid)
+        ?.cards.find(c => c.key === editing.key)) ||
+    null
+
+  /** The boxes that differ from the card as saved. */
+  function changesFor(card: CardInfo) {
+    const fields: Record<string, string> = {}
+    for (const f of card.fields) {
+      const v = (values[f.name] ?? f.value).replace(/\s+/g, ' ').trim()
+      if (v !== f.value) fields[f.name] = v
+    }
+    const fit =
+      card.fit !== null && fitText.trim() !== card.fit.trim()
+        ? fitText.trim()
+        : undefined
+    return { fields, fit }
   }
 
-  async function saveFit(gid: string, card: CardInfo) {
-    setSavingFit(true)
-    setFitError(null)
+  const pending = editingCard ? changesFor(editingCard) : null
+  const pendingKey =
+    pending &&
+    (Object.keys(pending.fields).length > 0 || pending.fit !== undefined)
+      ? JSON.stringify(pending)
+      : ''
+  const emptyField =
+    (editingCard &&
+      pending &&
+      editingCard.fields.find(
+        f => f.name in pending.fields && !pending.fields[f.name]
+      )) ||
+    null
+
+  /** Write the open card's changed text into the draft. Resolves true when
+   *  there was nothing to save or the save went through. */
+  async function saveCard(): Promise<boolean> {
+    if (inFlight.current) await inFlight.current
+    if (!editing || !editingCard) return true
+    const { fields, fit } = changesFor(editingCard)
+    if (Object.keys(fields).length === 0 && fit === undefined) return true
+    if (emptyField) return false
+    const gid = editing.gid
+    const key = editing.key
+    const run = (async () => {
+      setSavingCard(true)
+      setCardError(null)
+      try {
+        const res = await fetch('/api/admin/newsletter/card', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            campaign: draft.id,
+            message: draft.messageId ?? undefined,
+            group: gid,
+            key,
+            fields,
+            ...(fit !== undefined ? { fit } : {}),
+          }),
+        })
+        const body = (await res.json()) as {
+          error?: string
+          problems?: string[]
+          cards?: CardGroup[]
+        }
+        if (!res.ok || !body.cards) {
+          throw new Error(
+            body.problems?.length
+              ? body.problems.join('; ')
+              : (body.error ?? `HTTP ${res.status}`)
+          )
+        }
+        // The saved text becomes the card's baseline; what's in the boxes
+        // stays (it may already be ahead of this save), and any unsaved drag
+        // order stays too.
+        const saved = new Map(
+          body.cards.flatMap(g => g.cards.map(c => [`${g.id}:${c.key}`, c]))
+        )
+        setGroups(gs =>
+          gs.map(g => ({
+            ...g,
+            cards: g.cards.map(c => {
+              const s = saved.get(`${g.id}:${c.key}`)
+              return s
+                ? {
+                    ...c,
+                    title: s.title,
+                    fit: s.fit,
+                    pipelineFit: s.pipelineFit,
+                    fields: s.fields,
+                  }
+                : c
+            }),
+          }))
+        )
+        setSavedOnce(true)
+        onSaved(body.cards, '')
+        return true
+      } catch (err) {
+        setCardError(err instanceof Error ? err.message : String(err))
+        return false
+      } finally {
+        setSavingCard(false)
+      }
+    })()
+    inFlight.current = run
+    const ok = await run
+    inFlight.current = null
+    return ok
+  }
+
+  // Saves itself a moment after the typing stops (and at once when a box
+  // loses focus, below). The ref holds this render's saveCard, so the timer
+  // always saves what's in the boxes now.
+  const saveRef = useRef(saveCard)
+  useEffect(() => {
+    saveRef.current = saveCard
+  })
+  useEffect(() => {
+    if (!pendingKey || savingCard || emptyField) return
+    const timer = window.setTimeout(
+      () => void saveRef.current(),
+      AUTOSAVE_DELAY_MS
+    )
+    return () => window.clearTimeout(timer)
+  }, [pendingKey, savingCard, emptyField])
+
+  async function openEditor(gid: string, card: CardInfo) {
+    if (!(await saveCard())) return
+    setEditing({ gid, key: card.key })
+    setValues(Object.fromEntries(card.fields.map(f => [f.name, f.value])))
+    setFitText(card.fit ?? '')
+    setCardError(null)
+    setSavedOnce(false)
+    setListing(null)
+  }
+
+  async function closeEditor() {
+    if (await saveCard()) setEditing(null)
+  }
+
+  /** "Put this description on the site too": the listing's Description in
+   *  Airtable gets the text in the box (Bryce decides each time). */
+  async function pushListing(gid: string, card: CardInfo) {
+    const text = (values.desc ?? '').replace(/\s+/g, ' ').trim()
+    if (!text) return
+    setListing({ key: card.key, text, status: 'saving' })
     try {
-      const res = await fetch('/api/admin/newsletter/fit', {
+      const res = await fetch('/api/admin/newsletter/card', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           campaign: draft.id,
           group: gid,
           key: card.key,
-          fit: fitText,
+          listing: text,
         }),
       })
       const body = (await res.json()) as {
         error?: string
-        problems?: string[]
-        cards?: CardGroup[]
+        listing?: { ok: true } | { ok: false; reason: string }
       }
-      if (!res.ok || !body.cards) {
-        throw new Error(
-          body.problems?.length
-            ? body.problems.join('; ')
-            : (body.error ?? `HTTP ${res.status}`)
-        )
-      }
-      // Take the saved text, keep any unsaved drag order as it is.
-      const saved = new Map(
-        body.cards.flatMap(g => g.cards.map(c => [`${g.id}:${c.key}`, c]))
-      )
-      setGroups(gs =>
-        gs.map(g => ({
-          ...g,
-          cards: g.cards.map(c => {
-            const s = saved.get(`${g.id}:${c.key}`)
-            return s ? { ...c, fit: s.fit, pipelineFit: s.pipelineFit } : c
-          }),
-        }))
-      )
-      setEditing(null)
-      onSaved(
-        body.cards,
-        fitText.trim()
-          ? `Text saved to the draft for ${card.title}.`
-          : `Line removed from the draft for ${card.title}.`
-      )
+      if (!res.ok || !body.listing)
+        throw new Error(body.error ?? `HTTP ${res.status}`)
+      setListing({
+        key: card.key,
+        text,
+        status: body.listing.ok ? 'done' : { error: body.listing.reason },
+      })
     } catch (err) {
-      setFitError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setSavingFit(false)
+      setListing({
+        key: card.key,
+        text,
+        status: { error: err instanceof Error ? err.message : String(err) },
+      })
     }
   }
 
@@ -656,45 +846,91 @@ function ReorderPanel({
     if (from >= 0 && to >= 0) move(gid, from, to)
   }
 
-  async function save() {
-    setSaving(true)
-    setError(null)
-    try {
-      const order = Object.fromEntries(
-        groups.map(g => [g.id, g.cards.map(c => c.key)])
-      )
-      const res = await fetch('/api/admin/newsletter/reorder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaign: draft.id, order }),
-      })
-      const body = (await res.json()) as {
-        error?: string
-        problems?: string[]
-        cards?: CardGroup[]
+  /** Write the current card order into the draft (moves save themselves —
+   *  Bryce, 25 Sept 2026 — so there is no Save order button). Waits for a
+   *  text save in flight; keeps the order on screen as it is, so a card
+   *  moved while this was saving is saved next. */
+  async function saveOrder(): Promise<boolean> {
+    if (inFlight.current) await inFlight.current
+    const order = Object.fromEntries(
+      groups.map(g => [g.id, g.cards.map(c => c.key)])
+    )
+    const run = (async () => {
+      setSaving(true)
+      setError(null)
+      try {
+        const res = await fetch('/api/admin/newsletter/reorder', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            campaign: draft.id,
+            message: draft.messageId ?? undefined,
+            order,
+          }),
+        })
+        const body = (await res.json()) as {
+          error?: string
+          problems?: string[]
+          cards?: CardGroup[]
+        }
+        if (!res.ok || !body.cards) {
+          throw new Error(
+            body.problems?.length
+              ? body.problems.join('; ')
+              : (body.error ?? `HTTP ${res.status}`)
+          )
+        }
+        onSaved(body.cards, '')
+        return true
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+        return false
+      } finally {
+        setSaving(false)
       }
-      if (!res.ok || !body.cards) {
-        throw new Error(
-          body.problems?.length
-            ? body.problems.join('; ')
-            : (body.error ?? `HTTP ${res.status}`)
-        )
-      }
-      setGroups(body.cards.map(g => ({ ...g, cards: [...g.cards] })))
-      onSaved(body.cards, 'Order saved to the draft.')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setSaving(false)
-    }
+    })()
+    inFlight.current = run
+    const ok = await run
+    inFlight.current = null
+    return ok
   }
+
+  // ActiveCampaign sometimes takes 10+ seconds a request; say so rather than
+  // leave "Saving…" looking stuck.
+  const busy = saving || savingCard
+  const [slow, setSlow] = useState(false)
+  useEffect(() => {
+    if (!busy) {
+      setSlow(false)
+      return
+    }
+    const timer = window.setTimeout(() => setSlow(true), 6000)
+    return () => window.clearTimeout(timer)
+  }, [busy])
+  const slowNote = slow ? ' ActiveCampaign is answering slowly right now.' : ''
+
+  const saveOrderRef = useRef(saveOrder)
+  useEffect(() => {
+    saveOrderRef.current = saveOrder
+  })
+  const orderKey = JSON.stringify(keysOf(groups))
+  useEffect(() => {
+    // Not mid-drag, not while a save runs, and only when the order on screen
+    // differs from the draft's.
+    if (!dirty || drag || saving || savingCard || error) return
+    const timer = window.setTimeout(
+      () => void saveOrderRef.current(),
+      ORDER_SAVE_DELAY_MS
+    )
+    return () => window.clearTimeout(timer)
+  }, [orderKey, dirty, drag, saving, savingCard, error])
 
   return (
     <div className={styles.reorder}>
       <p className={adminStyles.sectionHint}>
         Drag a listing to move it. Cards stay within their section.
-        {editable && ' Edit changes a card’s “Consider applying if” line.'}{' '}
-        Saving writes into the draft (the preview updates); it sends nothing.
+        {editable && ' Edit changes any text on a card.'} Everything saves into
+        the draft by itself and the preview updates; nothing is sent.
       </p>
       {groups.map(g => (
         <div key={g.id} className={styles.reorderGroup}>
@@ -704,7 +940,9 @@ function ReorderPanel({
           <ol className={styles.reorderList}>
             {g.cards.map((c, i) => {
               const open = editing?.gid === g.id && editing.key === c.key
-              const edited = c.pipelineFit != null && c.fit !== c.pipelineFit
+              const edited =
+                (c.pipelineFit != null && c.fit !== c.pipelineFit) ||
+                c.fields.some(f => f.original !== null)
               return [
                 <li
                   key={c.key}
@@ -713,11 +951,10 @@ function ReorderPanel({
                       ? ` ${styles.reorderRowDragging}`
                       : ''
                   }`}
-                  draggable={!saving && !open}
+                  draggable={!open}
                   tabIndex={0}
                   aria-label={`${c.title}, position ${i + 1} of ${g.cards.length}. Arrow keys move it.`}
                   onKeyDown={e => {
-                    if (saving) return
                     if (e.key === 'ArrowUp' && i > 0) {
                       e.preventDefault()
                       move(g.id, i, i - 1)
@@ -762,14 +999,14 @@ function ReorderPanel({
                       <span className={styles.rowEdited}> · edited</span>
                     )}
                   </span>
-                  {c.fit !== null && (
+                  {(c.fields.length > 0 || c.fit !== null) && (
                     <button
                       type="button"
                       className={styles.rowButton}
-                      disabled={saving || savingFit}
+                      disabled={saving}
                       aria-expanded={open}
                       onClick={() =>
-                        open ? setEditing(null) : openEditor(g.id, c)
+                        void (open ? closeEditor() : openEditor(g.id, c))
                       }
                     >
                       {open ? 'Close' : 'Edit'}
@@ -777,57 +1014,146 @@ function ReorderPanel({
                   )}
                 </li>,
                 open && (
-                  <li key={`${c.key}-fit`} className={styles.fitEditor}>
-                    <label className={styles.fitLabel}>
-                      Consider applying if
-                      <textarea
-                        className={styles.fitTextarea}
-                        value={fitText}
-                        rows={4}
-                        autoFocus
-                        disabled={savingFit}
-                        onChange={e => setFitText(e.target.value)}
-                      />
-                    </label>
-                    {fitError && (
-                      <p className={styles.noticeError}>
-                        Not saved: {fitError}
-                      </p>
+                  <li key={`${c.key}-edit`} className={styles.fitEditor}>
+                    {c.fields.map((f, n) => {
+                      const v = values[f.name] ?? f.value
+                      const vPlain = v.replace(/\s+/g, ' ').trim()
+                      const onSite =
+                        listing?.key === c.key && listing.text === vPlain
+                          ? listing.status
+                          : null
+                      return (
+                        <div key={f.name} className={styles.fieldBlock}>
+                          <label className={styles.fitLabel}>
+                            {f.label}
+                            <textarea
+                              className={`${styles.fitTextarea} ${
+                                f.name === 'desc' ? '' : styles.fieldShort
+                              }`}
+                              value={v}
+                              rows={
+                                f.name === 'desc'
+                                  ? 6
+                                  : f.name === 'title'
+                                    ? 2
+                                    : 1
+                              }
+                              autoFocus={n === 0}
+                              onChange={e =>
+                                setValues(vs => ({
+                                  ...vs,
+                                  [f.name]: e.target.value,
+                                }))
+                              }
+                              onBlur={() => void saveCard()}
+                            />
+                          </label>
+                          {f.hasLink && (
+                            <p className={styles.notice}>
+                              This text has a link in it; editing it here drops
+                              the link.
+                            </p>
+                          )}
+                          {f.original !== null &&
+                            vPlain !== f.original.trim() && (
+                              <div className={styles.fieldActions}>
+                                <button
+                                  type="button"
+                                  className={styles.rowButton}
+                                  title={f.original}
+                                  onClick={() =>
+                                    setValues(vs => ({
+                                      ...vs,
+                                      [f.name]: f.original ?? '',
+                                    }))
+                                  }
+                                >
+                                  Pen’s text
+                                </button>
+                              </div>
+                            )}
+                          {f.name === 'desc' &&
+                            RECORD_KEY_RE.test(c.key) &&
+                            (f.original !== null || vPlain !== f.value) &&
+                            (onSite === 'done' ? (
+                              <p className={styles.noticeOk}>
+                                ✓ The site’s listing has this description now
+                                (it shows there in two or three minutes).
+                              </p>
+                            ) : (
+                              <div className={styles.fieldActions}>
+                                <button
+                                  type="button"
+                                  className={styles.rowButton}
+                                  disabled={!vPlain || onSite === 'saving'}
+                                  onClick={() => void pushListing(g.id, c)}
+                                >
+                                  {onSite === 'saving'
+                                    ? 'Updating the site…'
+                                    : 'Use this description on the site too'}
+                                </button>
+                                {onSite && typeof onSite === 'object' && (
+                                  <span className={styles.noticeError}>
+                                    Site not updated: {onSite.error}
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                        </div>
+                      )
+                    })}
+                    {c.fit !== null && (
+                      <div className={styles.fieldBlock}>
+                        <label className={styles.fitLabel}>
+                          Consider applying if
+                          <textarea
+                            className={styles.fitTextarea}
+                            value={fitText}
+                            rows={4}
+                            autoFocus={c.fields.length === 0}
+                            onChange={e => setFitText(e.target.value)}
+                            onBlur={() => void saveCard()}
+                          />
+                        </label>
+                        {c.pipelineFit != null &&
+                          fitText.trim() !== c.pipelineFit.trim() && (
+                            <div className={styles.fieldActions}>
+                              <button
+                                type="button"
+                                className={styles.rowButton}
+                                title={
+                                  c.pipelineFit ||
+                                  'Pen wrote no line for this card'
+                                }
+                                onClick={() => setFitText(c.pipelineFit ?? '')}
+                              >
+                                Pen’s text
+                              </button>
+                            </div>
+                          )}
+                      </div>
                     )}
-                    <div className={styles.actions}>
-                      <button
-                        type="button"
-                        className={styles.buttonPrimary}
-                        disabled={
-                          savingFit || fitText.trim() === (c.fit ?? '').trim()
-                        }
-                        onClick={() => void saveFit(g.id, c)}
-                      >
-                        {savingFit ? 'Saving…' : 'Save text'}
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.button}
-                        disabled={savingFit}
-                        onClick={() => setEditing(null)}
-                      >
-                        Cancel
-                      </button>
-                      {c.pipelineFit != null &&
-                        fitText.trim() !== c.pipelineFit.trim() && (
-                          <button
-                            type="button"
-                            className={styles.button}
-                            disabled={savingFit}
-                            title={
-                              c.pipelineFit || 'Pen wrote no line for this card'
-                            }
-                            onClick={() => setFitText(c.pipelineFit ?? '')}
-                          >
-                            Pen’s text
-                          </button>
-                        )}
-                    </div>
+                    <p
+                      className={
+                        cardError || emptyField
+                          ? styles.noticeError
+                          : styles.notice
+                      }
+                      role="status"
+                      aria-live="polite"
+                    >
+                      {cardError
+                        ? `Not saved: ${cardError}`
+                        : emptyField
+                          ? `Not saved yet: the ${emptyField.label.toLowerCase()} can’t be empty.`
+                          : savingCard
+                            ? `Saving…${slowNote}`
+                            : pendingKey
+                              ? 'Saves when you pause typing.'
+                              : savedOnce
+                                ? 'All changes saved to the draft.'
+                                : 'Changes save by themselves as you type.'}
+                    </p>
                   </li>
                 ),
               ]
@@ -835,30 +1161,33 @@ function ReorderPanel({
           </ol>
         </div>
       ))}
-      {error && <p className={styles.noticeError}>Not saved: {error}</p>}
-      <div className={styles.actions}>
-        <button
-          type="button"
-          className={styles.buttonPrimary}
-          disabled={!dirty || saving}
-          onClick={() => void save()}
+      {(error || saving || dirty) && (
+        <p
+          className={error ? styles.noticeError : styles.notice}
+          role="status"
+          aria-live="polite"
         >
-          {saving ? 'Saving…' : 'Save order'}
-        </button>
-        <button
-          type="button"
-          className={styles.button}
-          disabled={!dirty || saving}
-          onClick={() =>
-            setGroups(original.map(g => ({ ...g, cards: [...g.cards] })))
-          }
-        >
-          Reset
-        </button>
-        {!dirty && !saving && (
-          <span className={styles.notice}>Order matches the draft.</span>
-        )}
-      </div>
+          {error ? (
+            <>
+              Order not saved: {error}{' '}
+              <button
+                type="button"
+                className={styles.rowButton}
+                onClick={() => {
+                  setError(null)
+                  void saveOrder()
+                }}
+              >
+                Try again
+              </button>
+            </>
+          ) : saving ? (
+            `Saving the new order…${slowNote}`
+          ) : (
+            'The new order saves in a moment.'
+          )}
+        </p>
+      )}
     </div>
   )
 }
