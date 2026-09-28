@@ -81,6 +81,12 @@ interface Recent {
   uniqueOpens: number | null
   unsubscribes: number | null
   listNames: string[]
+  /** Counted on aisafety.com (the links go through /api/nl since 28 Sept
+   *  2026); zero for older sends. */
+  clicks: {
+    total: number
+    links: Array<{ label: string; url: string; clicks: number }>
+  }
 }
 
 interface Payload {
@@ -112,6 +118,15 @@ function when(iso: string | null): string {
   })
 }
 
+/** "lensacademy.org" for a link's destination (no www, no path). */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return url
+  }
+}
+
 export default function NewsletterAdmin({
   canSend,
 }: {
@@ -124,6 +139,8 @@ export default function NewsletterAdmin({
   const [loadError, setLoadError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [previewId, setPreviewId] = useState<string | null>(null)
+  /** The send whose per-link clicks are open under its row. */
+  const [openClicks, setOpenClicks] = useState<string | null>(null)
   /** Bumped after a reorder or a text edit so the preview frame reloads. */
   const [previewNonce, setPreviewNonce] = useState(0)
   /** Where the reader is in the preview (the frame posts it as it scrolls),
@@ -520,11 +537,12 @@ export default function NewsletterAdmin({
                 <th>Sent</th>
                 <th>To</th>
                 <th>Opens</th>
+                <th>Clicks</th>
                 <th>Unsubs</th>
               </tr>
             </thead>
             <tbody>
-              {data.recent.map(r => (
+              {data.recent.map(r => [
                 <tr key={r.id}>
                   <td>{r.name}</td>
                   <td className={styles.muted}>
@@ -550,9 +568,50 @@ export default function NewsletterAdmin({
                   </td>
                   <td>{r.sentTo}</td>
                   <td className={styles.muted}>{r.uniqueOpens ?? '—'}</td>
+                  <td>
+                    {r.clicks.total > 0 ? (
+                      <button
+                        type="button"
+                        className={styles.rowButton}
+                        aria-expanded={openClicks === r.id}
+                        title="Which links were clicked"
+                        onClick={() =>
+                          setOpenClicks(openClicks === r.id ? null : r.id)
+                        }
+                      >
+                        {r.clicks.total}
+                      </button>
+                    ) : (
+                      <span className={styles.muted}>0</span>
+                    )}
+                  </td>
                   <td className={styles.muted}>{r.unsubscribes ?? '—'}</td>
-                </tr>
-              ))}
+                </tr>,
+                openClicks === r.id && (
+                  <tr key={`${r.id}-clicks`}>
+                    <td colSpan={8} className={styles.clicksCell}>
+                      <ol className={styles.clicksList}>
+                        {r.clicks.links.map(l => (
+                          <li key={l.url} className={styles.clicksRow}>
+                            <span className={styles.clicksCount}>
+                              {l.clicks}
+                            </span>
+                            <span>{l.label}</span>
+                            <a
+                              href={l.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className={styles.muted}
+                            >
+                              {hostOf(l.url)}
+                            </a>
+                          </li>
+                        ))}
+                      </ol>
+                    </td>
+                  </tr>
+                ),
+              ])}
             </tbody>
           </table>
         )}

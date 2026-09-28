@@ -481,3 +481,35 @@
     animation: none;
   }
 }
+
+/* Per-link clicks under a Recent sends row (counted on aisafety.com since
+   28 Sept 2026). */
+.clicksCell {
+  padding: 4px 0 14px;
+}
+
+.clicksList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 8px 12px;
+  list-style: none;
+  border: 1px solid var(--teal-800);
+  border-radius: 6px;
+  background: var(--teal-900);
+  font-size: 12px;
+}
+
+.clicksRow {
+  display: grid;
+  grid-template-columns: 3em 1fr auto;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.clicksCount {
+  text-align: right;
+  font-weight: 600;
+  color: var(--bright-teal-300);
+}

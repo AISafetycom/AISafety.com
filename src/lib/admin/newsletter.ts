@@ -40,6 +40,7 @@
 */
 
 import { createHash } from 'node:crypto'
+import { type CampaignClicks, readClicks } from '@/lib/newsletter-clicks'
 
 const MARKER_RE = /<!--aisafety-issue:([0-9a-f]{16})-->/
 /** Minutes between approval and the send. AC rejects sdates in the past and
@@ -284,6 +285,10 @@ export interface SentSummary {
   uniqueOpens: number | null
   unsubscribes: number | null
   listNames: string[]
+  /** Clicks counted on aisafety.com (the email's links go through
+   *  /api/nl since 28 Sept 2026); zero for older sends, whose links went
+   *  through ActiveCampaign's tracker. */
+  clicks: CampaignClicks
 }
 
 // ActiveCampaign's campaign statuses (0 = draft is handled separately). 6 and
@@ -538,13 +543,16 @@ export async function listRecent(limit = 12): Promise<SentSummary[]> {
       )
     )
     .slice(0, limit)
-  const lists = await mapLimit(recent, 3, async c => {
-    const known = sentListIds.get(c.id)
-    if (known) return known
-    const ids = await campaignListIds(c.id)
-    if (c.status === '5') sentListIds.set(c.id, ids)
-    return ids
-  })
+  const [lists, clicks] = await Promise.all([
+    mapLimit(recent, 3, async c => {
+      const known = sentListIds.get(c.id)
+      if (known) return known
+      const ids = await campaignListIds(c.id)
+      if (c.status === '5') sentListIds.set(c.id, ids)
+      return ids
+    }),
+    readClicks(recent.map(c => c.name)),
+  ])
   return recent.map((c, i) => {
     const listIds = lists[i]
     return {
@@ -557,6 +565,7 @@ export async function listRecent(limit = 12): Promise<SentSummary[]> {
       uniqueOpens: c.uniqueopens == null ? null : Number(c.uniqueopens),
       unsubscribes: c.unsubscribes == null ? null : Number(c.unsubscribes),
       listNames: listIds.map(id => names.get(id) ?? `list ${id}`),
+      clicks: clicks.get(c.name) ?? { total: 0, links: [] },
     }
   })
 }
@@ -1152,6 +1161,70 @@ async function rewriteDraft(
   if (!cards) throw new Error('card markers missing after the edit')
   console.info(`[newsletter] draft ${draftId} ${logLine}`)
   return { cards }
+}
+
+/* ─── Analytics: sends in a date range ────────────────────────────────── */
+
+export interface SendStats {
+  id: string
+  name: string
+  /** 'Events', 'Training', 'Funding' — the list's name without the site's. */
+  newsletter: string
+  sentAt: string | null
+  delivered: number
+  opens: number | null
+  unsubscribes: number | null
+  clicks: CampaignClicks
+}
+
+/** The sent issues of the real newsletter lists (test lists left out) whose
+ *  send finished inside [startMs, endMs], newest first, with the clicks
+ *  counted on aisafety.com. For /admin/analytics' Newsletters tab. */
+export async function readSendStats(range: {
+  startMs: number | null
+  endMs: number | null
+}): Promise<SendStats[]> {
+  const [campaigns, names] = await Promise.all([allCampaigns(), listNames()])
+  const inRange = campaigns.filter(c => {
+    if (c.status !== '5') return false
+    const at = Date.parse(c.ldate ?? c.sdate ?? '')
+    if (Number.isNaN(at)) return false
+    return (
+      (range.startMs == null || at >= range.startMs) &&
+      (range.endMs == null || at <= range.endMs)
+    )
+  })
+  const lists = await mapLimit(inRange, 3, async c => {
+    const known = sentListIds.get(c.id)
+    if (known) return known
+    const ids = await campaignListIds(c.id)
+    sentListIds.set(c.id, ids)
+    return ids
+  })
+  const real = inRange
+    .map((c, i) => ({ c, list: names.get(lists[i][0] ?? '') ?? '' }))
+    .filter(
+      ({ c, list }, i) =>
+        lists[i].length === 1 &&
+        list !== '' &&
+        !/\(test\)/i.test(list) &&
+        c.name !== ''
+    )
+  const clicks = await readClicks(real.map(({ c }) => c.name))
+  return real
+    .map(({ c, list }) => ({
+      id: c.id,
+      name: c.name,
+      newsletter: list.replace(/^AISafety\.com\s+/i, ''),
+      sentAt: c.ldate ?? c.sdate,
+      delivered: Number(c.send_amt ?? 0),
+      opens: c.uniqueopens == null ? null : Number(c.uniqueopens),
+      unsubscribes: c.unsubscribes == null ? null : Number(c.unsubscribes),
+      clicks: clicks.get(c.name) ?? { total: 0, links: [] },
+    }))
+    .sort((a, b) =>
+      String(b.sentAt ?? '').localeCompare(String(a.sentAt ?? ''))
+    )
 }
 
 /** The message HTML as a subscriber will see it, with AC's personalisation

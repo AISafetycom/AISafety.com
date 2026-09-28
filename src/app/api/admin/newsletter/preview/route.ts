@@ -47,11 +47,18 @@ export async function GET(req: NextRequest) {
     // goes back to `#y=` after a reload, so saving an edit doesn't throw the
     // preview back to the top (Bryce, 25 Sept 2026).
     const nonce = randomBytes(16).toString('base64')
-    const framed = html.replace(
-      /<head[^>]*>/i,
-      m =>
-        `${m}<base target="_blank"><script nonce="${nonce}">${SCROLL_SCRIPT}</script>`
-    )
+    // Links go through the click counter (/api/nl); `p=1` tells it a click
+    // from this preview isn't a reader's.
+    const framed = html
+      .replace(
+        /(href="https:\/\/aisafety\.com\/api\/nl\/[0-9a-f]{16}\/\d+)"/g,
+        '$1?p=1"'
+      )
+      .replace(
+        /<head[^>]*>/i,
+        m =>
+          `${m}<base target="_blank"><script nonce="${nonce}">${SCROLL_SCRIPT}</script>`
+      )
     return new Response(framed, {
       headers: {
         'Content-Type': 'text/html; charset=utf-8',

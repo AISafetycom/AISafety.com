@@ -45,6 +45,11 @@ import { getFounderResources } from '@/lib/data/founders'
 import { getJobs } from '@/lib/data/jobs'
 import { getMapData, type MapOrg } from '@/lib/data/map'
 import { getProjects } from '@/lib/data/projects'
+import {
+  isNewsletterConfigured,
+  readSendStats,
+  type SendStats,
+} from '@/lib/admin/newsletter'
 import DateRangePicker from './DateRangePicker'
 import ExcludeToggle from './ExcludeToggle'
 import Logo from './Logo'
@@ -92,6 +97,7 @@ const OVERVIEW_TABS: { key: string; label: string }[] = [
   { key: 'pages', label: 'Overview' },
   { key: 'chatbot', label: 'Chatbot' },
   { key: 'search', label: 'Search' },
+  { key: 'newsletters', label: 'Newsletters' },
   { key: 'correlations', label: 'Correlations' },
 ]
 const OVERVIEW_KEYS = new Set(OVERVIEW_TABS.map(t => t.key))
@@ -500,24 +506,35 @@ export default async function AnalyticsPage({
   const tabReq = tabRaw === 'funnel' ? 'chatbot' : tabRaw
   const onResourceTab = tabReq != null && !OVERVIEW_KEYS.has(tabReq)
 
-  const [data, funders, convStats, themes, searchIndex] = await Promise.all([
-    readDashboard(
-      range,
-      onResourceTab ? tabReq : undefined,
-      unique,
-      first(sp.source)
-    ),
-    getFunders().catch(() => []),
-    // The transcript-derived stats only render on the Chatbot tab, so only
-    // fetch the (ever-growing) conversation log when it's the active tab.
-    tabReq === 'chatbot' ? readConversationStats(range) : null,
-    tabReq === 'chatbot' ? readQuestionThemes() : null,
-    // Resolves clicked search results to their resource page; only the Search
-    // tab reads it. On error the page icons resolve from recorded types alone.
-    tabReq === 'search'
-      ? buildSearchIndex().catch(() => [] as SearchEntry[])
-      : ([] as SearchEntry[]),
-  ])
+  const [data, funders, convStats, themes, searchIndex, sendStats] =
+    await Promise.all([
+      readDashboard(
+        range,
+        onResourceTab ? tabReq : undefined,
+        unique,
+        first(sp.source)
+      ),
+      getFunders().catch(() => []),
+      // The transcript-derived stats only render on the Chatbot tab, so only
+      // fetch the (ever-growing) conversation log when it's the active tab.
+      tabReq === 'chatbot' ? readConversationStats(range) : null,
+      tabReq === 'chatbot' ? readQuestionThemes() : null,
+      // Resolves clicked search results to their resource page; only the Search
+      // tab reads it. On error the page icons resolve from recorded types alone.
+      tabReq === 'search'
+        ? buildSearchIndex().catch(() => [] as SearchEntry[])
+        : ([] as SearchEntry[]),
+      // The Newsletters tab reads the sends from ActiveCampaign (slow, so only
+      // on that tab). null = couldn't read them; the tab says so.
+      tabReq === 'newsletters' && isNewsletterConfigured()
+        ? readSendStats(range).catch(err => {
+            console.warn(
+              `[analytics] newsletter sends unavailable: ${err instanceof Error ? err.message : String(err)}`
+            )
+            return null
+          })
+        : null,
+    ])
 
   // Resource-page tabs: every page in PAGE_NAV always gets one (so quiet pages
   // like Projects still appear), plus any other page that has clicks (e.g.
@@ -779,6 +796,33 @@ export default async function AnalyticsPage({
               search={data.search}
               index={searchIndex}
               unique={unique}
+            />
+          )}
+
+          {activeTab === 'newsletters' && (
+            <NewsletterView
+              sends={sendStats}
+              signups={
+                <Panel title="Signup box on the site">
+                  <CountTable
+                    rows={data.newsletterByPage.map(r => ({
+                      ...r,
+                      name: labelByPage.get(r.name) ?? r.name,
+                    }))}
+                    labelHead="Page"
+                    countHead="Submits"
+                    total={newsletterTotalByPage}
+                    shareFor={name => newsletterShare.get(name)}
+                    totalShare={data.siteNewsletterShare ?? undefined}
+                  />
+                  <p className={styles.caption}>
+                    Submits of the newsletter email box on the resource pages –
+                    may not all be successful signups. % of visitors = the share
+                    of the page&apos;s visitors who submitted it. Recording
+                    since 29 July 2026.
+                  </p>
+                </Panel>
+              }
             />
           )}
 
@@ -1533,6 +1577,156 @@ function DashboardTabs({
         ))}
       </div>
     </div>
+  )
+}
+
+/** The Newsletters tab: the issues sent in the range (ActiveCampaign's
+ *  deliveries, opens and unsubscribes; clicks counted on aisafety.com since
+ *  28 Sept 2026), the most-clicked links, and the signup box on the site. */
+function NewsletterView({
+  sends,
+  signups,
+}: {
+  sends: SendStats[] | null
+  signups: React.ReactNode
+}) {
+  if (sends === null) {
+    return (
+      <>
+        <Panel title="Newsletter sends">
+          <p className={styles.dim}>
+            Couldn&apos;t read ActiveCampaign just now — try refreshing in a
+            moment.
+          </p>
+        </Panel>
+        {signups}
+      </>
+    )
+  }
+  const delivered = sends.reduce((n, s) => n + s.delivered, 0)
+  const opens = sends.reduce((n, s) => n + (s.opens ?? 0), 0)
+  const clicks = sends.reduce((n, s) => n + s.clicks.total, 0)
+  const unsubs = sends.reduce((n, s) => n + (s.unsubscribes ?? 0), 0)
+  const topLinks = sends
+    .flatMap(s => s.clicks.links.map(l => ({ ...l, issue: s.name })))
+    .sort((a, b) => b.clicks - a.clicks)
+    .slice(0, 50)
+  const host = (url: string) => {
+    try {
+      return new URL(url).hostname.replace(/^www\./, '')
+    } catch {
+      return url
+    }
+  }
+  return (
+    <>
+      <Panel title="Newsletter sends">
+        <div className={styles.funnel}>
+          <Stat label="Issues sent" value={sends.length.toLocaleString()} />
+          <Stat label="Emails delivered" value={delivered.toLocaleString()} />
+          <Stat label="Opened" value={pct(opens, delivered)} />
+          <Stat label="Clicks" value={clicks.toLocaleString()} />
+          <Stat label="Clicks per email" value={pct(clicks, delivered)} />
+          <Stat label="Unsubscribed" value={pct(unsubs, delivered)} />
+        </div>
+        {sends.length === 0 ? (
+          <p className={styles.dim}>No issues sent in this range.</p>
+        ) : (
+          <SortableTable
+            columns={[
+              { label: 'Issue', sort: 'text' },
+              { label: 'Newsletter', sort: 'text' },
+              { label: 'Sent', sort: 'text' },
+              { label: 'Delivered', className: styles.numCol, sort: 'number' },
+              { label: 'Opened', className: styles.pctCol, sort: 'number' },
+              { label: 'Clicks', className: styles.numCol, sort: 'number' },
+              { label: 'Unsubs', className: styles.numCol, sort: 'number' },
+            ]}
+            values={sends.map(s => [
+              s.name,
+              s.newsletter,
+              s.sentAt ?? '',
+              s.delivered,
+              s.opens != null && s.delivered > 0 ? s.opens / s.delivered : null,
+              s.clicks.total,
+              s.unsubscribes,
+            ])}
+          >
+            {sends.map(s => (
+              <tr key={s.id}>
+                <td>{s.name}</td>
+                <td>{s.newsletter}</td>
+                <td className={styles.dim}>
+                  {s.sentAt ? formatDay(s.sentAt) : '—'}
+                </td>
+                <td className={styles.numCol}>
+                  {s.delivered.toLocaleString()}
+                </td>
+                <td className={styles.pctCol}>
+                  {s.opens != null ? pct(s.opens, s.delivered) : '—'}
+                </td>
+                <td className={styles.numCol}>
+                  {s.clicks.total.toLocaleString()}
+                </td>
+                <td className={styles.numCol}>
+                  {s.unsubscribes != null
+                    ? s.unsubscribes.toLocaleString()
+                    : '—'}
+                </td>
+              </tr>
+            ))}
+          </SortableTable>
+        )}
+        <p className={styles.caption}>
+          Issues sent to the Events, Training and Funding lists in this range
+          (test lists left out). Opened = unique opens ÷ delivered, from
+          ActiveCampaign; Apple Mail opens every email it receives, so it reads
+          high. Clicks are counted on aisafety.com as readers follow a link,
+          every click (not unique readers), link checkers left out; issues sent
+          before 28 September 2026 went through ActiveCampaign&apos;s tracker
+          and show none. Clicks per email = clicks ÷ delivered.
+        </p>
+      </Panel>
+      <Panel title="Most-clicked links">
+        {topLinks.length === 0 ? (
+          <p className={styles.dim}>No clicks counted in this range yet.</p>
+        ) : (
+          <SortableTable
+            columns={[
+              { label: 'Link', sort: 'text' },
+              { label: 'Goes to', sort: 'text' },
+              { label: 'Issue', sort: 'text' },
+              { label: 'Clicks', className: styles.numCol, sort: 'number' },
+            ]}
+            values={topLinks.map(l => [
+              l.label,
+              host(l.url),
+              l.issue,
+              l.clicks,
+            ])}
+          >
+            {topLinks.map(l => (
+              <tr key={`${l.issue}|${l.url}`}>
+                <td>{l.label}</td>
+                <td>
+                  <a
+                    href={l.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={styles.dim}
+                  >
+                    {host(l.url)}
+                  </a>
+                </td>
+                <td className={styles.dim}>{l.issue}</td>
+                <td className={styles.numCol}>{l.clicks.toLocaleString()}</td>
+              </tr>
+            ))}
+          </SortableTable>
+        )}
+      </Panel>
+      {signups}
+    </>
   )
 }
 
