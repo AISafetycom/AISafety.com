@@ -76,6 +76,7 @@ Read `docs/css-guidelines.md` (Melissa's rules) before writing any styles. In sh
 - Two systems: Matomo (script in the root layout, plus `src/proxy.ts` for AI-assistant fetches) and the first-party store in `src/lib/analytics/events.ts` behind `/api/track`, shown at `/admin/analytics`.
 - New event kinds go in `ALLOWED_EVENT_TYPES`; every field the beacon accepts is length-capped. Keep it that way.
 - Newsletter link clicks are counted separately, server-side, by `/api/nl` into their own Upstash hashes (`src/lib/newsletter-clicks.ts`), and shown on /admin/newsletter.
+- **Never delete anything under `newsletter/` in the Blob store.** Every sent email's links (`newsletter/links/`) and images live there for good.
 
 ## Admin area
 
