@@ -17,10 +17,11 @@
     content changed outside the pipeline. Either way: refuse to send.
 
   Sending: AC's v1 API has no "send now" for an existing draft, so approval
-  creates the sending campaign from the verified message (status 1, sdate a
-  couple of minutes out, in the account's local time) and deletes the draft
-  shell. Reads use the v3 API; the two writes use v1, the only API that can
-  schedule a send (unlocked on the paid plan, 30 Aug 2026).
+  creates the sending campaign from the verified message (status 1, sdate
+  sendDelayMinutes out, in the account's local time) and deletes the draft
+  shell (after the last wave, when it goes out in waves). Reads use the v3
+  API; the writes use v1, the only API that can schedule a send (unlocked on
+  the paid plan, 30 Aug 2026), except the stop calls (v3).
 
   Reordering (10 Sept 2026): the renderer wraps every card in
   `<!--card:gN:KEY-->…<!--/card-->` and ends the email with one
@@ -60,10 +61,26 @@
     and while NEWSLETTER_WARMUP is on a send to more than
     MAX_UNSEGMENTED_SEND people must name a wave;
   - every real-list approval is recorded in Upstash for the send watcher.
+
+  Waves and stopping (29 Sept 2026, stage B of the same work):
+  - the first sends go out in warm-up waves: saved segments in AC named
+    "Newsletter wave 1" … "Newsletter wave N (everyone else)" (made by
+    ~/Newsletter/waves.py; the WAVE CONTRACT is in its docstring). A wave's
+    campaign carries the segment (`segmentid`), is named
+    "<issue> · wave k/N", and is read back and deleted at once if AC didn't
+    keep the segment. Waves go in order, one at a time, each once the one
+    before has finished and WAVE_MIN_GAP_HOURS have passed (or the watcher's
+    verdict on it isn't red) unless the approver types a reason; the draft
+    stays until the last wave, and card edits wait while a wave is going out;
+  - a real-list send goes out SEND_DELAY_MINUTES_REAL after approval, and
+    Recent sends can cancel it until then, then pause, stop or resume it
+    (stopSend); the owner is emailed about every real-list approval.
 */
 
 import { createHash } from 'node:crypto'
 import { Redis } from '@upstash/redis'
+import { newsletterApprovalMail, sendAdminMail } from '@/lib/admin/mail'
+import { ROOT_ADMINS } from '@/lib/admin/users'
 import {
   type CampaignClicks,
   LIST_ID_RE,
@@ -71,9 +88,16 @@ import {
 } from '@/lib/newsletter-clicks'
 
 const MARKER_RE = /<!--aisafety-issue:([0-9a-f]{16})-->/
-/** Minutes between approval and the send. AC rejects sdates in the past and
- *  runs its scheduler about once a minute, so two is the practical minimum. */
-const SEND_DELAY_MINUTES = 2
+/** Minutes between approval and the send. On the real lists that is time to
+ *  notice a mistake and cancel the send under Recent sends before anyone gets
+ *  it; the test lists keep two, the practical minimum (AC rejects sdates in
+ *  the past and runs its scheduler about once a minute). */
+const SEND_DELAY_MINUTES_REAL = 10
+const SEND_DELAY_MINUTES_TEST = 2
+
+export function sendDelayMinutes(listId: string): number {
+  return isRealList(listId) ? SEND_DELAY_MINUTES_REAL : SEND_DELAY_MINUTES_TEST
+}
 /** Used for the account's local time when AC's own timestamps can't be read
  *  (account set up from Colombia, 2026). */
 const FALLBACK_UTC_OFFSET = '-05:00'
@@ -86,6 +110,17 @@ const SENDER_INFO =
  *  to one wave (an AC segment), never the whole list in one press. */
 export const NEWSLETTER_WARMUP = true
 export const MAX_UNSEGMENTED_SEND = 50
+/** Wave k+1 waits this long after wave k finished sending: the send watcher
+ *  judges each wave 18 hours after it ends, and a red verdict holds the next
+ *  one. Sending sooner takes a typed reason, which is logged. */
+export const WAVE_MIN_GAP_HOURS = 18
+/** The shortest reason accepted for sending a held wave anyway. */
+const OVERRIDE_MIN_CHARS = 10
+/** The saved segments that are waves, by name (~/Newsletter/waves.py makes
+ *  them): "Newsletter wave 1" … "Newsletter wave N (everyone else)" for the
+ *  real lists, and the test run's "SWEEP TEST wave …" for test lists 4/5. */
+const WAVE_PREFIX_REAL = 'Newsletter wave '
+const WAVE_PREFIX_TEST = 'SWEEP TEST wave '
 
 /** The real newsletter lists: the campaign name each issue carries in front
  *  ("Events · Week 41, 2026") and the one sender allowed on it. */
@@ -177,6 +212,16 @@ function v3url(path: string): URL {
 function acId(id: string): string {
   if (!/^\d{1,12}$/.test(id))
     throw new Error(`not an ActiveCampaign id: ${id.slice(0, 20)}`)
+  return id
+}
+
+/** Saved segments (segmentsV2) have UUIDs; same guard as acId. */
+export const SEGMENT_ID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function segmentId(id: string): string {
+  if (!SEGMENT_ID_RE.test(id))
+    throw new Error(`not an ActiveCampaign segment id: ${id.slice(0, 40)}`)
   return id
 }
 
@@ -320,6 +365,35 @@ async function v1answer(
   return (await res.json()) as Record<string, unknown>
 }
 
+/** A v1 report (a read: GET, READ_TIMEOUT_MS, no retry). Null when AC has
+ *  nothing to say (`result_code` 0) or the read fails; the numbers it feeds
+ *  are shown, never decided on. */
+async function v1report(
+  action: string,
+  params: Record<string, string>
+): Promise<Record<string, unknown> | null> {
+  const qs = new URLSearchParams({
+    api_action: action,
+    api_output: 'json',
+    api_key: apiKey(),
+    ...params,
+  })
+  try {
+    const res = await fetch(`${base()}/admin/api.php?${qs}`, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(READ_TIMEOUT_MS),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const out = (await res.json()) as Record<string, unknown>
+    return Number(out.result_code) === 1 ? out : null
+  } catch (err) {
+    console.warn(
+      `[newsletter] ActiveCampaign ${action} unreadable: ${err instanceof Error ? err.message : String(err)}`
+    )
+    return null
+  }
+}
+
 async function v1(
   action: string,
   fields: Record<string, string | number>
@@ -358,7 +432,13 @@ interface RawCampaign {
   tracklinks?: string | null
   /** '0' when AC adds no utm tags of its own. */
   tracklinksanalytics?: string | null
+  /** '0' for a whole-list send; a wave's campaign carries the id of the
+   *  hidden segment row AC made from the wave's saved segment. */
   segmentid?: string | null
+  hardbounces?: string | null
+  softbounces?: string | null
+  /** Opens by people, without Apple Mail's automatic image loads. */
+  verified_unique_opens?: string | null
 }
 
 interface RawMessage {
@@ -392,10 +472,19 @@ export interface DraftSummary {
   /** What the approver must tick in the confirm dialog before it sends. */
   warnings: SendWarning[]
   /** This issue already went (or is going) to this list as another
-   *  campaign: Approve stays off. */
+   *  campaign — the whole list, or every one of its waves: Approve stays
+   *  off. */
   alreadySent: { campaignId: string; status: string } | null
+  /** The list's warm-up waves and how far this issue has got through them;
+   *  null when the list has none (then it can only go out whole). */
+  waves: WavePlan | null
+  /** Minutes between approval and the send on this list. */
+  sendDelayMinutes: number
   /** Card edits may be saved into this draft from this copy of the site. */
   editable: boolean
+  /** Why card edits are off just now (a wave of the issue is going out and
+   *  shares this draft's email), or null. */
+  editLock: string | null
   /** The inbox preview line (the email's hidden preheader), as Gmail shows it
    *  after the subject. Null when the email has none. */
   preview: string | null
@@ -419,15 +508,91 @@ export interface SentSummary {
     | 'held'
     | 'disabled'
   scheduledFor: string | null
+  /** When a scheduled send goes out, as an ISO instant (AC's own sdate is in
+   *  the account's local time), for the countdown. */
+  scheduledAt: string | null
   sentAt: string | null
   sentTo: number
   uniqueOpens: number | null
   unsubscribes: number | null
   listNames: string[]
+  /** The issue's name without any wave suffix. */
+  baseName: string
+  /** Which wave this campaign is, or null for a whole-list send. */
+  wave: { wave: number; waves: number } | null
+  /** Rows of one issue on one list share this: they are shown together, and
+   *  the clicks (counted per issue) once for the lot. */
+  group: string
   /** Clicks counted on aisafety.com (the email's links go through
    *  /api/nl since 28 Sept 2026); zero for older sends, whose links went
-   *  through ActiveCampaign's tracker. */
+   *  through ActiveCampaign's tracker. Per issue: every wave of it carries
+   *  the same numbers. */
   clicks: CampaignClicks
+  /** What may be done to it from the page right now (approvers only). */
+  actions: StopAction[]
+}
+
+/** Cancel a scheduled or held send (it is deleted: nobody gets it), pause
+ *  one that is sending, stop a sending or paused one for good, resume a
+ *  paused one. */
+export type StopAction = 'cancel' | 'pause' | 'stop' | 'resume'
+
+/** One wave of the list, and this issue's send of it if it has gone. */
+export interface WaveInfo {
+  wave: number
+  waves: number
+  /** The saved segment's name ("Newsletter wave 2"). */
+  label: string
+  segmentId: string
+  /** Active contacts on this list in the wave right now; null if unread. */
+  count: number | null
+  sent: WaveSent | null
+}
+
+/** A wave this issue has sent (or is sending), with its numbers. */
+export interface WaveSent {
+  campaignId: string
+  status: string
+  /** When it finished sending (ISO), once it has. */
+  finishedAt: string | null
+  sent: number
+  /** Hard + soft bounces. */
+  bounces: number | null
+  unsubscribes: number | null
+  /** Opens by people (ActiveCampaign's verified_unique_opens). */
+  verifiedOpens: number | null
+  /** Non-Gmail complaints only: Gmail doesn't tell ActiveCampaign. */
+  spamComplaints: number | null
+  /** The send watcher's 18-hour verdict, once it has one. */
+  health: 'green' | 'amber' | 'red' | null
+}
+
+/** A list's waves and where one issue stands in them. */
+export interface WavePlan {
+  /** The waves couldn't be read or don't fit the wave contract; the list
+   *  can't be sent in waves until that's fixed. */
+  error: string | null
+  waves: WaveInfo[]
+  /** Active on the list now, and how many this issue has reached so far
+   *  (send_amt over its waves): the rest are still to get it. */
+  active: number | null
+  reached: number
+  /** The wave that may go next, or null. */
+  next: number | null
+  /** The 18-hour gap after the previous wave ends at this instant (ISO);
+   *  sending sooner needs a typed reason. */
+  notBefore: string | null
+  /** Other reasons the next wave is held that a typed reason can override
+   *  (the watcher flagged the previous wave red, say). */
+  holds: string[]
+  /** Why the next wave has to wait (the previous one is still sending). */
+  wait: string | null
+  /** Why no further wave of this issue can go (a wave was stopped, the
+   *  waves changed, it already went to the whole list). */
+  blocked: string | null
+  /** It may still go to the whole list at once instead (small lists only
+   *  while the warm-up is on). */
+  wholeList: boolean
 }
 
 // ActiveCampaign's campaign statuses (0 = draft is handled separately). 6 and
@@ -515,6 +680,245 @@ export function liveCampaignsNamed<
   })
 }
 
+/** A saved segment that is one wave of a list. */
+export interface WaveSegment {
+  wave: number
+  waves: number
+  name: string
+  segmentId: string
+  /** The wave's tag (waves 1…N−1); null for the last, "everyone else". */
+  tagId: string | null
+}
+
+/** Pure: the waves among the account's saved segments, in order, or why
+ *  they don't make a set: named `${prefix}1` … `${prefix}${N-1}` and
+ *  `${prefix}${N} (everyone else)`, N from 2 to 9, each number once. */
+export function parseWaveSegments(
+  prefix: string,
+  saved: Array<{ name: string; segmentId: string }>
+):
+  | Array<{ wave: number; name: string; segmentId: string; last: boolean }>
+  | {
+      error: string
+    } {
+  const re = new RegExp(
+    `^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)( \\(everyone else\\))?$`
+  )
+  const found = saved
+    .map(s => ({ s, m: re.exec(s.name) }))
+    .filter(x => x.m && x.s.name.startsWith(prefix))
+    .map(({ s, m }) => ({
+      wave: Number(m![1]),
+      name: s.name,
+      segmentId: s.segmentId,
+      last: Boolean(m![2]),
+    }))
+    .sort((a, b) => a.wave - b.wave)
+  if (found.length === 0) return []
+  const names = found.map(f => `“${f.name}”`).join(', ')
+  const n = found.length
+  const numbered = found.every((f, i) => f.wave === i + 1)
+  const lastOnly = found.every((f, i) => f.last === (i === n - 1))
+  if (n < 2 || n > 9 || !numbered || !lastOnly)
+    return {
+      error: `the wave segments in ActiveCampaign (${names}) aren’t numbered 1 to N with only the last one “(everyone else)” – ask Claude to check ~/Newsletter/waves.py`,
+    }
+  if (found.some(f => !SEGMENT_ID_RE.test(f.segmentId)))
+    return { error: `a wave segment has an unexpected id (${names})` }
+  return found
+}
+
+/** Pure: each wave's tag, read from its segment's conditions, or why they
+ *  don't fit the wave contract: wave k < N has exactly "has tag T_k"; the
+ *  last has "doesn't have tag T" for every earlier wave's tag and nothing
+ *  else, all joined with AND — so nobody is in two waves or in none. */
+export function waveTags(
+  defs: Array<{
+    wave: number
+    name: string
+    last: boolean
+    conditions: Array<{ field: string; op: string; value: string }>
+    groupOps: string[]
+  }>
+): { tags: Array<string | null> } | { error: string } {
+  const tags: Array<string | null> = []
+  for (const d of defs) {
+    if (d.last) continue
+    const c = d.conditions
+    if (
+      c.length !== 1 ||
+      c[0].field !== 'tagid' ||
+      c[0].op !== '=' ||
+      !/^\d+$/.test(c[0].value)
+    )
+      return {
+        error: `the segment “${d.name}” isn’t “has tag X” – ask Claude to check ~/Newsletter/waves.py`,
+      }
+    tags.push(c[0].value)
+  }
+  if (new Set(tags).size !== tags.length)
+    return { error: 'two wave segments use the same tag' }
+  const last = defs[defs.length - 1]
+  const excluded = last.conditions.map(c => c.value)
+  if (
+    !last.last ||
+    last.conditions.some(c => c.field !== 'tagid' || c.op !== '!=') ||
+    last.groupOps.some(op => op.toLowerCase() !== 'and') ||
+    excluded.length !== tags.length ||
+    !tags.every(t => excluded.includes(t as string))
+  )
+    return {
+      error: `the segment “${last.name}” doesn’t leave out exactly the earlier waves’ tags, so some people could get an issue twice or never – ask Claude to check ~/Newsletter/waves.py`,
+    }
+  return { tags: [...tags, null] }
+}
+
+/** A campaign of this issue on the list, as waveProgress reads it. */
+export interface IssueSend {
+  id: string
+  name: string
+  status: string
+  send_amt?: string | null
+  ldate?: string | null
+}
+
+/** The send watcher's 18-hour verdict on a wave (its HealthRecord; only
+ *  these fields are read). */
+export interface WaveHealth {
+  verdict?: string
+  reasons?: string[]
+  /** Too few recipients to judge. */
+  smallSample?: boolean
+}
+
+export interface WaveProgress {
+  next: number | null
+  /** Epoch ms when the gap after the previous wave ends. */
+  notBefore: number | null
+  holds: string[]
+  wait: string | null
+  blocked: string | null
+  /** Every wave went (or the issue went to the whole list). */
+  done: boolean
+  /** This issue's live campaign for each wave (index = wave − 1). */
+  byWave: Array<IssueSend | null>
+}
+
+/** Pure: which wave of `waves` may go next, given this issue's live
+ *  campaigns on the list (`live`, as sentOnList returns them) and the
+ *  watcher's verdicts. Waves go in order; wave k+1 needs wave k finished
+ *  (status 5) and WAVE_MIN_GAP_HOURS since then (see holdsAt). A wave that
+ *  was stopped after reaching people ends the issue's run. */
+export function waveProgress(
+  waves: number,
+  live: IssueSend[],
+  health: Map<string, WaveHealth> = new Map()
+): WaveProgress {
+  const out: WaveProgress = {
+    next: null,
+    notBefore: null,
+    holds: [],
+    wait: null,
+    blocked: null,
+    done: false,
+    byWave: Array.from({ length: waves }, () => null),
+  }
+  const whole = live.find(c => waveOf(c.name) == null)
+  if (whole) {
+    out.blocked = `this issue already went to the whole list as campaign ${whole.id} (${statusLabel(whole.status)})`
+    out.done = true
+    return out
+  }
+  for (const c of live) {
+    const w = waveOf(c.name)!
+    if (w.waves !== waves) {
+      out.blocked = `the waves changed after this issue started going out: campaign ${c.id} was wave ${w.wave} of ${w.waves}, and there are ${waves} waves now – ask Claude before sending more`
+      return out
+    }
+    if (w.wave < 1 || w.wave > waves) {
+      out.blocked = `campaign ${c.id} is named as wave ${w.wave} of ${w.waves}, which can’t be – ask Claude before sending more`
+      return out
+    }
+    const had = out.byWave[w.wave - 1]
+    if (had) {
+      out.blocked = `wave ${w.wave} of this issue went out twice (campaigns ${had.id} and ${c.id}) – ask Claude before sending more`
+      return out
+    }
+    out.byWave[w.wave - 1] = c
+  }
+  let highest = 0
+  out.byWave.forEach((c, i) => {
+    if (c) highest = i + 1
+  })
+  const missing = out.byWave.findIndex((c, i) => !c && i < highest)
+  if (missing >= 0) {
+    out.blocked = `wave ${missing + 1} of this issue never went out, but wave ${highest} did – ask Claude before sending more`
+    return out
+  }
+  if (highest === waves) {
+    out.done = true
+    return out
+  }
+  out.next = highest + 1
+  if (highest === 0) return out
+  const prev = out.byWave[highest - 1]!
+  if (prev.status === '4' || prev.status === '6') {
+    out.blocked = `wave ${highest} was ${statusLabel(prev.status)} after reaching ${Number(prev.send_amt ?? 0) || 'some'} people, so no further wave of this issue goes out (see ~/Newsletter/ROLLBACK.md)`
+    out.next = null
+    return out
+  }
+  if (prev.status !== '5') {
+    out.wait = `wave ${out.next} can go once wave ${highest} has finished sending (it is ${statusLabel(prev.status)} now)`
+    return out
+  }
+  const finished = Date.parse(prev.ldate ?? '')
+  if (Number.isNaN(finished))
+    out.holds.push(
+      `ActiveCampaign doesn’t say when wave ${highest} finished, so the ${WAVE_MIN_GAP_HOURS}-hour gap can’t be checked`
+    )
+  else out.notBefore = finished + WAVE_MIN_GAP_HOURS * 3_600_000
+  const h = health.get(prev.id)
+  if (h?.verdict === 'red' && !h.smallSample)
+    out.holds.push(
+      `the send watcher flagged wave ${highest} red${h.reasons?.length ? `: ${h.reasons.join('; ')}` : ''}`
+    )
+  return out
+}
+
+/** Pure: the holds on the next wave at `now`: the gap, if it hasn't passed,
+ *  then the others. */
+export function holdsAt(p: WaveProgress, now: Date): string[] {
+  const gap =
+    p.notBefore != null && now.getTime() < p.notBefore
+      ? [
+          `wave ${(p.next ?? 1) - 1} finished less than ${WAVE_MIN_GAP_HOURS} hours ago; wave ${p.next} is due from ${formatUtc(new Date(p.notBefore))}`,
+        ]
+      : []
+  return [...gap, ...p.holds]
+}
+
+/** "8 October 2026, 14:32 UTC". */
+function formatUtc(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${formatDay(d)}, ${p(d.getUTCHours())}:${p(d.getUTCMinutes())} UTC`
+}
+
+/** Pure: what the page may do to a send in this state. Only the newsletter
+ *  lists' single-list campaigns (lists 5–8); status 1 or 7 can only be
+ *  canceled (AC deletes it), 2 paused, 3 stopped for good or resumed. */
+export function stopActionsFor(
+  status: string,
+  listIds: string[]
+): StopAction[] {
+  if (listIds.length !== 1 || !STOPPABLE_LISTS.has(listIds[0])) return []
+  if (status === '1' || status === '7') return ['cancel']
+  if (status === '2') return ['pause']
+  if (status === '3') return ['stop', 'resume']
+  return []
+}
+
+const STOPPABLE_LISTS = new Set(['5', '6', '7', '8'])
+
 /** The live campaigns of this issue that went to `listId`, newest first. */
 async function sentOnList(
   campaigns: RawCampaign[],
@@ -575,14 +979,319 @@ async function listNames(): Promise<Map<string, string>> {
 
 /** Active contacts on a list — the number an approved send goes to. */
 async function activeContactCount(listId: string): Promise<number | null> {
+  return contactCount(
+    `contacts?listid=${encodeURIComponent(listId)}&status=1&limit=1`
+  )
+}
+
+/** How many contacts a contacts query matches (its meta.total); null when
+ *  it can't be read, which every caller treats as "unknown", never 0. */
+async function contactCount(query: string): Promise<number | null> {
   try {
-    const data = await v3<{ meta?: { total?: string | number } }>(
-      `contacts?listid=${encodeURIComponent(listId)}&status=1&limit=1`
-    )
+    const data = await v3<{ meta?: { total?: string | number } }>(query)
     const total = data.meta?.total
     return total == null ? null : Number(total)
-  } catch {
+  } catch (err) {
+    console.warn(
+      `[newsletter] counting ${query.split('&limit')[0]} failed: ${err instanceof Error ? err.message : String(err)}`
+    )
     return null
+  }
+}
+
+/* ─── Waves: what ActiveCampaign holds ────────────────────────────────────
+   ~/Newsletter/waves.py tags the contacts and makes one saved segment per
+   wave (the WAVE CONTRACT in its docstring). Here the segments are found by
+   name, their conditions checked, and each wave counted on the list. */
+
+function wavePrefix(listId: string): string | null {
+  if (isRealList(listId)) return WAVE_PREFIX_REAL
+  if (TEST_LISTS.has(listId)) return WAVE_PREFIX_TEST
+  return null
+}
+
+/** The list's waves with their tags; null when it has none; `{ error }`
+ *  when they can't be used. `fresh` skips the minute's sharing (approval). */
+async function readWaveSegments(
+  listId: string,
+  { fresh = false } = {}
+): Promise<WaveSegment[] | { error: string } | null> {
+  const prefix = wavePrefix(listId)
+  if (!prefix) return null
+  const read = async (): Promise<WaveSegment[] | { error: string } | null> => {
+    let saved: Array<{ name: string; segmentId: string }>
+    try {
+      const data = await v3<{
+        data?: Array<{
+          id?: string
+          attributes?: { name?: string; segment_id?: string }
+        }>
+      }>(`audiences?search=${encodeURIComponent(prefix.trim())}&page_size=100`)
+      saved = (data.data ?? []).map(d => ({
+        name: String(d.attributes?.name ?? ''),
+        segmentId: String(d.attributes?.segment_id ?? d.id ?? ''),
+      }))
+    } catch (err) {
+      // 404 = no saved segment matches: an empty result, not an error.
+      if (err instanceof Error && /: 404 /.test(err.message)) saved = []
+      else throw err
+    }
+    const found = parseWaveSegments(prefix, saved)
+    if (!Array.isArray(found)) return found
+    if (found.length === 0) return null
+    const defs = await mapLimit(found, 3, async f => ({
+      ...f,
+      ...(await segmentConditions(f.segmentId, fresh)),
+    }))
+    const tags = waveTags(defs)
+    if ('error' in tags) return tags
+    return found.map((f, i) => ({
+      wave: f.wave,
+      waves: found.length,
+      name: f.name,
+      segmentId: f.segmentId,
+      tagId: tags.tags[i],
+    }))
+  }
+  return fresh ? read() : sharedRead(`waves:${prefix}`, 60_000, read)
+}
+
+/** A saved segment's conditions as (field, operator, value), and how its
+ *  groups are joined. A condition on anything but a tag, or one that counts
+ *  (field_aggregate), comes back under another field name, so it can never
+ *  pass for a wave's. */
+async function segmentConditions(
+  id: string,
+  fresh: boolean
+): Promise<{
+  conditions: Array<{ field: string; op: string; value: string }>
+  groupOps: string[]
+}> {
+  const read = async () => {
+    const r = await v3<{ data?: unknown }>(`segmentsV2/${segmentId(id)}`)
+    const d = (Array.isArray(r.data) ? r.data[0] : r.data) as
+      | {
+          attributes?: {
+            segment_conditions?: Array<{
+              object_type?: string
+              field_aggregate?: unknown
+              fields?: Array<{
+                name?: string
+                operator?: string
+                value?: unknown
+              }>
+            }>
+            segment_condition_groups?: Array<{ operator?: string }>
+            segment_condition_group_operator?: string
+          }
+        }
+      | undefined
+    const at = d?.attributes ?? {}
+    const conditions = (at.segment_conditions ?? []).flatMap(c =>
+      (c.fields ?? []).map(f => ({
+        field:
+          c.object_type === 'tag' && c.field_aggregate == null
+            ? String(f.name ?? '')
+            : `${String(c.object_type)}.${String(f.name ?? '')}${c.field_aggregate == null ? '' : '(aggregate)'}`,
+        op: String(f.operator ?? ''),
+        value: String(f.value ?? ''),
+      }))
+    )
+    const groupOps = [
+      ...(at.segment_condition_groups ?? []).map(g => String(g.operator ?? '')),
+      String(at.segment_condition_group_operator ?? 'and'),
+    ]
+    return { conditions, groupOps }
+  }
+  // A segment's conditions can be edited in ActiveCampaign's app, so even
+  // the page's copy is only kept for ten minutes.
+  return fresh ? read() : sharedRead(`segment:${id}`, 10 * 60_000, read)
+}
+
+/** Each wave's active contacts on the list, by the wave contract: a tagged
+ *  wave is contacts?listid&status=1&tagid (the segmentid filter ignores
+ *  listid), the last wave the rest of the list's active contacts. */
+async function waveCounts(
+  listId: string,
+  segments: WaveSegment[],
+  active: number | null,
+  { fresh = false } = {}
+): Promise<Array<number | null>> {
+  const count = (tagId: string) => {
+    const query = `contacts?listid=${encodeURIComponent(listId)}&status=1&tagid=${encodeURIComponent(tagId)}&limit=1`
+    // The page rereads every 30 seconds; the approval counts afresh.
+    return fresh
+      ? contactCount(query)
+      : sharedRead(`count:${query}`, 30_000, () => contactCount(query))
+  }
+  const tagged = await mapLimit(
+    segments.filter(s => s.tagId != null),
+    3,
+    s => count(s.tagId!)
+  )
+  const known = tagged.every(n => n != null)
+  const rest =
+    active != null && known
+      ? active - tagged.reduce<number>((a, n) => a + (n ?? 0), 0)
+      : null
+  return [...tagged, rest != null && rest >= 0 ? rest : null]
+}
+
+/** Where the send watcher keeps its 18-hour verdict on each wave. */
+const HEALTH_PREFIX = 'aisafety:newsletter:health:'
+
+/** The watcher's verdicts on these campaigns (none on a laptop without
+ *  Upstash, or before the watcher has judged them). */
+async function readHealth(ids: string[]): Promise<Map<string, WaveHealth>> {
+  const redis = kv()
+  const out = new Map<string, WaveHealth>()
+  if (!redis || ids.length === 0) return out
+  const got = await Promise.all(
+    ids.map(id => redis.get<WaveHealth>(HEALTH_PREFIX + id))
+  )
+  ids.forEach((id, i) => {
+    const h = got[i]
+    if (h && typeof h === 'object') out.set(id, h)
+  })
+  return out
+}
+
+/** A wave's numbers: the campaign read on its own (the list read can lag),
+ *  and its complaints from the v1 report, shared for a minute. */
+async function waveSentInfo(
+  c: RawCampaign,
+  health: WaveHealth | undefined
+): Promise<WaveSent> {
+  const [full, totals] = await Promise.all([
+    sharedRead(`campaign:${c.id}`, 60_000, () =>
+      v3<{ campaign?: RawCampaign }>(`campaigns/${acId(c.id)}`).then(
+        d => d.campaign ?? c
+      )
+    ).catch(err => {
+      console.warn(
+        `[newsletter] reading campaign ${c.id}'s numbers failed: ${err instanceof Error ? err.message : String(err)}`
+      )
+      return c
+    }),
+    sharedRead(`unsubtotals:${c.id}`, 60_000, () =>
+      v1report('campaign_report_unsubscription_totals', { campaignid: c.id })
+    ),
+  ])
+  const num = (v: unknown) =>
+    v == null || String(v).trim() === '' || Number.isNaN(Number(v))
+      ? null
+      : Number(v)
+  const hard = num(full.hardbounces)
+  const soft = num(full.softbounces)
+  const finished = full.status === '5' ? Date.parse(full.ldate ?? '') : NaN
+  const verdict = health?.verdict
+  return {
+    campaignId: c.id,
+    status: statusLabel(full.status),
+    finishedAt: Number.isNaN(finished)
+      ? null
+      : new Date(finished).toISOString(),
+    sent: num(full.send_amt) ?? 0,
+    bounces: hard == null && soft == null ? null : (hard ?? 0) + (soft ?? 0),
+    unsubscribes: num(full.unsubscribes),
+    verifiedOpens: num(full.verified_unique_opens),
+    spamComplaints: totals ? num(totals.spam_complaints) : null,
+    health:
+      verdict === 'green' || verdict === 'amber' || verdict === 'red'
+        ? verdict
+        : null,
+  }
+}
+
+/** Pure: why card edits must wait, or null: a send of this issue that shares
+ *  the draft's email (every wave is made from the draft's message) is still
+ *  scheduled, sending, paused or held, and an edit would change what it
+ *  sends after the checks were ticked. */
+export function editLockFor(live: IssueSend[]): string | null {
+  const going = live.find(
+    c => isLiveCampaign(c) && !['4', '5', '6'].includes(c.status)
+  )
+  if (!going) return null
+  const w = waveOf(going.name)
+  return `${w ? `Wave ${w.wave} of this issue` : 'This issue'} (campaign ${going.id}) is ${statusLabel(going.status)} and uses this draft’s email, so card edits are off until it has finished sending`
+}
+
+/** The list's waves and where this issue stands in them, for the page:
+ *  null when the list has no waves. `live` = this issue's live campaigns on
+ *  the list; `active` = the list's active contacts. */
+async function wavePlanFor(
+  listId: string,
+  live: RawCampaign[],
+  active: number | null
+): Promise<{ plan: WavePlan; progress: WaveProgress | null } | null> {
+  const wholeList = warmupRefusal(listId, active, null) == null && !live.length
+  const empty = (error: string): { plan: WavePlan; progress: null } => ({
+    plan: {
+      error,
+      waves: [],
+      active,
+      reached: 0,
+      next: null,
+      notBefore: null,
+      holds: [],
+      wait: null,
+      blocked: null,
+      wholeList,
+    },
+    progress: null,
+  })
+  let segs: WaveSegment[] | { error: string } | null
+  try {
+    segs = await readWaveSegments(listId)
+  } catch (err) {
+    console.warn(
+      `[newsletter] reading the wave segments failed: ${err instanceof Error ? err.message : String(err)}`
+    )
+    return empty(
+      'the wave segments couldn’t be read just now – try again in a minute'
+    )
+  }
+  if (segs == null) return null
+  if ('error' in segs) return empty(segs.error)
+  const waves = segs
+  const waveIds = live.filter(c => waveOf(c.name)).map(c => c.id)
+  const [counts, health] = await Promise.all([
+    waveCounts(listId, waves, active),
+    readHealth(waveIds).catch(err => {
+      console.warn(
+        `[newsletter] reading the watcher's verdicts failed: ${err instanceof Error ? err.message : String(err)}`
+      )
+      return new Map<string, WaveHealth>()
+    }),
+  ])
+  const progress = waveProgress(waves.length, live, health)
+  const sent = await mapLimit(progress.byWave, 3, c =>
+    c ? waveSentInfo(c as RawCampaign, health.get(c.id)) : Promise.resolve(null)
+  )
+  return {
+    plan: {
+      error: null,
+      waves: waves.map((s, i) => ({
+        wave: s.wave,
+        waves: s.waves,
+        label: s.name,
+        segmentId: s.segmentId,
+        count: counts[i],
+        sent: sent[i],
+      })),
+      active,
+      reached: sent.reduce((n, s) => n + (s?.sent ?? 0), 0),
+      next: progress.next,
+      notBefore:
+        progress.notBefore == null
+          ? null
+          : new Date(progress.notBefore).toISOString(),
+      holds: progress.holds,
+      wait: progress.wait,
+      blocked: progress.blocked,
+      wholeList,
+    },
+    progress,
   }
 }
 
@@ -1172,7 +1881,25 @@ export async function listDrafts(): Promise<DraftSummary[]> {
         ])
       : [null, { blocks: [], warnings: [] }, []]
     const refusal = listId ? listRefusal(listId) : null
-    const warmup = listId ? warmupRefusal(listId, activeContacts, null) : null
+    const waved = listId
+      ? await wavePlanFor(listId, sent, activeContacts)
+      : null
+    const plan = waved?.plan ?? null
+    // With usable waves the warm-up only rules out the whole list (the page
+    // offers the waves instead); without, it blocks the send.
+    const usableWaves = plan != null && plan.error == null
+    const warmup =
+      listId && !usableWaves
+        ? warmupRefusal(listId, activeContacts, null)
+        : null
+    // "Already sent": the whole list got it, or every wave did. With waves
+    // still to go, Approve stays on for the next one.
+    const done =
+      waved?.progress?.done === true
+        ? (sent.find(s => waveOf(s.name) == null) ?? sent[0] ?? null)
+        : null
+    const alreadySent = usableWaves ? done : (sent[0] ?? null)
+    const editLock = editLockFor(sent)
     const row: DraftSummary = {
       id: c.id,
       name: c.name,
@@ -1188,16 +1915,29 @@ export async function listDrafts(): Promise<DraftSummary[]> {
       blocks: [
         ...(refusal ? [refusal] : []),
         ...checks.blocks,
-        ...(warmup ? [warmup] : []),
+        ...(warmup
+          ? [
+              warmup,
+              plan?.error ??
+                'no wave segments were found in ActiveCampaign (~/Newsletter/waves.py makes them after the import)',
+            ]
+          : []),
       ],
       warnings: checks.warnings,
-      alreadySent: sent[0]
-        ? { campaignId: sent[0].id, status: statusLabel(sent[0].status) }
+      alreadySent: alreadySent
+        ? {
+            campaignId: alreadySent.id,
+            status: statusLabel(alreadySent.status),
+          }
         : null,
+      waves: plan,
+      sendDelayMinutes: listId ? sendDelayMinutes(listId) : 0,
       editable:
         problems.length === 0 &&
         listId != null &&
-        (!isRealList(listId) || canWriteRealListsHere()),
+        (!isRealList(listId) || canWriteRealListsHere()) &&
+        editLock == null,
+      editLock,
       preview: previewText(msg.html ?? ''),
       cards: cardGroups(msg.html ?? ''),
     }
@@ -1302,25 +2042,71 @@ export async function listRecent(limit = 12): Promise<SentSummary[]> {
     )
     .slice(0, limit)
   // Clicks are counted per issue: every wave of one shares its base name.
-  const [lists, clicks] = await Promise.all([
+  const [lists, clicks, offset] = await Promise.all([
     mapLimit(recent, 3, knownListIds),
     readClicks([...new Set(recent.map(c => baseIssueName(c.name)))]),
+    accountUtcOffset(campaigns),
   ])
-  return recent.map((c, i) => {
+  const rows = recent.map((c, i): SentSummary => {
     const listIds = lists[i]
+    const baseName = baseIssueName(c.name)
     return {
       id: c.id,
       name: c.name,
       status: STATUS_NAMES[c.status],
       scheduledFor: c.sdate,
+      scheduledAt: sdateInstant(c.sdate, offset),
       sentAt: c.ldate,
       sentTo: Number(c.send_amt ?? 0),
       uniqueOpens: c.uniqueopens == null ? null : Number(c.uniqueopens),
       unsubscribes: c.unsubscribes == null ? null : Number(c.unsubscribes),
       listNames: listIds.map(id => names.get(id) ?? `list ${id}`),
-      clicks: clicks.get(baseIssueName(c.name)) ?? { total: 0, links: [] },
+      baseName,
+      wave: waveOf(c.name),
+      group: `${listIds.join(',')}|${baseName}`,
+      clicks: clicks.get(baseName) ?? { total: 0, links: [] },
+      actions: stopActionsFor(c.status, listIds),
     }
   })
+  return groupSends(rows)
+}
+
+/** Pure: rows of one issue on one list next to each other, where the
+ *  newest of them stands, waves highest first; otherwise the order stays. */
+export function groupSends<
+  T extends { group: string; wave: { wave: number } | null },
+>(rows: T[]): T[] {
+  const order: string[] = []
+  const by = new Map<string, T[]>()
+  for (const r of rows) {
+    const g = by.get(r.group)
+    if (g) g.push(r)
+    else {
+      by.set(r.group, [r])
+      order.push(r.group)
+    }
+  }
+  return order.flatMap(g =>
+    by.get(g)!.sort((a, b) => (b.wave?.wave ?? 0) - (a.wave?.wave ?? 0))
+  )
+}
+
+/** Pure: AC's sdate as an ISO instant. The v3 API writes it with the
+ *  account's offset; the v1 form (`YYYY-MM-DD HH:MM:SS`) is read in
+ *  `offset`. Null when it's neither. */
+export function sdateInstant(
+  sdate: string | null,
+  offset: string
+): string | null {
+  if (!sdate) return null
+  const s = sdate.trim()
+  const withZone = /[+-]\d{2}:\d{2}$|Z$/.test(s)
+    ? s
+    : /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/.test(s)
+      ? `${s.replace(' ', 'T')}${offset}`
+      : null
+  const at = withZone ? Date.parse(withZone) : NaN
+  return Number.isNaN(at) ? null : new Date(at).toISOString()
 }
 
 /* ─── Reorderable cards ─────────────────────────────────────────────── */
@@ -1883,11 +2669,13 @@ async function rewriteDraft(
   logLine: string,
   knownMessageId?: string
 ): Promise<{ cards: CardGroup[] }> {
-  const { problems, messageId, msg, listIds } = await readDraft(
-    draftId,
-    null,
-    knownMessageId
-  )
+  // The campaigns are read alongside the draft (uncached: an approval may
+  // have scheduled a wave a moment ago).
+  const [{ campaign, problems, messageId, msg, listIds }, campaigns] =
+    await Promise.all([
+      readDraft(draftId, null, knownMessageId),
+      allCampaigns({ fresh: true }),
+    ])
   if (problems.length > 0 || !messageId || !msg) {
     throw new DraftProblemError(
       problems.length > 0 ? problems : ['no message on the draft']
@@ -1900,6 +2688,12 @@ async function rewriteDraft(
     .map(listRefusal)
     .filter((r): r is string => r !== null)
   if (refusals.length > 0) throw new DraftProblemError(refusals)
+  // A wave of this issue still going out is made from this same message:
+  // an edit now would change it after its checks were ticked.
+  const lock = editLockFor(
+    await sentOnList(campaigns, draftId, campaign.name, listIds[0], null)
+  )
+  if (lock) throw new DraftProblemError([lock])
   const body = (msg.html ?? '').replace(MARKER_RE, '')
   const { html, text } = change(body)
   const stamped = `<!--aisafety-issue:${contentDigest(html)}-->` + html
@@ -1935,11 +2729,15 @@ export interface SendStats {
   opens: number | null
   unsubscribes: number | null
   clicks: CampaignClicks
+  /** How many waves the numbers add up (0 = one whole-list send). */
+  waves: number
 }
 
 /** The sent issues of the real newsletter lists (test lists left out) whose
  *  send finished inside [startMs, endMs], newest first, with the clicks
- *  counted on aisafety.com. For /admin/analytics' Newsletters tab. */
+ *  counted on aisafety.com. An issue sent in waves is one row: its waves'
+ *  numbers added up, its clicks (counted per issue) once. For
+ *  /admin/analytics' Newsletters tab. */
 export async function readSendStats(range: {
   startMs: number | null
   endMs: number | null
@@ -1962,7 +2760,11 @@ export async function readSendStats(range: {
     return ids
   })
   const real = inRange
-    .map((c, i) => ({ c, list: names.get(lists[i][0] ?? '') ?? '' }))
+    .map((c, i) => ({
+      c,
+      listId: lists[i][0] ?? '',
+      list: names.get(lists[i][0] ?? '') ?? '',
+    }))
     .filter(
       ({ c, list }, i) =>
         lists[i].length === 1 &&
@@ -1973,20 +2775,47 @@ export async function readSendStats(range: {
   const clicks = await readClicks([
     ...new Set(real.map(({ c }) => baseIssueName(c.name))),
   ])
-  return real
-    .map(({ c, list }) => ({
-      id: c.id,
-      name: c.name,
+  return sumIssues(real).map(({ rows, list }) => {
+    const newest = rows[0].c
+    const name = baseIssueName(newest.name)
+    const sum = (pick: (c: RawCampaign) => string | null | undefined) => {
+      const vals = rows.map(r => pick(r.c)).filter(v => v != null)
+      return vals.length === 0 ? null : vals.reduce((n, v) => n + Number(v), 0)
+    }
+    return {
+      id: newest.id,
+      name,
       newsletter: list.replace(/^AISafety\.com\s+/i, ''),
-      sentAt: c.ldate ?? c.sdate,
-      delivered: Number(c.send_amt ?? 0),
-      opens: c.uniqueopens == null ? null : Number(c.uniqueopens),
-      unsubscribes: c.unsubscribes == null ? null : Number(c.unsubscribes),
-      clicks: clicks.get(baseIssueName(c.name)) ?? { total: 0, links: [] },
-    }))
-    .sort((a, b) =>
-      String(b.sentAt ?? '').localeCompare(String(a.sentAt ?? ''))
-    )
+      sentAt: newest.ldate ?? newest.sdate,
+      delivered: sum(c => c.send_amt ?? '0') ?? 0,
+      opens: sum(c => c.uniqueopens),
+      unsubscribes: sum(c => c.unsubscribes),
+      clicks: clicks.get(name) ?? { total: 0, links: [] },
+      waves: rows.filter(r => waveOf(r.c.name) != null).length,
+    }
+  })
+}
+
+/** Pure: sends grouped per list + issue (base name), each group newest
+ *  first, the groups newest first. */
+export function sumIssues<
+  R extends {
+    c: { name: string; ldate?: string | null; sdate?: string | null }
+    listId: string
+    list: string
+  },
+>(sends: R[]): Array<{ rows: R[]; list: string }> {
+  const at = (r: R) => String(r.c.ldate ?? r.c.sdate ?? '')
+  const groups = new Map<string, { rows: R[]; list: string }>()
+  for (const r of sends) {
+    const key = `${r.listId}|${baseIssueName(r.c.name)}`
+    const g = groups.get(key)
+    if (g) g.rows.push(r)
+    else groups.set(key, { rows: [r], list: r.list })
+  }
+  const out = [...groups.values()]
+  for (const g of out) g.rows.sort((a, b) => at(b).localeCompare(at(a)))
+  return out.sort((a, b) => at(b.rows[0]).localeCompare(at(a.rows[0])))
 }
 
 /** The message HTML as a subscriber will see it, with AC's personalisation
@@ -2180,11 +3009,15 @@ export interface ApprovalRecord {
   waves: number | null
   /** The wave's AC segment (segmentsV2 id); null for a whole-list send. */
   segmentId: string | null
-  /** How many contacts it should reach, as counted at approval. */
+  /** How many contacts it should reach, as counted at approval: the wave's
+   *  count, or the list's active contacts. */
   expected: number | null
   /** ISO timestamp. */
   approvedAt: string
   approver: string
+  /** The reason typed to send a held wave anyway; absent otherwise. Not part
+   *  of the wave contract, so readers may ignore it. */
+  override?: string
 }
 
 async function recordApproval(r: ApprovalRecord): Promise<void> {
@@ -2204,8 +3037,13 @@ async function recordApproval(r: ApprovalRecord): Promise<void> {
 export class ApprovalLockedError extends Error {
   readonly detail: string
   readonly holder: LockHolder | null
-  constructor(issue: string, holder: LockHolder | null) {
-    const detail = `Another approval of “${issue}” for this list ${
+  constructor(
+    issue: string,
+    holder: LockHolder | null,
+    wave: number | null = null
+  ) {
+    const what = wave == null ? `“${issue}”` : `wave ${wave} of “${issue}”`
+    const detail = `Another approval of ${what} for this list ${
       holder ? `(${holder.approver}) ` : ''
     }started less than 15 minutes ago and may already have scheduled it. Don’t press again: check Recent sends, which updates by itself.`
     super(detail)
@@ -2224,22 +3062,57 @@ export class NeedsConfirmationError extends Error {
   }
 }
 
+/** The wave is held — the gap after the previous wave hasn't passed, or the
+ *  send watcher flagged that wave red — and no reason (or too short a one)
+ *  was typed to send it anyway. Nothing was sent. */
+export class NeedsOverrideError extends Error {
+  readonly holds: string[]
+  constructor(holds: string[]) {
+    super(`this wave is held: ${holds.join('; ')}`)
+    this.holds = holds
+  }
+}
+
+/** What the owner's notice says about an approval. */
+export interface ApprovalFacts {
+  /** The sending campaign's name ("… · wave 2/4" for a wave). */
+  name: string
+  listId: string
+  listName: string | null
+  wave: number | null
+  waves: number | null
+  /** Who it goes to: the wave's count, or the list's active contacts. */
+  expected: number | null
+  approver: string
+  /** When it was asked to go out (ISO). */
+  sendAt: string
+  /** The reason typed to send a held wave anyway. */
+  override: string | null
+}
+
 /** Something went wrong at or after `campaign_create`: ActiveCampaign may
  *  have scheduled the send even though the answer said otherwise (or never
  *  came). The lock stays, and the page says not to press again. */
 export class MaybeScheduledError extends Error {
   readonly detail: string
   readonly campaignId: string | null
-  constructor(detail: string, campaignId: string | null) {
+  /** For the owner's notice (null when it failed before the facts). */
+  readonly facts: ApprovalFacts | null
+  constructor(
+    detail: string,
+    campaignId: string | null,
+    facts: ApprovalFacts | null = null
+  ) {
     super(detail)
     this.detail = detail
     this.campaignId = campaignId
+    this.facts = facts
   }
 }
 
-/** ActiveCampaign created the send with its link tracker on, and the new
- *  campaign was deleted at once: nothing goes out. */
-export class LinkTrackingError extends Error {
+/** ActiveCampaign made the send wrongly, and the new campaign was deleted
+ *  at once: nothing goes out. */
+export class SendDeletedError extends Error {
   readonly detail: string
   constructor(detail: string) {
     super(detail)
@@ -2247,20 +3120,34 @@ export class LinkTrackingError extends Error {
   }
 }
 
-export interface ScheduledSend {
-  /** The new, sending campaign (the draft shell is deleted). */
+/** …because its link tracker came back on. */
+export class LinkTrackingError extends SendDeletedError {}
+
+/** …because it didn't keep the wave: it would have gone to the whole list. */
+export class WaveDroppedError extends SendDeletedError {}
+
+export interface ScheduledSend extends ApprovalFacts {
+  /** The new, sending campaign. */
   campaignId: string
   /** ActiveCampaign is holding the send for its compliance review ("Pending
    *  Approval"); it goes out once they approve it. */
   held: boolean
   draftId: string
   sdate: string | null
-  listName: string | null
   activeContacts: number | null
-  /** Who approved it (the signed-in admin's name). */
-  approver: string
+  segmentId: string | null
+  /** The draft stays for the next wave (it goes after the last one). */
+  draftKept: boolean
   /** Things that went wrong after the send was safely scheduled. */
   notes: string[]
+}
+
+/** One wave of the list, as the page listed it. */
+export interface WaveChoice {
+  /** The wave's saved segment (segmentsV2 id). */
+  segmentId: string
+  wave: number
+  waves: number
 }
 
 export interface ApproveOptions {
@@ -2268,14 +3155,58 @@ export interface ApproveOptions {
   approver: string
   /** Ids of the warnings ticked in the confirm dialog. */
   confirmed?: string[]
+  /** Send one wave instead of the whole list. */
+  wave?: WaveChoice | null
+  /** Typed in the dialog to send a held wave anyway; logged and recorded. */
+  override?: string | null
 }
 
-/** Verify the draft one last time, then schedule it to send in a couple of
- *  minutes. Refuses (DraftProblemError) on any verification problem or
- *  block, NeedsConfirmationError for unticked warnings, ApprovalLockedError
- *  while another approval of the issue holds the lock. Any error once the
- *  create has been asked for is a MaybeScheduledError (or a
- *  LinkTrackingError, when the new campaign was deleted again). */
+function isWaveChoice(w: WaveChoice): boolean {
+  return (
+    Number.isInteger(w.wave) &&
+    Number.isInteger(w.waves) &&
+    w.waves >= 2 &&
+    w.waves <= 9 &&
+    w.wave >= 1 &&
+    w.wave <= w.waves &&
+    typeof w.segmentId === 'string' &&
+    SEGMENT_ID_RE.test(w.segmentId)
+  )
+}
+
+/** The chosen wave as ActiveCampaign has it now, with all the list's waves;
+ *  refuses when they changed since the page showed them. */
+function chosenWave(
+  segments: WaveSegment[] | { error: string } | null,
+  wave: WaveChoice
+): WaveSegment[] {
+  if (segments == null)
+    throw new DraftProblemError([
+      'this list has no wave segments in ActiveCampaign any more – reload the page',
+    ])
+  if ('error' in segments) throw new DraftProblemError([segments.error])
+  const s = segments.find(x => x.wave === wave.wave)
+  if (
+    !s ||
+    segments.length !== wave.waves ||
+    s.segmentId.toLowerCase() !== wave.segmentId.toLowerCase()
+  )
+    throw new DraftProblemError([
+      'the waves in ActiveCampaign changed since the page loaded – reload it and choose the wave again',
+    ])
+  return segments
+}
+
+/** Verify the draft one last time, then schedule it — to the whole list, or
+ *  to one wave (`opts.wave`) — to send a few minutes later
+ *  (sendDelayMinutes). Refuses (DraftProblemError) on any verification
+ *  problem or block, a wave out of order or already sent,
+ *  NeedsConfirmationError for unticked warnings, NeedsOverrideError for a
+ *  held wave without a typed reason, ApprovalLockedError while another
+ *  approval of the issue (and wave) holds the lock. Any error once the create
+ *  has been asked for is a MaybeScheduledError (or a SendDeletedError, when
+ *  the new campaign was deleted again). The draft is kept after every wave
+ *  but the last. */
 export async function approveAndSend(
   draftId: string,
   listId: string,
@@ -2284,6 +3215,11 @@ export async function approveAndSend(
   const approver = opts.approver.trim() || 'an unnamed approver'
   const refusal = listRefusal(listId)
   if (refusal) throw new DraftProblemError([refusal])
+  const wave = opts.wave ?? null
+  if (wave && !isWaveChoice(wave))
+    throw new DraftProblemError([
+      'that isn’t one of the list’s waves – reload the page',
+    ])
   const { campaign, problems, messageId, msg } = await readDraft(
     draftId,
     listId
@@ -2294,26 +3230,42 @@ export async function approveAndSend(
     )
   }
   const baseName = baseIssueName(campaign.name)
-  // Whole-list sends only for now (wave = null); a wave send passes its
-  // number here, in the lock, the duplicate check and the record.
-  const lockKey = approveLockKey(listId, baseName, null)
+  const sendName = wave
+    ? waveCampaignName(baseName, wave.wave, wave.waves)
+    : campaign.name
+  const lockKey = approveLockKey(listId, baseName, wave?.wave ?? null)
   const claim = await claimApproveLock(
     lockKey,
     { draftId, approver, at: new Date().toISOString() },
     listId
   )
-  if (!claim.ok) throw new ApprovalLockedError(baseName, claim.holder)
+  if (!claim.ok)
+    throw new ApprovalLockedError(baseName, claim.holder, wave?.wave ?? null)
 
   let createAsked = false
   try {
-    // The email itself, and how many it would reach.
-    const [checks, active] = await Promise.all([
+    // The email itself, how many it would reach, and the wave as
+    // ActiveCampaign has it now (not as the page showed it).
+    const [checks, active, segments, names] = await Promise.all([
       sendChecks({ name: campaign.name, listId }, msg, [], new Date()),
       activeContactCount(listId),
+      wave ? readWaveSegments(listId, { fresh: true }) : null,
+      listNames().catch(() => new Map<string, string>()),
     ])
     if (checks.blocks.length > 0) throw new DraftProblemError(checks.blocks)
-    const warmup = warmupRefusal(listId, active, null)
+    const warmup = warmupRefusal(listId, active, wave?.wave ?? null)
     if (warmup) throw new DraftProblemError([warmup])
+    let expected = active
+    if (wave) {
+      const waves = chosenWave(segments, wave)
+      expected = (await waveCounts(listId, waves, active, { fresh: true }))[
+        wave.wave - 1
+      ]
+      if (expected == null)
+        throw new DraftProblemError([
+          `wave ${wave.wave} couldn’t be counted just now – try again in a minute`,
+        ])
+    }
     const ticked = new Set(opts.confirmed ?? [])
     if (checks.warnings.some(w => !ticked.has(w.id)))
       throw new NeedsConfirmationError(checks.warnings)
@@ -2331,17 +3283,51 @@ export async function approveAndSend(
     const otherDrafts = campaigns.filter(
       c => c.status === '0' && c.id !== draftId && issueOrder(c.name) != null
     )
-    const [sent, otherLists] = await Promise.all([
+    const [live, otherLists] = await Promise.all([
       sentOnList(campaigns, draftId, campaign.name, listId, null),
       mapLimit(otherDrafts, 3, c => campaignListIds(c.id)),
     ])
+    // Already sent: to the whole list, or (for a wave) this same wave. A
+    // whole-list send is refused once any wave of the issue went, and every
+    // wave once the whole list got it.
+    const sent = live.filter(c => {
+      const w = waveOf(c.name)
+      return wave == null || w == null || w.wave === wave.wave
+    })
     if (sent.length > 0) {
       throw new DraftProblemError(
-        sent.map(
-          c =>
-            `this issue already went to this list as campaign ${c.id} (${statusLabel(c.status)}) – approving it again would send it twice`
-        )
+        sent.map(c => {
+          const w = waveOf(c.name)
+          return `${w ? `wave ${w.wave} of this issue` : 'this issue'} already went to this list as campaign ${c.id} (${statusLabel(c.status)}) – approving it again would send it twice`
+        })
       )
+    }
+    // Waves go in order, each once the one before has finished and the gap
+    // has passed (or with a typed reason).
+    let override: string | null = null
+    if (wave) {
+      const health = await readHealth(
+        live.filter(c => waveOf(c.name)).map(c => c.id)
+      )
+      const p = waveProgress(wave.waves, live, health)
+      if (p.blocked) throw new DraftProblemError([p.blocked])
+      if (p.wait) throw new DraftProblemError([p.wait])
+      if (p.next !== wave.wave)
+        throw new DraftProblemError([
+          p.next == null
+            ? 'every wave of this issue has gone out'
+            : `waves go in order: wave ${p.next} is next, not wave ${wave.wave}`,
+        ])
+      const holds = holdsAt(p, new Date())
+      if (holds.length > 0) {
+        const reason = (opts.override ?? '').replace(/\s+/g, ' ').trim()
+        if (reason.length < OVERRIDE_MIN_CHARS)
+          throw new NeedsOverrideError(holds)
+        override = reason.slice(0, 500)
+        console.warn(
+          `[newsletter] ${approver} is sending wave ${wave.wave}/${wave.waves} of “${baseName}” on list ${listId} although ${holds.join('; ')}. Reason given: ${override}`
+        )
+      }
     }
     const older = olderIssueBlocks(
       campaign.name,
@@ -2350,10 +3336,7 @@ export async function approveAndSend(
     if (older.length > 0) throw new DraftProblemError(older)
 
     const offset = await accountUtcOffset(campaigns)
-    const sdate = formatLocal(
-      new Date(Date.now() + SEND_DELAY_MINUTES * 60_000),
-      offset
-    )
+    const sendAt = new Date(Date.now() + sendDelayMinutes(listId) * 60_000)
     // From here on the send may exist even when an answer says it doesn't:
     // the lock stays, and every error tells the approver not to press again.
     createAsked = true
@@ -2361,11 +3344,21 @@ export async function approveAndSend(
       draftId,
       listId,
       messageId,
-      name: campaign.name,
       baseName,
-      sdate,
+      sdate: formatLocal(sendAt, offset),
       active,
-      approver,
+      wave,
+      facts: {
+        name: sendName,
+        listId,
+        listName: names.get(listId) ?? null,
+        wave: wave?.wave ?? null,
+        waves: wave?.waves ?? null,
+        expected,
+        approver,
+        sendAt: sendAt.toISOString(),
+        override,
+      },
     })
   } catch (err) {
     if (!createAsked) {
@@ -2385,17 +3378,18 @@ async function createAndConfirm(a: {
   draftId: string
   listId: string
   messageId: string
-  name: string
   baseName: string
   sdate: string
   active: number | null
-  approver: string
+  wave: WaveChoice | null
+  facts: ApprovalFacts
 }): Promise<ScheduledSend> {
+  const { facts } = a
   let newId: string | null = null
   try {
     const created = await v1answer('campaign_create', {
       type: 'single',
-      name: a.name,
+      name: facts.name,
       status: 1,
       public: 0,
       // Off (28 Sept 2026): ActiveCampaign's click tracker
@@ -2408,6 +3402,10 @@ async function createAndConfirm(a: {
       // already put on every aisafety.com link (issue #20, 16 Sept 2026: two
       // utm_source values on one URL). Same flag in ac.py.
       tracklinksanalytics: 0,
+      // A wave: the saved segment's id. AC keeps it as a hidden numeric
+      // segment row that points at it (test sweep, 29 Sept 2026); read back
+      // below, since without it the send would reach the whole list.
+      ...(a.wave ? { segmentid: a.wave.segmentId } : {}),
       sdate: a.sdate,
       [`p[${a.listId}]`]: a.listId,
       [`m[${a.messageId}]`]: 100,
@@ -2421,16 +3419,23 @@ async function createAndConfirm(a: {
     const live = (await v3<{ campaign: RawCampaign }>(`campaigns/${newId}`))
       .campaign
 
-    // Read back what AC stored: its click tracker must be off, or readers'
-    // clicks go through the tracker that dropped half the connections.
+    // Read back what AC stored, inside the minutes before it goes out: its
+    // click tracker must be off (readers' clicks would go through the one
+    // that dropped half the connections), and a wave must still be one.
     if (
       live.tracklinks !== 'none' ||
       String(live.tracklinksanalytics ?? '') !== '0'
     ) {
       await deleteBadSend(
         newId,
-        `link tracking came back as ${String(live.tracklinks)}/${String(live.tracklinksanalytics)}`
+        'tracking',
+        `link tracking came back as ${String(live.tracklinks)}/${String(live.tracklinksanalytics)}`,
+        facts
       )
+    }
+    if (a.wave) {
+      const wrong = await segmentProblem(live.segmentid, a.wave.segmentId)
+      if (wrong) await deleteBadSend(newId, 'wave', wrong, facts)
     }
     // '7' = ActiveCampaign holds the send for its compliance review. The
     // campaign exists and will go out once they approve it, so this counts as
@@ -2443,32 +3448,37 @@ async function createAndConfirm(a: {
     }
 
     const notes: string[] = []
-    // The message now belongs to the sending campaign; the draft shell is
-    // noise — and harmless if it stays: the page shows it as already sent.
-    try {
-      await v1('campaign_delete', { id: a.draftId })
-    } catch (err) {
-      console.error(
-        `[newsletter] deleting draft ${a.draftId} after approval failed: ${err instanceof Error ? err.message : String(err)}`
-      )
-      notes.push(
-        `The draft (campaign ${a.draftId}) couldn’t be deleted; it now shows as already sent.`
-      )
+    // The message now belongs to the sending campaign. After a whole-list
+    // send or the last wave the draft shell is noise (and harmless if it
+    // stays: the page shows it as already sent); before the last wave it is
+    // what the next wave is approved from.
+    const lastWave = a.wave == null || a.wave.wave === a.wave.waves
+    if (lastWave) {
+      try {
+        await v1('campaign_delete', { id: a.draftId })
+      } catch (err) {
+        console.error(
+          `[newsletter] deleting draft ${a.draftId} after approval failed: ${err instanceof Error ? err.message : String(err)}`
+        )
+        notes.push(
+          `The draft (campaign ${a.draftId}) couldn’t be deleted; it now shows as already sent.`
+        )
+      }
     }
-    const approvedAt = new Date().toISOString()
     if (isRealList(a.listId)) {
       try {
         await recordApproval({
           campaignId: newId,
           listId: a.listId,
-          name: a.name,
+          name: facts.name,
           baseName: a.baseName,
-          wave: null,
-          waves: null,
-          segmentId: null,
-          expected: a.active,
-          approvedAt,
-          approver: a.approver,
+          wave: facts.wave,
+          waves: facts.waves,
+          segmentId: a.wave?.segmentId ?? null,
+          expected: facts.expected,
+          approvedAt: new Date().toISOString(),
+          approver: facts.approver,
+          ...(facts.override ? { override: facts.override } : {}),
         })
       } catch (err) {
         console.error(
@@ -2479,38 +3489,70 @@ async function createAndConfirm(a: {
         )
       }
     }
-    const names = await listNames().catch(() => new Map<string, string>())
     console.info(
-      `[newsletter] draft ${a.draftId} approved by ${a.approver} → campaign ${newId} ${held ? 'held for ActiveCampaign review' : 'scheduled'} for ${live.sdate ?? a.sdate} on list ${a.listId}`
+      `[newsletter] draft ${a.draftId} approved by ${facts.approver} → campaign ${newId} “${facts.name}” (${facts.expected ?? '?'} contacts) ${held ? 'held for ActiveCampaign review' : 'scheduled'} for ${live.sdate ?? a.sdate} on list ${a.listId}${lastWave ? '' : '; draft kept for the next wave'}`
     )
     return {
+      ...facts,
       campaignId: newId,
       held,
       draftId: a.draftId,
       sdate: live.sdate ?? a.sdate,
-      listName: names.get(a.listId) ?? null,
       activeContacts: a.active,
-      approver: a.approver,
+      segmentId: a.wave?.segmentId ?? null,
+      draftKept: !lastWave,
       notes,
     }
   } catch (err) {
-    if (err instanceof MaybeScheduledError || err instanceof LinkTrackingError)
+    if (err instanceof MaybeScheduledError || err instanceof SendDeletedError)
       throw err
     const reason = err instanceof Error ? err.message : String(err)
     console.error(
-      `[newsletter] approval of draft ${a.draftId} by ${a.approver} failed after campaign_create${newId ? ` (campaign ${newId})` : ''}: ${reason}`
+      `[newsletter] approval of draft ${a.draftId} by ${facts.approver} failed after campaign_create${newId ? ` (campaign ${newId})` : ''}: ${reason}`
     )
     throw new MaybeScheduledError(
       `It may have been scheduled anyway${newId ? ` (campaign ${newId})` : ''}: something went wrong after ActiveCampaign was asked to schedule it. Don’t press Approve again – check Recent sends, which updates by itself.`,
-      newId
+      newId,
+      facts
     )
   }
 }
 
-/** Delete a send that came back wrong, inside the couple of minutes before
- *  it goes out. Throws LinkTrackingError when it is gone, and a
+/** Why the campaign AC stored isn't the wave that was asked for, or null.
+ *  AC answers with the id of the hidden segment row it made for the saved
+ *  segment; that row names the saved segment in `segmentid_v2`. A missing
+ *  or zero segmentid means the whole list. */
+async function segmentProblem(
+  stored: string | null | undefined,
+  wanted: string
+): Promise<string | null> {
+  const s = String(stored ?? '').trim()
+  if (s === '' || s === '0') return 'it came back with no segment'
+  if (s.toLowerCase() === wanted.toLowerCase()) return null
+  if (!/^\d{1,12}$/.test(s))
+    return `it came back with segment ${s.slice(0, 40)}`
+  try {
+    const row = await v3<{ segment?: { segmentid_v2?: string | null } }>(
+      `segments/${acId(s)}`
+    )
+    const v2 = String(row.segment?.segmentid_v2 ?? '')
+    return v2.toLowerCase() === wanted.toLowerCase()
+      ? null
+      : `its segment ${s} points at ${v2 || 'nothing'}, not the wave`
+  } catch (err) {
+    return `its segment ${s} couldn’t be checked (${err instanceof Error ? err.message.slice(0, 120) : String(err)})`
+  }
+}
+
+/** Delete a send that came back wrong, inside the minutes before it goes
+ *  out. Throws a SendDeletedError when it is gone, and a
  *  MaybeScheduledError when it couldn't be deleted. */
-async function deleteBadSend(campaignId: string, why: string): Promise<never> {
+async function deleteBadSend(
+  campaignId: string,
+  kind: 'tracking' | 'wave',
+  why: string,
+  facts: ApprovalFacts
+): Promise<never> {
   let gone = false
   try {
     const out = await v3delete(`campaigns/${acId(campaignId)}/delete`)
@@ -2525,11 +3567,300 @@ async function deleteBadSend(campaignId: string, why: string): Promise<never> {
   )
   if (!gone) {
     throw new MaybeScheduledError(
-      `ActiveCampaign turned its link tracking on for campaign ${campaignId}, and it couldn’t be deleted. Delete it in ActiveCampaign now (Campaigns → ${campaignId}), before it sends.`,
-      campaignId
+      `ActiveCampaign created campaign ${campaignId} wrongly (${kind === 'wave' ? `the wave: ${why}, so it would go to the whole list` : why}), and it couldn’t be deleted. Delete it in ActiveCampaign now (Campaigns → ${campaignId}), before it sends.`,
+      campaignId,
+      facts
     )
   }
-  throw new LinkTrackingError(
-    `ActiveCampaign turned its link tracking on for the new campaign ${campaignId}, so it was deleted at once. Nothing was sent. Tell Claude before trying again.`
+  if (kind === 'tracking')
+    throw new LinkTrackingError(
+      `ActiveCampaign turned its link tracking on for the new campaign ${campaignId}, so it was deleted at once. Nothing was sent. Tell Claude before trying again.`
+    )
+  throw new WaveDroppedError(
+    `ActiveCampaign didn’t keep the wave on the new campaign ${campaignId} (${why}), so it would have gone to the whole list. It was deleted at once: nothing was sent, and the draft is still here. Tell Claude before trying again.`
   )
+}
+
+/* ─── The owner hears about every real-list approval ───────────────────── */
+
+/** Where the notice sends the owner (real lists are only ever approved on
+ *  the production site). */
+const ADMIN_PAGE_URL = 'https://aisafety.com/admin/newsletter'
+
+/** Email the owner about a real-list approval, or one that may have gone
+ *  out despite an error (`maybe`). The admin mail script only ever delivers
+ *  "digest" mail to the owner's own address. Best effort and never throws:
+ *  the route runs it after answering, so the approval never waits on it. */
+export async function notifyApproval(
+  f: ApprovalFacts & { campaignId: string | null; held?: boolean },
+  maybe = false
+): Promise<boolean> {
+  if (!isRealList(f.listId)) return false
+  const mail = newsletterApprovalMail({
+    ...f,
+    held: f.held ?? false,
+    maybe,
+    adminUrl: ADMIN_PAGE_URL,
+  })
+  let sent = false
+  for (const owner of ROOT_ADMINS) {
+    if (await sendAdminMail('digest', owner.email, mail)) sent = true
+  }
+  return sent
+}
+
+/* ─── Stop: cancel, pause, stop, resume ───────────────────────────────────
+   From Recent sends, by an approver with a fresh session (the route checks
+   both). ActiveCampaign allows: a scheduled (1) or held (7) campaign can
+   only be deleted; pause only while sending (2); stop from sending or
+   paused (2/3), for good; resume only from paused (3). Its answers are 200
+   with `succeeded` 0/1, so every action is read back. */
+
+const STOP_LOCK_PREFIX = 'aisafety:newsletter:stop-lock:'
+/** One action per campaign at a time: a double press gets a clear "wait". */
+const STOP_LOCK_SECONDS = 60
+const localStopLocks = new Map<string, number>()
+
+/** The action doesn't fit the campaign as it is now (it already finished,
+ *  was canceled, isn't a newsletter send…). Nothing was changed. */
+export class StopRefusedError extends Error {
+  readonly detail: string
+  constructor(detail: string) {
+    super(detail)
+    this.detail = detail
+  }
+}
+
+/** Another press on the same campaign is still being carried out. */
+export class StopLockedError extends Error {
+  readonly detail: string
+  constructor(campaignId: string) {
+    const detail = `Another stop or pause of campaign ${campaignId} is being carried out right now. Wait for Recent sends to update (it does by itself) before pressing again.`
+    super(detail)
+    this.detail = detail
+  }
+}
+
+/** ActiveCampaign was asked, and either refused or the result can't be
+ *  confirmed. `uncertain` = no clear answer came back: it may have worked. */
+export class StopFailedError extends Error {
+  readonly detail: string
+  readonly uncertain: boolean
+  constructor(detail: string, uncertain: boolean) {
+    super(detail)
+    this.detail = detail
+    this.uncertain = uncertain
+  }
+}
+
+export interface StopResult {
+  campaignId: string
+  name: string
+  action: StopAction
+  /** Its status now ('deleted' once canceled). */
+  status: string
+  by: string
+  /** After a cancel: whether the draft is still there to approve it (or its
+   *  wave) again; null if that couldn't be read. */
+  draftWaiting: boolean | null
+}
+
+const ACTION_WORDS: Record<StopAction, { done: string; want: string[] }> = {
+  cancel: { done: 'canceled', want: [] },
+  pause: { done: 'paused', want: ['3'] },
+  stop: { done: 'stopped', want: ['4'] },
+  resume: { done: 'resumed', want: ['2', '1', '5'] },
+}
+
+/** SET NX on Upstash when it's there; this process otherwise. A stop never
+ *  waits on Upstash: if it fails, the in-process lock is used instead. */
+async function claimStopLock(key: string): Promise<boolean> {
+  const redis = kv()
+  if (redis) {
+    try {
+      return (
+        (await redis.set(key, new Date().toISOString(), {
+          nx: true,
+          ex: STOP_LOCK_SECONDS,
+        })) === 'OK'
+      )
+    } catch (err) {
+      console.warn(
+        `[newsletter] the stop lock couldn’t use Upstash (${err instanceof Error ? err.message : String(err)}); locking in this process only`
+      )
+    }
+  }
+  const now = Date.now()
+  const until = localStopLocks.get(key)
+  if (until != null && until > now) return false
+  localStopLocks.set(key, now + STOP_LOCK_SECONDS * 1000)
+  return true
+}
+
+async function releaseStopLock(key: string): Promise<void> {
+  localStopLocks.delete(key)
+  const redis = kv()
+  if (redis)
+    await redis
+      .del(key)
+      .catch(err =>
+        console.warn(
+          `[newsletter] releasing the stop lock failed: ${err instanceof Error ? err.message : String(err)}`
+        )
+      )
+}
+
+/** Cancel, pause, stop or resume one send, after checking it is a
+ *  newsletter send in a state that allows it (stopActionsFor). Resuming a
+ *  real list's send is for production only, like approving; the others work
+ *  from any copy, since they only ever send less. */
+export async function stopSend(
+  campaignId: string,
+  action: StopAction,
+  opts: { by: string }
+): Promise<StopResult> {
+  const id = acId(campaignId)
+  const by = opts.by.trim() || 'an unnamed approver'
+  const lockKey = `${STOP_LOCK_PREFIX}${id}`
+  if (!(await claimStopLock(lockKey))) throw new StopLockedError(id)
+  try {
+    const gone = (err: Error) => {
+      if (/: 404 /.test(err.message)) return null
+      throw err
+    }
+    const readCampaign = () =>
+      v3<{ campaign?: RawCampaign }>(`campaigns/${id}`)
+        .then(d => d.campaign ?? null)
+        .catch(gone)
+    const [before, listIds] = await Promise.all([
+      readCampaign(),
+      campaignListIds(id).catch(gone),
+    ])
+    if (!before || !listIds)
+      throw new StopRefusedError(
+        `Campaign ${id} isn’t in ActiveCampaign any more – it may have been canceled already.`
+      )
+    const allowed = stopActionsFor(before.status, listIds)
+    if (!allowed.includes(action)) {
+      throw new StopRefusedError(
+        allowed.length === 0
+          ? `Campaign ${id} can’t be ${ACTION_WORDS[action].done} from here: it is ${statusLabel(before.status)}${listIds.length === 1 && STOPPABLE_LISTS.has(listIds[0]) ? '' : ' and not a newsletter send'}.`
+          : `Campaign ${id} is ${statusLabel(before.status)} now, so it can only be ${allowed.map(a => ACTION_WORDS[a].done).join(' or ')} – Recent sends will show the change in a moment.`
+      )
+    }
+    if (action === 'resume') {
+      const refusal = listRefusal(listIds[0])
+      if (refusal) throw new StopRefusedError(refusal)
+    }
+
+    // The call. No answer means it may or may not have happened.
+    let ok: boolean
+    try {
+      if (action === 'cancel') {
+        ok = Number((await v3delete(`campaigns/${id}/delete`)).succeeded) === 1
+        if (!ok) {
+          // v1's delete is the other route to the same thing — but only for
+          // a send that still hasn't started: AC may have refused because
+          // its scheduler got there first, and then Pause is the way.
+          const now = await readCampaign()
+          if (now && (now.status === '1' || now.status === '7'))
+            ok =
+              Number(
+                (await v1answer('campaign_delete', { id })).result_code
+              ) === 1
+        }
+      } else {
+        const answer = await v3put<Record<string, unknown>>(
+          `campaigns/${id}/${action}`,
+          {}
+        )
+        ok = Number(answer.succeeded) === 1
+      }
+    } catch (err) {
+      console.error(
+        `[newsletter] ${action} of campaign ${id} by ${by}: no clear answer: ${err instanceof Error ? err.message : String(err)}`
+      )
+      throw new StopFailedError(
+        `No clear answer from ActiveCampaign, so campaign ${id} may or may not have been ${ACTION_WORDS[action].done}. Recent sends updates by itself; if it is still going, press again or do it in ActiveCampaign (Campaigns → ${id}).`,
+        true
+      )
+    }
+
+    // What ActiveCampaign has now.
+    let after: RawCampaign | null
+    try {
+      after = await readCampaign()
+    } catch (err) {
+      console.error(
+        `[newsletter] reading campaign ${id} after ${action} failed: ${err instanceof Error ? err.message : String(err)}`
+      )
+      throw new StopFailedError(
+        `ActiveCampaign ${ok ? 'accepted' : 'refused'} the ${action}, but campaign ${id} couldn’t be read back. Recent sends updates by itself: check it there.`,
+        true
+      )
+    }
+    const done =
+      action === 'cancel'
+        ? after == null
+        : after != null && ACTION_WORDS[action].want.includes(after.status)
+    console.info(
+      `[newsletter] campaign ${id} “${before.name}” ${action} by ${by}: ${statusLabel(before.status)} → ${after ? statusLabel(after.status) : 'deleted'}${done ? '' : ' (NOT done)'}`
+    )
+    if (!done) {
+      throw new StopFailedError(
+        after == null
+          ? `Campaign ${id} is gone from ActiveCampaign, so it can’t be ${ACTION_WORDS[action].done}.`
+          : `ActiveCampaign didn’t ${action} campaign ${id}: it is ${statusLabel(after.status)} now.${
+              action === 'cancel' && after.status === '2'
+                ? ' It started sending first – press Pause, then Stop.'
+                : ' Try the button Recent sends shows now, or do it in ActiveCampaign.'
+            }`,
+        false
+      )
+    }
+
+    // A canceled send reached nobody: its approval may be pressed again
+    // straight away (the issue's lock would otherwise hold for 15 minutes).
+    let draftWaiting: boolean | null = null
+    if (action === 'cancel') {
+      const baseName = baseIssueName(before.name)
+      await releaseApproveLock(
+        approveLockKey(listIds[0], baseName, waveOf(before.name)?.wave ?? null)
+      ).catch(err =>
+        console.warn(
+          `[newsletter] releasing the approval lock after canceling ${id} failed: ${err instanceof Error ? err.message : String(err)}`
+        )
+      )
+      draftWaiting = await draftStillWaiting(baseName, listIds[0])
+    }
+    return {
+      campaignId: id,
+      name: before.name,
+      action,
+      status: after ? statusLabel(after.status) : 'deleted',
+      by,
+      draftWaiting,
+    }
+  } finally {
+    await releaseStopLock(lockKey)
+  }
+}
+
+/** Is a draft of this issue still waiting on the list? Null if unreadable. */
+async function draftStillWaiting(
+  baseName: string,
+  listId: string
+): Promise<boolean | null> {
+  try {
+    const drafts = (await allCampaigns({ fresh: true })).filter(
+      c => c.status === '0' && baseIssueName(c.name) === baseName
+    )
+    const lists = await mapLimit(drafts, 3, c => campaignListIds(c.id))
+    return lists.some(l => l.length === 1 && l[0] === listId)
+  } catch (err) {
+    console.warn(
+      `[newsletter] checking for the draft after a cancel failed: ${err instanceof Error ? err.message : String(err)}`
+    )
+    return null
+  }
 }

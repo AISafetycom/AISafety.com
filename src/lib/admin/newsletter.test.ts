@@ -16,8 +16,18 @@ import {
   setFitHtml,
   TestSendError,
   baseIssueName,
+  editLockFor,
+  groupSends,
+  holdsAt,
+  parseWaveSegments,
+  sdateInstant,
+  sendDelayMinutes,
+  stopActionsFor,
+  sumIssues,
   waveCampaignName,
   waveOf,
+  waveProgress,
+  waveTags,
 } from './newsletter'
 import { createHash } from 'node:crypto'
 import cardEdit from './__fixtures__/newsletter-card-edit.json'
@@ -588,5 +598,343 @@ describe('sendTestCopy', () => {
     const err = await sendTestCopy('42', 'owner@example.com').catch(e => e)
     expect(err).toBeInstanceOf(TestSendError)
     expect((err as TestSendError).detail).toContain('Daily test limit reached')
+  })
+})
+
+/* ─── Waves and stopping (pure parts) ─────────────────────────────────── */
+
+const U = (n: number) =>
+  `${String(n).repeat(8)}-${String(n).repeat(4)}-4${String(n).repeat(3)}-8${String(n).repeat(3)}-${String(n).repeat(12)}`
+
+describe('parseWaveSegments', () => {
+  const P = 'Newsletter wave '
+  it('finds the waves by name, in order, and ignores other segments', () => {
+    expect(
+      parseWaveSegments(P, [
+        { name: 'Newsletter wave 2', segmentId: U(2) },
+        { name: 'Engaged readers', segmentId: U(9) },
+        { name: 'Newsletter wave 3 (everyone else)', segmentId: U(3) },
+        { name: 'Newsletter wave 1', segmentId: U(1) },
+        { name: 'Newsletter waves old', segmentId: U(8) },
+      ])
+    ).toEqual([
+      { wave: 1, name: 'Newsletter wave 1', segmentId: U(1), last: false },
+      { wave: 2, name: 'Newsletter wave 2', segmentId: U(2), last: false },
+      {
+        wave: 3,
+        name: 'Newsletter wave 3 (everyone else)',
+        segmentId: U(3),
+        last: true,
+      },
+    ])
+    expect(parseWaveSegments(P, [])).toEqual([])
+  })
+
+  it('refuses a set that isn’t 1…N with only the last one “(everyone else)”', () => {
+    const bad = [
+      // a gap
+      [
+        { name: 'Newsletter wave 1', segmentId: U(1) },
+        { name: 'Newsletter wave 3 (everyone else)', segmentId: U(3) },
+      ],
+      // no catch-all
+      [
+        { name: 'Newsletter wave 1', segmentId: U(1) },
+        { name: 'Newsletter wave 2', segmentId: U(2) },
+      ],
+      // the catch-all not last
+      [
+        { name: 'Newsletter wave 1 (everyone else)', segmentId: U(1) },
+        { name: 'Newsletter wave 2', segmentId: U(2) },
+      ],
+      // one wave twice
+      [
+        { name: 'Newsletter wave 1', segmentId: U(1) },
+        { name: 'Newsletter wave 1', segmentId: U(4) },
+        { name: 'Newsletter wave 2 (everyone else)', segmentId: U(2) },
+      ],
+      // only one
+      [{ name: 'Newsletter wave 1 (everyone else)', segmentId: U(1) }],
+    ]
+    for (const saved of bad)
+      expect(parseWaveSegments(P, saved)).toEqual({
+        error: expect.stringMatching(/aren’t numbered 1 to N/),
+      })
+    expect(
+      parseWaveSegments(P, [
+        { name: 'Newsletter wave 1', segmentId: '12' },
+        { name: 'Newsletter wave 2 (everyone else)', segmentId: U(2) },
+      ])
+    ).toEqual({ error: expect.stringMatching(/unexpected id/) })
+  })
+})
+
+describe('waveTags', () => {
+  const def = (
+    wave: number,
+    last: boolean,
+    conditions: Array<[string, string, string]>,
+    groupOps = ['and', 'AND']
+  ) => ({
+    wave,
+    name: `Newsletter wave ${wave}`,
+    last,
+    conditions: conditions.map(([field, op, value]) => ({ field, op, value })),
+    groupOps,
+  })
+
+  it('reads each wave’s tag; the last wave has none', () => {
+    expect(
+      waveTags([
+        def(1, false, [['tagid', '=', '101']]),
+        def(2, false, [['tagid', '=', '102']]),
+        def(3, true, [
+          ['tagid', '!=', '102'],
+          ['tagid', '!=', '101'],
+        ]),
+      ])
+    ).toEqual({ tags: ['101', '102', null] })
+  })
+
+  it('refuses conditions that could send an issue twice or never', () => {
+    const cases = [
+      // wave 1 isn't "has tag X"
+      [
+        def(1, false, [['tagid', '!=', '101']]),
+        def(2, true, [['tagid', '!=', '101']]),
+      ],
+      // two conditions on a tagged wave
+      [
+        def(1, false, [
+          ['tagid', '=', '101'],
+          ['tagid', '=', '102'],
+        ]),
+        def(2, true, [['tagid', '!=', '101']]),
+      ],
+      // the last wave misses a tag
+      [
+        def(1, false, [['tagid', '=', '101']]),
+        def(2, false, [['tagid', '=', '102']]),
+        def(3, true, [['tagid', '!=', '101']]),
+      ],
+      // the last wave's conditions joined with OR
+      [
+        def(1, false, [['tagid', '=', '101']]),
+        def(2, false, [['tagid', '=', '102']]),
+        def(
+          3,
+          true,
+          [
+            ['tagid', '!=', '101'],
+            ['tagid', '!=', '102'],
+          ],
+          ['or', 'AND']
+        ),
+      ],
+      // something other than a tag (fields read back as "list.listid")
+      [
+        def(1, false, [['list.listid', '=', '6']]),
+        def(2, true, [['tagid', '!=', '101']]),
+      ],
+      // two waves on one tag
+      [
+        def(1, false, [['tagid', '=', '101']]),
+        def(2, false, [['tagid', '=', '101']]),
+        def(3, true, [['tagid', '!=', '101']]),
+      ],
+    ]
+    for (const c of cases) expect(waveTags(c)).toHaveProperty('error')
+  })
+})
+
+describe('waveProgress', () => {
+  const ISSUE = 'Events · Week 41, 2026'
+  const w = (
+    id: string,
+    k: number,
+    status: string,
+    more: { send_amt?: string; ldate?: string | null; n?: number } = {}
+  ) => ({
+    id,
+    name: `${ISSUE} · wave ${k}/${more.n ?? 4}`,
+    status,
+    send_amt: more.send_amt ?? '500',
+    ldate: more.ldate === undefined ? '2026-10-08T09:30:00-05:00' : more.ldate,
+  })
+
+  it('starts at wave 1, then the wave after the last one sent', () => {
+    expect(waveProgress(4, [])).toMatchObject({
+      next: 1,
+      notBefore: null,
+      holds: [],
+      wait: null,
+      blocked: null,
+      done: false,
+    })
+    const p = waveProgress(4, [w('2', 2, '5'), w('1', 1, '5')])
+    expect(p).toMatchObject({ next: 3, done: false })
+    expect(p.notBefore).toBe(Date.parse('2026-10-09T08:30:00Z'))
+    expect(p.byWave.map(c => c?.id ?? null)).toEqual(['1', '2', null, null])
+  })
+
+  it('waits while the previous wave is scheduled, sending, paused or held', () => {
+    for (const s of ['1', '2', '3', '7'])
+      expect(waveProgress(4, [w('1', 1, s, { ldate: null })]).wait).toMatch(
+        /^wave 2 can go once wave 1 has finished sending/
+      )
+  })
+
+  it('a wave stopped after reaching people ends the run', () => {
+    const p = waveProgress(4, [w('1', 1, '4', { send_amt: '300' })])
+    expect(p.next).toBeNull()
+    expect(p.blocked).toMatch(/wave 1 was stopped after reaching 300 people/)
+  })
+
+  it('is done after the last wave, or after a whole-list send', () => {
+    const all = [1, 2, 3, 4].map(k => w(String(k), k, '5'))
+    expect(waveProgress(4, all)).toMatchObject({ done: true, next: null })
+    const whole = waveProgress(4, [
+      { id: '9', name: ISSUE, status: '5', send_amt: '3' },
+    ])
+    expect(whole).toMatchObject({ done: true, next: null })
+    expect(whole.blocked).toMatch(
+      /already went to the whole list as campaign 9/
+    )
+  })
+
+  it('refuses mixed-up sends: another number of waves, a wave twice, a gap', () => {
+    expect(waveProgress(3, [w('1', 1, '5', { n: 4 })]).blocked).toMatch(
+      /the waves changed/
+    )
+    expect(waveProgress(4, [w('1', 1, '5'), w('5', 1, '1')]).blocked).toMatch(
+      /wave 1 of this issue went out twice \(campaigns 1 and 5\)/
+    )
+    expect(waveProgress(4, [w('2', 2, '5')]).blocked).toMatch(
+      /wave 1 of this issue never went out, but wave 2 did/
+    )
+    expect(waveProgress(4, [w('7', 7, '5')]).blocked).toMatch(/can’t be/)
+  })
+
+  it('holds the next wave on a red verdict (not a small sample), or when the finish time is unknown', () => {
+    const red = new Map([
+      ['1', { verdict: 'red', reasons: ['spam complaints 0.3%'] }],
+    ])
+    expect(waveProgress(4, [w('1', 1, '5')], red).holds).toEqual([
+      'the send watcher flagged wave 1 red: spam complaints 0.3%',
+    ])
+    const small = new Map([['1', { verdict: 'red', smallSample: true }]])
+    expect(waveProgress(4, [w('1', 1, '5')], small).holds).toEqual([])
+    const amber = new Map([['1', { verdict: 'amber', reasons: ['x'] }]])
+    expect(waveProgress(4, [w('1', 1, '5')], amber).holds).toEqual([])
+    expect(waveProgress(4, [w('1', 1, '5', { ldate: null })]).holds[0]).toMatch(
+      /doesn’t say when wave 1 finished/
+    )
+  })
+
+  it('holdsAt adds the 18-hour gap until it has passed', () => {
+    const p = waveProgress(4, [w('1', 1, '5')])
+    expect(holdsAt(p, new Date('2026-10-09T08:29:00Z'))).toEqual([
+      'wave 1 finished less than 18 hours ago; wave 2 is due from 9 October 2026, 08:30 UTC',
+    ])
+    expect(holdsAt(p, new Date('2026-10-09T08:30:00Z'))).toEqual([])
+  })
+})
+
+describe('stopActionsFor', () => {
+  it('cancel before it starts, pause while sending, stop or resume once paused', () => {
+    expect(stopActionsFor('1', ['6'])).toEqual(['cancel'])
+    expect(stopActionsFor('7', ['7'])).toEqual(['cancel'])
+    expect(stopActionsFor('2', ['8'])).toEqual(['pause'])
+    expect(stopActionsFor('3', ['5'])).toEqual(['stop', 'resume'])
+    for (const s of ['0', '4', '5', '6', '9'])
+      expect(stopActionsFor(s, ['6'])).toEqual([])
+  })
+
+  it('only for single-list sends on lists 5–8', () => {
+    expect(stopActionsFor('1', ['4'])).toEqual([])
+    expect(stopActionsFor('1', ['9'])).toEqual([])
+    expect(stopActionsFor('1', ['6', '7'])).toEqual([])
+    expect(stopActionsFor('1', [])).toEqual([])
+  })
+})
+
+describe('editLockFor', () => {
+  it('locks card edits while a send of the issue is still going out', () => {
+    const c = (status: string, name = 'Events · Week 41, 2026 · wave 1/4') => ({
+      id: '5',
+      name,
+      status,
+      send_amt: '10',
+    })
+    for (const s of ['1', '2', '3', '7', '9'])
+      expect(editLockFor([c(s)])).toMatch(
+        /^Wave 1 of this issue \(campaign 5\) is /
+      )
+    for (const s of ['4', '5', '6']) expect(editLockFor([c(s)])).toBeNull()
+    expect(editLockFor([c('1', 'Events · Week 41, 2026')])).toMatch(
+      /^This issue \(campaign 5\) is scheduled/
+    )
+    expect(editLockFor([])).toBeNull()
+  })
+})
+
+describe('send delay', () => {
+  it('ten minutes on the real lists, two on the test lists', () => {
+    for (const l of ['6', '7', '8']) expect(sendDelayMinutes(l)).toBe(10)
+    for (const l of ['4', '5']) expect(sendDelayMinutes(l)).toBe(2)
+  })
+})
+
+describe('sdateInstant', () => {
+  it('reads AC’s send date as an instant, in the account’s offset when it has none', () => {
+    expect(sdateInstant('2026-10-09 09:00:00', '-05:00')).toBe(
+      '2026-10-09T14:00:00.000Z'
+    )
+    expect(sdateInstant('2026-10-09T09:00:00-05:00', '+02:00')).toBe(
+      '2026-10-09T14:00:00.000Z'
+    )
+    expect(sdateInstant(null, '-05:00')).toBeNull()
+    expect(sdateInstant('soon', '-05:00')).toBeNull()
+  })
+})
+
+describe('grouping by issue', () => {
+  it('groupSends puts an issue’s rows together where its newest stands, highest wave first', () => {
+    const r = (id: string, group: string, wave: number | null) => ({
+      id,
+      group,
+      wave: wave == null ? null : { wave },
+    })
+    expect(
+      groupSends([
+        r('9', 'a', 2),
+        r('8', 'b', null),
+        r('7', 'a', 1),
+        r('6', 'c', null),
+        r('5', 'a', 3),
+      ]).map(x => x.id)
+    ).toEqual(['5', '9', '7', '8', '6'])
+  })
+
+  it('sumIssues groups per list and base name, newest first', () => {
+    const s = (name: string, listId: string, ldate: string) => ({
+      c: { name, ldate },
+      listId,
+      list: `list ${listId}`,
+    })
+    const out = sumIssues([
+      s('Events · Week 41, 2026 · wave 1/2', '6', '2026-10-08T10:00:00Z'),
+      s('Training · Week 41, 2026', '7', '2026-10-08T12:00:00Z'),
+      s('Events · Week 41, 2026 · wave 2/2', '6', '2026-10-09T10:00:00Z'),
+      s('Events · Week 41, 2026 · wave 1/2', '5', '2026-10-07T10:00:00Z'),
+    ])
+    expect(out.map(g => g.rows.map(r => `${r.listId}:${r.c.name}`))).toEqual([
+      [
+        '6:Events · Week 41, 2026 · wave 2/2',
+        '6:Events · Week 41, 2026 · wave 1/2',
+      ],
+      ['7:Training · Week 41, 2026'],
+      ['5:Events · Week 41, 2026 · wave 1/2'],
+    ])
   })
 })
