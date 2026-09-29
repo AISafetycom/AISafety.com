@@ -18,12 +18,14 @@
   so no fresh-session requirement.
   → { cards } for a text edit, { listing: { ok, table } | { ok: false,
     reason } } for a listing update
-    409 with { problems } when the draft fails verification, 400 for a bad
-    card, field or body.
+    409 with { problems } when the draft fails verification (or sits on a
+    real list, 6/7/8, and this isn't production), 400 for a bad card, field
+    or body, 403 when not posted from the admin page itself.
 */
 
 import { NextRequest } from 'next/server'
 import { canSendNewsletter } from '@/lib/admin/auth'
+import { isSameOriginRequest } from '@/lib/admin/origin'
 import {
   DraftProblemError,
   editDraftCard,
@@ -51,6 +53,9 @@ function json(body: unknown, status = 200): Response {
 }
 
 export async function POST(req: NextRequest) {
+  // Only the admin page itself may post here (see isSameOriginRequest).
+  if (!isSameOriginRequest(req))
+    return json({ error: 'cross-site request refused' }, 403)
   if (!(await canSendNewsletter())) return json({ error: 'unauthorized' }, 401)
   if (!isNewsletterConfigured()) {
     return json(

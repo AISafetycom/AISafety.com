@@ -1662,7 +1662,15 @@ function NewsletterView({
           >
             {sends.map(s => (
               <tr key={s.id}>
-                <td>{s.name}</td>
+                <td>
+                  {s.name}
+                  {s.waves > 0 && (
+                    <span className={styles.dim}>
+                      {' '}
+                      · {s.waves} wave{s.waves === 1 ? '' : 's'}
+                    </span>
+                  )}
+                </td>
                 <td>{s.newsletter}</td>
                 <td className={styles.dim}>
                   {s.sentAt ? formatDay(s.sentAt) : '—'}
@@ -1687,7 +1695,8 @@ function NewsletterView({
         )}
         <p className={styles.caption}>
           Issues sent to the Events, Training and Funding lists in this range
-          (test lists left out). Opened = unique opens ÷ delivered, from
+          (test lists left out). An issue sent in warm-up waves is one row, its
+          finished waves added up. Opened = unique opens ÷ delivered, from
           ActiveCampaign; Apple Mail opens every email it receives, so it reads
           high. Clicks are counted on aisafety.com as readers follow a link,
           every click (not unique readers), link checkers left out; issues sent
