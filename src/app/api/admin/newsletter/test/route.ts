@@ -8,11 +8,13 @@
   fresh-session requirement, since the email can only reach the person
   asking for it.
   → { to }   409 with { problems } when the draft fails the approval checks,
-  502 with { error } when ActiveCampaign won't send it.
+  502 with { error } when ActiveCampaign won't send it, 403 when not posted
+  from the admin page itself.
 */
 
 import { NextRequest } from 'next/server'
 import { canSendNewsletter, currentAdmin } from '@/lib/admin/auth'
+import { isSameOriginRequest } from '@/lib/admin/origin'
 import {
   DraftProblemError,
   isNewsletterConfigured,
@@ -34,6 +36,9 @@ function json(body: unknown, status = 200): Response {
 }
 
 export async function POST(req: NextRequest) {
+  // Only the admin page itself may post here (see isSameOriginRequest).
+  if (!isSameOriginRequest(req))
+    return json({ error: 'cross-site request refused' }, 403)
   const admin = await currentAdmin()
   if (!admin || !(await canSendNewsletter()))
     return json({ error: 'unauthorized' }, 401)

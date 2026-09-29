@@ -36,6 +36,8 @@
                                   502 { notSent } failed before the create,
                                       or the new campaign came back wrong
                                       and was deleted at once
+                                  403 not posted from this page (another
+                                      site or subdomain; nothing sent)
   Every real-list approval (and every 202 on a real list) emails the owner,
   after the answer has gone (notifyApproval).
 */
@@ -48,6 +50,7 @@ import {
   hasFreshSession,
   NEWSLETTER_FRESH_SECONDS,
 } from '@/lib/admin/auth'
+import { isSameOriginRequest } from '@/lib/admin/origin'
 import {
   ApprovalLockedError,
   approveAndSend,
@@ -127,6 +130,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  // Only the admin page itself may post here (see isSameOriginRequest).
+  if (!isSameOriginRequest(req))
+    return json({ error: 'cross-site request refused' }, 403)
   const auth = await ensureAuth(true)
   if (auth) return auth
   const admin = await currentAdmin()

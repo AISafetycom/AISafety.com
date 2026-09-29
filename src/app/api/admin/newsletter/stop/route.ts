@@ -15,6 +15,7 @@
         press on it is still being carried out (nothing changed)
     502 { failed, uncertain } ActiveCampaign refused, or no clear answer came
         back (uncertain: it may have worked)
+    403 not posted from the admin page itself (nothing changed)
 */
 
 import { NextRequest } from 'next/server'
@@ -24,6 +25,7 @@ import {
   hasFreshSession,
   NEWSLETTER_FRESH_SECONDS,
 } from '@/lib/admin/auth'
+import { isSameOriginRequest } from '@/lib/admin/origin'
 import {
   isNewsletterConfigured,
   StopFailedError,
@@ -49,6 +51,9 @@ function json(body: unknown, status = 200): Response {
 }
 
 export async function POST(req: NextRequest) {
+  // Only the admin page itself may post here (see isSameOriginRequest).
+  if (!isSameOriginRequest(req))
+    return json({ error: 'cross-site request refused' }, 403)
   // As for approving: an approver, signed in through Google recently. The
   // page reacts to 'reauth' by going through Google and coming back.
   if (!(await canSendNewsletter())) return json({ error: 'unauthorized' }, 401)

@@ -169,6 +169,9 @@ interface Recent {
   listNames: string[]
   baseName: string
   wave: { wave: number; waves: number } | null
+  /** Named as a wave, but ActiveCampaign holds no segment for it: it goes
+   *  (or went) to the whole list. */
+  segmentLost: boolean
   /** Rows of one issue on one list share it (they come next to each
    *  other) and are shown together. */
   group: string
@@ -520,8 +523,10 @@ export default function NewsletterAdmin({
             : `It may have been scheduled anyway: the answer didn’t come back cleanly (${res ? `HTTP ${res.status}` : 'no answer'}). Don’t press Approve again – check Recent sends below, which updates by itself.`,
       })
     }
-    setBusyId(null)
+    // Approve stays off until the lists are read again: until then the page
+    // still shows the draft (or its wave) as it was before this answer.
     await load()
+    setBusyId(null)
   }
 
   /** Mail the draft to the signed-in approver alone (ActiveCampaign's test
@@ -620,8 +625,10 @@ export default function NewsletterAdmin({
           : 'No answer came back, so it may or may not have worked. Recent sends updates by itself: check it there.',
       })
     }
-    setStopBusyId(null)
+    // The buttons stay off until Recent sends is read again, so a canceled
+    // send never offers "Cancel" a second time.
     await load()
+    setStopBusyId(null)
   }
 
   useEffect(() => {
@@ -2110,6 +2117,18 @@ function SendRows({
         </span>
       ) : (
         r.status
+      )}
+      {r.segmentLost && (
+        // A wave's name, but no segment in ActiveCampaign: the approval
+        // deletes such a send at once, unless it was cut off first.
+        <span className={styles.statusBad}>
+          {' '}
+          · no wave segment:{' '}
+          {['sent', 'stopped', 'disabled'].includes(r.status)
+            ? 'it went'
+            : 'it goes'}{' '}
+          to the whole list
+        </span>
       )}
       {canSend && r.actions.length > 0 && (
         <span className={styles.rowActions}>

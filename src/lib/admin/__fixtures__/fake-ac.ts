@@ -321,6 +321,9 @@ export interface AcOptions {
   startsBeforeDelete?: boolean
   /** v1 campaign_report_unsubscription_totals per campaign. */
   spamComplaints?: Record<string, string>
+  /** Reading back a campaign the approval just created answers with this
+   *  HTTP status (the read back fails). */
+  readbackStatus?: number
 }
 
 export function camp(p: Partial<Camp> & { id: string; name: string }): Camp {
@@ -548,6 +551,8 @@ export function makeAC(opts: AcOptions = {}) {
     }
     m = /^campaigns\/(\d+)$/.exec(p)
     if (m) {
+      if (opts.readbackStatus && creates.includes(m[1]))
+        return j({ message: 'read failed' }, opts.readbackStatus)
       const c = camps.find(x => x.id === m![1])
       return c ? j({ campaign: { ...c } }) : j({ message: 'nf' }, 404)
     }
