@@ -521,3 +521,62 @@
   font-weight: 600;
   color: var(--bright-teal-300);
 }
+
+/* ─── Pre-send warnings (29 Sept 2026) ────────────────────────────────── */
+
+/* Amber, like .liveWarning: look before sending, not "can't send". */
+.warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.warningsTitle {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: #f5b942;
+}
+
+.warningList {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #f5b942;
+  overflow-wrap: anywhere;
+}
+
+.warningChange {
+  display: block;
+  color: var(--teal-300);
+}
+
+/* The confirm dialog's ticks: one box per kind of warning, the list
+   scrolling inside the dialog when it's long. */
+.dialogChecks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 45vh;
+  overflow-y: auto;
+  margin-top: 16px;
+}
+
+.dialogCheck {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--teal-700);
+  border-radius: 8px;
+}
+
+.dialogCheck legend {
+  padding: 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #f5b942;
+}

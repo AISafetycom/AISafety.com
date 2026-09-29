@@ -56,13 +56,41 @@ interface Draft {
   listId: string | null
   listName: string | null
   activeContacts: number | null
+  /** The pipeline's checks (still a draft, one list, content untouched);
+   *  empty = it can be previewed, tested and edited. */
   problems: string[]
+  /** Why it may not be sent even so; empty = Approve may be pressed. */
+  blocks: string[]
+  /** What the approver ticks in the confirm dialog before it sends. */
+  warnings: SendWarning[]
+  /** The issue already went (or is going) to this list as that campaign. */
+  alreadySent: { campaignId: string; status: string } | null
+  /** Card edits can be saved into it from this copy of the site (real
+   *  lists only from aisafety.com itself). */
+  editable: boolean
   /** The inbox preview line (hidden preheader), as Gmail shows it. */
   preview: string | null
   /** Cards by section, current order; null for drafts built before the
    *  renderer stamped card markers (no Reorder button then). */
   cards: CardGroup[] | null
 }
+
+/** Something to look at before sending: card text edited since Pen wrote
+ *  it, leftover words (TEST, TODO…), or a date already past. */
+interface SendWarning {
+  /** Sent back when ticked; the server checks every current one was. */
+  id: string
+  kind: 'edited' | 'words' | 'date'
+  text: string
+  from?: string
+  to?: string
+}
+
+const WARNING_GROUPS: Array<{ kind: SendWarning['kind']; title: string }> = [
+  { kind: 'edited', title: 'Card text changed since Pen wrote it' },
+  { kind: 'words', title: 'Words that look left over' },
+  { kind: 'date', title: 'Dates or deadlines already past' },
+]
 
 interface Recent {
   id: string
@@ -232,52 +260,105 @@ export default function NewsletterAdmin({
     }
   }, [load])
 
-  async function send(draft: Draft) {
+  /** Approve: `confirmed` = the ids of the warnings ticked in the dialog.
+   *  Only an answer that says so counts as "not sent"; anything unclear
+   *  (no answer, a gateway error, a 202) may mean the send is scheduled, so
+   *  the page says not to press again and rereads the lists either way. */
+  async function send(draft: Draft, confirmed: string[]) {
     if (!draft.listId) return
     setConfirming(null)
     setBusyId(draft.id)
     setNotice(null)
+    let res: Response | null = null
+    let body: {
+      error?: string
+      problems?: string[]
+      campaignId?: string
+      sdate?: string
+      held?: boolean
+      approver?: string
+      notes?: string[]
+      needsConfirmation?: boolean
+      warnings?: SendWarning[]
+      locked?: boolean
+      maybeScheduled?: boolean
+      notSent?: boolean
+    } = {}
     try {
-      const res = await fetch('/api/admin/newsletter', {
+      res = await fetch('/api/admin/newsletter', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaign: draft.id, list: draft.listId }),
+        body: JSON.stringify({
+          campaign: draft.id,
+          list: draft.listId,
+          confirmed,
+        }),
       })
-      const body = (await res.json()) as {
-        error?: string
-        problems?: string[]
-        campaignId?: string
-        sdate?: string
-        held?: boolean
-      }
-      if (res.status === 401 && body.error === 'reauth') {
-        // The session is older than the approval step allows: confirm with
-        // Google (one click) and come back to this page.
-        window.location.assign('/api/admin/auth/google?next=/admin/newsletter')
-        return
-      }
-      if (!res.ok) {
-        const detail = body.problems?.length
-          ? body.problems.join('; ')
-          : (body.error ?? `HTTP ${res.status}`)
-        throw new Error(detail)
-      }
+      body = await res.json().catch(() => ({}))
+    } catch {
+      // No answer: the request may still have reached the server.
+      res = null
+    }
+    if (res?.status === 401 && body.error === 'reauth') {
+      // The session is older than the approval step allows: confirm with
+      // Google (one click) and come back to this page.
+      window.location.assign('/api/admin/auth/google?next=/admin/newsletter')
+      return
+    }
+    if (res?.status === 200 && body.campaignId) {
+      const by = body.approver ? ` by ${body.approver}` : ''
       setNotice({
         kind: 'ok',
-        text: body.held
-          ? `Approved. ActiveCampaign is holding “${draft.name}” for its own review first (campaign ${body.campaignId}) – it goes out once they approve it. Nothing more to do; don’t approve it again.`
-          : `Approved. “${draft.name}” is scheduled to send at ${when(body.sdate ?? null)} (campaign ${body.campaignId}). Nothing more to do.`,
+        text:
+          (body.held
+            ? `Approved${by}. ActiveCampaign is holding “${draft.name}” for its own review first (campaign ${body.campaignId}) – it goes out once they approve it. Nothing more to do; don’t approve it again.`
+            : `Approved${by}. “${draft.name}” is scheduled to send at ${when(body.sdate ?? null)} (campaign ${body.campaignId}). Nothing more to do.`) +
+          (body.notes?.length ? ` ${body.notes.join(' ')}` : ''),
       })
       if (previewId === draft.id) setPreviewId(null)
-      await load()
-    } catch (err) {
+    } else if (res?.status === 409 && body.needsConfirmation && body.warnings) {
+      // The checks changed since the dialog opened (an edit landed, a date
+      // passed): show the current ones and ask again.
+      const next = { ...draft, warnings: body.warnings }
+      setData(d =>
+        d
+          ? {
+              ...d,
+              drafts: d.drafts.map(x => (x.id === draft.id ? next : x)),
+            }
+          : d
+      )
       setNotice({
         kind: 'error',
-        text: `Not sent: ${err instanceof Error ? err.message : String(err)}`,
+        text: 'Not sent: the checks changed since you opened the dialog. Look at them again and tick them.',
       })
-    } finally {
       setBusyId(null)
+      setConfirming(next)
+      return
+    } else if (res?.status === 409 && body.locked) {
+      setNotice({
+        kind: 'error',
+        text: body.error ?? 'Another approval is running.',
+      })
+    } else if (
+      res != null &&
+      ([400, 401, 403, 409, 503].includes(res.status) || body.notSent)
+    ) {
+      const detail = body.problems?.length
+        ? body.problems.join('; ')
+        : (body.error ?? `HTTP ${res.status}`)
+      setNotice({ kind: 'error', text: `Not sent: ${detail}` })
+    } else {
+      setNotice({
+        kind: 'error',
+        text:
+          body.maybeScheduled && body.error
+            ? body.error
+            : `It may have been scheduled anyway: the answer didn’t come back cleanly (${res ? `HTTP ${res.status}` : 'no answer'}). Don’t press Approve again – check Recent sends below, which updates by itself.`,
+      })
     }
+    setBusyId(null)
+    await load()
   }
 
   /** Mail the draft to the signed-in approver alone (ActiveCampaign's test
@@ -432,8 +513,9 @@ export default function NewsletterAdmin({
         <p className={adminStyles.sectionHint}>
           Issues the pipeline has drafted from Pen. Each one is re-checked here
           before sending: still a draft, wired to exactly one list, content
-          untouched since the pipeline wrote it. Approving schedules the send
-          for about two minutes later.
+          untouched since the pipeline wrote it, the right sender for its list,
+          a working footer and links, and not already sent. Approving schedules
+          the send for about two minutes later.
         </p>
         {testTo && (
           <p className={adminStyles.sectionHint}>
@@ -467,14 +549,22 @@ export default function NewsletterAdmin({
         )}
         {data?.drafts.map(draft => {
           const ok = draft.problems.length === 0 && draft.listId != null
+          const approvable =
+            ok && draft.blocks.length === 0 && !draft.alreadySent
           const unsaved = unsavedId === draft.id
           const result = testResult?.draftId === draft.id ? testResult : null
           return (
             <div key={draft.id} className={adminStyles.editorBlock}>
               <div className={adminStyles.editorBlockHeader}>
                 <h3 className={adminStyles.editorBlockTitle}>{draft.name}</h3>
-                <span className={ok ? styles.statusOk : styles.statusBad}>
-                  {ok ? 'Verified' : 'Cannot send'}
+                <span
+                  className={approvable ? styles.statusOk : styles.statusBad}
+                >
+                  {draft.alreadySent
+                    ? 'Already sent'
+                    : approvable
+                      ? 'Verified'
+                      : 'Cannot send'}
                 </span>
               </div>
               <p className={styles.draftMeta}>
@@ -521,12 +611,28 @@ export default function NewsletterAdmin({
                 </span>
                 <span className={styles.muted}>campaign {draft.id}</span>
               </p>
-              {draft.problems.length > 0 && (
+              {draft.alreadySent && (
+                <p className={`${styles.noticeError} ${styles.testResult}`}>
+                  Already sent as campaign {draft.alreadySent.campaignId} (
+                  {draft.alreadySent.status}). Approving it again would send it
+                  twice, so Approve stays off.
+                </p>
+              )}
+              {(draft.problems.length > 0 || draft.blocks.length > 0) && (
                 <ul className={styles.problems}>
-                  {draft.problems.map(p => (
+                  {[...draft.problems, ...draft.blocks].map(p => (
                     <li key={p}>{p}</li>
                   ))}
                 </ul>
+              )}
+              {draft.warnings.length > 0 && (
+                <div className={styles.warnings}>
+                  <p className={styles.warningsTitle}>
+                    To check before sending (you’ll tick these when you
+                    approve):
+                  </p>
+                  <WarningItems items={draft.warnings} />
+                </div>
               )}
               <div className={styles.actions}>
                 <button
@@ -559,7 +665,10 @@ export default function NewsletterAdmin({
                     className={styles.buttonPrimary}
                     onClick={() => setConfirming(draft)}
                     disabled={
-                      !ok || busyId != null || unsaved || testingId === draft.id
+                      !approvable ||
+                      busyId != null ||
+                      unsaved ||
+                      testingId === draft.id
                     }
                     title={unsaved ? 'Waits for your edits to save' : undefined}
                   >
@@ -584,7 +693,7 @@ export default function NewsletterAdmin({
                   no separate button — Bryce, 11 Sept 2026). */}
               {previewId === draft.id && (
                 <div className={styles.previewRow}>
-                  {data.canSend && draft.cards && ok && (
+                  {data.canSend && draft.cards && draft.editable && (
                     <div className={styles.reorderSide}>
                       <ReorderPanel
                         key={draft.id}
@@ -729,9 +838,11 @@ export default function NewsletterAdmin({
 
       {confirming && (
         <ConfirmSend
+          // New warnings (after a refused approval) start with no ticks.
+          key={confirming.warnings.map(w => w.id).join(' ')}
           draft={confirming}
           onCancel={() => setConfirming(null)}
-          onConfirm={() => void send(confirming)}
+          onConfirm={confirmed => void send(confirming, confirmed)}
         />
       )}
     </div>
@@ -1378,7 +1489,27 @@ function ReorderPanel({
   )
 }
 
-/** In-page confirmation for the one irreversible action on this page. */
+/** The warnings as a list; an edit shows the text as Pen wrote it → now. */
+function WarningItems({ items }: { items: SendWarning[] }) {
+  return (
+    <ul className={styles.warningList}>
+      {items.map(w => (
+        <li key={w.id}>
+          {w.text}
+          {w.from != null && w.to != null && (
+            <span className={styles.warningChange}>
+              “{w.from}” → “{w.to}”
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** In-page confirmation for the one irreversible action on this page. Any
+ *  warnings are grouped by kind, and each group needs its own tick before
+ *  the send button works. */
 function ConfirmSend({
   draft,
   onCancel,
@@ -1386,9 +1517,17 @@ function ConfirmSend({
 }: {
   draft: Draft
   onCancel: () => void
-  onConfirm: () => void
+  /** With the ids of every warning, once each group has been ticked. */
+  onConfirm: (confirmed: string[]) => void
 }) {
   const cancelRef = useRef<HTMLButtonElement>(null)
+  /** One tick per kind of warning (the server checks every id came back). */
+  const groups = WARNING_GROUPS.map(g => ({
+    ...g,
+    items: draft.warnings.filter(w => w.kind === g.kind),
+  })).filter(g => g.items.length > 0)
+  const [ticked, setTicked] = useState<Set<string>>(() => new Set())
+  const allTicked = groups.every(g => ticked.has(g.kind))
   const count = draft.activeContacts
   const listLabel =
     draft.listName ?? (draft.listId ? `list ${draft.listId}` : '')
@@ -1444,6 +1583,31 @@ function ConfirmSend({
             )}
           </dd>
         </dl>
+        {groups.length > 0 && (
+          <div className={styles.dialogChecks}>
+            {groups.map(g => (
+              <fieldset key={g.kind} className={styles.dialogCheck}>
+                <legend>{g.title}</legend>
+                <WarningItems items={g.items} />
+                <label className={styles.checkRow}>
+                  <input
+                    type="checkbox"
+                    checked={ticked.has(g.kind)}
+                    onChange={e =>
+                      setTicked(t => {
+                        const next = new Set(t)
+                        if (e.target.checked) next.add(g.kind)
+                        else next.delete(g.kind)
+                        return next
+                      })
+                    }
+                  />
+                  I’ve checked {g.items.length === 1 ? 'this' : 'these'}
+                </label>
+              </fieldset>
+            ))}
+          </div>
+        )}
         <p className={styles.dialogNote}>
           It goes out about two minutes after you confirm and can&rsquo;t be
           recalled.
@@ -1460,7 +1624,9 @@ function ConfirmSend({
           <button
             type="button"
             className={styles.buttonPrimary}
-            onClick={onConfirm}
+            onClick={() => onConfirm(draft.warnings.map(w => w.id))}
+            disabled={!allTicked}
+            title={allTicked ? undefined : 'Tick the checks above first'}
           >
             Send to {who}
           </button>
