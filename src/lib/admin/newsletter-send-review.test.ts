@@ -313,6 +313,44 @@ describe('the page after an approval or a stop', () => {
     expect(await nl.listRecent()).toEqual([])
   })
 
+  it('says so when ActiveCampaign starts sending at once, instead of promising a cancel window', async () => {
+    const ac = makeAC({ createdStatus: '2' })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const r = await nl.approveAndSend('200', '6', WHO)
+    expect(r.sendingNow).toBe(true)
+    expect(r.held).toBe(false)
+  })
+
+  it('a send held for review for days keeps its Cancel button, however many newer sends there are', async () => {
+    const ac = makeAC({
+      extra: [
+        camp({
+          id: '150',
+          name: 'Events · Week 39, 2026',
+          status: '7',
+          sdate: '2026-09-24 09:00:00',
+        }),
+        ...Array.from({ length: 13 }, (_, i) =>
+          camp({
+            id: String(160 + i),
+            name: `Training · Week ${i + 1}, 2027`,
+            list: '7',
+            ldate: `2026-10-0${1 + (i % 8)}T12:00:00-05:00`,
+          })
+        ),
+      ],
+    })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const rows = await nl.listRecent()
+    expect(rows.find(r => r.id === '150')).toMatchObject({
+      status: 'held',
+      actions: ['cancel'],
+    })
+    expect(rows).toHaveLength(13)
+  })
+
   it('Recent sends flags a wave that has no segment: it goes to the whole list', async () => {
     const ac = makeAC({
       extra: [

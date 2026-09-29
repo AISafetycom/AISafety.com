@@ -416,6 +416,7 @@ export default function NewsletterAdmin({
       sendAt?: string
       expected?: number | null
       held?: boolean
+      sendingNow?: boolean
       approver?: string
       draftKept?: boolean
       wave?: number | null
@@ -461,7 +462,9 @@ export default function NewsletterAdmin({
         text:
           (body.held
             ? `Approved${by}. ActiveCampaign is holding ${what} for its own review first (campaign ${body.campaignId}) – it goes out once they approve it. Don’t approve it again.`
-            : `Approved${by}. ${what} is scheduled to send at ${when(body.sendAt ?? null)} (campaign ${body.campaignId}). You can cancel it under Recent sends until then.`) +
+            : body.sendingNow
+              ? `Approved${by}. ActiveCampaign started sending ${what} straight away (campaign ${body.campaignId}), not at ${when(body.sendAt ?? null)}, so it can’t be canceled – only paused or stopped under Recent sends.`
+              : `Approved${by}. ${what} is scheduled to send at ${when(body.sendAt ?? null)} (campaign ${body.campaignId}). You can cancel it under Recent sends until then.`) +
           (body.draftKept && body.wave != null
             ? ` The draft stays here for wave ${body.wave + 1}.`
             : '') +

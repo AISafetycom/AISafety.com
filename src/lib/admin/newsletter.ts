@@ -944,6 +944,9 @@ export function stopActionsFor(
 }
 
 const STOPPABLE_LISTS = new Set(['5', '6', '7', '8'])
+/** Scheduled, sending, paused, held: not finished, so a Stop button may
+ *  still apply. */
+const STILL_GOING = new Set(['1', '2', '3', '7'])
 
 /** The live campaigns of this issue that went to `listId`, newest first. */
 async function sentOnList(
@@ -2066,6 +2069,9 @@ function escapeHtml(s: string): string {
 /** The most recent sends (and anything scheduled or stuck), newest first. */
 export async function listRecent(limit = 12): Promise<SentSummary[]> {
   const [campaigns, names] = await Promise.all([allCampaigns(), listNames()])
+  // A send that can still be canceled, paused, stopped or resumed stays on
+  // the page however old it is: one held for ActiveCampaign's review for
+  // days must keep its Cancel button.
   const recent = campaigns
     .filter(c => c.status in STATUS_NAMES)
     .sort((a, b) =>
@@ -2073,7 +2079,7 @@ export async function listRecent(limit = 12): Promise<SentSummary[]> {
         String(a.ldate ?? a.sdate ?? '')
       )
     )
-    .slice(0, limit)
+    .filter((c, i) => i < limit || STILL_GOING.has(c.status))
   // Clicks are counted per issue: every wave of one shares its base name.
   const [lists, clicks, offset] = await Promise.all([
     mapLimit(recent, 3, knownListIds),
@@ -3227,6 +3233,9 @@ export interface ScheduledSend extends ApprovalFacts {
   segmentId: string | null
   /** The draft stays for the next wave (it goes after the last one). */
   draftKept: boolean
+  /** ActiveCampaign started sending at once instead of at `sdate` (it read
+   *  the time as past): too late to cancel, only pause or stop. */
+  sendingNow: boolean
   /** Things that went wrong after the send was safely scheduled. */
   notes: string[]
 }
@@ -3637,6 +3646,7 @@ async function createAndConfirm(a: {
       activeContacts: a.active,
       segmentId: a.wave?.segmentId ?? null,
       draftKept: !lastWave,
+      sendingNow: live.status === '2',
       notes,
     }
   } catch (err) {
