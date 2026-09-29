@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  HOMEPAGE,
+  isBurst,
   isLikelyBot,
   LIST_ID_RE,
+  matchesListId,
   parseLinkList,
   summariseClicks,
 } from './newsletter-clicks'
@@ -31,24 +34,65 @@ describe('parseLinkList', () => {
     expect(parsed?.links[1].k).toBe('recfEPy5dMqKPzLAc')
   })
 
-  it('refuses anything that is not a plain http(s) link, so nothing else is ever redirected to', () => {
-    for (const u of [
-      'javascript:alert(1)',
-      'data:text/html,hi',
-      'mailto:x@y.z',
-      'not a url',
-    ]) {
-      expect(
-        parseLinkList({ ...list, links: [{ u, k: 'page', t: 'x' }] })
-      ).toBeNull()
+  it('sends only a bad entry to the homepage, keeping every link in its place', () => {
+    const parsed = parseLinkList({
+      ...list,
+      links: [
+        list.links[0],
+        { u: 'javascript:alert(1)', k: 'recA', t: 'Bad scheme' },
+        { u: 'not a url', k: 'recB', t: 'Not a URL' },
+        { u: 'data:text/html,hi', k: 'recC', t: 'Data' },
+        { u: 'mailto:x@y.z', k: 'recD', t: 'Mail' },
+        null,
+        42,
+        { k: 'recE', t: 'No link' },
+        list.links[1],
+      ],
+    })
+    expect(parsed?.links).toHaveLength(9)
+    expect(parsed?.links[0].u).toBe('https://www.aisafety.com/?utm_source=x')
+    for (const i of [1, 2, 3, 4, 5, 6, 7]) {
+      expect(parsed?.links[i].u).toBe(HOMEPAGE)
+      expect(parsed?.links[i].fallback).toBe(true)
     }
+    // Its label stays, so the count still says which card it was.
+    expect(parsed?.links[1]).toMatchObject({ k: 'recA', t: 'Bad scheme' })
+    expect(parsed?.links[8]).toEqual({
+      u: 'https://lensacademy.org/courses/theory?utm_source=aisafety.com',
+      k: 'recfEPy5dMqKPzLAc',
+      t: 'Lens Academy: Alignment Theory of Deep Learning',
+    })
   })
 
-  it('refuses malformed lists', () => {
+  it('keeps a good link whose labels are missing', () => {
+    expect(
+      parseLinkList({ ...list, links: [{ u: 'https://a.b' }] })?.links
+    ).toEqual([{ u: 'https://a.b/', k: 'page', t: 'aisafety.com' }])
+  })
+
+  it('refuses lists that are not ours at all', () => {
     expect(parseLinkList(null)).toBeNull()
+    expect(parseLinkList('x')).toBeNull()
     expect(parseLinkList({ ...list, v: 2 })).toBeNull()
+    expect(parseLinkList({ ...list, c: 3 })).toBeNull()
     expect(parseLinkList({ ...list, links: 'x' })).toBeNull()
-    expect(parseLinkList({ ...list, links: [{ u: 'https://a.b' }] })).toBeNull()
+  })
+})
+
+describe('matchesListId', () => {
+  // The pipeline's own name for `list` (Python: json.dumps(ensure_ascii=
+  // False, separators=(',', ':')), SHA-256, first 16 hex characters).
+  const raw = new TextEncoder().encode(JSON.stringify(list))
+
+  it('agrees with the name the pipeline gives a list', () => {
+    expect(matchesListId('cedf00e8e8cef64c', raw)).toBe(true)
+  })
+
+  it('refuses a list whose content changed after it was named', () => {
+    const edited = new TextEncoder().encode(
+      JSON.stringify(list).replace('lensacademy.org', 'lensacademy.example')
+    )
+    expect(matchesListId('cedf00e8e8cef64c', edited)).toBe(false)
   })
 })
 
@@ -86,6 +130,58 @@ describe('isLikelyBot', () => {
     ]) {
       expect(isLikelyBot(ua)).toBe(true)
     }
+  })
+
+  it('skips link previews, Office link checks and mail security gateways', () => {
+    for (const ua of [
+      'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+      'WhatsApp/2.23.20.0 A',
+      'Microsoft Office Word 2014',
+      'Mozilla/4.0 (compatible; ms-office; MSOffice 16)',
+      'MSOffice 16',
+      'Outlook-Android/2.0',
+      'Google-Safety',
+      'Iframely/1.3.1 (+https://iframely.com/docs/about)',
+      'Mozilla/5.0 (compatible; Embedly/0.2; +http://support.embed.ly/)',
+      'libwww-perl/6.72',
+      'Mozilla/5.0 zgrab/0.x',
+      'Zscaler/6.2',
+      'Cisco-IronPort-WSA/12.5',
+    ]) {
+      expect(isLikelyBot(ua)).toBe(true)
+    }
+  })
+
+  it('still lets phones and other browsers through', () => {
+    for (const ua of [
+      'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Mobile Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36 Edg/128.0',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 14.6; rv:130.0) Gecko/20100101 Firefox/130.0',
+      'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/25.0 Chrome/121.0 Mobile Safari/537.36',
+    ]) {
+      expect(isLikelyBot(ua)).toBe(false)
+    }
+  })
+})
+
+describe('isBurst', () => {
+  const S = 1000
+
+  it('catches a scanner opening several links at once, every click of it', () => {
+    const times = [0, 120, 250, 400, 610]
+    for (const at of times) expect(isBurst(times, at)).toBe(true)
+  })
+
+  it('catches three links inside ten seconds', () => {
+    expect(isBurst([0, 5 * S, 9.9 * S], 0)).toBe(true)
+    expect(isBurst([0, 5 * S, 9.9 * S], 9.9 * S)).toBe(true)
+  })
+
+  it('leaves a reader opening links a few seconds apart alone', () => {
+    const times = [0, 9 * S, 18 * S]
+    for (const at of times) expect(isBurst(times, at)).toBe(false)
+    expect(isBurst([0, 2 * S], 2 * S)).toBe(false)
+    expect(isBurst([0], 0)).toBe(false)
   })
 })
 
