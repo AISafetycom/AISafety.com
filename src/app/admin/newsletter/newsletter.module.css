@@ -521,3 +521,153 @@
   font-weight: 600;
   color: var(--bright-teal-300);
 }
+
+/* ─── Pre-send warnings (29 Sept 2026) ────────────────────────────────── */
+
+/* Amber, like .liveWarning: look before sending, not "can't send". */
+.warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.warningsTitle {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: #f5b942;
+}
+
+.warningList {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #f5b942;
+  overflow-wrap: anywhere;
+}
+
+.warningChange {
+  display: block;
+  color: var(--teal-300);
+}
+
+/* The confirm dialog's ticks: one box per kind of warning, the list
+   scrolling inside the dialog when it's long. */
+.dialogChecks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 45vh;
+  overflow-y: auto;
+  margin-top: 16px;
+}
+
+.dialogCheck {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--teal-700);
+  border-radius: 8px;
+}
+
+.dialogCheck legend {
+  padding: 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #f5b942;
+}
+
+/* ─── Warm-up waves and Stop (29 Sept 2026) ──────────────────────────── */
+
+/* "Next wave waiting": amber like the warnings, neither verified nor
+   refused. */
+.statusWait {
+  color: #f5b942;
+  font-weight: 600;
+}
+
+/* The wave picker on a draft. */
+.waves {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--teal-700);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.wavesTitle {
+  padding: 0 4px;
+  font-weight: 600;
+  color: var(--teal-200);
+}
+
+.waveList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.waveRow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.waveChoice {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  color: var(--white);
+  cursor: pointer;
+}
+
+.waveChoice input {
+  align-self: center;
+}
+
+/* Waves after the next one: shown, not choosable yet. */
+.waveLater {
+  color: var(--teal-300);
+  cursor: default;
+}
+
+.waveNumbers {
+  margin: 0 0 0 22px;
+  color: var(--teal-300);
+  overflow-wrap: anywhere;
+}
+
+/* Recent sends: an issue sent in waves gets a totals row, then a row per
+   wave; stop buttons sit under the status. */
+.groupRow td {
+  font-weight: 600;
+}
+
+.waveSubRow td:first-child {
+  padding-left: 18px;
+  color: var(--teal-200);
+}
+
+.rowActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.countdown {
+  color: #f5b942;
+  font-variant-numeric: tabular-nums;
+}

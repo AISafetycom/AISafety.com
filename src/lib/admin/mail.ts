@@ -1,6 +1,7 @@
 // Email for the admin: the owner hears when someone requests access, a
-// person hears when they have been approved, and the owner hears (at most
-// once a day) when someone else publishes the donation guide.
+// person hears when they have been approved, the owner hears (at most
+// once a day) when someone else publishes the donation guide, and the owner
+// hears about every approval of a real newsletter list (kind "digest").
 //
 // Sent the same way the hackathon forms send their confirmations: a small
 // Google Apps Script web app in the owner's Google account (source mirrored
@@ -165,6 +166,104 @@ export function approvedMail(p: {
       `<p>Your Google account (<strong>${esc(p.email)}</strong>) now has access to the AISafety.com admin.</p>` +
       `<p><strong>Sign in:</strong> <a href="${esc(p.loginUrl)}">${esc(p.loginUrl)}</a></p>` +
       `<p style="color:#666;font-size:13px">Use the &ldquo;Sign in with Google&rdquo; button and pick that account. This email was sent by the admin itself; reply to it if something looks wrong.</p>`
+  )
+  return { subject, text, html }
+}
+
+/** "8 October 2026, 14:32 UTC": UTC, since the owner moves between time
+ *  zones and a mail can't know which one he's in. */
+function utcTime(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const months = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ]
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getUTCDate()} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()}, ${p(d.getUTCHours())}:${p(d.getUTCMinutes())} UTC`
+}
+
+/** To the owner: an issue, or one wave of it, was approved for a real
+ *  newsletter list on /admin/newsletter — or an approval ran into an error
+ *  after ActiveCampaign was asked to schedule it, so it may be going out
+ *  (`maybe`). Every real-list approval sends one, whoever pressed it. */
+export function newsletterApprovalMail(p: {
+  /** The sending campaign's name ("Events · Week 41, 2026 · wave 2/4"). */
+  name: string
+  listId: string
+  listName: string | null
+  wave: number | null
+  waves: number | null
+  expected: number | null
+  approver: string
+  /** When it was asked to go out (ISO). */
+  sendAt: string
+  campaignId: string | null
+  held: boolean
+  maybe: boolean
+  /** The reason typed to send a held wave anyway. */
+  override: string | null
+  adminUrl: string
+}): Mail {
+  const people =
+    p.expected == null
+      ? 'an unknown number of people'
+      : `${p.expected.toLocaleString('en-US')} ${p.expected === 1 ? 'person' : 'people'}`
+  const list = `${p.listName ?? 'the list'} (list ${p.listId})`
+  const at = utcTime(p.sendAt)
+  const subject = p.maybe
+    ? `Newsletter: “${p.name}” may have been scheduled – check`
+    : `Newsletter approved: ${p.name} (${people})`
+  const lead = p.maybe
+    ? `An approval of “${p.name}” by ${p.approver} ran into an error after ActiveCampaign was asked to schedule it, so it may be going out anyway.`
+    : p.held
+      ? `“${p.name}” was approved by ${p.approver}. ActiveCampaign is holding it for its own review; it goes out once they approve it.`
+      : `“${p.name}” was approved by ${p.approver} and is scheduled to send.`
+  const rows: Array<[string, string]> = [
+    [
+      'Wave',
+      p.wave == null ? 'none – the whole list' : `${p.wave} of ${p.waves}`,
+    ],
+    ['To', `${people} on ${list}`],
+    ['Sends', p.held ? `once ActiveCampaign approves it` : at],
+    ['Approved by', p.approver],
+    ['Campaign', p.campaignId ?? 'unknown'],
+    ...(p.override
+      ? [
+          ['Sent before its wave was due, because', p.override] as [
+            string,
+            string,
+          ],
+        ]
+      : []),
+  ]
+  const action = p.maybe
+    ? 'Check Recent sends, and cancel it there if it shouldn’t go'
+    : 'To cancel it before it sends, or pause or stop it while it’s sending'
+  const text = [
+    lead,
+    '',
+    ...rows.map(([k, v]) => `${k}: ${v}`),
+    '',
+    `${action}: ${p.adminUrl}`,
+    '',
+    'This email was sent by the admin itself, once for every approval of a real newsletter list.',
+  ].join('\n')
+  const html = wrap(
+    `<p>${esc(lead)}</p>` +
+      `<ul>${rows.map(([k, v]) => `<li><strong>${esc(k)}:</strong> ${esc(v)}</li>`).join('')}</ul>` +
+      `<p><strong>${esc(action)}:</strong> <a href="${esc(p.adminUrl)}">${esc(p.adminUrl)}</a></p>` +
+      `<p style="color:#666;font-size:13px">This email was sent by the admin itself, once for every approval of a real newsletter list.</p>`
   )
   return { subject, text, html }
 }

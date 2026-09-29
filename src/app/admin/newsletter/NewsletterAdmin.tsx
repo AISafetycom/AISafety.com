@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import adminStyles from '../admin.module.css'
 import styles from './newsletter.module.css'
+import NewsletterAlerts from './NewsletterAlerts'
 
 interface CardInfo {
   key: string
@@ -56,13 +57,97 @@ interface Draft {
   listId: string | null
   listName: string | null
   activeContacts: number | null
+  /** The pipeline's checks (still a draft, one list, content untouched);
+   *  empty = it can be previewed, tested and edited. */
   problems: string[]
+  /** Why it may not be sent even so; empty = Approve may be pressed. */
+  blocks: string[]
+  /** What the approver ticks in the confirm dialog before it sends. */
+  warnings: SendWarning[]
+  /** The issue already went (or is going) to this list as that campaign:
+   *  to the whole list, or every one of its waves. */
+  alreadySent: { campaignId: string; status: string } | null
+  /** The list's warm-up waves and how far this issue has got; null when
+   *  the list has none (it can only go out whole). */
+  waves: WavePlan | null
+  /** Minutes between approval and the send on this list. */
+  sendDelayMinutes: number
+  /** Card edits can be saved into it from this copy of the site (real
+   *  lists only from aisafety.com itself). */
+  editable: boolean
+  /** Why card edits are off just now (a wave sharing its email is going
+   *  out). */
+  editLock: string | null
   /** The inbox preview line (hidden preheader), as Gmail shows it. */
   preview: string | null
   /** Cards by section, current order; null for drafts built before the
    *  renderer stamped card markers (no Reorder button then). */
   cards: CardGroup[] | null
 }
+
+/** Something to look at before sending: card text edited since Pen wrote
+ *  it, leftover words (TEST, TODO…), or a date already past. */
+interface SendWarning {
+  /** Sent back when ticked; the server checks every current one was. */
+  id: string
+  kind: 'edited' | 'words' | 'date'
+  text: string
+  from?: string
+  to?: string
+}
+
+/** One wave of the list (see WavePlan in src/lib/admin/newsletter.ts). */
+interface WaveInfo {
+  wave: number
+  waves: number
+  label: string
+  segmentId: string
+  /** Active contacts on this list in the wave now. */
+  count: number | null
+  /** This issue's send of the wave, once it has gone. */
+  sent: {
+    campaignId: string
+    status: string
+    finishedAt: string | null
+    sent: number
+    bounces: number | null
+    unsubscribes: number | null
+    verifiedOpens: number | null
+    spamComplaints: number | null
+    health: 'green' | 'amber' | 'red' | null
+  } | null
+}
+
+interface WavePlan {
+  error: string | null
+  waves: WaveInfo[]
+  active: number | null
+  /** How many this issue has reached on the list so far. */
+  reached: number
+  next: number | null
+  /** The gap after the previous wave ends then (ISO); sooner needs a
+   *  typed reason. */
+  notBefore: string | null
+  /** Other holds a typed reason can override. */
+  holds: string[]
+  wait: string | null
+  blocked: string | null
+  wholeList: boolean
+}
+
+/** What the Approve button sends: one wave, or the whole list. */
+type Choice = number | 'all'
+
+type StopAction = 'cancel' | 'pause' | 'stop' | 'resume'
+
+/** Must match OVERRIDE_MIN_CHARS on the server. */
+const OVERRIDE_MIN_CHARS = 10
+
+const WARNING_GROUPS: Array<{ kind: SendWarning['kind']; title: string }> = [
+  { kind: 'edited', title: 'Card text changed since Pen wrote it' },
+  { kind: 'words', title: 'Words that look left over' },
+  { kind: 'date', title: 'Dates or deadlines already past' },
+]
 
 interface Recent {
   id: string
@@ -76,17 +161,29 @@ interface Recent {
     | 'held'
     | 'disabled'
   scheduledFor: string | null
+  /** When a scheduled send goes out (ISO), for the countdown. */
+  scheduledAt: string | null
   sentAt: string | null
   sentTo: number
   uniqueOpens: number | null
   unsubscribes: number | null
   listNames: string[]
+  baseName: string
+  wave: { wave: number; waves: number } | null
+  /** Named as a wave, but ActiveCampaign holds no segment for it: it goes
+   *  (or went) to the whole list. */
+  segmentLost: boolean
+  /** Rows of one issue on one list share it (they come next to each
+   *  other) and are shown together. */
+  group: string
   /** Counted on aisafety.com (the links go through /api/nl since 28 Sept
-   *  2026); zero for older sends. */
+   *  2026); zero for older sends. Per issue: every wave carries the same. */
   clicks: {
     total: number
     links: Array<{ label: string; url: string; clicks: number }>
   }
+  /** What an approver may do to it now. */
+  actions: StopAction[]
 }
 
 interface Payload {
@@ -116,6 +213,51 @@ function when(iso: string | null): string {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+/** "986 people", "1 person". */
+function people(n: number | null): string {
+  if (n == null) return 'an unknown number of people'
+  return `${n.toLocaleString('en-US')} ${n === 1 ? 'person' : 'people'}`
+}
+
+/** What Approve sends unless the approver picks otherwise: the next wave
+ *  when the list has waves, else the whole list; null when nothing may go. */
+function defaultChoice(d: Draft): Choice | null {
+  const p = d.waves
+  if (!p || p.error) return 'all'
+  if (p.next != null) return p.next
+  return p.wholeList ? 'all' : null
+}
+
+/** The chosen wave (or the whole list) may be approved now; the server
+ *  checks all of it again. Holds (gap, a red verdict) still allow it: the
+ *  dialog then asks for a reason. */
+function choiceAllowed(d: Draft, choice: Choice | null): boolean {
+  const p = d.waves
+  if (choice == null) return false
+  if (choice === 'all') return p == null || p.wholeList
+  return (
+    p != null &&
+    p.error == null &&
+    p.next === choice &&
+    p.wait == null &&
+    p.blocked == null
+  )
+}
+
+/** What holds the chosen wave at `now`: the gap after the previous wave,
+ *  if it hasn't passed, then the server's other holds. */
+function holdsFor(d: Draft, choice: Choice | null, now: number): string[] {
+  const p = d.waves
+  if (!p || typeof choice !== 'number') return []
+  const gap =
+    p.notBefore && now < Date.parse(p.notBefore)
+      ? [
+          `wave ${choice - 1} finished less than 18 hours ago; wave ${choice} is due from ${when(p.notBefore)}`,
+        ]
+      : []
+  return [...gap, ...p.holds]
 }
 
 /** "lensacademy.org" for a link's destination (no www, no path). */
@@ -167,7 +309,22 @@ export default function NewsletterAdmin({
   /** The draft with edits not yet written into it (typed text, a moved card,
    *  a save in flight): a test or an approval now would go without them. */
   const [unsavedId, setUnsavedId] = useState<string | null>(null)
-  const [confirming, setConfirming] = useState<Draft | null>(null)
+  /** The confirm dialog: the draft, what it goes to, and what holds that
+   *  wave (the dialog then asks for a reason to send it anyway). */
+  const [confirming, setConfirming] = useState<{
+    draft: Draft
+    choice: Choice
+    holds: string[]
+  } | null>(null)
+  /** The wave (or 'all') picked on each draft; unset = defaultChoice. */
+  const [choices, setChoices] = useState<Record<string, Choice>>({})
+  /** The Recent sends row whose Stop dialog is open, and the one whose
+   *  action is on its way. */
+  const [stopping, setStopping] = useState<{
+    row: Recent
+    action: StopAction
+  } | null>(null)
+  const [stopBusyId, setStopBusyId] = useState<string | null>(null)
   const [notice, setNotice] = useState<{
     kind: 'ok' | 'error'
     text: string
@@ -232,52 +389,148 @@ export default function NewsletterAdmin({
     }
   }, [load])
 
-  async function send(draft: Draft) {
+  /** Approve: `confirmed` = the ids of the warnings ticked in the dialog.
+   *  Only an answer that says so counts as "not sent"; anything unclear
+   *  (no answer, a gateway error, a 202) may mean the send is scheduled, so
+   *  the page says not to press again and rereads the lists either way. */
+  async function send(
+    draft: Draft,
+    choice: Choice,
+    confirmed: string[],
+    override: string | null
+  ) {
     if (!draft.listId) return
+    const wave =
+      typeof choice === 'number'
+        ? draft.waves?.waves.find(w => w.wave === choice)
+        : undefined
+    if (typeof choice === 'number' && !wave) return
     setConfirming(null)
     setBusyId(draft.id)
     setNotice(null)
+    let res: Response | null = null
+    let body: {
+      error?: string
+      problems?: string[]
+      campaignId?: string
+      name?: string
+      sendAt?: string
+      expected?: number | null
+      held?: boolean
+      sendingNow?: boolean
+      approver?: string
+      draftKept?: boolean
+      wave?: number | null
+      notes?: string[]
+      needsConfirmation?: boolean
+      warnings?: SendWarning[]
+      needsOverride?: boolean
+      holds?: string[]
+      locked?: boolean
+      maybeScheduled?: boolean
+      notSent?: boolean
+    } = {}
     try {
-      const res = await fetch('/api/admin/newsletter', {
+      res = await fetch('/api/admin/newsletter', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaign: draft.id, list: draft.listId }),
+        body: JSON.stringify({
+          campaign: draft.id,
+          list: draft.listId,
+          confirmed,
+          ...(wave
+            ? { wave: { segment: wave.segmentId, k: wave.wave, n: wave.waves } }
+            : {}),
+          ...(override ? { override } : {}),
+        }),
       })
-      const body = (await res.json()) as {
-        error?: string
-        problems?: string[]
-        campaignId?: string
-        sdate?: string
-        held?: boolean
-      }
-      if (res.status === 401 && body.error === 'reauth') {
-        // The session is older than the approval step allows: confirm with
-        // Google (one click) and come back to this page.
-        window.location.assign('/api/admin/auth/google?next=/admin/newsletter')
-        return
-      }
-      if (!res.ok) {
-        const detail = body.problems?.length
-          ? body.problems.join('; ')
-          : (body.error ?? `HTTP ${res.status}`)
-        throw new Error(detail)
-      }
+      body = await res.json().catch(() => ({}))
+    } catch {
+      // No answer: the request may still have reached the server.
+      res = null
+    }
+    if (res?.status === 401 && body.error === 'reauth') {
+      // The session is older than the approval step allows: confirm with
+      // Google (one click) and come back to this page.
+      window.location.assign('/api/admin/auth/google?next=/admin/newsletter')
+      return
+    }
+    if (res?.status === 200 && body.campaignId) {
+      const by = body.approver ? ` by ${body.approver}` : ''
+      const what = `“${body.name ?? draft.name}” (${people(body.expected ?? null)})`
       setNotice({
         kind: 'ok',
-        text: body.held
-          ? `Approved. ActiveCampaign is holding “${draft.name}” for its own review first (campaign ${body.campaignId}) – it goes out once they approve it. Nothing more to do; don’t approve it again.`
-          : `Approved. “${draft.name}” is scheduled to send at ${when(body.sdate ?? null)} (campaign ${body.campaignId}). Nothing more to do.`,
+        text:
+          (body.held
+            ? `Approved${by}. ActiveCampaign is holding ${what} for its own review first (campaign ${body.campaignId}) – it goes out once they approve it. Don’t approve it again.`
+            : body.sendingNow
+              ? `Approved${by}. ActiveCampaign started sending ${what} straight away (campaign ${body.campaignId}), not at ${when(body.sendAt ?? null)}, so it can’t be canceled – only paused or stopped under Recent sends.`
+              : `Approved${by}. ${what} is scheduled to send at ${when(body.sendAt ?? null)} (campaign ${body.campaignId}). You can cancel it under Recent sends until then.`) +
+          (body.draftKept && body.wave != null
+            ? ` The draft stays here for wave ${body.wave + 1}.`
+            : '') +
+          (body.notes?.length ? ` ${body.notes.join(' ')}` : ''),
       })
-      if (previewId === draft.id) setPreviewId(null)
-      await load()
-    } catch (err) {
+      if (previewId === draft.id && !body.draftKept) setPreviewId(null)
+    } else if (res?.status === 409 && body.needsConfirmation && body.warnings) {
+      // The checks changed since the dialog opened (an edit landed, a date
+      // passed): show the current ones and ask again.
+      const next = { ...draft, warnings: body.warnings }
+      setData(d =>
+        d
+          ? {
+              ...d,
+              drafts: d.drafts.map(x => (x.id === draft.id ? next : x)),
+            }
+          : d
+      )
       setNotice({
         kind: 'error',
-        text: `Not sent: ${err instanceof Error ? err.message : String(err)}`,
+        text: 'Not sent: the checks changed since you opened the dialog. Look at them again and tick them.',
       })
-    } finally {
       setBusyId(null)
+      setConfirming({
+        draft: next,
+        choice,
+        holds: holdsFor(next, choice, Date.now()),
+      })
+      return
+    } else if (res?.status === 409 && body.needsOverride && body.holds) {
+      // The wave is held (the gap, a red verdict) and no reason came with
+      // it: ask for one, showing what the server holds it for.
+      setNotice({
+        kind: 'error',
+        text: 'Not sent: this wave is held. Wait until it’s due, or give a reason to send it anyway.',
+      })
+      setBusyId(null)
+      setConfirming({ draft, choice, holds: body.holds })
+      return
+    } else if (res?.status === 409 && body.locked) {
+      setNotice({
+        kind: 'error',
+        text: body.error ?? 'Another approval is running.',
+      })
+    } else if (
+      res != null &&
+      ([400, 401, 403, 409, 503].includes(res.status) || body.notSent)
+    ) {
+      const detail = body.problems?.length
+        ? body.problems.join('; ')
+        : (body.error ?? `HTTP ${res.status}`)
+      setNotice({ kind: 'error', text: `Not sent: ${detail}` })
+    } else {
+      setNotice({
+        kind: 'error',
+        text:
+          body.maybeScheduled && body.error
+            ? body.error
+            : `It may have been scheduled anyway: the answer didn’t come back cleanly (${res ? `HTTP ${res.status}` : 'no answer'}). Don’t press Approve again – check Recent sends below, which updates by itself.`,
+      })
     }
+    // Approve stays off until the lists are read again: until then the page
+    // still shows the draft (or its wave) as it was before this answer.
+    await load()
+    setBusyId(null)
   }
 
   /** Mail the draft to the signed-in approver alone (ActiveCampaign's test
@@ -320,6 +573,66 @@ export default function NewsletterAdmin({
     } finally {
       setTestingId(null)
     }
+  }
+
+  /** Cancel, pause, stop or resume a send from Recent sends (after the
+   *  dialog). Only an answer that says so counts as done or refused; no
+   *  answer may mean it worked, so the page says to look and rereads. */
+  async function stopSend(row: Recent, action: StopAction) {
+    setStopping(null)
+    setStopBusyId(row.id)
+    setNotice(null)
+    let res: Response | null = null
+    let body: {
+      error?: string
+      draftWaiting?: boolean | null
+      uncertain?: boolean
+    } = {}
+    try {
+      res = await fetch('/api/admin/newsletter/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaign: row.id, action }),
+      })
+      body = await res.json().catch(() => ({}))
+    } catch {
+      res = null
+    }
+    if (res?.status === 401 && body.error === 'reauth') {
+      window.location.assign('/api/admin/auth/google?next=/admin/newsletter')
+      return
+    }
+    if (res?.ok) {
+      const name = `“${row.name}”`
+      setNotice({
+        kind: 'ok',
+        text:
+          action === 'cancel'
+            ? `Canceled ${name}: nobody gets it.${
+                body.draftWaiting === true
+                  ? ' Its draft is still waiting above, so it can be approved again.'
+                  : body.draftWaiting === false
+                    ? ' Its draft went when it was approved, so rebuild the issue to send it again.'
+                    : ''
+              }`
+            : action === 'pause'
+              ? `Paused ${name}. Stop it for good or resume it under Recent sends.`
+              : action === 'stop'
+                ? `Stopped ${name} for good. People who already got it keep it.`
+                : `Resumed ${name}: it’s sending again.`,
+      })
+    } else {
+      setNotice({
+        kind: 'error',
+        text: res
+          ? (body.error ?? `HTTP ${res.status}`)
+          : 'No answer came back, so it may or may not have worked. Recent sends updates by itself: check it there.',
+      })
+    }
+    // The buttons stay off until Recent sends is read again, so a canceled
+    // send never offers "Cancel" a second time.
+    await load()
+    setStopBusyId(null)
   }
 
   useEffect(() => {
@@ -393,12 +706,15 @@ export default function NewsletterAdmin({
           </button>
         </p>
       </div>
+      <NewsletterAlerts />
 
       {canSend && (
         <div className={`${adminStyles.notice} ${styles.liveWarning}`}>
-          <strong>This sends real emails.</strong> Approving an issue schedules
-          it to go to every subscriber on its list about two minutes later.
-          There’s no recall once it’s out. Use with caution.
+          <strong>This sends real emails.</strong> Approving schedules an issue,
+          or one wave of it, to go out ten minutes later (two on the test
+          lists). Until then you can cancel it under Recent sends; while it’s
+          sending you can pause or stop it there. Emails already delivered can’t
+          be recalled. Use with caution.
         </div>
       )}
       {!canSend && (
@@ -432,8 +748,10 @@ export default function NewsletterAdmin({
         <p className={adminStyles.sectionHint}>
           Issues the pipeline has drafted from Pen. Each one is re-checked here
           before sending: still a draft, wired to exactly one list, content
-          untouched since the pipeline wrote it. Approving schedules the send
-          for about two minutes later.
+          untouched since the pipeline wrote it, the right sender for its list,
+          a working footer and links, and not already sent. During the warm-up a
+          big list goes out in waves, one at a time, at least 18 hours apart:
+          the draft stays here until its last wave.
         </p>
         {testTo && (
           <p className={adminStyles.sectionHint}>
@@ -467,14 +785,43 @@ export default function NewsletterAdmin({
         )}
         {data?.drafts.map(draft => {
           const ok = draft.problems.length === 0 && draft.listId != null
+          const clean = ok && draft.blocks.length === 0 && !draft.alreadySent
+          // A pick that no longer fits (its wave went out) gives way to the
+          // default: the next wave.
+          const picked = choices[draft.id]
+          const choice =
+            picked != null && choiceAllowed(draft, picked)
+              ? picked
+              : defaultChoice(draft)
+          const approvable = clean && choiceAllowed(draft, choice)
+          const waiting = clean && !approvable && draft.waves?.wait != null
+          const held =
+            approvable &&
+            holdsFor(draft, choice, Date.parse(data.fetchedAt)).length > 0
           const unsaved = unsavedId === draft.id
           const result = testResult?.draftId === draft.id ? testResult : null
           return (
             <div key={draft.id} className={adminStyles.editorBlock}>
               <div className={adminStyles.editorBlockHeader}>
                 <h3 className={adminStyles.editorBlockTitle}>{draft.name}</h3>
-                <span className={ok ? styles.statusOk : styles.statusBad}>
-                  {ok ? 'Verified' : 'Cannot send'}
+                <span
+                  className={
+                    held || waiting
+                      ? styles.statusWait
+                      : approvable
+                        ? styles.statusOk
+                        : styles.statusBad
+                  }
+                >
+                  {draft.alreadySent
+                    ? 'Already sent'
+                    : held
+                      ? `Wave ${choice} held`
+                      : approvable
+                        ? 'Verified'
+                        : waiting
+                          ? 'Next wave waiting'
+                          : 'Cannot send'}
                 </span>
               </div>
               <p className={styles.draftMeta}>
@@ -521,12 +868,43 @@ export default function NewsletterAdmin({
                 </span>
                 <span className={styles.muted}>campaign {draft.id}</span>
               </p>
-              {draft.problems.length > 0 && (
+              {draft.alreadySent && (
+                <p className={`${styles.noticeError} ${styles.testResult}`}>
+                  Already sent as campaign {draft.alreadySent.campaignId} (
+                  {draft.alreadySent.status}). Approving it again would send it
+                  twice, so Approve stays off.
+                </p>
+              )}
+              {(draft.problems.length > 0 || draft.blocks.length > 0) && (
                 <ul className={styles.problems}>
-                  {draft.problems.map(p => (
+                  {[...draft.problems, ...draft.blocks].map(p => (
                     <li key={p}>{p}</li>
                   ))}
                 </ul>
+              )}
+              {draft.waves && (
+                <WavePicker
+                  draftId={draft.id}
+                  plan={draft.waves}
+                  choice={choice}
+                  canChoose={data.canSend && clean}
+                  onChoose={c => setChoices(cs => ({ ...cs, [draft.id]: c }))}
+                  now={Date.parse(data.fetchedAt)}
+                />
+              )}
+              {draft.editLock && (
+                <p className={`${styles.notice} ${styles.testResult}`}>
+                  {draft.editLock}.
+                </p>
+              )}
+              {draft.warnings.length > 0 && (
+                <div className={styles.warnings}>
+                  <p className={styles.warningsTitle}>
+                    To check before sending (you’ll tick these when you
+                    approve):
+                  </p>
+                  <WarningItems items={draft.warnings} />
+                </div>
               )}
               <div className={styles.actions}>
                 <button
@@ -557,13 +935,27 @@ export default function NewsletterAdmin({
                   <button
                     type="button"
                     className={styles.buttonPrimary}
-                    onClick={() => setConfirming(draft)}
+                    onClick={() =>
+                      choice != null &&
+                      setConfirming({
+                        draft,
+                        choice,
+                        holds: holdsFor(draft, choice, Date.now()),
+                      })
+                    }
                     disabled={
-                      !ok || busyId != null || unsaved || testingId === draft.id
+                      !approvable ||
+                      busyId != null ||
+                      unsaved ||
+                      testingId === draft.id
                     }
                     title={unsaved ? 'Waits for your edits to save' : undefined}
                   >
-                    {busyId === draft.id ? 'Scheduling…' : 'Approve & send'}
+                    {busyId === draft.id
+                      ? 'Scheduling…'
+                      : typeof choice === 'number'
+                        ? `Approve wave ${choice}`
+                        : 'Approve & send'}
                   </button>
                 )}
               </div>
@@ -584,7 +976,7 @@ export default function NewsletterAdmin({
                   no separate button — Bryce, 11 Sept 2026). */}
               {previewId === draft.id && (
                 <div className={styles.previewRow}>
-                  {data.canSend && draft.cards && ok && (
+                  {data.canSend && draft.cards && draft.editable && (
                     <div className={styles.reorderSide}>
                       <ReorderPanel
                         key={draft.id}
@@ -652,76 +1044,19 @@ export default function NewsletterAdmin({
               </tr>
             </thead>
             <tbody>
-              {data.recent.map(r => [
-                <tr key={r.id}>
-                  <td>{r.name}</td>
-                  <td className={styles.muted}>
-                    {r.listNames.join(', ') || '—'}
-                  </td>
-                  <td>
-                    {r.status === 'sent' ? (
-                      <span className={styles.statusOk}>sent</span>
-                    ) : r.status === 'stopped' || r.status === 'disabled' ? (
-                      <span className={styles.statusBad}>{r.status}</span>
-                    ) : r.status === 'held' ? (
-                      <span title="ActiveCampaign is reviewing this send; it goes out once they approve it">
-                        held for review
-                      </span>
-                    ) : (
-                      r.status
-                    )}
-                  </td>
-                  <td className={styles.muted}>
-                    {r.status === 'scheduled'
-                      ? `due ${when(r.scheduledFor)}`
-                      : when(r.sentAt)}
-                  </td>
-                  <td>{r.sentTo}</td>
-                  <td className={styles.muted}>{r.uniqueOpens ?? '—'}</td>
-                  <td>
-                    {r.clicks.total > 0 ? (
-                      <button
-                        type="button"
-                        className={styles.rowButton}
-                        aria-expanded={openClicks === r.id}
-                        title="Which links were clicked"
-                        onClick={() =>
-                          setOpenClicks(openClicks === r.id ? null : r.id)
-                        }
-                      >
-                        {r.clicks.total}
-                      </button>
-                    ) : (
-                      <span className={styles.muted}>0</span>
-                    )}
-                  </td>
-                  <td className={styles.muted}>{r.unsubscribes ?? '—'}</td>
-                </tr>,
-                openClicks === r.id && (
-                  <tr key={`${r.id}-clicks`}>
-                    <td colSpan={8} className={styles.clicksCell}>
-                      <ol className={styles.clicksList}>
-                        {r.clicks.links.map(l => (
-                          <li key={l.url} className={styles.clicksRow}>
-                            <span className={styles.clicksCount}>
-                              {l.clicks}
-                            </span>
-                            <span>{l.label}</span>
-                            <a
-                              href={l.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className={styles.muted}
-                            >
-                              {hostOf(l.url)}
-                            </a>
-                          </li>
-                        ))}
-                      </ol>
-                    </td>
-                  </tr>
-                ),
-              ])}
+              {groupRecent(data.recent).map(rows => (
+                <SendRows
+                  key={rows[0].group}
+                  rows={rows}
+                  canSend={data.canSend}
+                  openClicks={openClicks}
+                  onToggleClicks={key =>
+                    setOpenClicks(openClicks === key ? null : key)
+                  }
+                  stopBusyId={stopBusyId}
+                  onStop={(row, action) => setStopping({ row, action })}
+                />
+              ))}
             </tbody>
           </table>
         )}
@@ -729,9 +1064,26 @@ export default function NewsletterAdmin({
 
       {confirming && (
         <ConfirmSend
-          draft={confirming}
+          // New warnings or holds (after a refused approval) start afresh.
+          key={[
+            ...confirming.draft.warnings.map(w => w.id),
+            ...confirming.holds,
+          ].join(' ')}
+          draft={confirming.draft}
+          choice={confirming.choice}
+          holds={confirming.holds}
           onCancel={() => setConfirming(null)}
-          onConfirm={() => void send(confirming)}
+          onConfirm={(confirmed, override) =>
+            void send(confirming.draft, confirming.choice, confirmed, override)
+          }
+        />
+      )}
+      {stopping && (
+        <ConfirmStop
+          row={stopping.row}
+          action={stopping.action}
+          onCancel={() => setStopping(null)}
+          onConfirm={() => void stopSend(stopping.row, stopping.action)}
         />
       )}
     </div>
@@ -1378,24 +1730,67 @@ function ReorderPanel({
   )
 }
 
-/** In-page confirmation for the one irreversible action on this page. */
+/** The warnings as a list; an edit shows the text as Pen wrote it → now. */
+function WarningItems({ items }: { items: SendWarning[] }) {
+  return (
+    <ul className={styles.warningList}>
+      {items.map(w => (
+        <li key={w.id}>
+          {w.text}
+          {w.from != null && w.to != null && (
+            <span className={styles.warningChange}>
+              “{w.from}” → “{w.to}”
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** In-page confirmation for the one irreversible action on this page. It
+ *  names what goes out and to how many (the wave's count for a wave). Any
+ *  warnings are grouped by kind, and each group needs its own tick; a held
+ *  wave also needs a typed reason before the send button works. */
 function ConfirmSend({
   draft,
+  choice,
+  holds,
   onCancel,
   onConfirm,
 }: {
   draft: Draft
+  choice: Choice
+  /** Why this wave is held (the gap, a red verdict); empty when it isn't. */
+  holds: string[]
   onCancel: () => void
-  onConfirm: () => void
+  /** With the ids of every warning, once each group has been ticked, and
+   *  the reason typed for a held wave. */
+  onConfirm: (confirmed: string[], override: string | null) => void
 }) {
   const cancelRef = useRef<HTMLButtonElement>(null)
-  const count = draft.activeContacts
+  /** One tick per kind of warning (the server checks every id came back). */
+  const groups = WARNING_GROUPS.map(g => ({
+    ...g,
+    items: draft.warnings.filter(w => w.kind === g.kind),
+  })).filter(g => g.items.length > 0)
+  const [ticked, setTicked] = useState<Set<string>>(() => new Set())
+  const [reason, setReason] = useState('')
+  const reasonOk =
+    holds.length === 0 || reason.trim().length >= OVERRIDE_MIN_CHARS
+  const allTicked = groups.every(g => ticked.has(g.kind)) && reasonOk
+  const wave =
+    typeof choice === 'number'
+      ? (draft.waves?.waves.find(w => w.wave === choice) ?? null)
+      : null
+  const count = wave ? wave.count : draft.activeContacts
   const listLabel =
     draft.listName ?? (draft.listId ? `list ${draft.listId}` : '')
   const who =
     count == null
       ? `everyone on ${listLabel}`
       : `${count} contact${count === 1 ? '' : 's'}`
+  const delay = draft.sendDelayMinutes
 
   useEffect(() => {
     // Focus lands on Cancel, so a stray Enter never sends.
@@ -1417,7 +1812,8 @@ function ConfirmSend({
         onClick={e => e.stopPropagation()}
       >
         <h2 id="confirm-send-title" className={styles.dialogTitle}>
-          Send “{draft.name}”?
+          Send “{draft.name}”
+          {wave ? ` · wave ${wave.wave} of ${wave.waves}` : ''}?
         </h2>
         {/* In the order the inbox shows them: sender, subject, preview line. */}
         <dl className={styles.dialogFacts}>
@@ -1435,18 +1831,78 @@ function ConfirmSend({
           )}
           <dt>To</dt>
           <dd>
-            {listLabel}
-            {count != null && (
-              <span className={styles.muted}>
-                {' '}
-                · {count} active contact{count === 1 ? '' : 's'}
-              </span>
+            {wave ? (
+              <>
+                {wave.label} on {listLabel}
+                <span className={styles.muted}>
+                  {' '}
+                  · {people(wave.count)}
+                  {draft.activeContacts != null &&
+                    ` of ${draft.activeContacts.toLocaleString('en-US')} active`}
+                </span>
+              </>
+            ) : (
+              <>
+                {listLabel}
+                {count != null && (
+                  <span className={styles.muted}>
+                    {' '}
+                    · {count} active contact{count === 1 ? '' : 's'}
+                  </span>
+                )}
+              </>
             )}
           </dd>
         </dl>
+        {(groups.length > 0 || holds.length > 0) && (
+          <div className={styles.dialogChecks}>
+            {holds.length > 0 && (
+              <fieldset className={styles.dialogCheck}>
+                <legend>This wave is held</legend>
+                <ul className={styles.warningList}>
+                  {holds.map(h => (
+                    <li key={h}>{h}</li>
+                  ))}
+                </ul>
+                <label className={styles.fitLabel}>
+                  To send it anyway, say why (kept with the send)
+                  <textarea
+                    className={`${styles.fitTextarea} ${styles.fieldShort}`}
+                    rows={2}
+                    maxLength={500}
+                    value={reason}
+                    onChange={e => setReason(e.target.value)}
+                  />
+                </label>
+              </fieldset>
+            )}
+            {groups.map(g => (
+              <fieldset key={g.kind} className={styles.dialogCheck}>
+                <legend>{g.title}</legend>
+                <WarningItems items={g.items} />
+                <label className={styles.checkRow}>
+                  <input
+                    type="checkbox"
+                    checked={ticked.has(g.kind)}
+                    onChange={e =>
+                      setTicked(t => {
+                        const next = new Set(t)
+                        if (e.target.checked) next.add(g.kind)
+                        else next.delete(g.kind)
+                        return next
+                      })
+                    }
+                  />
+                  I’ve checked {g.items.length === 1 ? 'this' : 'these'}
+                </label>
+              </fieldset>
+            ))}
+          </div>
+        )}
         <p className={styles.dialogNote}>
-          It goes out about two minutes after you confirm and can&rsquo;t be
-          recalled.
+          It goes out {delay} minutes after you confirm. Until then you can
+          cancel it under Recent sends; while it’s sending you can pause or stop
+          it there. Emails already delivered can’t be recalled.
         </p>
         <div className={styles.dialogActions}>
           <button
@@ -1460,9 +1916,464 @@ function ConfirmSend({
           <button
             type="button"
             className={styles.buttonPrimary}
+            onClick={() =>
+              onConfirm(
+                draft.warnings.map(w => w.id),
+                holds.length > 0 ? reason.trim() : null
+              )
+            }
+            disabled={!allTicked}
+            title={
+              allTicked
+                ? undefined
+                : reasonOk
+                  ? 'Tick the checks above first'
+                  : 'Say why this wave should go now'
+            }
+          >
+            {wave
+              ? count == null
+                ? `Send wave ${wave.wave}`
+                : `Send wave ${wave.wave} to ${who}`
+              : `Send to ${who}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** The list's waves on a draft: each with its size, the ones this issue
+ *  has sent with their numbers, the next one ready to choose. Only the next
+ *  wave (or, on a small list, the whole list) can be chosen. */
+function WavePicker({
+  draftId,
+  plan,
+  choice,
+  canChoose,
+  onChoose,
+  now,
+}: {
+  draftId: string
+  plan: WavePlan
+  choice: Choice | null
+  /** An approver, and the draft passes its checks. */
+  canChoose: boolean
+  onChoose: (c: Choice) => void
+  /** When ActiveCampaign was read (epoch ms): "now" for the gap, fresh to
+   *  within the page's 30-second reread. */
+  now: number
+}) {
+  const due =
+    plan.notBefore && now < Date.parse(plan.notBefore) ? plan.notBefore : null
+  const left =
+    plan.active != null ? Math.max(0, plan.active - plan.reached) : null
+  return (
+    <fieldset className={styles.waves}>
+      <legend className={styles.wavesTitle}>
+        Warm-up waves
+        {plan.waves.length > 0 && (
+          <span className={styles.muted}>
+            {' '}
+            · {plan.active?.toLocaleString('en-US') ?? '?'} active ·{' '}
+            {plan.reached.toLocaleString('en-US')} have this issue ·{' '}
+            {left?.toLocaleString('en-US') ?? '?'} still to get it
+          </span>
+        )}
+      </legend>
+      {plan.error && <p className={styles.noticeError}>{plan.error}</p>}
+      <ul className={styles.waveList}>
+        {plan.wholeList && (
+          <li className={styles.waveRow}>
+            <label className={styles.waveChoice}>
+              <input
+                type="radio"
+                name={`wave-${draftId}`}
+                checked={choice === 'all'}
+                disabled={!canChoose}
+                onChange={() => onChoose('all')}
+              />
+              Everyone on the list at once · {people(plan.active)}
+            </label>
+          </li>
+        )}
+        {plan.waves.map(w => {
+          const isNext = w.wave === plan.next && !plan.wait && !plan.blocked
+          return (
+            <li key={w.segmentId} className={styles.waveRow}>
+              <label
+                className={`${styles.waveChoice} ${
+                  isNext || w.sent ? '' : styles.waveLater
+                }`}
+              >
+                <input
+                  type="radio"
+                  name={`wave-${draftId}`}
+                  checked={choice === w.wave}
+                  disabled={!canChoose || !isNext}
+                  onChange={() => onChoose(w.wave)}
+                />
+                Wave {w.wave} of {w.waves}
+                {w.wave === w.waves ? ' (everyone else)' : ''} ·{' '}
+                {people(w.count)}
+                {w.sent ? (
+                  <span className={styles.statusOk}> · {w.sent.status}</span>
+                ) : isNext ? (
+                  <span className={styles.muted}>
+                    {' '}
+                    · next{due ? `, due from ${when(due)}` : ''}
+                  </span>
+                ) : null}
+              </label>
+              {w.sent && <WaveNumbers sent={w.sent} />}
+            </li>
+          )
+        })}
+      </ul>
+      {plan.wait && <p className={styles.notice}>{plan.wait}.</p>}
+      {plan.blocked && <p className={styles.noticeError}>{plan.blocked}.</p>}
+      {plan.holds.map(h => (
+        <p key={h} className={styles.warningsTitle}>
+          Held: {h}.
+        </p>
+      ))}
+    </fieldset>
+  )
+}
+
+/** A sent wave's numbers, as the send watcher judges them. */
+function WaveNumbers({ sent }: { sent: NonNullable<WaveInfo['sent']> }) {
+  const n = (v: number | null) => (v == null ? '?' : v.toLocaleString('en-US'))
+  return (
+    <p className={styles.waveNumbers}>
+      Campaign {sent.campaignId}
+      {sent.finishedAt ? ` · finished ${when(sent.finishedAt)}` : ''} ·{' '}
+      {n(sent.sent)} sent · {n(sent.bounces)} bounced · {n(sent.unsubscribes)}{' '}
+      unsubscribed · {n(sent.verifiedOpens)} opened · {n(sent.spamComplaints)}{' '}
+      spam complaints
+      {sent.health && (
+        <span
+          className={
+            sent.health === 'red'
+              ? styles.statusBad
+              : sent.health === 'amber'
+                ? styles.statusWait
+                : styles.statusOk
+          }
+        >
+          {' '}
+          · watcher: {sent.health}
+        </span>
+      )}
+    </p>
+  )
+}
+
+/** Consecutive rows of one issue on one list (the server puts them next to
+ *  each other). */
+function groupRecent(rows: Recent[]): Recent[][] {
+  const out: Recent[][] = []
+  for (const r of rows) {
+    const last = out[out.length - 1]
+    if (last && last[0].group === r.group) last.push(r)
+    else out.push([r])
+  }
+  return out
+}
+
+const STOP_LABELS: Record<StopAction, string> = {
+  cancel: 'Cancel this send',
+  pause: 'Pause',
+  stop: 'Stop',
+  resume: 'Resume',
+}
+
+/** One issue's rows in Recent sends. A single whole-list send is one row; an
+ *  issue sent in waves gets a row with its totals (and its clicks, which
+ *  are counted per issue), then a row per wave. */
+function SendRows({
+  rows,
+  canSend,
+  openClicks,
+  onToggleClicks,
+  stopBusyId,
+  onStop,
+}: {
+  rows: Recent[]
+  canSend: boolean
+  openClicks: string | null
+  onToggleClicks: (key: string) => void
+  stopBusyId: string | null
+  onStop: (row: Recent, action: StopAction) => void
+}) {
+  const first = rows[0]
+  const waved = rows.length > 1 || rows.some(r => r.wave)
+  const lists = first.listNames.join(', ') || '—'
+
+  const status = (r: Recent) => (
+    <>
+      {r.status === 'sent' ? (
+        <span className={styles.statusOk}>sent</span>
+      ) : r.status === 'stopped' || r.status === 'disabled' ? (
+        <span className={styles.statusBad}>{r.status}</span>
+      ) : r.status === 'held' ? (
+        <span title="ActiveCampaign is reviewing this send; it goes out once they approve it">
+          held for review
+        </span>
+      ) : (
+        r.status
+      )}
+      {r.segmentLost && (
+        // A wave's name, but no segment in ActiveCampaign: the approval
+        // deletes such a send at once, unless it was cut off first.
+        <span className={styles.statusBad}>
+          {' '}
+          · no wave segment:{' '}
+          {['sent', 'stopped', 'disabled'].includes(r.status)
+            ? 'it went'
+            : 'it goes'}{' '}
+          to the whole list
+        </span>
+      )}
+      {canSend && r.actions.length > 0 && (
+        <span className={styles.rowActions}>
+          {r.actions.map(a => (
+            <button
+              key={a}
+              type="button"
+              className={styles.rowButton}
+              disabled={stopBusyId != null}
+              onClick={() => onStop(r, a)}
+            >
+              {stopBusyId === r.id ? 'Working…' : STOP_LABELS[a]}
+            </button>
+          ))}
+        </span>
+      )}
+    </>
+  )
+  const sentCell = (r: Recent) =>
+    r.status === 'scheduled' ? (
+      <>
+        due {when(r.scheduledAt ?? r.scheduledFor)}
+        {r.scheduledAt && <Countdown to={r.scheduledAt} />}
+      </>
+    ) : (
+      when(r.sentAt)
+    )
+  const clicksButton = (r: Recent, key: string) =>
+    r.clicks.total > 0 ? (
+      <button
+        type="button"
+        className={styles.rowButton}
+        aria-expanded={openClicks === key}
+        title="Which links were clicked"
+        onClick={() => onToggleClicks(key)}
+      >
+        {r.clicks.total}
+      </button>
+    ) : (
+      <span className={styles.muted}>0</span>
+    )
+  const clicksRow = (r: Recent, key: string) =>
+    openClicks === key && (
+      <tr>
+        <td colSpan={8} className={styles.clicksCell}>
+          <ol className={styles.clicksList}>
+            {r.clicks.links.map(l => (
+              <li key={l.url} className={styles.clicksRow}>
+                <span className={styles.clicksCount}>{l.clicks}</span>
+                <span>{l.label}</span>
+                <a
+                  href={l.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={styles.muted}
+                >
+                  {hostOf(l.url)}
+                </a>
+              </li>
+            ))}
+          </ol>
+        </td>
+      </tr>
+    )
+
+  if (!waved) {
+    return (
+      <>
+        <tr>
+          <td>{first.name}</td>
+          <td className={styles.muted}>{lists}</td>
+          <td>{status(first)}</td>
+          <td className={styles.muted}>{sentCell(first)}</td>
+          <td>{first.sentTo}</td>
+          <td className={styles.muted}>{first.uniqueOpens ?? '—'}</td>
+          <td>{clicksButton(first, first.id)}</td>
+          <td className={styles.muted}>{first.unsubscribes ?? '—'}</td>
+        </tr>
+        {clicksRow(first, first.id)}
+      </>
+    )
+  }
+  const sum = (pick: (r: Recent) => number | null) => {
+    const vals = rows.map(pick).filter((v): v is number => v != null)
+    return vals.length ? vals.reduce((a, b) => a + b, 0) : null
+  }
+  const groupKey = `issue:${first.group}`
+  const newestSent = rows
+    .map(r => r.sentAt)
+    .filter((s): s is string => s != null)
+    .sort()
+    .pop()
+  const waves = first.wave?.waves
+  return (
+    <>
+      <tr className={styles.groupRow}>
+        <td>{first.baseName}</td>
+        <td className={styles.muted}>{lists}</td>
+        <td className={styles.muted}>
+          {rows.length} {rows.length === 1 ? 'send' : 'sends'}
+          {waves ? ` of ${waves} waves` : ''}
+        </td>
+        <td className={styles.muted}>{when(newestSent ?? null)}</td>
+        <td>{sum(r => r.sentTo)}</td>
+        <td className={styles.muted}>{sum(r => r.uniqueOpens) ?? '—'}</td>
+        <td>{clicksButton(first, groupKey)}</td>
+        <td className={styles.muted}>{sum(r => r.unsubscribes) ?? '—'}</td>
+      </tr>
+      {clicksRow(first, groupKey)}
+      {rows.map(r => (
+        <tr key={r.id} className={styles.waveSubRow}>
+          <td>
+            {r.wave ? `wave ${r.wave.wave} of ${r.wave.waves}` : 'whole list'}
+          </td>
+          <td className={styles.muted}>campaign {r.id}</td>
+          <td>{status(r)}</td>
+          <td className={styles.muted}>{sentCell(r)}</td>
+          <td>{r.sentTo}</td>
+          <td className={styles.muted}>{r.uniqueOpens ?? '—'}</td>
+          <td className={styles.muted} title="Clicks are counted per issue">
+            –
+          </td>
+          <td className={styles.muted}>{r.unsubscribes ?? '—'}</td>
+        </tr>
+      ))}
+    </>
+  )
+}
+
+/** " · sends in 8:41", counting down each second; " · going out now"
+ *  after; nothing for a send more than two days away. */
+function Countdown({ to }: { to: string }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(t)
+  }, [])
+  const left = Date.parse(to) - now
+  // Days away (a send scheduled in ActiveCampaign itself): the due time
+  // beside it says enough.
+  if (Number.isNaN(left) || left > 48 * 3_600_000) return null
+  if (left <= 0)
+    return <span className={styles.countdown}> · going out now</span>
+  const h = Math.floor(left / 3_600_000)
+  const m = Math.floor((left % 3_600_000) / 60_000)
+  const s = Math.floor((left % 60_000) / 1000)
+  const two = (n: number) => String(n).padStart(2, '0')
+  return (
+    <span className={styles.countdown}>
+      {' '}
+      · sends in {h > 0 ? `${h}:${two(m)}` : m}:{two(s)}
+    </span>
+  )
+}
+
+/** Confirmation for a Stop button on Recent sends: what the action does to
+ *  this send, in plain words. Focus starts on "Go back". */
+function ConfirmStop({
+  row,
+  action,
+  onCancel,
+  onConfirm,
+}: {
+  row: Recent
+  action: StopAction
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const backRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    backRef.current?.focus()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel])
+  const name = `“${row.name}”`
+  const text: Record<StopAction, { title: string; body: string; go: string }> =
+    {
+      cancel: {
+        title: `Cancel ${name}?`,
+        body: `It hasn’t gone to anyone yet${
+          row.scheduledAt ? ` (it’s due ${when(row.scheduledAt)})` : ''
+        }. Canceling deletes the send in ActiveCampaign, so nobody gets it.${
+          row.wave && row.wave.wave < row.wave.waves
+            ? ' The draft stays, so this wave can be approved again.'
+            : ''
+        }`,
+        go: 'Cancel this send',
+      },
+      pause: {
+        title: `Pause ${name}?`,
+        body: 'It stops going out partway. People who already got it keep it. You can then stop it for good or resume it.',
+        go: 'Pause sending',
+      },
+      stop: {
+        title: `Stop ${name} for good?`,
+        body: `Nobody else gets it; people who already got it keep it. This can’t be undone.${
+          row.wave
+            ? ' A wave stopped after reaching people ends this issue’s waves: no later wave can be approved.'
+            : ''
+        }`,
+        go: 'Stop for good',
+      },
+      resume: {
+        title: `Resume ${name}?`,
+        body: 'It carries on sending to everyone on its list who hasn’t got it yet.',
+        go: 'Resume sending',
+      },
+    }
+  const t = text[action]
+  return (
+    <div className={styles.overlay} onClick={onCancel}>
+      <div
+        className={styles.dialog}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-stop-title"
+        onClick={e => e.stopPropagation()}
+      >
+        <h2 id="confirm-stop-title" className={styles.dialogTitle}>
+          {t.title}
+        </h2>
+        <p className={styles.dialogNote}>{t.body}</p>
+        <div className={styles.dialogActions}>
+          <button
+            ref={backRef}
+            type="button"
+            className={styles.button}
+            onClick={onCancel}
+          >
+            Go back
+          </button>
+          <button
+            type="button"
+            className={styles.buttonPrimary}
             onClick={onConfirm}
           >
-            Send to {who}
+            {t.go}
           </button>
         </div>
       </div>
