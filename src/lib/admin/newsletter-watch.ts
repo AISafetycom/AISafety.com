@@ -51,6 +51,7 @@
   open alerts are carried over unchanged rather than cleared.
 */
 
+import { timingSafeEqual } from 'node:crypto'
 import { Redis } from '@upstash/redis'
 import { longDate, type Mail, sendAdminMail } from '@/lib/admin/mail'
 import { ROOT_ADMINS } from '@/lib/admin/users'
@@ -115,6 +116,19 @@ const STALE_AFTER = 30 * MINUTE
 
 /** At most this many separate emails per run; more become one summary. */
 const MAX_SEPARATE_EMAILS = 3
+/** Hard ceilings on emails tried (sent or not), whatever state things are
+ *  in: a flapping problem, or a mail script that times out after sending,
+ *  can't fill the inbox, and the script's ~100-a-day Gmail quota stays free
+ *  for the other admin mail. What's held back goes on a later run; the
+ *  banner shows everything meanwhile. */
+const MAX_EMAILS_PER_HOUR = 4
+const MAX_EMAILS_PER_DAY = 20
+/** A problem that clears and comes back in the same state within this long
+ *  of last being open isn't emailed again (the banner still shows it). */
+const REALERT_AFTER = 6 * HOUR
+/** No new email is started this far into a run: each can take up to 20 s
+ *  and the function stops at 60 s. The rest go on the next run. */
+const MAIL_START_BY_MS = 38_000
 
 const LOCK_SECONDS = 300
 /** Time a run may spend reading ActiveCampaign before it stops, saves what
@@ -244,6 +258,13 @@ interface WatchState {
 interface AlertsDoc {
   updatedAt: string
   alerts: Record<string, WatchAlert>
+  /** When each email was tried, for the hourly and daily ceilings (the
+   *  last day's only). Written before the try, so a run cut off mid-send
+   *  still counts it. */
+  mailLog?: string[]
+  /** `${id}|${sig}` → the last time that problem was open and already
+   *  emailed, for REALERT_AFTER (the last REALERT_AFTER's only). */
+  recent?: Record<string, string>
 }
 
 /** A raised alert before it meets the stored ones. */
@@ -267,6 +288,7 @@ interface RawCampaign {
   unsubscribes?: string | null
   verified_unique_opens?: string | null
   message_id?: string | null
+  type?: string | null
 }
 
 // ─── Store ──────────────────────────────────────────────────────────────────
@@ -320,7 +342,8 @@ function redisStore(db: Redis): WatchStore {
   }
 }
 
-/** In-memory store: tests, and a laptop without the Redis variables. */
+/** In-memory store: tests, and dry runs on a laptop without the Redis
+ *  variables (a real run refuses it). */
 export function memoryWatchStore(): WatchStore & {
   dump(): Record<string, unknown>
 } {
@@ -516,6 +539,17 @@ export function shortLabel(name: string, id: string): string {
   return wave ? `${short} wave ${wave}/${waves}` : short
 }
 
+/** One-off sends, what the approval page makes. An automatic email (an
+ *  auto-responder, a reminder, a recurring or RSS campaign) sits at
+ *  "scheduled" or "sending" for as long as it's switched on, so the timing,
+ *  wave and "more than expected" rules would flag it for ever; it still gets
+ *  the status and "not through the page" alerts. */
+const ONE_OFF_TYPES = new Set(['', 'single', 'split', 'text'])
+
+function oneOff(c: RawCampaign): boolean {
+  return ONE_OFF_TYPES.has(String(c.type ?? '').toLowerCase())
+}
+
 /** No wave: ActiveCampaign sends to everyone active on the list. */
 function wholeList(c: RawCampaign): boolean {
   return c.segmentid == null || ['', '0'].includes(String(c.segmentid))
@@ -527,11 +561,24 @@ function count(v: unknown): number {
 }
 
 /** ActiveCampaign's v3 dates carry the account's offset
- *  ("2026-09-28T09:35:42-05:00"); empty and zero dates read as unknown. */
+ *  ("2026-09-28T09:35:42-05:00", -06:00 in US winter time); empty and zero
+ *  dates read as unknown. A date without an offset would be read in the
+ *  server's time zone, so it reads as unknown too rather than hours off. */
 function timeOf(v: string | null | undefined): number | null {
   if (!v || v.startsWith('0000')) return null
+  if (!/(?:Z|[+-]\d{2}:?\d{2})$/.test(v)) return null
   const t = Date.parse(v)
   return Number.isNaN(t) ? null : t
+}
+
+/** When a campaign was last set going: its creation, or its send time when
+ *  that is later (a draft built days ago and sent later from
+ *  ActiveCampaign's own screens, or a send scheduled ahead). */
+function lastActivity(c: RawCampaign): number | null {
+  const times = [timeOf(c.cdate), timeOf(c.sdate)].filter(
+    (t): t is number => t != null
+  )
+  return times.length ? Math.max(...times) : null
 }
 
 function pct(part: number, whole: number): string {
@@ -765,6 +812,20 @@ async function mailOwner(mail: Mail): Promise<boolean> {
 
 // ─── The run ────────────────────────────────────────────────────────────────
 
+/** The cron route's check: Vercel sends `Authorization: Bearer <CRON_SECRET>`.
+ *  Unlike the other cron routes this one refuses outright when CRON_SECRET
+ *  isn't set (Preview has none): a run reads the account with the full key,
+ *  can email and answers with what it found. */
+export function cronAuthorized(
+  header: string | null,
+  secret: string | undefined
+): boolean {
+  if (!secret) return false
+  const got = Buffer.from(header ?? '')
+  const want = Buffer.from(`Bearer ${secret}`)
+  return got.length === want.length && timingSafeEqual(got, want)
+}
+
 export interface WatchOptions {
   now?: Date
   store?: WatchStore
@@ -783,8 +844,11 @@ export interface WatchSummary {
   skipped?: string
   dry: boolean
   alerts: PublicAlert[]
-  /** Subjects of the emails sent (or, dry, that would have been). */
+  /** Subjects of the emails tried (or, dry, that would have been). */
   emails: string[]
+  /** Held back by the email ceilings or the time limit; a later run sends
+   *  them. */
+  deferred: string[]
   health: Array<{ campaignId: string; verdict: HealthVerdict }>
   errors: string[]
 }
@@ -825,11 +889,13 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
   const store = opts.store ?? sharedStore()
   const origin = opts.origin ?? PRODUCTION_ORIGIN
   const mail = opts.mail ?? mailOwner
+  const startedMs = Date.now()
   const summary: WatchSummary = {
     ran: false,
     dry,
     alerts: [],
     emails: [],
+    deferred: [],
     health: [],
     errors: [],
   }
@@ -837,6 +903,12 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
     summary.skipped = 'ACTIVECAMPAIGN_URL / ACTIVECAMPAIGN_KEY not set'
     return summary
   }
+  // The in-memory stand-in forgets everything between runs, so a real run
+  // on it would email every open problem every ten minutes.
+  if (!dry && !opts.store && !(restUrl && restToken))
+    throw new Error(
+      'KV_REST_API_URL / KV_REST_API_TOKEN not set: the watcher needs Upstash to email each problem only once'
+    )
   if (!dry && !(await store.lock(LOCK_KEY, LOCK_SECONDS))) {
     summary.skipped = 'another run is still going'
     return summary
@@ -867,7 +939,8 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
       ...emptyState(),
       ...((await store.get<WatchState>(STATE_KEY)) ?? {}),
     }
-    const previous = (await store.get<AlertsDoc>(ALERTS_KEY))?.alerts ?? {}
+    const prevDoc = await store.get<AlertsDoc>(ALERTS_KEY)
+    const previous = prevDoc?.alerts ?? {}
     const ac = acReader(
       Date.now() + (opts.budgetMs ?? RUN_BUDGET_MS),
       opts.retryDelayMs ?? 1000
@@ -896,22 +969,30 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
       const next: Record<string, CampaignState> = {}
       for (const c of campaigns) {
         const prev = state.campaigns[c.id]
+        const same = prev?.s === c.status
         let since: string
-        if (prev && prev.s === c.status) since = prev.since
+        if (prev && same) since = prev.since
         else if (prev) since = nowIso
         else {
-          // First sight: the status has held at least since it was created.
-          const created = timeOf(c.cdate)
-          since =
-            created != null && created < nowMs
-              ? new Date(created).toISOString()
-              : nowIso
+          // First sight: the status has held at least since the campaign
+          // was created or, when that's later and past, since its send time
+          // (a hold starts at the send time, not at the approval).
+          const started = [timeOf(c.cdate), timeOf(c.sdate)].filter(
+            (t): t is number => t != null && t < nowMs
+          )
+          since = started.length
+            ? new Date(Math.max(...started)).toISOString()
+            : nowIso
         }
+        // Lists and the pipeline marker are read once per status: a draft's
+        // lists can still change in ActiveCampaign's editor before it's sent.
         next[c.id] = {
           s: c.status,
           since,
-          ...(prev?.lists ? { lists: prev.lists } : {}),
-          ...(prev?.pipeline !== undefined ? { pipeline: prev.pipeline } : {}),
+          ...(same && prev?.lists ? { lists: prev.lists } : {}),
+          ...(same && prev?.pipeline !== undefined
+            ? { pipeline: prev.pipeline }
+            : {}),
         }
       }
 
@@ -994,13 +1075,13 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
       // Active subscribers, for the whole-list rule (read only when needed).
       const activeCounts = new Map<string, number>()
       const wholeListCandidates = relevant.filter(({ c }) => {
-        if (!NEWSLETTER_WARMUP || !wholeList(c)) return false
-        const created = timeOf(c.cdate)
+        if (!NEWSLETTER_WARMUP || !oneOff(c) || !wholeList(c)) return false
+        const active = lastActivity(c)
         return (
           ['1', '2', '3', '7'].includes(c.status) ||
           (c.status === '5' &&
-            created != null &&
-            nowMs - created <= UNAPPROVED_WINDOW)
+            active != null &&
+            nowMs - active <= UNAPPROVED_WINDOW)
         )
       })
       const neededLists = [
@@ -1222,29 +1303,45 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
       )
         current[old.id] = old
     }
+    const recent: Record<string, string> = {}
+    for (const [key, at] of Object.entries(prevDoc?.recent ?? {}))
+      if (nowMs - Date.parse(at) < REALERT_AFTER) recent[key] = at
+    const mailLog = (prevDoc?.mailLog ?? []).filter(
+      at => nowMs - Date.parse(at) < DAY
+    )
     for (const { preEmailed, ...r } of raised) {
       const old = previous[r.id]
-      current[r.id] =
-        old && old.sig === r.sig
-          ? {
-              ...r,
-              since: old.since,
-              emailedSig: old.emailedSig,
-              emailedAt: old.emailedAt,
-            }
-          : {
-              ...r,
-              since: nowIso,
-              emailedSig: preEmailed ? r.sig : null,
-              emailedAt: preEmailed ? nowIso : null,
-            }
+      if (old && old.sig === r.sig) {
+        current[r.id] = {
+          ...r,
+          since: old.since,
+          emailedSig: old.emailedSig,
+          emailedAt: old.emailedAt,
+        }
+        continue
+      }
+      // New, or changed. The same problem in the same state that was open
+      // and emailed within REALERT_AFTER is flapping (a read that comes
+      // and goes): it shows on the banner but isn't emailed again.
+      const covered = preEmailed ? nowIso : (recent[`${r.id}|${r.sig}`] ?? null)
+      current[r.id] = {
+        ...r,
+        since: nowIso,
+        emailedSig: covered ? r.sig : null,
+        emailedAt: covered,
+      }
     }
     summary.alerts = sortAlerts(Object.values(current)).map(toPublic)
-    const saveAlerts = () =>
-      store.set(ALERTS_KEY, {
+    const saveAlerts = () => {
+      for (const a of Object.values(current))
+        if (a.emailedSig === a.sig) recent[`${a.id}|${a.sig}`] = nowIso
+      return store.set(ALERTS_KEY, {
         updatedAt: nowIso,
         alerts: current,
+        mailLog,
+        recent,
       } satisfies AlertsDoc)
+    }
 
     // Saved before any email goes out, so a run cut short by the time limit
     // still knows what it found; each email is recorded as it succeeds and
@@ -1258,13 +1355,38 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
       await saveAlerts()
     }
 
+    const room = () =>
+      Math.min(
+        MAX_EMAILS_PER_HOUR -
+          mailLog.filter(at => nowMs - Date.parse(at) < HOUR).length,
+        MAX_EMAILS_PER_DAY - mailLog.length
+      )
+    // Each try is logged (and saved) before it's made, so one cut off by
+    // the time limit still counts against the ceilings.
+    const mayTry = async (): Promise<boolean> => {
+      if (room() <= 0 || Date.now() - startedMs > MAIL_START_BY_MS) return false
+      mailLog.push(nowIso)
+      if (!dry) await saveAlerts()
+      return true
+    }
+
     const toEmail = sortAlerts(
       Object.values(current).filter(a => a.emailedSig !== a.sig)
     )
+    // Separate emails only while they fit under the ceiling; otherwise one
+    // summary with everything in it.
     const batches =
-      toEmail.length <= MAX_SEPARATE_EMAILS ? toEmail.map(a => [a]) : [toEmail]
+      toEmail.length === 0
+        ? []
+        : toEmail.length <= Math.min(MAX_SEPARATE_EMAILS, room())
+          ? toEmail.map(a => [a])
+          : [toEmail]
     for (const batch of batches) {
       const m = alertMail(batch, origin)
+      if (!(await mayTry())) {
+        summary.deferred.push(m.subject)
+        continue
+      }
       summary.emails.push(m.subject)
       if (dry || !(await mail(m))) continue
       for (const a of batch) {
@@ -1278,10 +1400,18 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
     }
     for (const r of healthToEmail) {
       const m = healthMail(r, origin)
+      if (!(await mayTry())) {
+        summary.deferred.push(m.subject)
+        continue
+      }
       summary.emails.push(m.subject)
       if (dry || !(await mail(m))) continue
       await store.set(HEALTH_PREFIX + r.campaignId, { ...r, emailedAt: nowIso })
     }
+    if (summary.deferred.length)
+      console.warn(
+        `[newsletter-watch] ${summary.deferred.length} email(s) held back by the ceilings or the time limit; a later run sends them`
+      )
   }
 }
 
@@ -1301,6 +1431,10 @@ function campaignAlerts(p: {
     const since = Date.parse(states[c.id].since)
     const created = timeOf(c.cdate)
     const age = created == null ? Infinity : nowMs - created
+    // An automatic email's send time moves on with every send; its window
+    // runs from its creation only.
+    const active = oneOff(c) ? lastActivity(c) : created
+    const activeAgo = active == null ? Infinity : nowMs - active
     const sent = count(c.send_amt)
     const total = count(c.total_amt)
     const base = {
@@ -1375,7 +1509,7 @@ function campaignAlerts(p: {
         break
       case '1': {
         const due = timeOf(c.sdate)
-        if (due != null && nowMs - due > LATE_AFTER) {
+        if (oneOff(c) && due != null && nowMs - due > LATE_AFTER) {
           out.push({
             ...base,
             id: `late:${c.id}`,
@@ -1392,7 +1526,7 @@ function campaignAlerts(p: {
       }
       case '2': {
         const started = timeOf(c.sdate) ?? since
-        if (nowMs - started > SENDING_TOO_LONG) {
+        if (oneOff(c) && nowMs - started > SENDING_TOO_LONG) {
           out.push({
             ...base,
             id: `slow:${c.id}`,
@@ -1423,12 +1557,15 @@ function campaignAlerts(p: {
 
     const record = approved.get(c.id)
 
-    // Not approved through the page.
+    // Not approved through the page. The window runs from the later of its
+    // creation and its send time, so a draft built days ago and then sent
+    // from ActiveCampaign's own screens is caught too; the grace counts from
+    // the creation, since the approval step writes its record right after.
     if (
       ['1', '2', '5', '7'].includes(c.status) &&
       !record &&
       age >= UNAPPROVED_GRACE &&
-      age <= UNAPPROVED_WINDOW
+      activeAgo <= UNAPPROVED_WINDOW
     ) {
       out.push({
         ...base,
@@ -1437,7 +1574,7 @@ function campaignAlerts(p: {
         severity: 'red',
         title: `${label} was not sent through the approval page`,
         detail: [
-          `Campaign ${c.id} on ${on} was created ${longDate(new Date(created!).toISOString())} and is ${STATUS_WORDS[c.status]}, but the approval page has no record of approving it. Only the Approve button on the newsletter page should send to the real lists.`,
+          `Campaign ${c.id} on ${on}${created != null ? ` was created ${longDate(new Date(created).toISOString())} and` : ''} is ${STATUS_WORDS[c.status]}, but the approval page has no record of approving it. Only the Approve button on the newsletter page should send to the real lists.`,
           c.status === '5'
             ? `It has already gone out to ${num(sent)} people.`
             : c.status === '2'
@@ -1450,9 +1587,10 @@ function campaignAlerts(p: {
     // A whole-list send during the warm-up.
     if (
       NEWSLETTER_WARMUP &&
+      oneOff(c) &&
       wholeList(c) &&
       (['1', '2', '3', '7'].includes(c.status) ||
-        (c.status === '5' && age <= UNAPPROVED_WINDOW))
+        (c.status === '5' && activeAgo <= UNAPPROVED_WINDOW))
     ) {
       const big = lists.filter(
         l => (activeCounts.get(l) ?? 0) > MAX_UNSEGMENTED_SEND
@@ -1478,14 +1616,17 @@ function campaignAlerts(p: {
     }
 
     // More people than the approval expected: the wave wasn't kept to.
+    // Counted from send_amt, the emails actually sent: nobody has checked
+    // yet what total_amt holds for a segmented send before or while it goes
+    // out, and a false "pause it" on a good wave is its own harm.
     const expected = record?.expected
-    const reachedMost = Math.max(sent, total)
     if (
       typeof expected === 'number' &&
       expected >= 0 &&
-      ['1', '2', '3', '4', '5', '7'].includes(c.status) &&
+      oneOff(c) &&
+      ['2', '3', '4', '5'].includes(c.status) &&
       age <= RECENT &&
-      reachedMost > expected * OVERSEND_FACTOR + OVERSEND_SLACK
+      sent > expected * OVERSEND_FACTOR + OVERSEND_SLACK
     ) {
       out.push({
         ...base,
@@ -1494,7 +1635,7 @@ function campaignAlerts(p: {
         severity: 'red',
         title: `${label} is reaching more people than its wave`,
         detail: [
-          `The approval expected about ${num(expected)} people, but ActiveCampaign reports ${num(reachedMost)} for campaign ${c.id} (${on}). It may not have kept to the wave.`,
+          `The approval expected about ${num(expected)} people, but ActiveCampaign has sent it to ${num(sent)} so far (campaign ${c.id}, ${on}). It may not have kept to the wave.`,
           'Pause it in ActiveCampaign if it’s still sending, and don’t approve the next wave until this is understood.',
         ],
       })

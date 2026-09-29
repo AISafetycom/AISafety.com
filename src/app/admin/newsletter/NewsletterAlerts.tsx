@@ -136,8 +136,9 @@ export default function NewsletterAlerts() {
       )}
       {n > 0 && (
         <p className={styles.footnote}>
-          Each problem was also emailed. The banner clears by itself once the
-          watcher sees the problem is gone.
+          The watcher also emails each problem once, a few emails an hour at
+          most. The banner clears by itself once the watcher sees the problem is
+          gone.
         </p>
       )}
     </div>

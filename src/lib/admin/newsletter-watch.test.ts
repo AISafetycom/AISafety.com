@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Mail } from './mail'
 import {
+  ALERTS_KEY,
   APPROVED_PREFIX,
   type ApprovedRecord,
+  cronAuthorized,
   HEALTH_PREFIX,
   type HealthRecord,
   healthVerdict,
@@ -43,6 +45,7 @@ interface FakeCampaign {
   unsubscribes?: string
   verified_unique_opens?: string
   message_id?: string
+  type?: string
 }
 
 interface Fake {
@@ -379,7 +382,12 @@ describe('runWatch: campaign status', () => {
   it('lets old stopped campaigns rest and reads nothing more about them', async () => {
     const { sent, run } = setup()
     ac.campaigns = [
-      campaign({ id: '150', status: '4', cdate: acDate(10 * DAY) }),
+      campaign({
+        id: '150',
+        status: '4',
+        cdate: acDate(10 * DAY),
+        sdate: acDate(10 * DAY),
+      }),
     ]
     ac.lists['150'] = ['6']
     expect((await run()).alerts).toEqual([])
@@ -481,6 +489,7 @@ describe('runWatch: sends that did not come through the page', () => {
         id: '213',
         status: '5',
         cdate: acDate(2 * DAY),
+        sdate: acDate(2 * DAY),
         ldate: acDate(2 * DAY),
       }),
     ]
@@ -957,17 +966,27 @@ describe('runWatch: plumbing', () => {
     ])
   })
 
-  it('alerts again when a problem clears and comes back', async () => {
+  it('alerts again when a problem comes back, but not when it flaps', async () => {
     const { store, sent, run } = setup()
     ac.campaigns = [campaign({ id: '275', status: '3' })]
     ac.lists['275'] = ['6']
     await approve(store, '275')
+    const flip = async (status: string, at: number) => {
+      ac.campaigns[0].status = status
+      ac.campaigns[0].sdate = acDate(MIN, later(at))
+      return run(later(at))
+    }
     await run()
-    ac.campaigns[0].status = '2'
-    ac.campaigns[0].sdate = acDate(MIN, later(10 * MIN))
-    await run(later(10 * MIN))
-    ac.campaigns[0].status = '3'
-    await run(later(20 * MIN))
+    // Paused, resumed, paused again within the hour: on the banner each
+    // time it's open, emailed once.
+    await flip('2', 10 * MIN)
+    expect(ids(await flip('3', 20 * MIN))).toEqual(['status:275'])
+    await flip('2', 30 * MIN)
+    await flip('3', 40 * MIN)
+    expect(sent).toHaveLength(1)
+    // Back more than six hours after it was last open: emailed again.
+    await flip('2', 50 * MIN)
+    await flip('3', 7 * HOUR)
     expect(sent.map(m => m.subject)).toEqual([
       'Newsletter: Events · Week 41 is paused',
       'Newsletter: Events · Week 41 is paused',
@@ -1044,6 +1063,282 @@ describe('runWatch: plumbing', () => {
     const { run } = setup()
     expect(await run()).toMatchObject({ ran: false })
     expect(calls).toEqual([])
+  })
+})
+
+/* ─── Review of 29 Sept 2026: auth, flaps, ceilings, clocks ───────────── */
+
+describe('cronAuthorized', () => {
+  it('refuses without CRON_SECRET, with a wrong one and without a header', () => {
+    expect(cronAuthorized('Bearer x', undefined)).toBe(false)
+    expect(cronAuthorized('Bearer ', '')).toBe(false)
+    expect(cronAuthorized(null, 's3cret')).toBe(false)
+    expect(cronAuthorized('Bearer s3cre', 's3cret')).toBe(false)
+    expect(cronAuthorized('Bearer s3cret!', 's3cret')).toBe(false)
+    expect(cronAuthorized('s3cret', 's3cret')).toBe(false)
+    expect(cronAuthorized('Bearer s3cret', 's3cret')).toBe(true)
+  })
+})
+
+describe('runWatch: review hardening', () => {
+  it('catches an old draft sent later from ActiveCampaign’s own screens', async () => {
+    const { sent, run } = setup()
+    // A pipeline draft built three days ago, seen as a draft first.
+    ac.campaigns = [
+      campaign({
+        id: '280',
+        status: '0',
+        cdate: acDate(3 * DAY),
+        sdate: null,
+      }),
+    ]
+    ac.lists['280'] = ['7']
+    await run()
+    // Then someone sends it from ActiveCampaign, not the page.
+    ac.campaigns[0].status = '2'
+    ac.campaigns[0].sdate = acDate(MIN, later(10 * MIN))
+    const s = await run(later(10 * MIN))
+    expect(ids(s)).toContain('unapproved:280')
+    expect(sent[0].subject).toBe(
+      'Newsletter: Events · Week 41 was not sent through the approval page'
+    )
+  })
+
+  it('rereads a campaign’s lists when its status changes', async () => {
+    const { run } = setup()
+    // A draft made in ActiveCampaign's editor, no list picked yet.
+    ac.campaigns = [
+      campaign({ id: '281', status: '0', cdate: acDate(2 * DAY), sdate: null }),
+    ]
+    ac.lists['281'] = []
+    expect((await run()).alerts).toEqual([])
+    // A list is picked and it's scheduled.
+    ac.lists['281'] = ['6']
+    ac.campaigns[0].status = '1'
+    ac.campaigns[0].sdate = acDate(-30 * MIN, later(10 * MIN))
+    expect(ids(await run(later(10 * MIN)))).toEqual(['unapproved:281'])
+  })
+
+  it('leaves automatic emails (auto-responders) out of the timing and wave rules', async () => {
+    const { sent, run } = setup()
+    ac.campaigns = [
+      // Switched on three days ago, "scheduled" ever since.
+      campaign({
+        id: '286',
+        type: 'responder',
+        status: '1',
+        segmentid: '0',
+        cdate: acDate(3 * DAY),
+        sdate: acDate(5 * MIN),
+      }),
+      campaign({
+        id: '287',
+        type: 'responder',
+        status: '2',
+        segmentid: '0',
+        cdate: acDate(3 * DAY),
+        sdate: acDate(3 * DAY),
+      }),
+    ]
+    ac.lists = { '286': ['6'], '287': ['7'] }
+    expect((await run()).alerts).toEqual([])
+    expect((await run(later(HOUR))).alerts).toEqual([])
+    // A new one, not set up through the page, is flagged once.
+    ac.campaigns.push(
+      campaign({
+        id: '288',
+        type: 'responder',
+        status: '1',
+        segmentid: '0',
+        cdate: acDate(10 * MIN, later(HOUR)),
+        sdate: acDate(10 * MIN, later(HOUR)),
+      })
+    )
+    ac.lists['288'] = ['6']
+    expect(ids(await run(later(HOUR + MIN)))).toEqual(['unapproved:288'])
+    expect(sent).toHaveLength(1)
+  })
+
+  it('judges "more than expected" by emails sent, not total_amt', async () => {
+    const { store, run } = setup()
+    ac.campaigns = [
+      campaign({
+        id: '282',
+        name: 'Events · Week 41, 2026 · wave 1/4',
+        status: '1',
+        segmentid: '14',
+        sdate: acDate(-5 * MIN),
+        send_amt: '0',
+        total_amt: '2889',
+      }),
+      campaign({
+        id: '283',
+        name: 'Training · Week 41, 2026 · wave 1/4',
+        status: '2',
+        segmentid: '15',
+        sdate: acDate(MIN),
+        send_amt: '300',
+        total_amt: '2889',
+      }),
+    ]
+    ac.lists = { '282': ['6'], '283': ['7'] }
+    await approve(store, '282', { expected: 494 })
+    await approve(store, '283', { expected: 494, listId: '7' })
+    expect((await run()).alerts).toEqual([])
+    ac.campaigns[1].send_amt = '700'
+    expect(ids(await run(later(10 * MIN)))).toEqual(['oversend:283'])
+  })
+
+  it('reads ActiveCampaign’s winter offset, and an offset-less date as unknown', async () => {
+    const { store, run } = setup()
+    const winter = (msAgo: number) =>
+      new Date(NOW.getTime() - msAgo - 6 * HOUR)
+        .toISOString()
+        .replace(/\.\d{3}Z$/, '-06:00')
+    ac.campaigns = [
+      campaign({
+        id: '284',
+        status: '1',
+        cdate: winter(HOUR),
+        sdate: winter(10 * MIN),
+      }),
+      // Local time with no offset: can't be placed, so it can't be "late".
+      campaign({
+        id: '285',
+        status: '1',
+        cdate: acDate(HOUR),
+        sdate: '2026-10-08 06:00:00',
+      }),
+    ]
+    ac.lists = { '284': ['6'], '285': ['6'] }
+    await approve(store, '284')
+    await approve(store, '285')
+    expect((await run()).alerts).toEqual([])
+    expect(ids(await run(later(11 * MIN)))).toEqual(['late:284'])
+  })
+
+  it('emails an account status that flips back and forth at most twice', async () => {
+    const { sent, run } = setup()
+    await run()
+    for (let i = 1; i <= 12; i++) {
+      ac.account.status = i % 2 ? 'sending' : 'nobody'
+      await run(later(i * 10 * MIN))
+    }
+    expect(sent).toHaveLength(2)
+  })
+
+  it('never tries more than 4 emails an hour or 20 a day', async () => {
+    const { sent, run } = setup()
+    // A new paused campaign every run, each its own problem.
+    for (let i = 0; i < 6; i++) {
+      ac.campaigns.push(campaign({ id: String(300 + i), status: '3' }))
+      ac.lists[String(300 + i)] = ['6']
+      await run(later(i * 10 * MIN))
+    }
+    expect(sent).toHaveLength(4)
+    // What waited goes out once the hour has room again.
+    const s = await run(later(70 * MIN))
+    expect(s.deferred).toEqual([])
+    expect(sent).toHaveLength(6)
+
+    // A mail script that sends but always answers "failed" retries each
+    // run, yet stays under the ceilings.
+    const log = setup()
+    log.breakMail(true)
+    ac.campaigns = [campaign({ id: '310', status: '3' })]
+    ac.lists['310'] = ['6']
+    for (let i = 0; i < 6 * 24; i++) await log.run(later(i * 10 * MIN))
+    expect(log.mail).toHaveBeenCalledTimes(20)
+    const doc = await log.store.get<{ mailLog: string[] }>(ALERTS_KEY)
+    expect(doc?.mailLog).toHaveLength(20)
+  })
+
+  it('puts alerts before health checks when the ceiling is near', async () => {
+    const { store, sent, run } = setup()
+    ac.campaigns = ['320', '321', '322', '323', '324'].map((id, i) =>
+      campaign({
+        id,
+        name: `Training · Week 41, 2026 · wave ${i + 1}/5`,
+        status: '5',
+        cdate: acDate(20 * HOUR),
+        sdate: acDate(20 * HOUR),
+        ldate: acDate(19 * HOUR),
+        send_amt: '1000',
+        total_amt: '1000',
+        verified_unique_opens: '400',
+      })
+    )
+    ac.campaigns.push(campaign({ id: '325', status: '3' }))
+    for (const c of ac.campaigns) {
+      ac.lists[c.id] = ['7']
+      await approve(store, c.id, { listId: '7', expected: 1000 })
+    }
+    const s = await run()
+    expect(sent[0].subject).toBe('Newsletter: Events · Week 41 is paused')
+    expect(sent).toHaveLength(4)
+    expect(s.deferred).toHaveLength(2)
+    // The two left go in the next hour; each check is emailed once.
+    await run(later(61 * MIN))
+    await run(later(71 * MIN))
+    expect(sent).toHaveLength(6)
+    expect(
+      sent.filter(m => m.subject.includes('health check')).map(m => m.subject)
+    ).toHaveLength(5)
+  })
+
+  it.skipIf(process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL)(
+    'refuses a real run without Upstash rather than forget what it emailed',
+    async () => {
+      const mail = vi.fn(async () => true)
+      ac.campaigns = [campaign({ id: '331', status: '3' })]
+      ac.lists['331'] = ['6']
+      await expect(
+        runWatch({ now: NOW, mail, retryDelayMs: 0 })
+      ).rejects.toThrow(/KV_REST_API_URL/)
+      expect(mail).not.toHaveBeenCalled()
+      expect(calls).toEqual([])
+      // A dry run on a laptop still works.
+      const s = await runWatch({ now: NOW, mail, retryDelayMs: 0, dry: true })
+      expect(ids(s)).toEqual(['status:331'])
+    }
+  )
+
+  it('sends nothing when Upstash fails, and never calls a send unapproved for it', async () => {
+    const { store, mail, run } = setup()
+    ac.campaigns = [
+      campaign({
+        id: '330',
+        status: '2',
+        cdate: acDate(10 * MIN),
+        sdate: acDate(MIN),
+      }),
+    ]
+    ac.lists['330'] = ['6']
+    await approve(store, '330')
+    expect((await run()).alerts).toEqual([])
+
+    // The approval records can't be read: the campaign part counts as not
+    // read, so nothing is raised about it.
+    const mget = store.mget
+    store.mget = async () => {
+      throw new Error('Upstash 503')
+    }
+    let s = await run(later(10 * MIN))
+    expect(s.alerts).toEqual([])
+    expect(s.errors[0]).toMatch(/^campaigns: Upstash 503/)
+    store.mget = mget
+
+    // The stored state can't be read at all: the run stops before
+    // reading or emailing anything.
+    const get = store.get
+    store.get = async () => {
+      throw new Error('Upstash 503')
+    }
+    await expect(run(later(20 * MIN))).rejects.toThrow('Upstash 503')
+    store.get = get
+    expect(mail).not.toHaveBeenCalled()
+    s = await run(later(30 * MIN))
+    expect(s.ran).toBe(true)
   })
 })
 

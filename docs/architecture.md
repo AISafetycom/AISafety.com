@@ -99,9 +99,9 @@ AISafety.com is a **Next.js 16 (App Router) + TypeScript** app on Vercel. The pu
 | `/api/admin/analytics/themes` | Mondays 07:00 UTC | regroup chatbot questions into themes                |
 | `/api/admin/newsletter/watch` | every 10 minutes  | watch newsletter sends; email the owner on problems  |
 
-Cron routes check the `Authorization` header against `CRON_SECRET` when it is set.
+Cron routes check the `Authorization` header against `CRON_SECRET` when it is set; the newsletter watcher refuses every request when it isn't.
 
-The newsletter watcher (`src/lib/admin/newsletter-watch.ts`, 29 Sept 2026) only reads ActiveCampaign. It emails the owner once per problem on the real lists (a send held for review, paused, stopped, late or slow; a send that didn't come through the approval page or has no wave during the warm-up; a pipeline draft left waiting; the API failing; the account's limit or status changing; the contact count near the cap) and, 18 hours after each send on Events or Training, a green/amber/red health check. Open problems show as a banner on /admin/newsletter (`GET /api/admin/newsletter/alerts`). State lives in Upstash under `aisafety:newsletter:watch:*` and `aisafety:newsletter:health:*`; outside production a run is dry (no writes, no email), since every environment shares that database.
+The newsletter watcher (`src/lib/admin/newsletter-watch.ts`, 29 Sept 2026) only reads ActiveCampaign. It emails the owner once per problem on the real lists (a send held for review, paused, stopped, late or slow; a send that didn't come through the approval page or has no wave during the warm-up; a pipeline draft left waiting; the API failing; the account's limit or status changing; the contact count near the cap) and, 18 hours after each send on Events or Training, a green/amber/red health check. Open problems show as a banner on /admin/newsletter (`GET /api/admin/newsletter/alerts`). It tries at most 4 emails an hour and 20 a day, and a problem that comes and goes within 6 hours is emailed once. State lives in Upstash under `aisafety:newsletter:watch:*` and `aisafety:newsletter:health:*`; outside production a run is dry (no writes, no email), since every environment shares that database.
 
 ## Environment variables
 
