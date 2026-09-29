@@ -1,0 +1,84 @@
+/* The send watcher's banner on /admin/newsletter (NewsletterAlerts.tsx).
+   Same palette as newsletter.module.css: #ff6b6b for problems, #f5b942 for
+   the amber ones. */
+
+.banner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--white);
+}
+
+.bannerRed {
+  border-color: #ff6b6b;
+  background-color: rgba(255, 107, 107, 0.08);
+}
+
+.bannerAmber {
+  border-color: #f5b942;
+  background-color: rgba(245, 185, 66, 0.08);
+}
+
+.heading {
+  margin: 0;
+  font-weight: 600;
+  color: #ff6b6b;
+}
+
+.bannerAmber .heading {
+  color: #f5b942;
+}
+
+.list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.itemRed::marker {
+  color: #ff6b6b;
+}
+
+.itemAmber::marker {
+  color: #f5b942;
+}
+
+.title {
+  font-weight: 600;
+}
+
+.since {
+  font-size: 12px;
+  color: var(--teal-300);
+}
+
+.detail {
+  display: block;
+  margin-top: 2px;
+  color: var(--teal-300);
+}
+
+.stale {
+  margin: 0;
+  font-weight: 600;
+  color: #ff6b6b;
+}
+
+.footnote {
+  margin: 0;
+  font-size: 12px;
+  color: var(--teal-400);
+}
+
+.readError {
+  margin: 0;
+  font-size: 12px;
+  color: #ff6b6b;
+}

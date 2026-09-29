@@ -1,0 +1,1088 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Mail } from './mail'
+import {
+  APPROVED_PREFIX,
+  type ApprovedRecord,
+  HEALTH_PREFIX,
+  type HealthRecord,
+  healthVerdict,
+  LOCK_KEY,
+  memoryWatchStore,
+  readAlerts,
+  runWatch,
+  shortLabel,
+  STATE_KEY,
+  type WatchStore,
+  waveOf,
+} from './newsletter-watch'
+
+/* ─── A pretend ActiveCampaign ────────────────────────────────────────────
+   Campaigns as the v3 listing returns them, each campaign's lists, message
+   HTML, active counts per list and the account. Every request is recorded so
+   the tests can check the watcher only ever reads. */
+
+const KEY = 'secret-ac-key-123'
+const NOW = new Date('2026-10-08T15:00:00Z')
+const MIN = 60_000
+const HOUR = 60 * MIN
+const DAY = 24 * HOUR
+const MARKER = '<!--aisafety-issue:0123456789abcdef-->'
+
+interface FakeCampaign {
+  id: string
+  name: string
+  status: string
+  segmentid?: string
+  cdate?: string | null
+  sdate?: string | null
+  ldate?: string | null
+  send_amt?: string
+  total_amt?: string
+  hardbounces?: string
+  softbounces?: string
+  unsubscribes?: string
+  verified_unique_opens?: string
+  message_id?: string
+}
+
+interface Fake {
+  campaigns: FakeCampaign[]
+  lists: Record<string, string[]>
+  messages: Record<string, string>
+  active: Record<string, number>
+  contactsTotal: number
+  account: Record<string, string>
+  unsubTotals: Record<
+    string,
+    { spam_complaints?: string; unsubscribes?: string }
+  >
+  /** Answer every request with this status (ActiveCampaign down). */
+  down: number | null
+}
+
+let ac: Fake
+let calls: Array<{ method: string; url: URL }>
+
+/** An AC date `msAgo` before `at`, in the account's -05:00 offset, the way
+ *  the v3 API writes them ("2026-09-28T09:35:42-05:00"). */
+function acDate(msAgo: number, at: Date = NOW): string {
+  const d = new Date(at.getTime() - msAgo - 5 * HOUR)
+  return d.toISOString().replace(/\.\d{3}Z$/, '-05:00')
+}
+
+function campaign(over: Partial<FakeCampaign> & { id: string }): FakeCampaign {
+  return {
+    name: 'Events · Week 41, 2026',
+    status: '5',
+    segmentid: '12',
+    cdate: acDate(2 * HOUR),
+    sdate: acDate(2 * HOUR),
+    ldate: null,
+    send_amt: '0',
+    total_amt: '0',
+    hardbounces: '0',
+    softbounces: '0',
+    unsubscribes: '0',
+    verified_unique_opens: '0',
+    ...over,
+  }
+}
+
+function approval(
+  id: string,
+  over: Partial<ApprovedRecord> = {}
+): ApprovedRecord {
+  return {
+    campaignId: id,
+    listId: '6',
+    name: 'Events · Week 41, 2026 · wave 1/4',
+    baseName: 'Events · Week 41, 2026',
+    wave: 1,
+    waves: 4,
+    segmentId: 'uuid-1',
+    expected: 494,
+    approvedAt: NOW.toISOString(),
+    approver: 'bryceerobertson@gmail.com',
+    ...over,
+  }
+}
+
+/** What the approval step writes for a page-approved send. */
+async function approve(
+  store: WatchStore,
+  id: string,
+  over: Partial<ApprovedRecord> = {}
+) {
+  await store.set(APPROVED_PREFIX + id, approval(id, over))
+}
+
+beforeEach(() => {
+  process.env.ACTIVECAMPAIGN_URL = 'https://alignment23684.api-us1.com'
+  process.env.ACTIVECAMPAIGN_KEY = KEY
+  ac = {
+    campaigns: [],
+    lists: {},
+    messages: {},
+    active: { '6': 2889, '7': 2889, '8': 3 },
+    contactsTotal: 2903,
+    account: {
+      subscriber_limit: '5000',
+      subscriber_total: '2903',
+      status: 'nobody',
+    },
+    unsubTotals: {},
+    down: null,
+  }
+  calls = []
+  vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+    const url = new URL(String(input))
+    calls.push({ method: init?.method ?? 'GET', url })
+    if (ac.down) return new Response('<html>502</html>', { status: ac.down })
+    if (url.pathname === '/admin/api.php') {
+      const action = url.searchParams.get('api_action')
+      if (action === 'account_view')
+        return Response.json({ ...ac.account, result_code: 1 })
+      if (action === 'campaign_report_unsubscription_totals') {
+        const t = ac.unsubTotals[url.searchParams.get('campaignid') ?? '']
+        return Response.json({
+          spam_complaints: '0',
+          unsubscribes: '0',
+          ...t,
+          result_code: 1,
+        })
+      }
+      return Response.json({ result_code: 0, result_message: 'unexpected' })
+    }
+    const path = url.pathname.replace('/api/3/', '')
+    if (path === 'campaigns') return Response.json({ campaigns: ac.campaigns })
+    let m = /^campaigns\/(\d+)\/campaignLists$/.exec(path)
+    if (m)
+      return Response.json({
+        campaignLists: (ac.lists[m[1]] ?? []).map(list => ({ list })),
+      })
+    m = /^campaigns\/(\d+)\/campaignMessages$/.exec(path)
+    if (m) return Response.json({ campaignMessages: [] })
+    m = /^messages\/(\d+)$/.exec(path)
+    if (m) return Response.json({ message: { html: ac.messages[m[1]] ?? '' } })
+    if (path === 'contacts') {
+      const list = url.searchParams.get('listid')
+      const total = list ? (ac.active[list] ?? 0) : ac.contactsTotal
+      return Response.json({ contacts: [], meta: { total: String(total) } })
+    }
+    return new Response('not found', { status: 404 })
+  })
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  delete process.env.VERCEL_ENV
+})
+
+function setup() {
+  const store = memoryWatchStore()
+  const sent: Mail[] = []
+  let mailWorks = true
+  const mail = vi.fn(async (m: Mail) => {
+    if (!mailWorks) return false
+    sent.push(m)
+    return true
+  })
+  const run = (at: Date = NOW, extra: { dry?: boolean } = {}) =>
+    runWatch({ now: at, store, mail, retryDelayMs: 0, ...extra })
+  return {
+    store,
+    sent,
+    mail,
+    run,
+    breakMail: (broken: boolean) => {
+      mailWorks = !broken
+    },
+  }
+}
+
+const later = (ms: number) => new Date(NOW.getTime() + ms)
+const ids = (s: { alerts: Array<{ id: string }> }) =>
+  s.alerts.map(a => a.id).sort()
+
+/* ─── Pure helpers ───────────────────────────────────────────────────── */
+
+describe('waveOf and shortLabel (wave contract names)', () => {
+  it('splits a wave campaign into its base issue and wave', () => {
+    expect(waveOf('Events · Week 41, 2026 · wave 2/4')).toEqual({
+      baseName: 'Events · Week 41, 2026',
+      wave: 2,
+      waves: 4,
+    })
+    expect(waveOf('Events · Week 41, 2026')).toEqual({
+      baseName: 'Events · Week 41, 2026',
+      wave: null,
+      waves: null,
+    })
+  })
+  it('shortens for subject lines', () => {
+    expect(shortLabel('Events · Week 41, 2026 · wave 2/4', '9')).toBe(
+      'Events · Week 41 wave 2/4'
+    )
+    expect(shortLabel('Funding · Issue #21, 2026', '9')).toBe(
+      'Funding · Issue #21'
+    )
+    expect(shortLabel('', '9')).toBe('campaign 9')
+  })
+})
+
+describe('healthVerdict', () => {
+  const ok = {
+    sendAmt: 1000,
+    hardBounces: 0,
+    softBounces: 0,
+    unsubscribes: 10,
+    spamComplaints: 0,
+    verifiedOpens: 400,
+  }
+  it('is green when every number is in range', () => {
+    expect(healthVerdict(ok)).toEqual({ verdict: 'green', reasons: [] })
+  })
+  it('is red at 2% hard bounces', () => {
+    const v = healthVerdict({ ...ok, hardBounces: 20 })
+    expect(v.verdict).toBe('red')
+    expect(v.reasons).toEqual(['hard bounces 2.0% (red at 2%)'])
+  })
+  it('is red above 0.1% complaints', () => {
+    expect(healthVerdict({ ...ok, spamComplaints: 1 }).verdict).toBe('green')
+    expect(healthVerdict({ ...ok, spamComplaints: 2 }).verdict).toBe('red')
+  })
+  it('is red under 15% verified opens, amber under 25%', () => {
+    expect(healthVerdict({ ...ok, verifiedOpens: 149 }).verdict).toBe('red')
+    expect(healthVerdict({ ...ok, verifiedOpens: 200 }).verdict).toBe('amber')
+    expect(healthVerdict({ ...ok, verifiedOpens: 250 }).verdict).toBe('green')
+  })
+  it('is amber at 1% bounces (hard and soft together)', () => {
+    expect(healthVerdict({ ...ok, hardBounces: 4, softBounces: 6 })).toEqual({
+      verdict: 'amber',
+      reasons: ['bounces 1.0% (amber at 1%)'],
+    })
+  })
+  it('keeps unsubscribes amber however high (the move invites them)', () => {
+    expect(healthVerdict({ ...ok, unsubscribes: 300 })).toEqual({
+      verdict: 'amber',
+      reasons: ['unsubscribes 30% (amber above 5%)'],
+    })
+  })
+  it('lists amber reasons alongside red ones', () => {
+    const v = healthVerdict({ ...ok, hardBounces: 30, unsubscribes: 60 })
+    expect(v.verdict).toBe('red')
+    expect(v.reasons).toHaveLength(2)
+  })
+  it('is amber when it went to nobody', () => {
+    expect(healthVerdict({ ...ok, sendAmt: 0 }).verdict).toBe('amber')
+  })
+})
+
+/* ─── Campaign rules ─────────────────────────────────────────────────── */
+
+describe('runWatch: campaign status', () => {
+  it('alerts once when a wave is held for review for over 20 minutes', async () => {
+    const { store, sent, run } = setup()
+    ac.campaigns = [
+      campaign({
+        id: '201',
+        name: 'Events · Week 41, 2026 · wave 2/4',
+        status: '7',
+        cdate: acDate(5 * MIN),
+      }),
+    ]
+    ac.lists['201'] = ['6']
+    await approve(store, '201', { wave: 2 })
+
+    expect((await run()).alerts).toEqual([])
+
+    let s = await run(later(20 * MIN))
+    expect(ids(s)).toEqual(['held:201'])
+    expect(sent.map(m => m.subject)).toEqual([
+      'Newsletter: Events · Week 41 wave 2/4 is held for review by ActiveCampaign',
+    ])
+    expect(sent[0].text).toContain('https://aisafety.com/admin/newsletter')
+    expect(sent[0].text).toContain('https://alignment23684.activehosted.com')
+
+    // Still held ten minutes later: still open, not emailed again.
+    s = await run(later(30 * MIN))
+    expect(ids(s)).toEqual(['held:201'])
+    expect(sent).toHaveLength(1)
+
+    // ActiveCampaign approves it and it sends: the alert clears.
+    ac.campaigns[0].status = '5'
+    s = await run(later(40 * MIN))
+    expect(s.alerts).toEqual([])
+    expect((await readAlerts({ store, now: later(41 * MIN) })).alerts).toEqual(
+      []
+    )
+  })
+
+  it('counts a hold from the first time it saw it, not the creation', async () => {
+    const { store, run } = setup()
+    ac.campaigns = [
+      campaign({
+        id: '209',
+        status: '1',
+        cdate: acDate(HOUR),
+        sdate: acDate(-5 * MIN),
+      }),
+    ]
+    ac.lists['209'] = ['6']
+    await approve(store, '209')
+    expect((await run()).alerts).toEqual([])
+    // Held at send time, 10 minutes later: not yet 20 minutes held.
+    ac.campaigns[0].status = '7'
+    expect((await run(later(10 * MIN))).alerts).toEqual([])
+    expect(ids(await run(later(20 * MIN)))).toEqual([])
+    expect(ids(await run(later(31 * MIN)))).toEqual(['held:209'])
+  })
+
+  it('alerts on paused, stopped and disabled, and again when it changes', async () => {
+    const { sent, run } = setup()
+    ac.campaigns = [
+      campaign({ id: '202', status: '3', send_amt: '120', total_amt: '494' }),
+      campaign({ id: '203', status: '6', send_amt: '40' }),
+    ]
+    ac.lists = { '202': ['6'], '203': ['7'] }
+    let s = await run()
+    expect(s.alerts.map(a => [a.id, a.severity]).sort()).toEqual([
+      ['status:202', 'red'],
+      ['status:203', 'red'],
+    ])
+    expect(sent.map(m => m.subject).sort()).toEqual([
+      'Newsletter: ActiveCampaign disabled Events · Week 41',
+      'Newsletter: Events · Week 41 is paused',
+    ])
+    expect(sent.find(m => m.subject.endsWith('paused'))?.text).toContain(
+      '120 of 494 people'
+    )
+
+    ac.campaigns[0].status = '4'
+    s = await run(later(10 * MIN))
+    expect(s.alerts.find(a => a.id === 'status:202')?.severity).toBe('amber')
+    expect(sent.at(-1)?.subject).toBe(
+      'Newsletter: Events · Week 41 was stopped'
+    )
+    expect(sent.at(-1)?.text).toContain('would send it to them twice')
+    expect(sent).toHaveLength(3)
+
+    // A stop or a disable stays up for three days, then rests; a pause
+    // stays up for as long as it lasts.
+    ac.campaigns[1].status = '3'
+    expect(ids(await run(later(3 * DAY + HOUR)))).toEqual(['status:203'])
+    ac.campaigns[1].status = '6'
+    expect(ids(await run(later(3 * DAY + 2 * HOUR)))).toEqual(['status:203'])
+    expect(ids(await run(later(6 * DAY + 3 * HOUR)))).toEqual([])
+  })
+
+  it('lets old stopped campaigns rest and reads nothing more about them', async () => {
+    const { sent, run } = setup()
+    ac.campaigns = [
+      campaign({ id: '150', status: '4', cdate: acDate(10 * DAY) }),
+    ]
+    ac.lists['150'] = ['6']
+    expect((await run()).alerts).toEqual([])
+    expect(sent).toEqual([])
+    expect(calls.some(c => c.url.pathname.includes('/150/'))).toBe(false)
+  })
+
+  it('alerts when a scheduled send is 20 minutes past its time', async () => {
+    const { store, run } = setup()
+    ac.campaigns = [
+      campaign({ id: '204', status: '1', sdate: acDate(10 * MIN) }),
+    ]
+    ac.lists['204'] = ['6']
+    await approve(store, '204')
+    expect((await run()).alerts).toEqual([])
+    const s = await run(later(15 * MIN))
+    expect(ids(s)).toEqual(['late:204'])
+    expect(s.alerts[0].title).toMatch(/^Events · Week 41 was due to send at /)
+  })
+
+  it('alerts when a send has been going for over 3 hours', async () => {
+    const { store, run } = setup()
+    ac.campaigns = [
+      campaign({ id: '205', status: '2', sdate: acDate(2 * HOUR) }),
+    ]
+    ac.lists['205'] = ['7']
+    await approve(store, '205', { listId: '7' })
+    expect((await run()).alerts).toEqual([])
+    expect(ids(await run(later(61 * MIN)))).toEqual(['slow:205'])
+  })
+
+  it('alerts on a status it does not know', async () => {
+    const { run } = setup()
+    ac.campaigns = [campaign({ id: '206', status: '9' })]
+    ac.lists['206'] = ['8']
+    const s = await run()
+    expect(ids(s)).toEqual(['unknown:206'])
+    expect(s.alerts[0].title).toContain('(9)')
+  })
+
+  it('ignores campaigns on test lists', async () => {
+    const { sent, run } = setup()
+    ac.campaigns = [
+      campaign({ id: '207', status: '3' }),
+      campaign({ id: '208', status: '1', sdate: acDate(HOUR), segmentid: '0' }),
+    ]
+    ac.lists = { '207': ['5'], '208': ['4'] }
+    expect((await run()).alerts).toEqual([])
+    expect(sent).toEqual([])
+  })
+
+  it('asks ActiveCampaign for the newest campaigns by id', async () => {
+    const { run } = setup()
+    await run()
+    const listing = calls.find(c => c.url.pathname === '/api/3/campaigns')
+    expect(listing?.url.searchParams.get('orders[id]')).toBe('DESC')
+    expect(listing?.url.searchParams.has('orders[cdate]')).toBe(false)
+  })
+})
+
+describe('runWatch: sends that did not come through the page', () => {
+  it('alerts on a new send with no approval record', async () => {
+    const { sent, run } = setup()
+    ac.campaigns = [
+      campaign({
+        id: '210',
+        status: '1',
+        cdate: acDate(10 * MIN),
+        sdate: acDate(-5 * MIN),
+      }),
+    ]
+    ac.lists['210'] = ['7']
+    const s = await run()
+    expect(ids(s)).toEqual(['unapproved:210'])
+    expect(sent[0].subject).toBe(
+      'Newsletter: Events · Week 41 was not sent through the approval page'
+    )
+    expect(sent[0].text).toContain(
+      'delete it in ActiveCampaign before it sends'
+    )
+  })
+
+  it('stays quiet with a record, inside the grace minutes, and for old sends', async () => {
+    const { store, run } = setup()
+    ac.campaigns = [
+      campaign({
+        id: '211',
+        status: '2',
+        cdate: acDate(10 * MIN),
+        sdate: acDate(MIN),
+      }),
+      campaign({
+        id: '212',
+        status: '1',
+        cdate: acDate(MIN),
+        sdate: acDate(-2 * MIN),
+      }),
+      campaign({
+        id: '213',
+        status: '5',
+        cdate: acDate(2 * DAY),
+        ldate: acDate(2 * DAY),
+      }),
+    ]
+    ac.lists = { '211': ['6'], '212': ['6'], '213': ['6'] }
+    await approve(store, '211')
+    expect((await run()).alerts).toEqual([])
+  })
+
+  it('tells a finished unapproved send apart from a pending one', async () => {
+    const { sent, run } = setup()
+    ac.campaigns = [
+      campaign({
+        id: '214',
+        status: '5',
+        cdate: acDate(3 * HOUR),
+        ldate: acDate(2 * HOUR),
+        send_amt: '3',
+      }),
+    ]
+    ac.lists['214'] = ['8']
+    expect(ids(await run())).toEqual(['unapproved:214'])
+    expect(sent[0].text).toContain('It has already gone out to 3 people.')
+  })
+})
+
+describe('runWatch: warm-up waves', () => {
+  it('alerts when a send has no wave and its list is over 50 active', async () => {
+    const { store, sent, run } = setup()
+    ac.campaigns = [
+      campaign({
+        id: '220',
+        status: '1',
+        segmentid: '0',
+        sdate: acDate(-8 * MIN),
+      }),
+    ]
+    ac.lists['220'] = ['6']
+    await approve(store, '220', { wave: null, waves: null, expected: 2889 })
+    const s = await run()
+    expect(ids(s)).toEqual(['whole-list:220'])
+    expect(sent[0].subject).toBe(
+      'Newsletter: Events · Week 41 is going to the whole Events list, not a wave'
+    )
+    const counted = calls.find(
+      c =>
+        c.url.pathname === '/api/3/contacts' &&
+        c.url.searchParams.get('listid') === '6'
+    )
+    expect(counted?.url.searchParams.get('status')).toBe('1')
+  })
+
+  it('allows a whole-list send to a small list (rehearsals)', async () => {
+    const { store, run } = setup()
+    ac.active['6'] = 3
+    ac.campaigns = [
+      campaign({
+        id: '221',
+        status: '1',
+        segmentid: '0',
+        sdate: acDate(-8 * MIN),
+      }),
+    ]
+    ac.lists['221'] = ['6']
+    await approve(store, '221', { expected: 3 })
+    expect((await run()).alerts).toEqual([])
+  })
+
+  it('stays quiet for a send with a wave', async () => {
+    const { store, run } = setup()
+    ac.campaigns = [
+      campaign({ id: '222', status: '2', segmentid: '14', sdate: acDate(MIN) }),
+    ]
+    ac.lists['222'] = ['7']
+    await approve(store, '222', { listId: '7' })
+    expect((await run()).alerts).toEqual([])
+    expect(calls.some(c => c.url.searchParams.get('listid') === '7')).toBe(
+      false
+    )
+  })
+
+  it('alerts when a wave reaches clearly more people than expected', async () => {
+    const { store, sent, run } = setup()
+    ac.campaigns = [
+      campaign({
+        id: '223',
+        name: 'Events · Week 41, 2026 · wave 1/4',
+        status: '2',
+        segmentid: '14',
+        sdate: acDate(MIN),
+        send_amt: '700',
+        total_amt: '2889',
+      }),
+    ]
+    ac.lists['223'] = ['6']
+    await approve(store, '223', { expected: 494 })
+    expect(ids(await run())).toEqual(['oversend:223'])
+    expect(sent[0].subject).toBe(
+      'Newsletter: Events · Week 41 wave 1/4 is reaching more people than its wave'
+    )
+    // Within the margin: fine.
+    ac.campaigns[0].total_amt = '560'
+    ac.campaigns[0].send_amt = '560'
+    expect((await run(later(10 * MIN))).alerts).toEqual([])
+  })
+})
+
+describe('runWatch: drafts left on the real lists', () => {
+  const draft = (over: Partial<FakeCampaign> = {}) =>
+    campaign({
+      id: '230',
+      status: '0',
+      segmentid: '0',
+      cdate: acDate(31 * HOUR),
+      sdate: null,
+      message_id: '900',
+      ...over,
+    })
+
+  it('alerts on a pipeline draft older than 30 hours', async () => {
+    const { sent, run } = setup()
+    ac.campaigns = [draft()]
+    ac.lists['230'] = ['6']
+    ac.messages['900'] = `${MARKER}<p>Week 41</p>`
+    expect(ids(await run())).toEqual(['draft:230'])
+    expect(sent[0].subject).toBe(
+      'Newsletter: An unapproved Events · Week 41 draft has been waiting over 30 hours'
+    )
+    // The marker is read once, then remembered.
+    await run(later(10 * MIN))
+    expect(
+      calls.filter(c => c.url.pathname === '/api/3/messages/900')
+    ).toHaveLength(1)
+  })
+
+  it('ignores young drafts, hand-made drafts and drafts on other lists', async () => {
+    const { run } = setup()
+    ac.campaigns = [
+      draft({ id: '231', cdate: acDate(20 * HOUR) }),
+      draft({ id: '232', message_id: '901' }),
+      draft({ id: '233', message_id: '902' }),
+    ]
+    ac.lists = { '231': ['6'], '232': ['7'], '233': ['5'] }
+    ac.messages = { '900': MARKER, '901': '<p>Opt in</p>', '902': MARKER }
+    expect((await run()).alerts).toEqual([])
+    // A young draft needs no reads at all.
+    expect(calls.some(c => c.url.pathname.includes('/231/'))).toBe(false)
+  })
+
+  it('leaves a draft alone while its waves are going out, not after the last', async () => {
+    const { store, run } = setup()
+    ac.campaigns = [
+      draft(),
+      campaign({
+        id: '240',
+        name: 'Events · Week 41, 2026 · wave 1/2',
+        status: '5',
+        cdate: acDate(DAY),
+        ldate: acDate(DAY),
+      }),
+    ]
+    ac.lists = { '230': ['6'], '240': ['6'] }
+    ac.messages['900'] = MARKER
+    await approve(store, '240', { waves: 2, expected: null })
+    expect((await run()).alerts).toEqual([])
+
+    ac.campaigns.push(
+      campaign({
+        id: '241',
+        name: 'Events · Week 41, 2026 · wave 2/2',
+        status: '5',
+        cdate: acDate(HOUR),
+        ldate: acDate(HOUR),
+      })
+    )
+    ac.lists['241'] = ['6']
+    await approve(store, '241', { wave: 2, waves: 2, expected: null })
+    const s = await run(later(10 * MIN))
+    expect(ids(s)).toEqual(['draft:230'])
+    expect(s.alerts[0].detail[0]).toContain(
+      'every wave of it has already gone out'
+    )
+  })
+})
+
+/* ─── Account and API ────────────────────────────────────────────────── */
+
+describe('runWatch: the account', () => {
+  it('alerts when the contact limit or account status changes', async () => {
+    const { sent, run } = setup()
+    expect((await run()).alerts).toEqual([])
+    ac.account.subscriber_limit = '10000'
+    let s = await run(later(10 * MIN))
+    expect(ids(s)).toEqual(['account-change'])
+    expect(sent[0].subject).toBe(
+      'Newsletter: ActiveCampaign’s account limit or status changed'
+    )
+    expect(sent[0].text).toContain('5000 → 10000')
+    s = await run(later(20 * MIN))
+    expect(sent).toHaveLength(1)
+    ac.account.status = 'suspended'
+    await run(later(30 * MIN))
+    expect(sent).toHaveLength(2)
+    expect(sent[1].text).toContain('“nobody” → “suspended”')
+    // It clears three days after the last change.
+    expect((await run(later(30 * MIN + 3 * DAY + MIN))).alerts).toEqual([])
+  })
+
+  it('alerts at 4,950 contacts, and again at the limit itself', async () => {
+    const { sent, run } = setup()
+    ac.account.subscriber_total = '4949'
+    ac.contactsTotal = 4949
+    expect((await run()).alerts).toEqual([])
+    ac.contactsTotal = 4950
+    expect(ids(await run(later(10 * MIN)))).toEqual(['contacts-cap'])
+    expect(sent[0].subject).toBe(
+      'Newsletter: ActiveCampaign is at 4,950 of 5,000 contacts – sends stop at 5,000'
+    )
+    ac.contactsTotal = 4990
+    await run(later(20 * MIN))
+    expect(sent).toHaveLength(1)
+    ac.account.subscriber_total = '5000'
+    await run(later(30 * MIN))
+    expect(sent[1].subject).toBe(
+      'Newsletter: ActiveCampaign is at its 5,000-contact limit – sends have stopped'
+    )
+  })
+})
+
+describe('runWatch: ActiveCampaign unreachable', () => {
+  it('alerts after an hour of failures and keeps open alerts meanwhile', async () => {
+    const { store, sent, run } = setup()
+    ac.campaigns = [campaign({ id: '250', status: '3' })]
+    ac.lists['250'] = ['6']
+    await approve(store, '250')
+    expect(ids(await run())).toEqual(['status:250'])
+    expect(sent).toHaveLength(1)
+
+    ac.down = 502
+    let s = await run(later(10 * MIN))
+    expect(s.errors[0]).toMatch(/^campaigns: ActiveCampaign campaigns: 502/)
+    // The paused campaign can't be seen, so its alert stays as it was.
+    expect(ids(s)).toEqual(['status:250'])
+    s = await run(later(60 * MIN))
+    expect(ids(s)).toEqual(['status:250'])
+    s = await run(later(70 * MIN))
+    expect(ids(s)).toEqual(['ac-unreachable', 'status:250'])
+    expect(sent.map(m => m.subject)).toEqual([
+      'Newsletter: Events · Week 41 is paused',
+      'Newsletter: The site can’t read ActiveCampaign',
+    ])
+    const state = await store.get<{ api: { failures: number } }>(STATE_KEY)
+    expect(state?.api.failures).toBe(3)
+
+    ac.down = null
+    ac.campaigns[0].status = '5'
+    s = await run(later(80 * MIN))
+    expect(s.alerts).toEqual([])
+    expect(s.errors).toEqual([])
+  })
+
+  it('never lets the API key into an error, a summary or an email', async () => {
+    const { sent, run } = setup()
+    vi.stubGlobal('fetch', async (input: unknown) => {
+      throw new Error(`request to ${String(input)} failed`)
+    })
+    let s = await run()
+    s = await run(later(2 * HOUR))
+    expect(s.errors.length).toBeGreaterThan(0)
+    expect(JSON.stringify(s)).not.toContain(KEY)
+    expect(JSON.stringify(sent)).not.toContain(KEY)
+    expect(sent.map(m => m.subject)).toEqual([
+      'Newsletter: The site can’t read ActiveCampaign',
+    ])
+  })
+})
+
+/* ─── Health, 18 hours after ─────────────────────────────────────────── */
+
+describe('runWatch: health checks', () => {
+  function sentWave(over: Partial<FakeCampaign> = {}) {
+    return campaign({
+      id: '260',
+      name: 'Training · Week 41, 2026 · wave 1/4',
+      status: '5',
+      cdate: acDate(20 * HOUR),
+      sdate: acDate(20 * HOUR),
+      ldate: acDate(19 * HOUR),
+      send_amt: '1000',
+      total_amt: '1000',
+      verified_unique_opens: '400',
+      ...over,
+    })
+  }
+
+  it('reports once, 18 hours after, and stores the verdict', async () => {
+    const { store, sent, run } = setup()
+    ac.campaigns = [sentWave({ hardbounces: '25' })]
+    ac.lists['260'] = ['7']
+    ac.unsubTotals['260'] = { spam_complaints: '0', unsubscribes: '12' }
+    await approve(store, '260', { listId: '7', expected: 1003 })
+
+    const s = await run()
+    expect(s.health).toEqual([{ campaignId: '260', verdict: 'red' }])
+    expect(sent.map(m => m.subject)).toEqual([
+      'Newsletter: Training · Week 41 wave 1/4 health check: red – hold the next wave',
+    ])
+    expect(sent[0].text).toContain(
+      'Sent to: 1,000 (the approval expected 1,003)'
+    )
+    expect(sent[0].text).toContain('Hard bounces: 25 (2.5%)')
+    expect(sent[0].text).toContain('Unsubscribes: 12 (1.2%)')
+    const record = await store.get<HealthRecord>(HEALTH_PREFIX + '260')
+    expect(record?.verdict).toBe('red')
+    expect(record?.numbers.spamComplaints).toBe(0)
+    expect(record?.emailedAt).toBe(NOW.toISOString())
+    expect(ids(s)).toEqual(['health:260'])
+
+    // Next run: no second report, no second read, no second email.
+    const again = await run(later(10 * MIN))
+    expect(again.health).toEqual([])
+    expect(ids(again)).toEqual(['health:260'])
+    expect(sent).toHaveLength(1)
+    expect(
+      calls.filter(
+        c =>
+          c.url.searchParams.get('api_action') ===
+          'campaign_report_unsubscription_totals'
+      )
+    ).toHaveLength(1)
+  })
+
+  it('emails a green check and raises nothing', async () => {
+    const { store, sent, run } = setup()
+    ac.campaigns = [sentWave()]
+    ac.lists['260'] = ['7']
+    await approve(store, '260', { listId: '7', expected: 1000 })
+    const s = await run()
+    expect(s.health).toEqual([{ campaignId: '260', verdict: 'green' }])
+    expect(sent[0].subject).toBe(
+      'Newsletter: Training · Week 41 wave 1/4 health check: green'
+    )
+    expect(sent).toHaveLength(1)
+    expect(s.alerts).toEqual([])
+  })
+
+  it('counts spam complaints from the v1 report', async () => {
+    const { store, sent, run } = setup()
+    ac.campaigns = [sentWave()]
+    ac.lists['260'] = ['7']
+    await approve(store, '260', { listId: '7', expected: 1000 })
+    ac.unsubTotals['260'] = { spam_complaints: '3' }
+    const s = await run()
+    expect(s.health[0].verdict).toBe('red')
+    expect(sent[0].text).toContain(
+      'Spam complaints: 3 (0.3%, non-Gmail readers only)'
+    )
+  })
+
+  it('waits the full 18 hours, and skips Funding', async () => {
+    const { run } = setup()
+    ac.campaigns = [
+      sentWave({ ldate: acDate(17 * HOUR) }),
+      sentWave({ id: '261', ldate: acDate(19 * HOUR) }),
+    ]
+    ac.lists = { '260': ['7'], '261': ['8'] }
+    const s = await run()
+    expect(s.health).toEqual([])
+  })
+
+  it('stores but does not email a check on a rehearsal to a few people', async () => {
+    const { store, sent, run } = setup()
+    ac.campaigns = [
+      sentWave({ send_amt: '3', total_amt: '3', verified_unique_opens: '0' }),
+    ]
+    ac.lists['260'] = ['7']
+    await approve(store, '260', { listId: '7' })
+    const s = await run()
+    expect(s.health).toEqual([{ campaignId: '260', verdict: 'red' }])
+    expect(sent).toEqual([])
+    expect(s.alerts).toEqual([])
+    expect(
+      (await store.get<HealthRecord>(HEALTH_PREFIX + '260'))?.smallSample
+    ).toBe(true)
+  })
+
+  it('retries a health email that did not go out, without rereading', async () => {
+    const { store, sent, run, breakMail } = setup()
+    ac.campaigns = [sentWave()]
+    ac.lists['260'] = ['7']
+    await approve(store, '260', { listId: '7', expected: 1000 })
+    breakMail(true)
+    await run()
+    expect(sent).toEqual([])
+    breakMail(false)
+    await run(later(10 * MIN))
+    expect(sent).toHaveLength(1)
+    expect(
+      calls.filter(c => c.url.searchParams.has('campaignid'))
+    ).toHaveLength(1)
+  })
+})
+
+/* ─── Dedupe, email batching, lock, dry runs, read-only ──────────────── */
+
+describe('runWatch: plumbing', () => {
+  it('retries an alert email that failed, then stops', async () => {
+    const { sent, run, breakMail, mail } = setup()
+    ac.campaigns = [campaign({ id: '270', status: '3' })]
+    ac.lists['270'] = ['6']
+    breakMail(true)
+    await run()
+    expect(mail).toHaveBeenCalledTimes(1)
+    breakMail(false)
+    await run(later(10 * MIN))
+    await run(later(20 * MIN))
+    expect(sent).toHaveLength(1)
+    expect(mail).toHaveBeenCalledTimes(2)
+  })
+
+  it('saves what it found before emailing, so a run cut short resumes', async () => {
+    const store = memoryWatchStore()
+    ac.campaigns = [campaign({ id: '277', status: '3' })]
+    ac.lists['277'] = ['6']
+    // The function is stopped at its time limit while the email is going.
+    await expect(
+      runWatch({
+        now: NOW,
+        store,
+        retryDelayMs: 0,
+        mail: async () => {
+          throw new Error('function timed out')
+        },
+      })
+    ).rejects.toThrow('function timed out')
+    expect(Object.keys(store.dump()).sort()).toEqual([
+      'aisafety:newsletter:watch:alerts',
+      'aisafety:newsletter:watch:state',
+    ])
+    const sent: Mail[] = []
+    const s = await runWatch({
+      now: later(10 * MIN),
+      store,
+      retryDelayMs: 0,
+      mail: async m => {
+        sent.push(m)
+        return true
+      },
+    })
+    expect(ids(s)).toEqual(['status:277'])
+    expect(sent.map(m => m.subject)).toEqual([
+      'Newsletter: Events · Week 41 is paused',
+    ])
+  })
+
+  it('reads ids and statuses sent as numbers', async () => {
+    const { run } = setup()
+    ac.campaigns = [
+      { ...campaign({ id: '278', status: '3' }), id: 278, status: 3 },
+    ] as unknown as FakeCampaign[]
+    ac.lists['278'] = ['6']
+    expect(ids(await run())).toEqual(['status:278'])
+  })
+
+  it('sends one summary instead of more than three emails at once', async () => {
+    const { sent, run } = setup()
+    ac.campaigns = ['271', '272', '273', '274'].map(id =>
+      campaign({ id, status: '3' })
+    )
+    for (const id of ['271', '272', '273', '274']) ac.lists[id] = ['6']
+    const s = await run()
+    expect(s.alerts).toHaveLength(4)
+    expect(sent.map(m => m.subject)).toEqual([
+      'Newsletter: 4 problems need a look (4 red)',
+    ])
+  })
+
+  it('alerts again when a problem clears and comes back', async () => {
+    const { store, sent, run } = setup()
+    ac.campaigns = [campaign({ id: '275', status: '3' })]
+    ac.lists['275'] = ['6']
+    await approve(store, '275')
+    await run()
+    ac.campaigns[0].status = '2'
+    ac.campaigns[0].sdate = acDate(MIN, later(10 * MIN))
+    await run(later(10 * MIN))
+    ac.campaigns[0].status = '3'
+    await run(later(20 * MIN))
+    expect(sent.map(m => m.subject)).toEqual([
+      'Newsletter: Events · Week 41 is paused',
+      'Newsletter: Events · Week 41 is paused',
+    ])
+  })
+
+  it('skips a run while another holds the lock', async () => {
+    const { store, run } = setup()
+    await store.lock(LOCK_KEY, 300)
+    const s = await run()
+    expect(s).toMatchObject({
+      ran: false,
+      skipped: 'another run is still going',
+    })
+    expect(calls).toEqual([])
+    await store.unlock(LOCK_KEY)
+    expect((await run()).ran).toBe(true)
+    // The lock is released after a run.
+    expect(await store.lock(LOCK_KEY, 300)).toBe(true)
+  })
+
+  it('writes nothing and emails nobody on a dry run', async () => {
+    const { store, mail, run } = setup()
+    ac.campaigns = [campaign({ id: '276', status: '3' })]
+    ac.lists['276'] = ['6']
+    const s = await run(NOW, { dry: true })
+    expect(ids(s)).toEqual(['status:276'])
+    expect(s.emails).toEqual(['Newsletter: Events · Week 41 is paused'])
+    expect(mail).not.toHaveBeenCalled()
+    expect(store.dump()).toEqual({})
+  })
+
+  it('only ever reads from ActiveCampaign', async () => {
+    const { store, run } = setup()
+    ac.campaigns = [
+      campaign({ id: '280', status: '7', cdate: acDate(HOUR) }),
+      campaign({
+        id: '281',
+        status: '1',
+        segmentid: '0',
+        sdate: acDate(-5 * MIN),
+      }),
+      campaign({
+        id: '282',
+        status: '0',
+        cdate: acDate(2 * DAY),
+        message_id: '905',
+      }),
+      campaign({
+        id: '283',
+        status: '5',
+        ldate: acDate(20 * HOUR),
+        send_amt: '900',
+      }),
+    ]
+    ac.lists = { '280': ['6'], '281': ['7'], '282': ['6'], '283': ['6'] }
+    ac.messages['905'] = MARKER
+    await approve(store, '281')
+    await run()
+    expect(calls.length).toBeGreaterThan(5)
+    for (const c of calls) {
+      expect(c.method).toBe('GET')
+      const action = c.url.searchParams.get('api_action')
+      if (action)
+        expect([
+          'account_view',
+          'campaign_report_unsubscription_totals',
+        ]).toContain(action)
+    }
+  })
+
+  it('skips when ActiveCampaign is not configured', async () => {
+    delete process.env.ACTIVECAMPAIGN_KEY
+    const { run } = setup()
+    expect(await run()).toMatchObject({ ran: false })
+    expect(calls).toEqual([])
+  })
+})
+
+describe('readAlerts', () => {
+  it('returns the open alerts, red first, and when the watcher last ran', async () => {
+    const { store, run } = setup()
+    ac.campaigns = [
+      campaign({ id: '290', status: '4', send_amt: '10' }),
+      campaign({ id: '291', status: '3' }),
+    ]
+    ac.lists = { '290': ['6'], '291': ['7'] }
+    await run()
+    const view = await readAlerts({ store, now: later(5 * MIN) })
+    expect(view.lastRunAt).toBe(NOW.toISOString())
+    expect(view.stale).toBe(false)
+    expect(view.alerts.map(a => [a.id, a.severity])).toEqual([
+      ['status:291', 'red'],
+      ['status:290', 'amber'],
+    ])
+    expect(Object.keys(view.alerts[0]).sort()).toEqual([
+      'campaignId',
+      'detail',
+      'id',
+      'severity',
+      'since',
+      'title',
+    ])
+  })
+
+  it('calls the watcher stale after 30 minutes without a run', async () => {
+    const { store, run } = setup()
+    await run()
+    expect((await readAlerts({ store, now: later(31 * MIN) })).stale).toBe(true)
+  })
+
+  it('calls a watcher that never ran stale in production only', async () => {
+    const store = memoryWatchStore()
+    expect((await readAlerts({ store })).stale).toBe(false)
+    process.env.VERCEL_ENV = 'production'
+    expect((await readAlerts({ store })).stale).toBe(true)
+  })
+})
