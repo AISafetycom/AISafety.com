@@ -3314,10 +3314,10 @@ function sameEmail(a: RawMessage, b: RawMessage): boolean {
  *  problem or block, a wave out of order or already sent,
  *  NeedsConfirmationError for unticked warnings, NeedsOverrideError for a
  *  held wave without a typed reason, ApprovalLockedError while another
- *  approval of the issue (and wave) holds the lock. Any error once the create
- *  has been asked for is a MaybeScheduledError (or a SendDeletedError, when
- *  the new campaign was deleted again). The draft is kept after every wave
- *  but the last. */
+ *  approval of the issue (whole list or any wave) holds the lock. Any error
+ *  once the create has been asked for is a MaybeScheduledError (or a
+ *  SendDeletedError, when the new campaign was deleted again). The draft is
+ *  kept after every wave but the last. */
 export async function approveAndSend(
   draftId: string,
   listId: string,

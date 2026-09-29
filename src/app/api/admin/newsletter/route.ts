@@ -29,7 +29,8 @@
                                   409 { needsOverride, holds } the wave is
                                       held: type a reason (nothing sent)
                                   409 { locked } another approval of the
-                                      issue (and wave) holds the lock
+                                      issue (whole list or any wave) holds
+                                      the lock
                                   202 { maybeScheduled } an error at or after
                                       the create: it may be scheduled, so
                                       don't press again
