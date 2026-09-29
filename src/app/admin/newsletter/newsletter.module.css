@@ -90,6 +90,14 @@
   color: var(--bright-teal-300);
 }
 
+/* The line under a draft's buttons after Send test. The editor block hands
+   down a fixed line-height sized for 17px text, so a wrapped 12px line needs
+   its own. */
+.testResult {
+  margin: 0;
+  line-height: 1.5;
+}
+
 /* Reorder panel beside the preview (Bryce, 11 Sept 2026), stacked on narrow screens. */
 .previewRow {
   display: flex;

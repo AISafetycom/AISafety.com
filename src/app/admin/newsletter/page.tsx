@@ -1,4 +1,4 @@
-import { canSendNewsletter } from '@/lib/admin/auth'
+import { canSendNewsletter, currentAdmin } from '@/lib/admin/auth'
 import NewsletterAdmin from './NewsletterAdmin'
 
 // Nothing here is prerendered: the page reads ActiveCampaign live in the
@@ -12,6 +12,16 @@ export default async function NewsletterAdminPage() {
   // ActiveCampaign read (preview-only reviewers used to see the amber
   // "sends real emails" warning until the list arrived). The layout has
   // already turned away anyone who can neither approve nor preview.
-  const canSend = await canSendNewsletter()
-  return <NewsletterAdmin canSend={canSend} />
+  const [canSend, admin] = await Promise.all([
+    canSendNewsletter(),
+    currentAdmin(),
+  ])
+  // Where "Send test" delivers: the approver's own address, the one they
+  // signed in with.
+  return (
+    <NewsletterAdmin
+      canSend={canSend}
+      testTo={canSend ? (admin?.email ?? null) : null}
+    />
+  )
 }

@@ -37,6 +37,10 @@
   The manifest also carries Pen's original line per card (`fit`), so the page
   can show what was edited and offer it back. Mirrors render.py `set_fit()`;
   `issue.py build` carries edits over to a rebuild.
+
+  Test copies (29 Sept 2026): `sendTestCopy()` mails a draft to the approver
+  alone through ActiveCampaign's own test send, so the issue can be read and
+  clicked through in a real inbox before it goes to the list.
 */
 
 import { createHash } from 'node:crypto'
@@ -187,7 +191,9 @@ async function mapLimit<T, R>(
 
 const sentListIds = new Map<string, string[]>()
 
-async function v1(
+/** A v1 call and ActiveCampaign's answer as it came, refusals included
+ *  (`result_code` 0, reason in `result_message`). */
+async function v1answer(
   action: string,
   fields: Record<string, string | number>
 ): Promise<Record<string, unknown>> {
@@ -203,7 +209,14 @@ async function v1(
     body,
     cache: 'no-store',
   })
-  const out = (await res.json()) as Record<string, unknown>
+  return (await res.json()) as Record<string, unknown>
+}
+
+async function v1(
+  action: string,
+  fields: Record<string, string | number>
+): Promise<Record<string, unknown>> {
+  const out = await v1answer(action, fields)
   if (Number(out.result_code) !== 1) {
     throw new Error(
       `ActiveCampaign ${action} failed: ${String(out.result_message)}`
@@ -428,20 +441,25 @@ async function readDraft(
   messageId: string | null
   msg: RawMessage | null
 }> {
+  // A draft the page still lists can be gone by the time a button is pressed
+  // (approved in another tab, or replaced by a rebuild): every one of these
+  // reads then answers 404, and that is "not found", not a failure.
+  const gone = (err: Error) => {
+    if (/: 404 /.test(err.message)) return null
+    throw err
+  }
   const [campaign, listIds, messageIds, early] = await Promise.all([
     v3<{ campaign?: RawCampaign }>(`campaigns/${acId(draftId)}`)
       .then(d => d.campaign ?? null)
-      .catch((err: Error) => {
-        if (/: 404 /.test(err.message)) return null
-        throw err
-      }),
-    campaignListIds(draftId),
-    campaignMessageIds(draftId),
+      .catch(gone),
+    campaignListIds(draftId).catch(gone),
+    campaignMessageIds(draftId).catch(gone),
     knownMessageId
       ? message(knownMessageId).catch(() => null)
       : Promise.resolve(null),
   ])
-  if (!campaign) throw new DraftProblemError(['draft campaign not found'])
+  if (!campaign || !listIds || !messageIds)
+    throw new DraftProblemError(['draft campaign not found'])
   const messageId = messageIds.length === 1 ? messageIds[0] : null
   const msg =
     messageId == null
@@ -1282,6 +1300,50 @@ export class DraftProblemError extends Error {
     super(`draft failed verification: ${problems.join('; ')}`)
     this.problems = problems
   }
+}
+
+/** A test copy ActiveCampaign wouldn't send; `detail` is written for the
+ *  page and carries ActiveCampaign's own reason. */
+export class TestSendError extends Error {
+  readonly detail: string
+  constructor(detail: string) {
+    super(detail)
+    this.detail = detail
+  }
+}
+
+/** Mail one copy of a draft to `to` through ActiveCampaign's own test send:
+ *  the real sender, HTML and text, tags filled in the way a send fills them,
+ *  and "TEST: " in front of the subject. Nobody on the list gets anything and
+ *  the draft stays a draft. Runs the same checks as approval first, so a test
+ *  is always of an email that could go out. `to` must come from the session,
+ *  never from a request (the route passes the signed-in approver's own
+ *  address). Same call as ~/Newsletter/ac.py `test_send()`. */
+export async function sendTestCopy(
+  draftId: string,
+  to: string,
+  knownMessageId?: string
+): Promise<{ to: string }> {
+  const { problems, messageId } = await readDraft(draftId, null, knownMessageId)
+  if (problems.length > 0 || !messageId) {
+    throw new DraftProblemError(
+      problems.length > 0 ? problems : ['no message on the draft']
+    )
+  }
+  const out = await v1answer('campaign_send', {
+    email: to,
+    campaignid: draftId,
+    messageid: messageId,
+    type: 'mime',
+    action: 'test',
+  })
+  if (Number(out.result_code) !== 1) {
+    throw new TestSendError(
+      `ActiveCampaign didn't send it: ${String(out.result_message ?? 'no reason given').slice(0, 300)}`
+    )
+  }
+  console.info(`[newsletter] test copy of draft ${draftId} sent`)
+  return { to }
 }
 
 export interface ScheduledSend {
