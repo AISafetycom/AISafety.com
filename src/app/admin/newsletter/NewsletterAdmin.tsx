@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import adminStyles from '../admin.module.css'
 import styles from './newsletter.module.css'
+import NewsletterAlerts from './NewsletterAlerts'
 
 interface CardInfo {
   key: string
@@ -705,6 +706,7 @@ export default function NewsletterAdmin({
           </button>
         </p>
       </div>
+      <NewsletterAlerts />
 
       {canSend && (
         <div className={`${adminStyles.notice} ${styles.liveWarning}`}>

@@ -86,10 +86,18 @@ import { Redis } from '@upstash/redis'
 import { newsletterApprovalMail, sendAdminMail } from '@/lib/admin/mail'
 import { ROOT_ADMINS } from '@/lib/admin/users'
 import {
+  MAX_UNSEGMENTED_SEND,
+  NEWSLETTER_WARMUP,
+} from '@/lib/admin/newsletter-warmup'
+import {
   type CampaignClicks,
+  LINKS_BASE,
   LIST_ID_RE,
   readClicks,
 } from '@/lib/newsletter-clicks'
+
+/** Re-exported for callers that already import them from here. */
+export { MAX_UNSEGMENTED_SEND, NEWSLETTER_WARMUP }
 
 const MARKER_RE = /<!--aisafety-issue:([0-9a-f]{16})-->/
 /** Minutes between approval and the send. On the real lists that is time to
@@ -109,11 +117,6 @@ const FALLBACK_UTC_OFFSET = '-05:00'
 const SENDER_INFO =
   'AISafety.com, 2810 N Church St PMB 49028, Wilmington, DE 19802-4447, US'
 
-/** Warm-up (from the first real sends, 8 October 2026): while on, a send to
- *  a real list with more than MAX_UNSEGMENTED_SEND active contacts must go
- *  to one wave (an AC segment), never the whole list in one press. */
-export const NEWSLETTER_WARMUP = true
-export const MAX_UNSEGMENTED_SEND = 50
 /** Wave k+1 waits this long after wave k finished sending: the send watcher
  *  judges each wave 18 hours after it ends, and a red verdict holds the next
  *  one. Sending sooner takes a typed reason, which is logged. */
@@ -178,11 +181,6 @@ const READ_TIMEOUT_MS = 20_000
 const MAX_HTML_BYTES = 90 * 1024
 /** How many campaigns one read covers (AC's page maximum). */
 const CAMPAIGN_READ_WINDOW = 100
-/** Where the pipeline saves each email's click-counter link list. The same
- *  value as LINKS_BASE in src/lib/newsletter-clicks.ts, which doesn't export
- *  it (that file belongs to the click counter); keep the two identical. */
-const LINKS_BASE =
-  'https://vfnmdozpctvdobh7.public.blob.vercel-storage.com/newsletter/links/'
 
 export function isNewsletterConfigured(): boolean {
   return Boolean(

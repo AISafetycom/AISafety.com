@@ -55,14 +55,15 @@ import { timingSafeEqual } from 'node:crypto'
 import { Redis } from '@upstash/redis'
 import { longDate, type Mail, sendAdminMail } from '@/lib/admin/mail'
 import { ROOT_ADMINS } from '@/lib/admin/users'
+import {
+  MAX_UNSEGMENTED_SEND,
+  NEWSLETTER_WARMUP,
+} from '@/lib/admin/newsletter-warmup'
 
 // ─── The rules' numbers ─────────────────────────────────────────────────────
 
-/** Warm-up switch (wave contract): while on, a send to 6, 7 or 8 whose list
- *  has more than MAX_UNSEGMENTED_SEND active subscribers must name a wave.
- *  The approval step has the same pair; keep them in step. */
-export const NEWSLETTER_WARMUP = true
-export const MAX_UNSEGMENTED_SEND = 50
+/** Warm-up switch (wave contract), shared with the approval step. */
+export { MAX_UNSEGMENTED_SEND, NEWSLETTER_WARMUP }
 
 /** Lists real subscribers are on. */
 const REAL_LISTS = ['6', '7', '8']
