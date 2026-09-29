@@ -9,26 +9,42 @@
                                   drafts = pipeline-made draft campaigns with
                                   their verification result; recent = latest
                                   sends/scheduled campaigns
-  POST /api/admin/newsletter   → body { campaign, list }
-                                  re-verifies the draft, schedules it to send
-                                  in ~2 minutes, deletes the draft shell
-                               → { campaign, sdate, listName, activeContacts }
-                                  409 with { problems } when verification fails
+  POST /api/admin/newsletter   → body { campaign, list, confirmed?: [ids] }
+                                  re-verifies the draft under a lock,
+                                  schedules it to send in ~2 minutes,
+                                  deletes the draft shell. `confirmed` = the
+                                  ids of the warnings ticked in the dialog.
+                               → 200 { campaignId, sdate, listName,
+                                  activeContacts, approver, notes }
+                                  409 { problems } refused (nothing sent)
+                                  409 { needsConfirmation, warnings } tick
+                                      these first (nothing sent)
+                                  409 { locked } another approval of the
+                                      issue holds the lock (nothing sent)
+                                  202 { maybeScheduled } an error at or after
+                                      the create: it may be scheduled, so
+                                      don't press again
+                                  502 { notSent } failed before the create
 */
 
 import { NextRequest } from 'next/server'
 import {
   canSendNewsletter,
   canViewNewsletter,
+  currentAdmin,
   hasFreshSession,
   NEWSLETTER_FRESH_SECONDS,
 } from '@/lib/admin/auth'
 import {
+  ApprovalLockedError,
   approveAndSend,
   DraftProblemError,
   isNewsletterConfigured,
+  LinkTrackingError,
   listDrafts,
   listRecent,
+  MaybeScheduledError,
+  NeedsConfirmationError,
 } from '@/lib/admin/newsletter'
 
 export const runtime = 'nodejs'
@@ -95,32 +111,84 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const auth = await ensureAuth(true)
   if (auth) return auth
+  const admin = await currentAdmin()
+  if (!admin) return json({ error: 'unauthorized' }, 401)
   let body: unknown
   try {
     body = await req.json()
   } catch {
     return json({ error: 'body must be JSON' }, 400)
   }
-  const { campaign, list } = (body ?? {}) as {
+  const { campaign, list, confirmed } = (body ?? {}) as {
     campaign?: unknown
     list?: unknown
+    confirmed?: unknown
   }
   const campaignId = String(campaign ?? '')
   const listId = String(list ?? '')
-  if (!/^\d+$/.test(campaignId) || !/^\d+$/.test(listId)) {
-    return json({ error: 'body must be { campaign: id, list: id }' }, 400)
+  const ticks =
+    confirmed === undefined
+      ? []
+      : Array.isArray(confirmed) &&
+          confirmed.length <= 200 &&
+          confirmed.every(c => typeof c === 'string' && c.length <= 200)
+        ? (confirmed as string[])
+        : null
+  if (!/^\d+$/.test(campaignId) || !/^\d+$/.test(listId) || ticks === null) {
+    return json(
+      { error: 'body must be { campaign: id, list: id, confirmed?: [ids] }' },
+      400
+    )
   }
   try {
-    const result = await approveAndSend(campaignId, listId)
+    const result = await approveAndSend(campaignId, listId, {
+      approver: admin.name || admin.email,
+      confirmed: ticks,
+    })
     return json(result)
   } catch (err) {
     if (err instanceof DraftProblemError) {
       return json({ error: err.message, problems: err.problems }, 409)
     }
+    if (err instanceof NeedsConfirmationError) {
+      return json(
+        {
+          error: err.message,
+          needsConfirmation: true,
+          warnings: err.warnings,
+        },
+        409
+      )
+    }
+    if (err instanceof ApprovalLockedError) {
+      return json({ error: err.detail, locked: true }, 409)
+    }
+    if (err instanceof MaybeScheduledError) {
+      // 202: the send may well be on its way. The page says so, tells the
+      // approver not to press again and rereads the lists.
+      return json(
+        {
+          error: err.detail,
+          maybeScheduled: true,
+          campaignId: err.campaignId,
+        },
+        202
+      )
+    }
+    if (err instanceof LinkTrackingError) {
+      return json({ error: err.detail, notSent: true }, 502)
+    }
+    // Everything else failed before ActiveCampaign was asked to schedule
+    // anything (approveAndSend turns every later error into one of the
+    // above), so this is a definite "not sent".
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[newsletter] approve ${campaignId} failed: ${message}`)
     return json(
-      { error: 'Approving the draft failed; details are in the server log.' },
+      {
+        error:
+          'Approving failed before anything was scheduled; details are in the server log.',
+        notSent: true,
+      },
       502
     )
   }

@@ -6,6 +6,7 @@ import {
   FieldError,
   FitError,
   formatLocal,
+  isLiveCampaign,
   liveCampaignsNamed,
   previewText,
   ReorderError,
@@ -14,6 +15,9 @@ import {
   setFieldsHtml,
   setFitHtml,
   TestSendError,
+  baseIssueName,
+  waveCampaignName,
+  waveOf,
 } from './newsletter'
 import { createHash } from 'node:crypto'
 import cardEdit from './__fixtures__/newsletter-card-edit.json'
@@ -345,7 +349,12 @@ describe('setFitHtml', () => {
 
 describe('liveCampaignsNamed', () => {
   const name = 'Events · Week 40, 2026'
-  const c = (id: string, status: string, n = name) => ({ id, name: n, status })
+  const c = (id: string, status: string, n = name, send_amt?: string) => ({
+    id,
+    name: n,
+    status,
+    send_amt,
+  })
 
   it('finds live campaigns of the same issue: scheduled, sending, paused, sent, held', () => {
     const found = liveCampaignsNamed(
@@ -356,19 +365,86 @@ describe('liveCampaignsNamed', () => {
     expect(found.map(x => x.id)).toEqual(['1', '2', '3', '5', '7'])
   })
 
-  it('ignores the draft itself, other drafts, stopped/disabled sends and other issues', () => {
+  it('ignores the draft itself, other drafts, sends stopped before anyone got them, and other issues', () => {
     const found = liveCampaignsNamed(
       [
         c('99', '1'),
         c('10', '0'),
-        c('11', '4'),
-        c('12', '6'),
+        c('11', '4', name, '0'),
+        c('12', '6', name, '0'),
         c('13', '5', 'Events · Week 39, 2026'),
       ],
       '99',
       name
     )
     expect(found).toEqual([])
+  })
+
+  it('counts a stop that already reached people, an unknown send count and unknown statuses', () => {
+    const found = liveCampaignsNamed(
+      [
+        c('20', '4', name, '1200'),
+        c('21', '6'),
+        c('22', '9'),
+        c('23', '4', name, ''),
+      ],
+      '99',
+      name
+    )
+    expect(found.map(x => x.id)).toEqual(['20', '21', '22', '23'])
+  })
+
+  it('matches every wave of the issue by its base name', () => {
+    const campaigns = [
+      c('30', '5', `${name} · wave 1/4`),
+      c('31', '1', `${name} · wave 2/4`),
+      c('32', '5', 'Events · Week 41, 2026 · wave 1/4'),
+    ]
+    expect(liveCampaignsNamed(campaigns, '99', name).map(x => x.id)).toEqual([
+      '30',
+      '31',
+    ])
+    // A wave send only clashes with the same wave or a whole-list send.
+    expect(liveCampaignsNamed(campaigns, '99', name, 2).map(x => x.id)).toEqual(
+      ['31']
+    )
+    expect(
+      liveCampaignsNamed([...campaigns, c('33', '5')], '99', name, 3).map(
+        x => x.id
+      )
+    ).toEqual(['33'])
+  })
+})
+
+describe('isLiveCampaign', () => {
+  it('only a draft, or a stop/disable that provably reached nobody, is not live', () => {
+    expect(isLiveCampaign({ status: '0' })).toBe(false)
+    expect(isLiveCampaign({ status: '4', send_amt: '0' })).toBe(false)
+    expect(isLiveCampaign({ status: '6', send_amt: '0' })).toBe(false)
+    expect(isLiveCampaign({ status: '4', send_amt: '3' })).toBe(true)
+    expect(isLiveCampaign({ status: '4', send_amt: null })).toBe(true)
+    for (const s of ['1', '2', '3', '5', '7', '8', '42'])
+      expect(isLiveCampaign({ status: s, send_amt: '0' })).toBe(true)
+  })
+})
+
+describe('wave names', () => {
+  it('builds and strips the wave suffix', () => {
+    const issue = 'Events · Week 41, 2026'
+    expect(waveCampaignName(issue, 2, 4)).toBe(
+      'Events · Week 41, 2026 · wave 2/4'
+    )
+    expect(baseIssueName('Events · Week 41, 2026 · wave 2/4')).toBe(issue)
+    expect(baseIssueName(issue)).toBe(issue)
+    expect(waveOf('Events · Week 41, 2026 · wave 2/4')).toEqual({
+      wave: 2,
+      waves: 4,
+    })
+    expect(waveOf(issue)).toBeNull()
+    // Only the exact suffix counts.
+    expect(baseIssueName('Events · Week 41, 2026 · wave 2')).toBe(
+      'Events · Week 41, 2026 · wave 2'
+    )
   })
 })
 

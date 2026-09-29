@@ -18,8 +18,9 @@
   so no fresh-session requirement.
   → { cards } for a text edit, { listing: { ok, table } | { ok: false,
     reason } } for a listing update
-    409 with { problems } when the draft fails verification, 400 for a bad
-    card, field or body.
+    409 with { problems } when the draft fails verification (or sits on a
+    real list, 6/7/8, and this isn't production), 400 for a bad card, field
+    or body.
 */
 
 import { NextRequest } from 'next/server'
