@@ -416,7 +416,7 @@ export function makeAC(opts: AcOptions = {}) {
       mails.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
       return j({ ok: true, emailed: true })
     }
-    if (url.hostname.endsWith('blob.vercel-storage.com')) {
+    if (url.hostname.endsWith('.public.blob.vercel-storage.com')) {
       const id = url.pathname
         .split('/')
         .pop()!

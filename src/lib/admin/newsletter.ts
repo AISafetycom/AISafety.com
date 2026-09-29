@@ -2040,8 +2040,14 @@ export function previewText(html: string): string | null {
 /** An HTML fragment as one line of plain text: tags dropped, the entities
  *  the renderer writes resolved, whitespace collapsed. */
 function stripHtml(fragment: string): string {
-  return fragment
-    .replace(/<[^>]+>/g, '')
+  // Strip tags until none are left, so a tag split around another one
+  // ("<scr<b>ipt>") can't survive a single pass.
+  let text = fragment
+  for (let prev = ''; prev !== text; ) {
+    prev = text
+    text = text.replace(/<[^>]*>/g, '')
+  }
+  return text
     .replace(/&nbsp;|&zwnj;|&#8204;|\u00a0|\u200c/g, ' ')
     .replace(/&rsquo;/g, '\u2019')
     .replace(/&lsquo;/g, '\u2018')
