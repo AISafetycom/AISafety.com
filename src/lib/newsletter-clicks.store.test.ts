@@ -223,6 +223,38 @@ describe('loadLinkList', () => {
     expect(waited).toBeLessThan(5000)
   }, 10_000)
 
+  it('times the whole Blob step, even a stall before the network read', async () => {
+    // Next's fetch looks in its own cache before the signal applies; a
+    // stall there ignores the signal, as this fetch does.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise<Response>(() => {}))
+    )
+    const { json, id } = make('Events · Week 47, 2026')
+    strings.set(`aisafety:newsletter:links:${id}`, json)
+    const t0 = Date.now()
+    expect((await m.loadLinkList(id))?.c).toBe('Events · Week 47, 2026')
+    const waited = Date.now() - t0
+    expect(waited).toBeGreaterThanOrEqual(2400)
+    expect(waited).toBeLessThan(3500)
+  }, 10_000)
+
+  it('keeps the copy straight away when after() refuses, and the link still works', async () => {
+    const { json, id } = make('Training · Week 47, 2026')
+    vi.stubGlobal('fetch', blob(json))
+    const refuses = () => {
+      throw new Error('`after` was called outside a request scope')
+    }
+    expect((await m.loadLinkList(id, refuses))?.c).toBe(
+      'Training · Week 47, 2026'
+    )
+    await vi.waitFor(() =>
+      expect(strings.get(`aisafety:newsletter:links:${id}`)).toBe(json)
+    )
+    // Nothing broken is remembered for the next click.
+    expect((await m.loadLinkList(id))?.c).toBe('Training · Week 47, 2026')
+  })
+
   it('lands on the homepage when neither can be read, and tries again next time', async () => {
     const { json, id } = make('Events · Week 45, 2026')
     vi.stubGlobal(
@@ -283,6 +315,18 @@ describe('isScannerBurst', () => {
       false,
       false,
     ])
+  })
+
+  it('counts a reader who opens two links and goes back to the first', async () => {
+    vi.useFakeTimers()
+    const ip = '198.51.100.5'
+    const checks: Promise<boolean>[] = []
+    for (const n of [0, 1, 0]) {
+      checks.push(m.isScannerBurst(LIST, n, ip))
+      await vi.advanceTimersByTimeAsync(2_000)
+    }
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(await Promise.all(checks)).toEqual([false, false, false])
   })
 
   it('counts links opened ten seconds apart', async () => {

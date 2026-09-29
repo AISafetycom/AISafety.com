@@ -16,11 +16,12 @@
   Hardened before the first real sends (29 Sept 2026):
   - A bad entry in a list sends that one link to the homepage; the email's
     other links keep working.
-  - The Blob read gives up after 2.5 s. A list read from the Blob is used
-    only if its content still matches its name (the pipeline names each
-    list by the first 16 hex characters of its SHA-256), and is then copied
-    to Upstash with no expiry. When the Blob is slow, missing or changed,
-    that copy is used instead; failing that, the homepage.
+  - The Blob read (Next's fetch cache included) gives up after 2.5 s. A
+    list read from the Blob is used only if its content still matches its
+    name (the pipeline names each list by the first 16 hex characters of
+    its SHA-256), and is then copied to Upstash with no expiry. When the
+    Blob is slow, missing or changed, that copy is used instead (given
+    1.5 s more); failing that, the homepage. So a reader waits 4 s at most.
   - More link checkers are recognised by name, and a burst (one address
     opening 3+ different links of one email within 10 s) is a scanner, so
     none of that burst is counted. Addresses are kept only as a keyed hash,
@@ -163,7 +164,14 @@ export async function loadLinkList(
   if (!LIST_ID_RE.test(listId)) return null
   const hit = lists.get(listId)
   if (hit) return hit
-  const read = readList(listId, later)
+  // Never rejects: a remembered rejection would break every later click on
+  // this list until the instance restarts.
+  const read = readList(listId, later).catch(err => {
+    console.warn(
+      `[newsletter-clicks] list ${listId}: read failed: ${err instanceof Error ? err.message : String(err)}`
+    )
+    return null
+  })
   lists.set(listId, read)
   // A failed read is retried next time rather than remembered.
   void read.then(list => {
@@ -176,10 +184,18 @@ async function readList(
   listId: string,
   later: Later
 ): Promise<LinkList | null> {
-  const raw = await readBlob(listId)
+  // The whole Blob step is timed, not just the network read: Next's fetch
+  // looks in its own cache (and waits on its lock) before the signal
+  // applies, and a stall there must not hold the reader either.
+  const raw = await within(readBlob(listId), BLOB_TIMEOUT_MS)
   const fromBlob = raw && listFromRaw(listId, raw)
   if (raw && fromBlob) {
-    later(() => keepCopy(listId, raw))
+    try {
+      later(() => keepCopy(listId, raw))
+    } catch {
+      // after() refused (called outside a request): copy it now instead.
+      void keepCopy(listId, raw)
+    }
     return fromBlob
   }
   const copy = await within(readCopy(listId), COPY_TIMEOUT_MS)
