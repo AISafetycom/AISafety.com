@@ -59,9 +59,10 @@
     50% 50%;
 }
 
-/* Guard for the featured blurb: the copy is already trimmed to whole sentences
-   in page.tsx, so this only catches a single sentence too long for three lines,
-   keeping the "Learn more" button inside the card. */
+/* Guard for the featured blurb: the copy is already a short Card blurb or
+   trimmed to whole sentences in page.tsx, so this only catches text too long
+   for three lines, keeping the "Learn more" button inside the card. Lifted on
+   stacked (mobile) layouts below. */
 .max-3-lines {
   max-height: 3lh;
   overflow: hidden;
@@ -330,6 +331,13 @@
     width: auto;
     margin: 0 -24px 8px;
     padding: 24px;
+  }
+
+  /* The stacked card grows with its content, so the blurb never needs the
+     three-line guard here; on a phone a 125-character blurb wraps to four
+     lines and the guard hid the last one mid-sentence. */
+  .max-3-lines {
+    max-height: none;
   }
 
   /* The stacked card is tall, so the photo is scaled to its height and only a
