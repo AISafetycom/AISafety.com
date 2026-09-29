@@ -5,11 +5,14 @@
   pipeline on the site's Blob store, see src/lib/newsletter-clicks.ts) and
   counts the click for that campaign. Only links in our own lists can be
   followed. The count happens after the redirect (after()), and link
-  checkers, prefetchers and the admin preview (`?p=1`) aren't counted. A
-  link that can't be found goes to the homepage rather than an error.
+  checkers, prefetchers, the admin preview (`?p=1`) and anyone signed in to
+  the admin (the team trying a test copy, or reading their own copy of an
+  issue) aren't counted. A link that can't be found goes to the homepage
+  rather than an error.
 */
 
 import { after, NextRequest } from 'next/server'
+import { isAdmin } from '@/lib/admin/auth'
 import {
   isLikelyBot,
   LIST_ID_RE,
@@ -42,7 +45,12 @@ async function resolve(
   if (!links || !link) return notFound()
   const preview = req.nextUrl.searchParams.get('p') === '1'
   if (count && !preview && !isLikelyBot(req.headers.get('user-agent'))) {
-    after(() => recordClick(links.c, link))
+    // The session check reads the cookie after the redirect has gone, so a
+    // reader never waits on it.
+    after(async () => {
+      if (await isAdmin()) return
+      await recordClick(links.c, link)
+    })
   }
   return new Response(null, {
     status: 302,

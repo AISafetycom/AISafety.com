@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   cardGroups,
   contentDigest,
+  DraftProblemError,
   FieldError,
   FitError,
   formatLocal,
@@ -9,8 +10,10 @@ import {
   previewText,
   ReorderError,
   reorderHtml,
+  sendTestCopy,
   setFieldsHtml,
   setFitHtml,
+  TestSendError,
 } from './newsletter'
 import { createHash } from 'node:crypto'
 import cardEdit from './__fixtures__/newsletter-card-edit.json'
@@ -430,5 +433,84 @@ describe('card text fields', () => {
     expect(() =>
       setFieldsHtml(input, group, 'recNope', { title: 'x' })
     ).toThrow(FieldError)
+  })
+})
+
+/* ─── Test copies ───────────────────────────────────────────────────── */
+
+describe('sendTestCopy', () => {
+  // A pretend ActiveCampaign: one draft (campaign 42, message 77, list 6)
+  // and the v1 endpoint, which records what it was asked to do.
+  const body = '<p>Week 40</p>'
+  let html = ''
+  let v1calls: URLSearchParams[] = []
+  let v1answer: Record<string, unknown> = {}
+  const env = { ...process.env }
+
+  beforeEach(() => {
+    process.env.ACTIVECAMPAIGN_URL = 'https://ac.example'
+    process.env.ACTIVECAMPAIGN_KEY = 'key'
+    html = `<!--aisafety-issue:${contentDigest(body)}-->${body}`
+    v1calls = []
+    v1answer = { result_code: 1, result_message: 'Message sent' }
+    const reads: Record<string, unknown> = {
+      'campaigns/42': {
+        campaign: { id: '42', name: 'Events · Week 40, 2026', status: '0' },
+      },
+      'campaigns/42/campaignLists': { campaignLists: [{ list: '6' }] },
+      'campaigns/42/campaignMessages': {
+        campaignMessages: [{ messageid: '77' }],
+      },
+    }
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      const url = new URL(String(input))
+      if (url.pathname === '/admin/api.php') {
+        const call = new URLSearchParams(String(init?.body ?? ''))
+        call.set('api_action', url.searchParams.get('api_action') ?? '')
+        v1calls.push(call)
+        return Response.json(v1answer)
+      }
+      const path = url.pathname.replace('/api/3/', '')
+      if (path === 'messages/77')
+        return Response.json({
+          message: { id: '77', subject: 'Week 40, 2026', html },
+        })
+      return path in reads
+        ? Response.json(reads[path])
+        : new Response('not found', { status: 404 })
+    })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    process.env = { ...env }
+  })
+
+  it('mails ActiveCampaign’s test copy to the one address, and does nothing else', async () => {
+    await expect(sendTestCopy('42', 'owner@example.com')).resolves.toEqual({
+      to: 'owner@example.com',
+    })
+    expect(v1calls).toHaveLength(1)
+    const [call] = v1calls
+    expect(call.get('api_action')).toBe('campaign_send')
+    expect(call.get('action')).toBe('test')
+    expect(call.get('email')).toBe('owner@example.com')
+    expect(call.get('campaignid')).toBe('42')
+    expect(call.get('messageid')).toBe('77')
+  })
+
+  it('refuses a draft that fails the approval checks, before asking ActiveCampaign', async () => {
+    html = body // the marker is gone: someone saved it in AC's designer
+    await expect(sendTestCopy('42', 'owner@example.com')).rejects.toThrow(
+      DraftProblemError
+    )
+    expect(v1calls).toHaveLength(0)
+  })
+
+  it('passes on ActiveCampaign’s reason when it won’t send', async () => {
+    v1answer = { result_code: 0, result_message: 'Daily test limit reached' }
+    const err = await sendTestCopy('42', 'owner@example.com').catch(e => e)
+    expect(err).toBeInstanceOf(TestSendError)
+    expect((err as TestSendError).detail).toContain('Daily test limit reached')
   })
 })

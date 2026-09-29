@@ -129,11 +129,15 @@ function hostOf(url: string): string {
 
 export default function NewsletterAdmin({
   canSend,
+  testTo,
 }: {
   /** This session may approve (from the server, so it is known before the
    *  ActiveCampaign read finishes). Picks which notice shows at the top; the
    *  Approve button itself follows the API's answer in `data.canSend`. */
   canSend: boolean
+  /** Where "Send test" delivers: the approver's own sign-in address. Null
+   *  for view-only sessions, which get no test button. */
+  testTo: string | null
 }) {
   const [data, setData] = useState<Payload | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -151,6 +155,18 @@ export default function NewsletterAdmin({
   const previewFrame = useRef<HTMLIFrameElement | null>(null)
   const [previewY, setPreviewY] = useState(0)
   const [busyId, setBusyId] = useState<string | null>(null)
+  /** The draft a test copy is on its way for, and how the last one went.
+   *  `edited` = the draft has changed since that copy went out. */
+  const [testingId, setTestingId] = useState<string | null>(null)
+  const [testResult, setTestResult] = useState<{
+    draftId: string
+    kind: 'ok' | 'error'
+    text: string
+    edited?: boolean
+  } | null>(null)
+  /** The draft with edits not yet written into it (typed text, a moved card,
+   *  a save in flight): a test or an approval now would go without them. */
+  const [unsavedId, setUnsavedId] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<Draft | null>(null)
   const [notice, setNotice] = useState<{
     kind: 'ok' | 'error'
@@ -264,6 +280,48 @@ export default function NewsletterAdmin({
     }
   }
 
+  /** Mail the draft to the signed-in approver alone (ActiveCampaign's test
+   *  send), so it can be read and clicked through in a real inbox first. */
+  async function sendTest(draft: Draft) {
+    setTestingId(draft.id)
+    setTestResult(null)
+    try {
+      const res = await fetch('/api/admin/newsletter/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaign: draft.id,
+          message: draft.messageId ?? undefined,
+        }),
+      })
+      const body = (await res.json()) as {
+        error?: string
+        problems?: string[]
+        to?: string
+      }
+      if (!res.ok || !body.to) {
+        throw new Error(
+          body.problems?.length
+            ? body.problems.join('; ')
+            : (body.error ?? `HTTP ${res.status}`)
+        )
+      }
+      setTestResult({
+        draftId: draft.id,
+        kind: 'ok',
+        text: `Test sent to ${body.to} only. It arrives in a minute or two as “TEST: ${draft.subject}”.`,
+      })
+    } catch (err) {
+      setTestResult({
+        draftId: draft.id,
+        kind: 'error',
+        text: `Test not sent: ${err instanceof Error ? err.message : String(err)}`,
+      })
+    } finally {
+      setTestingId(null)
+    }
+  }
+
   useEffect(() => {
     function onMessage(e: MessageEvent) {
       if (e.source !== previewFrame.current?.contentWindow) return
@@ -296,6 +354,9 @@ export default function NewsletterAdmin({
     )
     setPreviewY(previewScroll.current)
     setPreviewNonce(n => n + 1)
+    setTestResult(t =>
+      t && t.draftId === draftId && t.kind === 'ok' ? { ...t, edited: true } : t
+    )
     if (text) setNotice({ kind: 'ok', text })
   }
 
@@ -374,6 +435,15 @@ export default function NewsletterAdmin({
           untouched since the pipeline wrote it. Approving schedules the send
           for about two minutes later.
         </p>
+        {testTo && (
+          <p className={adminStyles.sectionHint}>
+            Send test emails an issue to you alone ({testTo}), exactly as
+            subscribers will get it but with “TEST:” in front of the subject, so
+            you can read it and try the links first. Clicks from this browser
+            aren’t counted while you’re signed in. Don’t use the unsubscribe
+            links in a test copy.
+          </p>
+        )}
         {/* The first read takes several seconds; say so where the drafts
             will appear, not only in the small line at the top (Bryce, 16
             Sept 2026: "make this more obvious"). */}
@@ -397,6 +467,8 @@ export default function NewsletterAdmin({
         )}
         {data?.drafts.map(draft => {
           const ok = draft.problems.length === 0 && draft.listId != null
+          const unsaved = unsavedId === draft.id
+          const result = testResult?.draftId === draft.id ? testResult : null
           return (
             <div key={draft.id} className={adminStyles.editorBlock}>
               <div className={adminStyles.editorBlockHeader}>
@@ -464,17 +536,50 @@ export default function NewsletterAdmin({
                 >
                   {previewId === draft.id ? 'Hide preview' : 'Preview'}
                 </button>
+                {data.canSend && testTo && (
+                  <button
+                    type="button"
+                    className={styles.button}
+                    onClick={() => void sendTest(draft)}
+                    disabled={
+                      !ok || testingId != null || busyId != null || unsaved
+                    }
+                    title={
+                      unsaved
+                        ? 'Waits for your edits to save'
+                        : `Sends this issue to ${testTo} only`
+                    }
+                  >
+                    {testingId === draft.id ? 'Sending test…' : 'Send test'}
+                  </button>
+                )}
                 {data.canSend && (
                   <button
                     type="button"
                     className={styles.buttonPrimary}
                     onClick={() => setConfirming(draft)}
-                    disabled={!ok || busyId != null}
+                    disabled={
+                      !ok || busyId != null || unsaved || testingId === draft.id
+                    }
+                    title={unsaved ? 'Waits for your edits to save' : undefined}
                   >
                     {busyId === draft.id ? 'Scheduling…' : 'Approve & send'}
                   </button>
                 )}
               </div>
+              {result && (
+                <p
+                  className={`${
+                    result.kind === 'ok' ? styles.noticeOk : styles.noticeError
+                  } ${styles.testResult}`}
+                  role="status"
+                  aria-live="polite"
+                >
+                  {result.text}
+                  {result.edited &&
+                    ' You’ve edited the issue since, so send another test to see the changes.'}
+                </p>
+              )}
               {/* The preview brings the reorder panel with it (approvers only;
                   no separate button — Bryce, 11 Sept 2026). */}
               {previewId === draft.id && (
@@ -486,6 +591,11 @@ export default function NewsletterAdmin({
                         draft={draft}
                         onSaved={(cards, text) =>
                           draftChanged(draft.id, cards, text)
+                        }
+                        onUnsavedChange={pending =>
+                          setUnsavedId(id =>
+                            pending ? draft.id : id === draft.id ? null : id
+                          )
                         }
                       />
                     </div>
@@ -639,9 +749,13 @@ const keysOf = (groups: CardGroup[]) => groups.map(g => g.cards.map(c => c.key))
 function ReorderPanel({
   draft,
   onSaved,
+  onUnsavedChange,
 }: {
   draft: Draft
   onSaved: (cards: CardGroup[], notice: string) => void
+  /** True while something here isn't in the draft yet; the page holds Send
+   *  test and Approve & send back until it is. */
+  onUnsavedChange: (unsaved: boolean) => void
 }) {
   const original = draft.cards ?? []
   const [groups, setGroups] = useState<CardGroup[]>(() =>
@@ -967,6 +1081,19 @@ function ReorderPanel({
     return () => window.clearTimeout(timer)
   }, [busy])
   const slowNote = slow ? ' ActiveCampaign is answering slowly right now.' : ''
+
+  // Typed text waiting for its autosave, a moved card, or a save in flight:
+  // a test copy or an approval sent now would go out without it, so the page
+  // waits. Cleared when the panel closes.
+  const unsaved = Boolean(pendingKey) || dirty || saving || savingCard
+  const unsavedRef = useRef(onUnsavedChange)
+  useEffect(() => {
+    unsavedRef.current = onUnsavedChange
+  })
+  useEffect(() => {
+    unsavedRef.current(unsaved)
+  }, [unsaved])
+  useEffect(() => () => unsavedRef.current(false), [])
 
   const saveOrderRef = useRef(saveOrder)
   useEffect(() => {
