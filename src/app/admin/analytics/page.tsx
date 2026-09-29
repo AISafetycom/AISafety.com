@@ -53,6 +53,7 @@ import {
 import DateRangePicker from './DateRangePicker'
 import ExcludeToggle from './ExcludeToggle'
 import Logo from './Logo'
+import PendingMark from './PendingMark'
 import SortableTable, { type SortColumn, type SortValue } from './SortableTable'
 import admin from '../admin.module.css'
 import styles from './analytics.module.css'
@@ -717,7 +718,7 @@ export default async function AnalyticsPage({
     (range.startMs == null || range.startMs < oldestMs)
 
   return (
-    <div>
+    <div className={styles.dashboard}>
       <div className={styles.headerRow}>
         <h1 className={admin.pageTitle}>Analytics</h1>
         <div className={styles.meta}>
@@ -1416,6 +1417,7 @@ function ClickModeToggle({
         }`}
       >
         Unique
+        <PendingMark />
       </Link>
       <Link
         href={`?${totalParams.toString()}`}
@@ -1425,6 +1427,7 @@ function ClickModeToggle({
         }`}
       >
         Total
+        <PendingMark />
       </Link>
     </div>
   )
@@ -1473,6 +1476,7 @@ function SourceSplit({
             <span className={styles.sourceStatCount}>
               {total.toLocaleString()}
             </span>
+            <PendingMark />
           </Link>
         )}
         {rows.map(r => {
@@ -1497,6 +1501,7 @@ function SourceSplit({
                   {pct1(r.count, total)}
                 </span>
               )}
+              <PendingMark />
             </Link>
           )
         })}
@@ -1553,6 +1558,7 @@ function DashboardTabs({
             className={tabClass(t.key)}
           >
             {t.label}
+            <PendingMark />
           </Link>
         ))}
       </div>
@@ -1574,6 +1580,7 @@ function DashboardTabs({
               </span>
             )}
             {t.label}
+            <PendingMark />
           </Link>
         ))}
       </div>

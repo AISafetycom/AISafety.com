@@ -1,7 +1,7 @@
 'use client'
 
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
-import { useState } from 'react'
+import { useState, useTransition } from 'react'
 import styles from './analytics.module.css'
 
 const PRESETS = [
@@ -26,6 +26,11 @@ export default function DateRangePicker({
   const searchParams = useSearchParams()
   const [customFrom, setCustomFrom] = useState(from ?? '')
   const [customTo, setCustomTo] = useState(to ?? '')
+  // The new range takes a moment to load, so the clicked preset lights up at
+  // once (and the figures below fade, via data-pending) until it arrives.
+  const [pending, startTransition] = useTransition()
+  const [clicked, setClicked] = useState<string | null>(null)
+  const shownKey = pending && clicked ? clicked : activeKey
 
   // Keep the rest of the query (active tab, count mode, source filter) when the
   // date changes — only the date params (range/from/to) get swapped, so changing
@@ -43,24 +48,27 @@ export default function DateRangePicker({
     setCustomTo('')
     const params = carryOver()
     params.set('range', key)
-    router.push(`${pathname}?${params.toString()}`)
+    setClicked(key)
+    startTransition(() => router.push(`${pathname}?${params.toString()}`))
   }
   const applyCustom = () => {
     const params = carryOver()
     if (customFrom) params.set('from', customFrom)
     if (customTo) params.set('to', customTo)
     const qs = params.toString()
-    router.push(qs ? `${pathname}?${qs}` : pathname)
+    setClicked('custom')
+    startTransition(() => router.push(qs ? `${pathname}?${qs}` : pathname))
   }
 
   return (
     <div className={styles.rangeBar}>
+      <span hidden data-pending={pending || undefined} />
       <div className={styles.presets}>
         {PRESETS.map(p => (
           <button
             key={p.key}
             type="button"
-            className={`${styles.presetBtn} ${activeKey === p.key ? styles.presetBtnActive : ''}`}
+            className={`${styles.presetBtn} ${shownKey === p.key ? styles.presetBtnActive : ''}`}
             onClick={() => setPreset(p.key)}
           >
             {p.label}

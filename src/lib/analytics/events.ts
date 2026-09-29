@@ -159,6 +159,14 @@ const restToken =
 
 const store =
   restUrl && restToken ? new Redis({ url: restUrl, token: restToken }) : null
+// The dashboard's bulk reads get their own client with auto-pipelining off.
+// @upstash/redis otherwise batches commands issued together into ONE HTTP
+// call, so parallel slice reads would come back as a single oversized
+// response — the very thing READ_CHUNK exists to prevent.
+const bulkStore =
+  restUrl && restToken
+    ? new Redis({ url: restUrl, token: restToken, enableAutoPipelining: false })
+    : null
 
 const trackLimiter = store
   ? new Ratelimit({
@@ -214,6 +222,33 @@ const HIGH_TRAFFIC_RATIO = 2
 // response can outgrow Upstash's response-size limits, however big a month
 // gets. ~300-byte events make a full slice ~1.5 MB.
 const READ_CHUNK = 5000
+// Slices read at once. Each is its own ~1.5 MB request, so this bounds what's
+// in flight while cutting the wait for a full month roughly fourfold.
+const PARALLEL_SLICES = 4
+
+// ─── Month cache ─────────────────────────────────────────────────────────────
+// Each server instance keeps the month lists it has read, parsed, between
+// dashboard loads. A click then downloads only the events that arrived since
+// the last load, instead of every event in the range again (for 30 days in
+// September 2026, about 50 requests of 1.5 MB on every click). Writes only
+// ever prepend, so the cached copy is still the list's tail: a month that grew
+// from n to len events gained exactly tail offsets [n, len). The copy is
+// dropped and the month read afresh when that doesn't hold — the list shrank,
+// or the event at tail offset n-1 isn't the newest one held (a hand cleanup
+// removed or rewrote events).
+interface CachedMonth {
+  len: number
+  /** Newest first. Shared by every request, so never mutated. */
+  events: AnalyticsEvent[]
+}
+const monthCache = new Map<string, CachedMonth>()
+// About 450 bytes per event in memory, so ~270 MB: a bit over three months at
+// September 2026 traffic. Past it the oldest months drop out and are read
+// again when a range needs them.
+const MONTH_CACHE_MAX_EVENTS = 600_000
+// Reads under way, by month and length, so a burst of clicks shares one
+// download instead of each request fetching (and holding) its own copy.
+const monthReads = new Map<string, Promise<AnalyticsEvent[]>>()
 
 /** 'YYYY-MM' (UTC) an event belongs to, from its server-stamped timestamp. */
 function monthOf(ts: string): string | null {
@@ -872,9 +907,25 @@ function tallyPositions(positions: string[]): Counted[] {
 // living. Change it here and nowhere else; the page says which zone it is.
 export const DASHBOARD_TZ = 'UTC'
 
+// Built once: toLocaleDateString constructs a fresh formatter on every call,
+// and the unique-mode dedupes call dashboardDay for every click in range —
+// that alone was about half of a dashboard render.
+const DAY_FORMAT = new Intl.DateTimeFormat('en-CA', { timeZone: DASHBOARD_TZ })
+// Day per quarter hour. Every time zone's offset, and every change of offset,
+// falls on a quarter hour, so all instants in one 15-minute bucket share a
+// calendar day. Grows by 96 short entries a day of data.
+const QUARTER_HOUR = 15 * 60_000
+const dayByQuarterHour = new Map<number, string>()
+
 /** "2026-09-05" — the dashboard-zone calendar day an instant falls on. */
 export function dashboardDay(ms: number): string {
-  return new Date(ms).toLocaleDateString('en-CA', { timeZone: DASHBOARD_TZ })
+  const bucket = Math.floor(ms / QUARTER_HOUR)
+  let day = dayByQuarterHour.get(bucket)
+  if (day === undefined) {
+    day = DAY_FORMAT.format(ms)
+    dayByQuarterHour.set(bucket, day)
+  }
+  return day
 }
 
 /** "+00:00" / "+01:00" — the dashboard zone's UTC offset on a given day, for
@@ -1864,40 +1915,118 @@ function uniqueUsers(events: AnalyticsEvent[]): number {
   return seen.size + anon
 }
 
-/** Every event in the given months, globally newest-first. Each month list is
- *  read in READ_CHUNK slices addressed FROM THE TAIL: normal writes only ever
- *  prepend at the head, so tail-relative indices stay stable and a read can't
- *  double-count or skip events mid-way. Events arriving after the length
- *  snapshot simply aren't part of this read — the next refresh has them.
+/** Events at tail offsets [lo, hi) of one month list, newest first — offset 0
+ *  is the list's oldest event. Normal writes only ever prepend at the head, so
+ *  tail-relative offsets stay stable and a read can't double-count or skip
+ *  events mid-way; events arriving meanwhile land beyond `hi` and are simply
+ *  left for the next read.
  *
- *  Each slice is awaited as its OWN request, deliberately not pipelined: the
- *  client sends a pipeline as a single HTTP call, whose one response would
- *  carry every slice at once — recreating exactly the oversized response the
- *  slicing exists to prevent. Sequential round trips are fine here: at organic
- *  volume a dashboard range is a handful of slices. */
+ *  Read in READ_CHUNK slices, each its OWN request, PARALLEL_SLICES at a time.
+ *  Never pipelined: the client sends a pipeline as a single HTTP call, whose
+ *  one response would carry every slice at once — recreating exactly the
+ *  oversized response the slicing exists to prevent. Hence `db` should be
+ *  bulkStore, which doesn't auto-pipeline. */
+async function readTail(
+  db: Redis,
+  key: string,
+  lo: number,
+  hi: number
+): Promise<AnalyticsEvent[]> {
+  // Newest (deepest tail offset) slice first.
+  const slices: [number, number][] = []
+  for (let top = hi; top > lo; top -= READ_CHUNK)
+    slices.push([Math.max(lo, top - READ_CHUNK), top])
+  const out: AnalyticsEvent[][] = []
+  for (let i = 0; i < slices.length; i += PARALLEL_SLICES) {
+    out.push(
+      ...(await Promise.all(
+        slices
+          .slice(i, i + PARALLEL_SLICES)
+          .map(([a, b]) => db.lrange<AnalyticsEvent>(key, -b, -(a + 1)))
+      ))
+    )
+  }
+  return out.flat()
+}
+
+/** Every event in the given months, globally newest-first, read in full. */
 async function readMonths(
   db: Redis,
   monthsNewestFirst: { month: string; len: number }[]
 ): Promise<AnalyticsEvent[]> {
-  // Newest-first overall: months newest → oldest, and within a month the head
-  // (newest) slice first. In tail-relative terms the head slice is the DEEPEST
-  // tail offset, so iterate offsets downward.
-  const out: AnalyticsEvent[] = []
-  for (const { month, len } of monthsNewestFirst) {
-    const key = MONTH_KEY_PREFIX + month
-    const sliceCount = Math.ceil(len / READ_CHUNK)
-    for (let s = sliceCount - 1; s >= 0; s--) {
-      const fromTail = s * READ_CHUNK // events between this offset and the tail
-      out.push(
-        ...(await db.lrange<AnalyticsEvent>(
-          key,
-          Math.max(-len, -(fromTail + READ_CHUNK)),
-          -(fromTail + 1)
-        ))
-      )
-    }
+  const out: AnalyticsEvent[][] = []
+  for (const { month, len } of monthsNewestFirst)
+    out.push(await readTail(db, MONTH_KEY_PREFIX + month, 0, len))
+  return out.flat()
+}
+
+/** Like readMonths, but through the month cache: only events new since this
+ *  instance last read a month are downloaded. */
+async function readMonthsCached(
+  db: Redis,
+  monthsNewestFirst: { month: string; len: number }[]
+): Promise<AnalyticsEvent[]> {
+  const parts = await Promise.all(
+    monthsNewestFirst.map(({ month, len }) => {
+      const key = `${month}:${len}`
+      let read = monthReads.get(key)
+      if (!read) {
+        read = refreshMonth(db, month, len).finally(() =>
+          monthReads.delete(key)
+        )
+        monthReads.set(key, read)
+      }
+      return read
+    })
+  )
+  return parts.flat()
+}
+
+/** One month's events at `len` long, newest first: the cached copy plus
+ *  whatever arrived since, or a full read when there's no usable copy. */
+async function refreshMonth(
+  db: Redis,
+  month: string,
+  len: number
+): Promise<AnalyticsEvent[]> {
+  const key = MONTH_KEY_PREFIX + month
+  const cached = monthCache.get(month)
+  let events: AnalyticsEvent[]
+  if (cached && cached.len <= len && (await stillTail(db, key, cached))) {
+    events =
+      cached.len === len
+        ? cached.events
+        : (await readTail(db, key, cached.len, len)).concat(cached.events)
+  } else {
+    events = await readTail(db, key, 0, len)
   }
-  return out
+  monthCache.set(month, { len, events })
+  trimMonthCache()
+  return events
+}
+
+/** Whether a cached copy is still the month list's tail: the event at tail
+ *  offset n-1 is the newest one the copy holds. */
+async function stillTail(
+  db: Redis,
+  key: string,
+  cached: CachedMonth
+): Promise<boolean> {
+  if (cached.len === 0) return true
+  const atEdge = await db.lindex(key, -cached.len)
+  return JSON.stringify(atEdge) === JSON.stringify(cached.events[0])
+}
+
+/** Drop the oldest cached months until the cache is under its cap, always
+ *  keeping the newest. Requests already holding a dropped month keep it. */
+function trimMonthCache(): void {
+  let total = 0
+  for (const c of monthCache.values()) total += c.len
+  for (const month of [...monthCache.keys()].sort()) {
+    if (total <= MONTH_CACHE_MAX_EVENTS || monthCache.size <= 1) break
+    total -= monthCache.get(month)!.len
+    monthCache.delete(month)
+  }
 }
 
 /** The newest month, if it already holds more than HIGH_TRAFFIC_RATIO times
@@ -2021,7 +2150,7 @@ export async function readDashboard(
         .map(m => byMonth.find(b => b.month === m)!)
         .reverse() // newest first
       const [all, oldestEvent, backfilled] = await Promise.all([
-        readMonths(store, wanted),
+        readMonthsCached(bulkStore ?? store, wanted),
         months.length > 0
           ? (store.lindex(
               MONTH_KEY_PREFIX + months[0],
@@ -2168,7 +2297,7 @@ export async function backfillFirstSeen(): Promise<FirstSeenBackfillResult> {
     )
   }
   const byMonth = await storedMonths(store)
-  const all = await readMonths(store, [...byMonth].reverse())
+  const all = await readMonths(bulkStore ?? store, [...byMonth].reverse())
   const earliest = earliestByVid(all)
   const vids = [...earliest.keys()]
   let written = 0

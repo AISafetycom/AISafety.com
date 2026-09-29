@@ -738,3 +738,56 @@
   color: var(--teal-400);
   font-variant-numeric: tabular-nums;
 }
+
+/* ─── Instant click feedback ──────────────────────────────────────────── */
+/* New figures take a moment to work out, so a click shows at once: the
+   clicked tab or pill lights up (PendingMark gives it a data-pending child
+   while its page loads), the one it replaces steps back, and the figures
+   below fade until the new ones arrive. The date presets do the same in
+   DateRangePicker. The fade waits a beat so quick loads don't flicker. */
+.dashboard:has([data-pending]) :is(.panel, .empty) {
+  opacity: 0.45;
+  transition: opacity 0.2s 0.15s;
+}
+
+.pageTabs:has([data-pending]) .pageTabActive,
+.clickToggle:has([data-pending]) .clickToggleBtnActive {
+  color: var(--teal-300);
+  background-color: transparent;
+  border-color: var(--teal-800);
+}
+
+.pageTabs .pageTab:has([data-pending]),
+.clickToggle .clickToggleBtn:has([data-pending]) {
+  color: var(--teal-900);
+  background-color: var(--bright-teal-300);
+  border-color: var(--bright-teal-300);
+}
+
+.sourceSplit:has([data-pending]) .sourceStatActive {
+  background-color: var(--teal-900);
+  border-color: var(--teal-800);
+}
+
+.sourceSplit:has([data-pending]) .sourceStatActive .sourceStatName {
+  color: var(--teal-300);
+}
+
+.sourceSplit:has([data-pending]) .sourceStatActive .sourceStatCount {
+  color: var(--white);
+}
+
+.sourceSplit:has([data-pending]) .sourceStatActive .sourceStatPct {
+  color: var(--teal-400);
+}
+
+.sourceSplit .sourceStat:has([data-pending]) {
+  background-color: var(--bright-teal-300);
+  border-color: var(--bright-teal-300);
+}
+
+.sourceSplit
+  .sourceStat:has([data-pending])
+  :is(.sourceStatName, .sourceStatCount, .sourceStatPct) {
+  color: var(--teal-900);
+}
