@@ -119,7 +119,6 @@ export default function Position({
   const firstNumbered = list.findIndex(p => p.sort !== null)
   const unsorted = firstNumbered === -1 ? list.length : firstNumbered
   const above = slot > 0 ? list[slot - 1] : null
-  const below = list[slot] ?? null
   const moves = sort === null ? [] : roomFor(list, sort, record)
 
   const q = query.trim().toLowerCase()
@@ -233,13 +232,6 @@ export default function Position({
             </>
           ) : (
             'at the top'
-          )}
-          {below ? (
-            <>
-              , before <b>{below.name}</b>
-            </>
-          ) : (
-            ', at the bottom'
           )}
         </span>
       </span>
