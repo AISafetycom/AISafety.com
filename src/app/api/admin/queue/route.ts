@@ -11,6 +11,8 @@
        now for the page's refreshes. A write, so it takes the edit grant;
        a viewer gets the plain list.
   GET  /api/admin/queue?target=<tbl>/<rec>     → { fields, attachments, schema } (live)
+  GET  /api/admin/queue?order=<tbl>            → { order } – the page's published
+       listings by Sort, for placing an addition (null for a table with no Sort)
   POST /api/admin/queue  body { id, action, edits?, reason?, replyDraft? } → { item }
        action: accept | reject | edit | undo
        (edit keeps the page's pending edits, and the reply draft as
@@ -32,6 +34,7 @@ import {
   acceptItem,
   agentInfo,
   closeHandledRows,
+  getPageOrder,
   getQueueItem,
   getTableSchema,
   getTargetFields,
@@ -78,6 +81,8 @@ export async function GET(req: NextRequest) {
   const auth = await ensureAuth(false)
   if (auth) return auth
   try {
+    const orderOf = req.nextUrl.searchParams.get('order')
+    if (orderOf) return json({ order: await getPageOrder(orderOf) })
     const target = req.nextUrl.searchParams.get('target')
     if (target) {
       const [table = '', record = ''] = target.split('/')

@@ -35,6 +35,8 @@ import SitePreview, {
   seedPreviews,
 } from './SitePreview'
 import Chat, { CharCount, descriptionCap } from './Chat'
+import Position, { forgetOrder } from './Position'
+import { SORT_FIELD, sortValue } from '@/lib/admin/queue-place'
 import styles from './queue.module.css'
 
 // The Queue is a triage tool Bryce sits in for long stretches, so it has its
@@ -1078,6 +1080,7 @@ export default function QueueAdmin({
   const [agentChat, setAgentChat] = useState(false)
   // Bumped by the F key so the chat box takes focus.
   const [chatFocus, setChatFocus] = useState(0)
+  const [placeFocus, setPlaceFocus] = useState(0)
   const wantedRef = useRef<string | null>(null)
   // The focused item's record as it is in Airtable now, plus the table's
   // field list, so empty fields (a missing logo) show as empty. By item id.
@@ -1940,8 +1943,10 @@ export default function QueueAdmin({
         // picture already on the page stays.
         const updated = { ...data.item, logo: data.item.logo ?? item.logo }
         // Accept wrote the edits and the flag, undo took them back: the
-        // card built before either is out of date.
+        // card built before either is out of date, and so is the page's
+        // order the Position picker read.
         forgetCard(updated)
+        if (updated.type === 'Add') forgetOrder(updated.targetTable)
         setItems(prev =>
           prev ? prev.map(i => (i.id === updated.id ? updated : i)) : prev
         )
@@ -2200,6 +2205,13 @@ export default function QueueAdmin({
           if (canEdit && item && agentChat) {
             e.preventDefault()
             setChatFocus(n => n + 1)
+          }
+          break
+        case 'p':
+          // Where the addition goes on its page (Bryce, 30 Sept 2026).
+          if (canEdit && item?.type === 'Add' && isOpen(item)) {
+            e.preventDefault()
+            setPlaceFocus(n => n + 1)
           }
           break
         case '1':
@@ -2638,6 +2650,7 @@ export default function QueueAdmin({
                 act={(action, extra) => void act(selected, action, extra)}
                 chatAgent={canEdit && agentChat ? agent : null}
                 chatFocus={chatFocus}
+                placeFocus={placeFocus}
                 readOnly={!canEdit}
               />
             ) : (
@@ -2783,6 +2796,14 @@ export default function QueueAdmin({
                 <kbd>F</kbd>
               </dt>
               <dd>talk to Fable about the item, or tell it what to change</dd>
+              <dt>
+                <kbd>P</kbd>
+              </dt>
+              <dd>
+                on an addition, choose where it goes on its page: type to find a
+                listing, <kbd>↑</kbd> <kbd>↓</kbd> and <kbd>Enter</kbd> puts it
+                after that one
+              </dd>
               <dt>
                 <kbd>S</kbd>
               </dt>
@@ -2981,6 +3002,7 @@ function Detail({
   act,
   chatAgent,
   chatFocus,
+  placeFocus,
   readOnly,
 }: {
   item: QueueItem
@@ -2994,6 +3016,8 @@ function Detail({
   /** The Mac agent, when it is up and can chat; null hides the panel. */
   chatAgent: AgentInfo | null
   chatFocus: number
+  /** Bumped by P: open the Position list on an addition. */
+  placeFocus: number
   /** A view-only session: no editing, no deciding. */
   readOnly: boolean
 }) {
@@ -3009,6 +3033,13 @@ function Detail({
       : (live?.fields ?? item.fields ?? {})
   const types = new Map((live?.schema ?? []).map(f => [f.name, f]))
   const editsToSave = () => coerceEdits(d.edits, original, types)
+
+  // An addition to a page kept in a manual order gets the Position
+  // picker, which stands in for its Sort field.
+  const placeable =
+    item.type === 'Add' &&
+    (live?.schema ?? []).some(f => f.name === SORT_FIELD && f.type === 'number')
+  const sortWas = (live?.fields ?? item.fields ?? {})[SORT_FIELD]
 
   const hasCard =
     item.type === 'Change' && Boolean(item.targetTable && item.targetRecord)
@@ -3241,11 +3272,31 @@ function Detail({
                   readOnly={readOnly}
                 />
               </div>
+              {placeable && (
+                <Position
+                  key={item.id}
+                  table={item.targetTable}
+                  record={item.targetRecord}
+                  name={splitTitle(item).name ?? item.title}
+                  value={SORT_FIELD in d.edits ? d.edits[SORT_FIELD] : sortWas}
+                  edited={SORT_FIELD in d.edits}
+                  canEdit={!revising && isOpen(item)}
+                  focusTick={placeFocus}
+                  onChange={sort => {
+                    // Back where the record has it is not an edit.
+                    const edits = { ...d.edits }
+                    if (sort === sortValue(sortWas)) delete edits[SORT_FIELD]
+                    else edits[SORT_FIELD] = String(sort)
+                    setD({ edits })
+                  }}
+                />
+              )}
               <Fields
                 part="rest"
                 item={item}
                 fields={live?.fields ?? item.fields ?? {}}
                 schema={live?.schema ?? []}
+                omit={placeable ? SORT_FIELD : undefined}
                 onImage={onImage}
                 d={d}
                 setD={setD}
@@ -3720,6 +3771,7 @@ function Fields({
   item,
   fields,
   schema,
+  omit,
   onImage,
   d,
   setD,
@@ -3731,6 +3783,8 @@ function Fields({
   item: QueueItem
   fields: Record<string, unknown>
   schema: FieldInfo[]
+  /** A field shown elsewhere on the item (Sort, by the Position picker). */
+  omit?: string
   onImage: (field: string, urls: string[]) => void
   d: Draft
   setD: (patch: Partial<Draft>) => void
@@ -3765,7 +3819,9 @@ function Fields({
   const seen = new Set(main.map(([k]) => k))
   const editable = ([k]: [string, unknown]) =>
     !HOUSEKEEPING.test(k) && !COMPUTED_TYPES.has(types.get(k) ?? '')
-  const rest = entries.filter(e => !seen.has(e[0]) && editable(e))
+  const rest = entries.filter(
+    e => !seen.has(e[0]) && e[0] !== omit && editable(e)
+  )
   const revising = item.status === 'Revising' || readOnly
   // The description's length against its page's cap, as the chat's edit
   // card counts it (Bryce, 24 Sept 2026).

@@ -5,7 +5,8 @@
   Fable Review, the Secretary, the Discord intake); this file is the site's
   side — list the rows, and carry out a decision:
 
-    accept  Add     → tick Publish? on the target record (plus any edits)
+    accept  Add     → tick Publish? on the target record (plus any edits;
+                      a Sort already taken moves the listings below down)
             Change  → write the proposed field values, drop the Broom flag row
             Rule    → mark Accepted; the Mac worker patches the rulebook
     reject          → mark Rejected with the reason (the worker deletes a
@@ -31,6 +32,7 @@ import {
 } from './airtable'
 import { sealToken } from './session'
 import { isExpiredAttachment } from './attachment-url'
+import { roomFor, SORT_FIELD, type Placed } from './queue-place'
 
 export const QUEUE_TABLE_ID = 'tblonlKwIFJ7Aa8QN'
 const BROOM_ISSUES_TABLE_ID = 'tblntD3WITPEgjHRK'
@@ -534,6 +536,9 @@ export interface FieldInfo {
 
 const schemaCache = new Map<string, { at: number; fields: FieldInfo[] }>()
 const SCHEMA_TTL_MS = 10 * 60 * 1000
+/** Each table's name column (Projects calls it "Project Name"), filled
+ *  with the schema. */
+const primaryNames = new Map<string, string>()
 
 /** Every field of a resource table, in Airtable's column order, so the page
  *  can list what is EMPTY on a record (a missing logo, an empty location)
@@ -556,6 +561,7 @@ export async function getTableSchema(table: string): Promise<FieldInfo[]> {
   const data = (await res.json()) as {
     tables: {
       id: string
+      primaryFieldId: string
       fields: {
         id: string
         name: string
@@ -565,6 +571,8 @@ export async function getTableSchema(table: string): Promise<FieldInfo[]> {
     }[]
   }
   for (const t of data.tables) {
+    const primary = t.fields.find(f => f.id === t.primaryFieldId)
+    if (primary) primaryNames.set(t.id, primary.name)
     schemaCache.set(t.id, {
       at: Date.now(),
       fields: t.fields
@@ -659,6 +667,75 @@ export async function getTargetFields(
     }
   }
   return { fields: out, attachments }
+}
+
+// ─── Where a new listing sits on its page ───────────────────────────────────
+
+/** The table's published listings in the order its page shows them (Sort
+ *  ascending, a listing with no Sort first, as the site reads them), for
+ *  the Position picker on an addition. Null when the table keeps no Sort:
+ *  its page orders itself (events, dated training, the map). */
+export async function getPageOrder(table: string): Promise<Placed[] | null> {
+  if (!TABLE_ID_RE.test(table)) return null
+  const schema = await getTableSchema(table)
+  if (!schema.some(f => f.name === SORT_FIELD && f.type === 'number')) {
+    return null
+  }
+  const name = primaryNames.get(table) ?? 'Name'
+  const featured = schema.some(f => f.name === 'Featured')
+  const params = new URLSearchParams({
+    filterByFormula: 'AND({Publish?}, NOT({Hide?}))',
+    'sort[0][field]': SORT_FIELD,
+    'sort[0][direction]': 'asc',
+  })
+  params.append('fields[]', name)
+  params.append('fields[]', SORT_FIELD)
+  if (featured) params.append('fields[]', 'Featured')
+  let rows: AirtableRow<RawFields>[]
+  try {
+    rows = await listAll<RawFields>(table, params)
+  } catch (e) {
+    throw new QueueError(
+      `Airtable read failed: ${e instanceof Error ? e.message : String(e)}`,
+      502
+    )
+  }
+  return rows.map(r => ({
+    id: r.id,
+    name: str(r.fields[name]) ?? '(no name)',
+    sort:
+      typeof r.fields[SORT_FIELD] === 'number' ? r.fields[SORT_FIELD] : null,
+    featured: Boolean(str(r.fields.Featured)),
+  }))
+}
+
+/** Frees a Sort value for the addition being published: the listing that
+ *  holds it, and each one straight after it with no gap, moves down one
+ *  (roomFor), ten records a request. Nothing to do when it is free. */
+async function makeRoom(
+  table: string,
+  record: string,
+  sort: number
+): Promise<void> {
+  const order = await getPageOrder(table)
+  if (!order) return
+  const moves = roomFor(order, sort, record)
+  for (let i = 0; i < moves.length; i += 10) {
+    const res = await airtableRequest(table, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        records: moves
+          .slice(i, i + 10)
+          .map(m => ({ id: m.id, fields: { [SORT_FIELD]: m.sort } })),
+      }),
+    })
+    if (!res.ok) {
+      throw new QueueError(
+        `Airtable refused to move the listings below it down: ${res.status} ${(await res.text()).slice(0, 300)}`,
+        502
+      )
+    }
+  }
 }
 
 // ─── Preview through the site's own code ────────────────────────────────────
@@ -1350,10 +1427,12 @@ export async function acceptItem(
   try {
     if (item.type === 'Add') {
       const t = target(item)
-      await patchRecord(t.table, t.record, {
-        ...(await withAttachmentShapes(t.table, edits, 'throw')),
-        'Publish?': true,
-      })
+      const fields = await withAttachmentShapes(t.table, edits, 'throw')
+      // A place picked on the page whose Sort a listing already holds:
+      // that one and the run after it move down one first.
+      const sort = fields[SORT_FIELD]
+      if (typeof sort === 'number') await makeRoom(t.table, t.record, sort)
+      await patchRecord(t.table, t.record, { ...fields, 'Publish?': true })
     } else if (item.type === 'Change') {
       const t = target(item)
       const fields: Record<string, unknown> = {}
