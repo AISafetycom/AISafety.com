@@ -422,7 +422,7 @@ describe('the newsletter’s POST routes answer only the admin page itself', () 
     expect(ac.creates).toEqual(['201'])
   })
 
-  it('Stop, card text, Consider applying if, reorder and Send test: 403 from another subdomain', async () => {
+  it('Stop, card text, Consider applying if, reorder, Send test and Delete: 403 from another subdomain', async () => {
     const ac = makeAC({
       extra: [camp({ id: '181', name: ISSUE, status: '1' })],
     })
@@ -445,6 +445,7 @@ describe('the newsletter’s POST routes answer only the admin page itself', () 
       ],
       ['reorder', { campaign: '200', order: { g0: ['recAAAAAAAAAAAAAA'] } }],
       ['test', { campaign: '200' }],
+      ['delete', { campaign: '200' }],
     ]
     for (const [name, body] of routes) {
       const { POST } = (await import(
@@ -458,5 +459,6 @@ describe('the newsletter’s POST routes answer only the admin page itself', () 
     // Nothing reached ActiveCampaign's write side.
     expect(ac.calls.filter(c => c.method !== 'GET')).toEqual([])
     expect(ac.camps.some(c => c.id === '181')).toBe(true)
+    expect(ac.camps.some(c => c.id === '200')).toBe(true)
   })
 })
