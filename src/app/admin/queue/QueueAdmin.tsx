@@ -37,6 +37,14 @@ import SitePreview, {
 import Chat, { CharCount, descriptionCap } from './Chat'
 import Position, { forgetOrder } from './Position'
 import { SORT_FIELD, sortValue } from '@/lib/admin/queue-place'
+import {
+  fileNameOf,
+  hasExpiredPicture,
+  isImageLink,
+  pictureOf,
+  touchesPicture,
+  type PictureSide,
+} from '@/lib/admin/queue-picture'
 import styles from './queue.module.css'
 
 // The Queue is a triage tool Bryce sits in for long stretches, so it has its
@@ -390,58 +398,6 @@ function friendly(text: string): string {
   return text
 }
 
-/** An attachment value as the queue sees it: Airtable's own shape (an
- *  object or list with `url`), the site's snapshot (a list of URLs), or
- *  Broom's proposal (`{url, filename}`). The old side of a change often
- *  carries only `{id, filename}`, which is why `pictureOf` also takes the
- *  record's live field. */
-function pictureUrl(v: unknown): string | null {
-  if (Array.isArray(v)) return v.length ? pictureUrl(v[0]) : null
-  if (typeof v === 'string') return IMAGE_URL.test(v) ? v : null
-  if (v && typeof v === 'object' && 'url' in v) {
-    const url = (v as { url: unknown }).url
-    return typeof url === 'string' ? url : null
-  }
-  return null
-}
-
-function looksLikeAttachment(v: unknown): boolean {
-  if (Array.isArray(v)) return v.length > 0 && v.every(looksLikeAttachment)
-  return Boolean(
-    v && typeof v === 'object' && ('url' in v || 'filename' in v || 'id' in v)
-  )
-}
-
-function fileNameOf(v: unknown): string | null {
-  if (Array.isArray(v)) return v.length ? fileNameOf(v[0]) : null
-  if (v && typeof v === 'object' && 'filename' in v) {
-    const f = (v as { filename: unknown }).filename
-    return typeof f === 'string' ? f : null
-  }
-  if (typeof v === 'string') {
-    try {
-      return decodeURIComponent(new URL(v).pathname.split('/').pop() ?? '')
-    } catch {
-      return null
-    }
-  }
-  return null
-}
-
-/** The picture behind one side of a change to a logo or image field: the
- *  value's own URL, else (for the old side, whose snapshot has none) the
- *  record's live field. Null when the value is not a picture at all. */
-function pictureOf(
-  v: unknown,
-  liveValue: unknown
-): { url: string | null; name: string | null } | null {
-  if (!looksLikeAttachment(v) && !pictureUrl(v)) return null
-  return {
-    url: pictureUrl(v) ?? pictureUrl(liveValue),
-    name: fileNameOf(v) ?? fileNameOf(liveValue),
-  }
-}
-
 /** Saves a picture under its file name. A host that refuses a cross-site
  *  read cannot be fetched from here, so the picture opens in a tab instead
  *  (a plain download link is ignored by browsers for another site). */
@@ -469,16 +425,19 @@ function fileSize(bytes: number): string {
 
 /** One side of a change to an image field: the picture with a download
  *  button on hover, then its file name, then its size in pixels and bytes
- *  (the bytes only when the host lets the page read the file). A missing
- *  picture (an expired link) shows the name only. */
-function Picture({ url, name }: { url: string | null; name: string | null }) {
+ *  (the bytes only when the host lets the page read the file). A link that
+ *  does not load gives way to the fallback (the record's own picture),
+ *  then to the plain box with the name: never a broken picture. */
+function Picture({ url, fallback, name }: PictureSide) {
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
   const [bytes, setBytes] = useState<number | null>(null)
   // Keyed by URL where it is used, so a new picture is a fresh component.
+  const [failed, setFailed] = useState<string[]>([])
+  const src = [url, fallback].find(u => u && !failed.includes(u)) ?? null
   useEffect(() => {
-    if (!url) return
+    if (!src) return
     let cancelled = false
-    fetch(url, { mode: 'cors' })
+    fetch(src, { mode: 'cors' })
       .then(r => (r.ok ? r.blob() : null))
       .then(b => {
         if (!cancelled && b) setBytes(b.size)
@@ -489,7 +448,7 @@ function Picture({ url, name }: { url: string | null; name: string | null }) {
     return () => {
       cancelled = true
     }
-  }, [url])
+  }, [src])
   const meta = [
     dims ? `${dims.w} × ${dims.h}` : null,
     bytes !== null ? fileSize(bytes) : null,
@@ -497,11 +456,12 @@ function Picture({ url, name }: { url: string | null; name: string | null }) {
   return (
     <span className={styles.picture}>
       <span className={styles.pictureFrame}>
-        {url ? (
+        {src ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
+            key={src}
             className={styles.pictureImg}
-            src={url}
+            src={src}
             alt=""
             onLoad={e => {
               const el = e.currentTarget
@@ -509,17 +469,21 @@ function Picture({ url, name }: { url: string | null; name: string | null }) {
                 setDims({ w: el.naturalWidth, h: el.naturalHeight })
               }
             }}
+            onError={() => {
+              setBytes(null)
+              setFailed(prev => [...prev, src])
+            }}
           />
         ) : (
           <span className={`${styles.pictureImg} ${styles.pictureEmpty}`} />
         )}
-        {url && (
+        {src && (
           <button
             type="button"
             className={styles.pictureDownload}
             title={`Download ${name ?? 'the picture'}`}
             aria-label={`Download ${name ?? 'the picture'}`}
-            onClick={() => void downloadPicture(url, name)}
+            onClick={() => void downloadPicture(src, name)}
           >
             <Icon src={ICON.download} size={12} />
           </button>
@@ -530,6 +494,26 @@ function Picture({ url, name }: { url: string | null; name: string | null }) {
         <span className={styles.pictureMeta}>{meta.join(' · ')}</span>
       )}
     </span>
+  )
+}
+
+/** A picture that turns into its plain box when its link does not load
+ *  (an Airtable link that has run out), instead of the browser's broken
+ *  picture. */
+function SafeImg({
+  src,
+  className,
+  empty,
+}: {
+  src: string | null | undefined
+  className: string
+  empty: React.ReactNode
+}) {
+  const [dead, setDead] = useState<string | null>(null)
+  if (!src || dead === src) return <>{empty}</>
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img className={className} src={src} alt="" onError={() => setDead(src)} />
   )
 }
 
@@ -1602,14 +1586,17 @@ export default function QueueAdmin({
   useEffect(() => {
     if (!selected) return
     // Additions always; a Change only when it swaps a picture, whose old
-    // side is snapshotted without a link (the live read supplies one).
+    // side is snapshotted without a working link (the live read supplies
+    // one).
     const wantsLive =
       selected.type === 'Add' ||
-      (selected.type === 'Change' &&
-        selected.changes.some(c => looksLikeAttachment(c.from)))
+      (selected.type === 'Change' && selected.changes.some(touchesPicture))
     if (!wantsLive) return
     if (!selected.targetTable || !selected.targetRecord) return
-    if (live[selected.id]) return
+    // A read whose picture links have run out (the page was left open for
+    // hours) is made again, or its pictures could not show.
+    const had = live[selected.id]
+    if (had && !hasExpiredPicture(had.fields)) return
     const id = selected.id
     const target = `${selected.targetTable}/${selected.targetRecord}`
     let cancelled = false
@@ -2686,12 +2673,13 @@ export default function QueueAdmin({
               <Icon src={toast.no ? ICON.x : ICON.check} size={16} />
             ) : null}
           </span>
-          {toast.item.logo ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img className={styles.rowLogo} src={toast.item.logo} alt="" />
-          ) : (
-            <span className={`${styles.rowLogo} ${styles.rowLogoEmpty}`} />
-          )}
+          <SafeImg
+            src={toast.item.logo}
+            className={styles.rowLogo}
+            empty={
+              <span className={`${styles.rowLogo} ${styles.rowLogoEmpty}`} />
+            }
+          />
           <span className={styles.toastBody}>
             <span className={styles.rowTitle}>
               {splitTitle(toast.item).name ?? toast.item.title}
@@ -3327,7 +3315,10 @@ function Detail({
                   </span>
                   <span className={styles.from}>
                     {(() => {
-                      const pic = pictureOf(c.from, live?.fields[c.field])
+                      const pic = pictureOf(c.from, live?.fields[c.field], {
+                        pictureField: touchesPicture(c),
+                        open: isOpen(item),
+                      })
                       return pic ? (
                         <Picture key={pic.url ?? ''} {...pic} />
                       ) : (
@@ -3345,7 +3336,9 @@ function Detail({
                       if (c.field in d.edits || d.editing === c.field) {
                         return null
                       }
-                      const pic = pictureOf(c.to, null)
+                      const pic = pictureOf(c.to, null, {
+                        pictureField: touchesPicture(c),
+                      })
                       return pic ? (
                         <Picture key={pic.url ?? ''} {...pic} />
                       ) : null
@@ -3571,9 +3564,6 @@ function Detail({
   )
 }
 
-const IMAGE_URL =
-  /\.(png|jpe?g|webp|gif|svg)(\?|$)|airtableusercontent\.com|blob\.vercel-storage\.com/i
-
 /** The picture links in an edit's text – one, or several separated by
  *  commas – or null when it names no link (a note about the old file). */
 function imageLinks(text: string): string[] | null {
@@ -3588,7 +3578,7 @@ function isImageList(v: unknown): v is string[] {
   return (
     Array.isArray(v) &&
     v.length > 0 &&
-    v.every(x => typeof x === 'string' && IMAGE_URL.test(x))
+    v.every(x => typeof x === 'string' && isImageLink(x))
   )
 }
 
@@ -4043,6 +4033,8 @@ function ImageSlot({
   onDone: (urls: string[]) => void
 }) {
   const [over, setOver] = useState(false)
+  // Pictures whose links did not load.
+  const [deadThumbs, setDeadThumbs] = useState<string[]>([])
   // What is on its way: a drop, or an undo/redo of one.
   const [busy, setBusy] = useState<'upload' | 'undo' | 'redo' | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -4164,14 +4156,21 @@ function ImageSlot({
         return (
           <span key={src} className={styles.thumbItem}>
             <span className={styles.thumbWrap}>
-              <Image
-                src={src}
-                alt=""
-                width={56}
-                height={56}
-                unoptimized
-                className={styles.thumb}
-              />
+              {deadThumbs.includes(src) ? (
+                <span className={`${styles.thumb} ${styles.thumbEmpty}`} />
+              ) : (
+                <Image
+                  src={src}
+                  alt=""
+                  width={56}
+                  height={56}
+                  unoptimized
+                  className={styles.thumb}
+                  // An expired link shows the plain box, not a broken
+                  // picture; the next live read brings a fresh one.
+                  onError={() => setDeadThumbs(prev => [...prev, src])}
+                />
+              )}
               {over && <span className={styles.thumbOverlay}>Replace</span>}
             </span>
             {meta && (meta.filename || line) && (
