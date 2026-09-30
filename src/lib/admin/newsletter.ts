@@ -499,6 +499,8 @@ export interface DraftSummary {
   sendDelayMinutes: number
   /** Card edits may be saved into this draft from this copy of the site. */
   editable: boolean
+  /** The draft may be deleted from this copy of the site. */
+  deletable: boolean
   /** Why card edits are off just now (a wave of the issue is going out and
    *  shares this draft's email), or null. */
   editLock: string | null
@@ -1971,6 +1973,7 @@ export async function listDrafts(): Promise<DraftSummary[]> {
         listId != null &&
         (!isRealList(listId) || canWriteRealListsHere()) &&
         editLock == null,
+      deletable: deleteRefusal(listIds) == null,
       editLock,
       preview: previewText(msg.html ?? ''),
       cards: cardGroups(msg.html ?? ''),
@@ -2984,6 +2987,87 @@ export async function sendTestCopy(
   return { to }
 }
 
+/** ActiveCampaign answered a draft delete with a refusal; `detail` carries
+ *  its reason. */
+export class DraftDeleteError extends Error {
+  readonly detail: string
+  constructor(detail: string) {
+    super(detail)
+    this.detail = detail
+  }
+}
+
+/** Why a draft on these lists can't be deleted from this copy of the site,
+ *  or null: the rule for editing it (a real list's drafts from production
+ *  only, and only newsletter lists). */
+function deleteRefusal(listIds: string[]): string | null {
+  for (const l of listIds) {
+    const r = listRefusal(l)
+    if (r) return r
+  }
+  return null
+}
+
+/** Delete a draft waiting for approval, with ~/Newsletter/ac.py
+ *  `delete_draft()`'s refusals: the campaign must still be a draft and every
+ *  message on it must carry the pipeline's marker, so a wrong id can never
+ *  take out a scheduled or sent campaign, or one built by hand. Refused
+ *  while an approval of the issue is running or has just scheduled it. Only
+ *  the campaign goes: a wave already sent was made from this same message.
+ *  The pipeline's next build of the issue finds the draft gone and makes a
+ *  new one. `deleted: false` = it was already gone. */
+export async function deleteDraft(
+  draftId: string,
+  by: string
+): Promise<{ deleted: boolean }> {
+  const id = acId(draftId)
+  const gone = (err: Error) => {
+    if (/: 404 /.test(err.message)) return null
+    throw err
+  }
+  const [campaign, listIds, messageIds] = await Promise.all([
+    v3<{ campaign?: RawCampaign }>(`campaigns/${id}`)
+      .then(d => d.campaign ?? null)
+      .catch(gone),
+    campaignListIds(id).catch(gone),
+    campaignMessageIds(id).catch(gone),
+  ])
+  if (!campaign || !listIds || !messageIds) {
+    forgetSharedCampaigns([id])
+    return { deleted: false }
+  }
+  if (campaign.status !== '0') {
+    throw new DraftProblemError([
+      `campaign ${id} is ${statusLabel(campaign.status)}, not a draft – only drafts are deleted from here`,
+    ])
+  }
+  const refusal = deleteRefusal(listIds)
+  if (refusal) throw new DraftProblemError([refusal])
+  const msgs = await Promise.all(messageIds.map(m => message(m)))
+  if (msgs.length === 0 || msgs.some(m => !MARKER_RE.test(m.html ?? ''))) {
+    throw new DraftProblemError([
+      'this draft wasn’t built by the pipeline (no content marker), so it isn’t deleted from here',
+    ])
+  }
+  for (const l of new Set(listIds)) {
+    const approving = await approvalEditLock(
+      l,
+      baseIssueName(campaign.name),
+      'delete'
+    )
+    if (approving) throw new DraftProblemError([approving])
+  }
+  const out = await v1answer('campaign_delete', { id })
+  forgetSharedCampaigns([id])
+  if (Number(out.result_code) !== 1) {
+    throw new DraftDeleteError(
+      `ActiveCampaign didn’t delete it: ${String(out.result_message ?? 'no reason given').slice(0, 300)}`
+    )
+  }
+  console.info(`[newsletter] draft ${id} (“${campaign.name}”) deleted by ${by}`)
+  return { deleted: true }
+}
+
 /* ─── Approval: the lock and the record (Upstash) ─────────────────────── */
 
 // The same Upstash database the analytics, the admin users and the click
@@ -3061,13 +3145,14 @@ async function releaseApproveLock(key: string): Promise<void> {
   else localLocks.delete(key)
 }
 
-/** Why card edits must wait for an approval of this issue on this list, or
- *  null: while one runs, or for the minutes after it scheduled a send, the
- *  message it checked (and may already be sending) is not to change under
- *  it. Refuses when the lock can't be read. */
+/** Why card edits (or deleting the draft) must wait for an approval of this
+ *  issue on this list, or null: while one runs, or for the minutes after it
+ *  scheduled a send, the draft it checked (and may already be sending) is
+ *  not to change under it. Refuses when the lock can't be read. */
 async function approvalEditLock(
   listId: string,
-  baseName: string
+  baseName: string,
+  what: 'edit' | 'delete' = 'edit'
 ): Promise<string | null> {
   const key = approveLockKey(listId, baseName)
   const redis = kv()
@@ -3079,14 +3164,14 @@ async function approvalEditLock(
       console.warn(
         `[newsletter] reading the approval lock before an edit failed: ${err instanceof Error ? err.message : String(err)}`
       )
-      return 'couldn’t check whether an approval of this issue is running, so the edit wasn’t saved – try again in a minute'
+      return `couldn’t check whether an approval of this issue is running, so the ${what === 'delete' ? 'draft wasn’t deleted' : 'edit wasn’t saved'} – try again in a minute`
     }
   } else {
     const hit = localLocks.get(key)
     holder = hit && hit.until > Date.now() ? hit.holder : null
   }
   if (!holder) return null
-  return `an approval of this issue (${holder.approver || 'someone'}) is running or has just scheduled it, so card edits wait – for up to 15 minutes, or until its send is canceled`
+  return `an approval of this issue (${holder.approver || 'someone'}) is running or has just scheduled it, so ${what === 'delete' ? 'deleting the draft waits' : 'card edits wait'} – for up to 15 minutes, or until its send is canceled`
 }
 
 /** What the send watcher knows about each real-list approval. */

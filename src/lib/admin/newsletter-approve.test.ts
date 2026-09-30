@@ -484,8 +484,106 @@ describe('only production can send to, or edit drafts on, lists 6/7/8', () => {
     const nl = await freshModule({ VERCEL_ENV: 'development' })
     const [d] = await nl.listDrafts()
     expect(d.editable).toBe(false)
+    expect(d.deletable).toBe(false)
     expect(d.blocks.join(' ')).toMatch(/only aisafety\.com itself/)
     expect(d.problems).toEqual([])
+  })
+})
+
+/* ─── Delete on a draft ────────────────────────────────────────────────── */
+
+describe('deleteDraft', () => {
+  const deletes = (ac: ReturnType<typeof makeAC>) =>
+    ac.calls.filter(c => c.action === 'campaign_delete')
+
+  it('deletes a pipeline draft, and only the campaign: its message stays', async () => {
+    const ac = makeAC()
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    expect((await nl.listDrafts())[0].deletable).toBe(true)
+    await expect(nl.deleteDraft('200', 'Bryce')).resolves.toEqual({
+      deleted: true,
+    })
+    expect(deletes(ac).map(c => c.form?.get('id'))).toEqual(['200'])
+    expect(ac.calls.some(c => c.action === 'message_delete')).toBe(false)
+    expect(ac.msgs.has('300')).toBe(true)
+    expect(await nl.listDrafts()).toEqual([])
+  })
+
+  it('a draft already gone answers deleted: false', async () => {
+    const ac = makeAC()
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    await expect(nl.deleteDraft('999', 'Bryce')).resolves.toEqual({
+      deleted: false,
+    })
+    expect(deletes(ac)).toEqual([])
+  })
+
+  it('refuses a campaign that isn’t a draft any more', async () => {
+    const ac = makeAC({
+      extra: [
+        camp({
+          id: '181',
+          name: 'Events · Week 41, 2026',
+          status: '1',
+          msg: '300',
+        }),
+      ],
+    })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const r = await outcome(nl.deleteDraft('181', 'Bryce'))
+    expect(r.err).toBeInstanceOf(nl.DraftProblemError)
+    expect((r.err as Error).message).toMatch(/not a draft/)
+    expect(deletes(ac)).toEqual([])
+  })
+
+  it('refuses a draft without the pipeline’s marker', async () => {
+    const e = buildEmail()
+    const ac = makeAC({
+      email: {
+        html: e.html.replace(/<!--aisafety-issue:[0-9a-f]+-->/, ''),
+        text: e.text,
+      },
+    })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const r = await outcome(nl.deleteDraft('200', 'Bryce'))
+    expect((r.err as Error).message).toMatch(/wasn’t built by the pipeline/)
+    expect(deletes(ac)).toEqual([])
+  })
+
+  it('refuses a real list’s draft outside production; a test list’s goes anywhere', async () => {
+    const ac = makeAC()
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule({ VERCEL_ENV: 'preview' })
+    const r = await outcome(nl.deleteDraft('200', 'Bryce'))
+    expect((r.err as Error).message).toMatch(/only aisafety\.com itself/)
+    expect(deletes(ac)).toEqual([])
+
+    const test = makeAC({ draftList: '5' })
+    vi.stubGlobal('fetch', test.fetchMock)
+    await expect(nl.deleteDraft('200', 'Bryce')).resolves.toEqual({
+      deleted: true,
+    })
+  })
+
+  it('waits while an approval of the issue holds the lock', async () => {
+    const ac = makeAC({ deleteFails: true })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    // The approval's own delete of the draft fails, so the draft stays.
+    await nl.approveAndSend('200', '6', WHO)
+    const before = deletes(ac).length
+    const r = await outcome(nl.deleteDraft('200', 'Bryce'))
+    expect(r.err).toBeInstanceOf(nl.DraftProblemError)
+    expect((r.err as Error).message).toMatch(/deleting the draft waits/)
+    expect(deletes(ac)).toHaveLength(before)
+    expireLocks()
+    const later = await outcome(nl.deleteDraft('200', 'Bryce'))
+    expect(later.err).toBeInstanceOf(nl.DraftDeleteError)
+    expect((later.err as Error).message).toMatch(/temporary failure/)
   })
 })
 
