@@ -356,8 +356,27 @@ export default function Chat({
     inputRef.current?.focus()
   }, [focusTick])
 
-  // Keep the newest words in view: the panel is its own scroll box.
+  // Keep the newest words in view – the panel is its own scroll box – but
+  // after the thread first opens, only while the panel is already at its
+  // foot. Scrolled up to read something, the view stays put when a message
+  // goes, Fable starts thinking, writes or finishes (Bryce, 30 Sept 2026:
+  // "it jumps the viewer to the bottom").
+  const atFootRef = useRef(true)
+  const openedRef = useRef(false)
   useEffect(() => {
+    const box = inputRef.current?.closest<HTMLElement>('[data-chat-scroll]')
+    if (!box) return
+    const onScroll = () => {
+      atFootRef.current =
+        box.scrollHeight - box.scrollTop - box.clientHeight < 40
+    }
+    box.addEventListener('scroll', onScroll)
+    return () => box.removeEventListener('scroll', onScroll)
+  }, [])
+  useEffect(() => {
+    const opening = messages !== null && !openedRef.current
+    if (opening) openedRef.current = true
+    if (!opening && !atFootRef.current) return
     const box = endRef.current?.closest<HTMLElement>('[data-chat-scroll]')
     if (box) box.scrollTop = box.scrollHeight
   }, [messages, live, note, queued])
