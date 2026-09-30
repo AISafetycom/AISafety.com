@@ -6,12 +6,33 @@ import type { NextRequest } from 'next/server'
  *  header buys nothing: Google only redirects to URIs registered in the
  *  console, and a callback with a forged host is only fooling its sender. */
 export function publicOrigin(req: NextRequest): string {
+  return originFrom(req.headers, req.nextUrl)
+}
+
+function originFrom(
+  headers: Headers,
+  url: { protocol: string; host: string }
+): string {
   const proto =
-    req.headers.get('x-forwarded-proto')?.split(',')[0].trim() ||
-    req.nextUrl.protocol.replace(/:$/, '')
+    headers.get('x-forwarded-proto')?.split(',')[0].trim() ||
+    url.protocol.replace(/:$/, '')
   const host =
-    req.headers.get('x-forwarded-host')?.split(',')[0].trim() ||
-    req.headers.get('host') ||
-    req.nextUrl.host
+    headers.get('x-forwarded-host')?.split(',')[0].trim() ||
+    headers.get('host') ||
+    url.host
   return `${proto}://${host}`
+}
+
+/** A POST that changes something must come from the admin page itself. The
+ *  session cookie is SameSite=Lax, which keeps other sites out but not a
+ *  page on another subdomain of aisafety.com (the same "site"), so this
+ *  checks the origin too: the browser's own Sec-Fetch-Site, which no page
+ *  can set, and Origin for older browsers without it. A request with
+ *  neither isn't a browser's, so it carries nobody's cookie. */
+export function isSameOriginRequest(req: Request): boolean {
+  const site = req.headers.get('sec-fetch-site')
+  if (site != null) return site === 'same-origin'
+  const origin = req.headers.get('origin')
+  if (origin == null) return true
+  return origin === originFrom(req.headers, new URL(req.url))
 }

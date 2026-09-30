@@ -9,26 +9,64 @@
                                   drafts = pipeline-made draft campaigns with
                                   their verification result; recent = latest
                                   sends/scheduled campaigns
-  POST /api/admin/newsletter   → body { campaign, list }
-                                  re-verifies the draft, schedules it to send
-                                  in ~2 minutes, deletes the draft shell
-                               → { campaign, sdate, listName, activeContacts }
-                                  409 with { problems } when verification fails
+  POST /api/admin/newsletter   → body { campaign, list, confirmed?: [ids],
+                                  wave?: { segment, k, n }, override? }
+                                  re-verifies the draft under a lock and
+                                  schedules it — to the whole list, or to
+                                  wave k of n (the saved segment `segment`)
+                                  — to send in 10 minutes (2 on the test
+                                  lists). The draft shell is deleted after a
+                                  whole-list send or the last wave, and kept
+                                  for the next wave otherwise. `confirmed` =
+                                  the ids of the warnings ticked in the
+                                  dialog; `override` = the reason typed to
+                                  send a held wave anyway.
+                               → 200 ScheduledSend (campaignId, sdate, name,
+                                  wave, waves, expected, draftKept, notes…)
+                                  409 { problems } refused (nothing sent)
+                                  409 { needsConfirmation, warnings } tick
+                                      these first (nothing sent)
+                                  409 { needsOverride, holds } the wave is
+                                      held: type a reason (nothing sent)
+                                  409 { locked } another approval of the
+                                      issue (whole list or any wave) holds
+                                      the lock
+                                  202 { maybeScheduled } an error at or after
+                                      the create: it may be scheduled, so
+                                      don't press again
+                                  502 { notSent } failed before the create,
+                                      or the new campaign came back wrong
+                                      and was deleted at once
+                                  403 not posted from this page (another
+                                      site or subdomain; nothing sent)
+  Every real-list approval (and every 202 on a real list) emails the owner,
+  after the answer has gone (notifyApproval).
 */
 
-import { NextRequest } from 'next/server'
+import { after, NextRequest } from 'next/server'
 import {
   canSendNewsletter,
   canViewNewsletter,
+  currentAdmin,
   hasFreshSession,
   NEWSLETTER_FRESH_SECONDS,
 } from '@/lib/admin/auth'
+import { isSameOriginRequest } from '@/lib/admin/origin'
 import {
+  ApprovalLockedError,
   approveAndSend,
   DraftProblemError,
   isNewsletterConfigured,
+  isRealList,
   listDrafts,
   listRecent,
+  MaybeScheduledError,
+  NeedsConfirmationError,
+  NeedsOverrideError,
+  notifyApproval,
+  SEGMENT_ID_RE,
+  SendDeletedError,
+  type WaveChoice,
 } from '@/lib/admin/newsletter'
 
 export const runtime = 'nodejs'
@@ -93,35 +131,135 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  // Only the admin page itself may post here (see isSameOriginRequest).
+  if (!isSameOriginRequest(req))
+    return json({ error: 'cross-site request refused' }, 403)
   const auth = await ensureAuth(true)
   if (auth) return auth
+  const admin = await currentAdmin()
+  if (!admin) return json({ error: 'unauthorized' }, 401)
   let body: unknown
   try {
     body = await req.json()
   } catch {
     return json({ error: 'body must be JSON' }, 400)
   }
-  const { campaign, list } = (body ?? {}) as {
+  const { campaign, list, confirmed, wave, override } = (body ?? {}) as {
     campaign?: unknown
     list?: unknown
+    confirmed?: unknown
+    wave?: unknown
+    override?: unknown
   }
   const campaignId = String(campaign ?? '')
   const listId = String(list ?? '')
-  if (!/^\d+$/.test(campaignId) || !/^\d+$/.test(listId)) {
-    return json({ error: 'body must be { campaign: id, list: id }' }, 400)
+  const ticks =
+    confirmed === undefined
+      ? []
+      : Array.isArray(confirmed) &&
+          confirmed.length <= 200 &&
+          confirmed.every(c => typeof c === 'string' && c.length <= 200)
+        ? (confirmed as string[])
+        : null
+  const choice = parseWave(wave)
+  if (
+    !/^\d+$/.test(campaignId) ||
+    !/^\d+$/.test(listId) ||
+    ticks === null ||
+    choice === undefined ||
+    (override !== undefined &&
+      override !== null &&
+      !(typeof override === 'string' && override.length <= 1000))
+  ) {
+    return json(
+      {
+        error:
+          'body must be { campaign: id, list: id, confirmed?: [ids], wave?: { segment, k, n }, override?: text }',
+      },
+      400
+    )
   }
   try {
-    const result = await approveAndSend(campaignId, listId)
+    const result = await approveAndSend(campaignId, listId, {
+      approver: admin.name || admin.email,
+      confirmed: ticks,
+      wave: choice,
+      override: typeof override === 'string' ? override : null,
+    })
+    // The owner hears about it once the answer has gone: the approval never
+    // waits on the mail (notifyApproval never throws).
+    if (isRealList(listId)) after(() => notifyApproval(result))
     return json(result)
   } catch (err) {
     if (err instanceof DraftProblemError) {
       return json({ error: err.message, problems: err.problems }, 409)
     }
+    if (err instanceof NeedsOverrideError) {
+      return json(
+        { error: err.message, needsOverride: true, holds: err.holds },
+        409
+      )
+    }
+    if (err instanceof NeedsConfirmationError) {
+      return json(
+        {
+          error: err.message,
+          needsConfirmation: true,
+          warnings: err.warnings,
+        },
+        409
+      )
+    }
+    if (err instanceof ApprovalLockedError) {
+      return json({ error: err.detail, locked: true }, 409)
+    }
+    if (err instanceof MaybeScheduledError) {
+      // 202: the send may well be on its way. The page says so, tells the
+      // approver not to press again and rereads the lists; the owner hears.
+      const facts = err.facts
+      if (facts && isRealList(facts.listId))
+        after(() =>
+          notifyApproval({ ...facts, campaignId: err.campaignId }, true)
+        )
+      return json(
+        {
+          error: err.detail,
+          maybeScheduled: true,
+          campaignId: err.campaignId,
+        },
+        202
+      )
+    }
+    if (err instanceof SendDeletedError) {
+      return json({ error: err.detail, notSent: true }, 502)
+    }
+    // Everything else failed before ActiveCampaign was asked to schedule
+    // anything (approveAndSend turns every later error into one of the
+    // above), so this is a definite "not sent".
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[newsletter] approve ${campaignId} failed: ${message}`)
     return json(
-      { error: 'Approving the draft failed; details are in the server log.' },
+      {
+        error:
+          'Approving failed before anything was scheduled; details are in the server log.',
+        notSent: true,
+      },
       502
     )
   }
+}
+
+/** The wave in a request: undefined when malformed, null when none. */
+function parseWave(wave: unknown): WaveChoice | null | undefined {
+  if (wave === undefined || wave === null) return null
+  const w = wave as { segment?: unknown; k?: unknown; n?: unknown }
+  if (
+    typeof w !== 'object' ||
+    typeof w.segment !== 'string' ||
+    !SEGMENT_ID_RE.test(w.segment) ||
+    !Number.isInteger(w.k) ||
+    !Number.isInteger(w.n)
+  )
+    return undefined
+  return { segmentId: w.segment, wave: w.k as number, waves: w.n as number }
 }
