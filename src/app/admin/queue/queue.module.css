@@ -571,6 +571,9 @@
   top: 0;
   display: grid;
   gap: 12px;
+  /* A long link in Fable's reasons wraps rather than widening the panel
+     past its column and cutting the text off (Bryce, 30 Sept 2026). */
+  overflow-wrap: anywhere;
   padding: 16px 18px;
   border: 1px solid var(--q-border);
   border-top: 5px solid var(--q-border-strong);
@@ -1317,6 +1320,13 @@
   border-radius: 8px;
   background: var(--q-panel);
   border: 1px solid var(--q-border);
+}
+
+.thumbEmpty {
+  display: block;
+  box-sizing: border-box;
+  background: none;
+  border: 1px dashed var(--q-border-strong);
 }
 
 .imageSlot {
