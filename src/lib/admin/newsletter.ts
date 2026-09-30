@@ -2881,6 +2881,52 @@ export function sumIssues<
   return out.sort((a, b) => at(b.rows[0]).localeCompare(at(a.rows[0])))
 }
 
+/* ─── Web version (30 Sept 2026) ──────────────────────────────────────────
+   aisafety.com/newsletter/<key>/<issue> shows a sent issue on its own page
+   (src/lib/newsletter-web.ts), in place of ActiveCampaign's web copy. Only
+   an issue that has reached readers on its real list is shown there: never
+   a draft, a test-list send, or a send still waiting (it can be cancelled). */
+
+/** Pure: whether a campaign has reached anyone – sending, sent, or paused
+ *  or stopped part-way. */
+export function reachedReaders(c: {
+  status: string
+  send_amt?: string | null
+}): boolean {
+  if (c.status === '2' || c.status === '5') return true
+  if (c.status === '3' || c.status === '4') return Number(c.send_amt ?? 0) > 0
+  return false
+}
+
+/** The email of the issue named `name` as it went out on the real list
+ *  `listId` (any wave: they all send the one message), or null when none of
+ *  its campaigns there has reached anyone yet. Public pages call this, so
+ *  the campaign list is shared for half a minute, not the approval page's
+ *  few seconds: a burst of views, or of made-up issue addresses, costs one
+ *  ActiveCampaign read. */
+export async function sentIssueHtml(
+  name: string,
+  listId: string
+): Promise<string | null> {
+  if (!isRealList(listId) || !isNewsletterConfigured()) return null
+  const campaigns = await sharedRead('web-campaigns', 30_000, () =>
+    allCampaigns({ fresh: true })
+  )
+  const candidates = campaigns
+    .filter(c => baseIssueName(c.name) === name && reachedReaders(c))
+    .sort((a, b) => Number(b.id) - Number(a.id))
+  for (const c of candidates) {
+    const [lists, messages] = await Promise.all([
+      campaignListIds(c.id),
+      campaignMessageIds(c.id),
+    ])
+    if (!lists.includes(listId) || messages.length !== 1) continue
+    const html = (await message(messages[0])).html ?? ''
+    if (MARKER_RE.test(html)) return html
+  }
+  return null
+}
+
 /** The message HTML as a subscriber will see it, with AC's personalisation
  *  tags neutralised so the preview renders cleanly. */
 export async function previewHtml(
