@@ -1674,7 +1674,7 @@ function campaignAlerts(p: {
           title: `An unapproved ${label} draft has been waiting over 30 hours`,
           detail: [
             `Draft campaign ${c.id} on ${listLabel(draftLists)} was built ${longDate(new Date(created!).toISOString())}${lastWaveOut ? ', and every wave of it has already gone out' : ''}. A draft left on a real list can be approved by mistake later and would reach everyone on it.`,
-            'Approve it if it’s due; if it isn’t going out, ask Claude to delete the draft.',
+            'Approve it if it’s due; if it isn’t going out, press Delete on it at /admin/newsletter.',
           ],
         })
       }
