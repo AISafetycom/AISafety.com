@@ -476,6 +476,50 @@
   border-left-color: var(--q-accent);
 }
 
+/* Fable is answering in this row's chat (the bar pulses), or has answered
+   since the row was last open: a short teal bar inside the right edge,
+   apart from the left one that marks the open row. */
+.rowFable {
+  position: relative;
+}
+
+.rowFable::after {
+  content: '';
+  position: absolute;
+  top: 9px;
+  right: 5px;
+  bottom: 9px;
+  width: 4px;
+  border-radius: 2px;
+  background: var(--q-accent);
+}
+
+.rowFableLive::after {
+  animation: chatPulse 1.2s ease-in-out infinite;
+}
+
+/* The same news on a folded heading, or on the other kinds' tabs. */
+.fableDot {
+  flex: none;
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 2px;
+  border-radius: 50%;
+  background: var(--q-accent);
+}
+
+.fableDotLive {
+  animation: chatPulse 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rowFableLive::after,
+  .fableDotLive {
+    animation: none;
+  }
+}
+
 .withIcon {
   display: inline-flex;
   align-items: center;

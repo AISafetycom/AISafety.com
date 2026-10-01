@@ -252,6 +252,9 @@ const THEME_KEY = 'aisafety-admin-queue:theme'
 const COLLAPSED_KEY = 'aisafety-admin-queue:collapsed'
 const FOLDED_PAGES_KEY = 'aisafety-admin-queue:folded-pages'
 const KIND_KEY = 'aisafety-admin-queue:kind'
+// Per chat thread, the time of Fable's newest reply already seen here.
+const CHAT_SEEN_KEY = 'aisafety-admin-queue:chat-seen'
+const CHAT_STATUS_MS = 3000
 
 function sectionOf(item: QueueItem): Section {
   if (item.type === 'Rule' || item.source === 'Teach') return 'rules'
@@ -1001,6 +1004,43 @@ async function callAgent(
   }
 }
 
+/** The chat threads on the Mac, by row: when Fable last replied there, and
+ *  whether Fable is answering there now. */
+type ChatRows = Record<string, { last?: string; answering?: boolean }>
+
+/** A row's teal bar: Fable is answering, or has answered since the row was
+ *  last open (Bryce, 1 Oct 2026: "I'll often write to Fable on a listing
+ *  then switch to other listings and forget which one I was on"). */
+type FableMark = 'answering' | 'new'
+
+const FABLE_MARK_TITLE: Record<FableMark, string> = {
+  answering: 'Fable is answering',
+  new: 'Fable has answered since you last looked',
+}
+
+/** Every chat thread's state on the Mac; null when the agent did not say
+ *  (offline, or a version without /chat/status). */
+async function fetchChatRows(agent: AgentInfo): Promise<ChatRows | null> {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), AGENT_TIMEOUT_MS)
+  try {
+    const res = await fetch(`http://127.0.0.1:${agent.port}/chat/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: agent.token }),
+      cache: 'no-store',
+      signal: ctrl.signal,
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as { rows?: ChatRows }
+    return data.rows ?? null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 const WORKER_NOTE = 'the Mac saves the reply draft within five minutes'
 const OFFLINE_SUB = `Mac agent not reachable · ${WORKER_NOTE}`
 
@@ -1062,6 +1102,10 @@ export default function QueueAdmin({
   const [agentOnline, setAgentOnline] = useState<boolean | null>(null)
   // The agent answered the ping and can chat: the conversation panel shows.
   const [agentChat, setAgentChat] = useState(false)
+  // The chat threads on the Mac, and per row the newest reply already seen
+  // in this browser (null until read), for the rows' teal bars.
+  const [chatRows, setChatRows] = useState<ChatRows>({})
+  const [chatSeen, setChatSeen] = useState<Record<string, string> | null>(null)
   // Bumped by the F key so the chat box takes focus.
   const [chatFocus, setChatFocus] = useState(0)
   const [placeFocus, setPlaceFocus] = useState(0)
@@ -1371,6 +1415,92 @@ export default function QueueAdmin({
       cancelled = true
     }
   }, [agent])
+
+  // Which rows Fable is answering, or has answered since they were last
+  // open: asked of the Mac every few seconds while the tab is in view.
+  const chatOn = canEdit && agentChat && agent !== null
+  useEffect(() => {
+    if (!chatOn || !agent) return
+    let alive = true
+    const poll = async () => {
+      if (document.visibilityState !== 'visible') return
+      const rows = await fetchChatRows(agent)
+      if (!alive || !rows) return
+      setChatRows(rows)
+      setChatSeen(prev => {
+        if (prev) return prev
+        let saved: unknown = null
+        try {
+          saved = JSON.parse(localStorage.getItem(CHAT_SEEN_KEY) ?? 'null')
+        } catch {
+          // storage refused: start from what is there now
+        }
+        const seen: Record<string, string> = {}
+        if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+          // Threads that have gone (cleared) drop out.
+          for (const [id, at] of Object.entries(saved)) {
+            if (rows[id] && typeof at === 'string') seen[id] = at
+          }
+          return seen
+        }
+        // The first time in this browser, every reply so far counts as
+        // seen: only what comes from now on gets a bar.
+        for (const [id, r] of Object.entries(rows)) {
+          if (r.last) seen[id] = r.last
+        }
+        return seen
+      })
+    }
+    void poll()
+    const t = setInterval(() => void poll(), CHAT_STATUS_MS)
+    document.addEventListener('visibilitychange', poll)
+    return () => {
+      alive = false
+      clearInterval(t)
+      document.removeEventListener('visibilitychange', poll)
+    }
+  }, [chatOn, agent])
+
+  // The open item's replies are in front of Bryce: seen.
+  const openId = selectedId && !showDone ? selectedId : null
+  useEffect(() => {
+    if (!openId || !chatSeen) return
+    const last = chatRows[openId]?.last
+    if (!last || (chatSeen[openId] ?? '') >= last) return
+    setChatSeen({ ...chatSeen, [openId]: last })
+  }, [openId, chatRows, chatSeen])
+
+  useEffect(() => {
+    if (!chatSeen) return
+    try {
+      localStorage.setItem(CHAT_SEEN_KEY, JSON.stringify(chatSeen))
+    } catch {
+      // ignore
+    }
+  }, [chatSeen])
+
+  const fableMarks = useMemo(() => {
+    const marks: Record<string, FableMark> = {}
+    if (!chatOn || !chatSeen) return marks
+    for (const [id, r] of Object.entries(chatRows)) {
+      if (r.answering) marks[id] = 'answering'
+      else if (r.last && id !== openId && r.last > (chatSeen[id] ?? '')) {
+        marks[id] = 'new'
+      }
+    }
+    return marks
+  }, [chatOn, chatRows, chatSeen, openId])
+
+  /** The strongest mark among `list`, for a folded heading's dot. */
+  const markAmong = (list: QueueItem[]): FableMark | null => {
+    let mark: FableMark | null = null
+    for (const item of list) {
+      const m = fableMarks[item.id]
+      if (m === 'new') return m
+      if (m) mark = m
+    }
+    return mark
+  }
 
   // One flat, ordered list of open items: requests, Broom, rules, then Comb
   // with Fable's Publish verdicts first, each section split by resource
@@ -2346,6 +2476,15 @@ export default function QueueAdmin({
                 <span className={styles.segCount}>
                   {ordered.perKind[k.key]}
                 </span>
+                {!searching && kind !== k.key && (
+                  <FableDot
+                    mark={markAmong(
+                      (items ?? []).filter(
+                        i => isOpen(i) && kindOf(i) === k.key
+                      )
+                    )}
+                  />
+                )}
               </button>
             ))}
           </span>
@@ -2504,6 +2643,7 @@ export default function QueueAdmin({
                           failed={
                             !pending[item.id] && Boolean(draft(item.id).error)
                           }
+                          fable={fableMarks[item.id]}
                           showKind
                           search={search}
                           hit={ordered.hits.get(item.id)}
@@ -2536,6 +2676,9 @@ export default function QueueAdmin({
                         </span>
                         {SECTION_LABEL[section]}
                         <span className={styles.groupCount}>{list.length}</span>
+                        {collapsed[section] && (
+                          <FableDot mark={markAmong(list)} />
+                        )}
                         <span
                           className={`${styles.groupChevron} ${collapsed[section] ? styles.groupChevronClosed : ''}`}
                         >
@@ -2564,6 +2707,9 @@ export default function QueueAdmin({
                                 <span className={styles.pageCount}>
                                   {page.items.length}
                                 </span>
+                                {folded && (
+                                  <FableDot mark={markAmong(page.items)} />
+                                )}
                               </button>
                               {folded
                                 ? null
@@ -2579,6 +2725,7 @@ export default function QueueAdmin({
                                         !pending[item.id] &&
                                         Boolean(draft(item.id).error)
                                       }
+                                      fable={fableMarks[item.id]}
                                       showPage={false}
                                       onClick={() => select(item.id)}
                                       onLogoError={() => logoDied(item)}
@@ -2597,6 +2744,7 @@ export default function QueueAdmin({
                             failed={
                               !pending[item.id] && Boolean(draft(item.id).error)
                             }
+                            fable={fableMarks[item.id]}
                             onClick={() => select(item.id)}
                             onLogoError={() => logoDied(item)}
                           />
@@ -2834,11 +2982,23 @@ export default function QueueAdmin({
   )
 }
 
+/** A folded heading (or another kind's tab) holds a row with a teal bar. */
+function FableDot({ mark }: { mark: FableMark | null }) {
+  if (!mark) return null
+  return (
+    <span
+      className={`${styles.fableDot} ${mark === 'answering' ? styles.fableDotLive : ''}`}
+      title={FABLE_MARK_TITLE[mark]}
+    />
+  )
+}
+
 function Row({
   item,
   active,
   working,
   failed,
+  fable = null,
   showPage = true,
   showKind = false,
   search = null,
@@ -2852,6 +3012,8 @@ function Row({
   working: Decision | null
   /** The last decision on it did not land; the error is on the detail. */
   failed: boolean
+  /** Fable is answering in its chat, or answered since it was last open. */
+  fable?: FableMark | null
   /** Off under a page sub-head, which already names the page. */
   showPage?: boolean
   /** On in search results, which mix additions, changes and rules. */
@@ -2867,7 +3029,7 @@ function Row({
   return (
     <button
       data-id={item.id}
-      className={`${styles.row} ${active ? styles.rowActive : ''} ${working ? styles.rowBusy : ''}`}
+      className={`${styles.row} ${active ? styles.rowActive : ''} ${working ? styles.rowBusy : ''} ${fable ? styles.rowFable : ''} ${fable === 'answering' ? styles.rowFableLive : ''}`}
       onClick={onClick}
     >
       {item.logo ? (
