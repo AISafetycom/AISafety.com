@@ -1003,7 +1003,7 @@ describe('the routes', () => {
     expect(await stale.json()).toEqual({ error: 'reauth' })
   })
 
-  it('Approve: a wave, then 409 on a second press; the owner’s notice runs after the answer', async () => {
+  it('Approve: a wave, then 409 on a second press; no email to the owner', async () => {
     const ac = makeAC(waved())
     vi.stubGlobal('fetch', ac.fetchMock)
     await freshModule({
@@ -1024,10 +1024,10 @@ describe('the routes', () => {
       expected: 494,
       draftKept: true,
     })
+    // No email for an ordinary approval (Bryce, 2 Oct 2026), with the mail
+    // script set up: nothing is queued to run after the answer.
+    expect(afterQueue).toHaveLength(0)
     expect(ac.mails).toHaveLength(0)
-    expect(afterQueue).toHaveLength(1)
-    await afterQueue[0]()
-    expect(ac.mails[0].subject).toMatch(/wave 1\/4 \(494 people\)/)
 
     const second = await POST(post(body))
     expect(second.status).toBe(409)

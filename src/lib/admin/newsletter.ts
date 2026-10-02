@@ -3869,16 +3869,18 @@ async function deleteBadSend(
   )
 }
 
-/* ─── The owner hears about every real-list approval ───────────────────── */
+/* ─── The owner hears when a real-list approval may have gone out ─────── */
 
 /** Where the notice sends the owner (real lists are only ever approved on
  *  the production site). */
 const ADMIN_PAGE_URL = 'https://aisafety.com/admin/newsletter'
 
 /** Email the owner about a real-list approval, or one that may have gone
- *  out despite an error (`maybe`). The admin mail script only ever delivers
- *  "digest" mail to the owner's own address. Best effort and never throws:
- *  the route runs it after answering, so the approval never waits on it. */
+ *  out despite an error (`maybe`). The route sends only the `maybe` kind
+ *  since 2 Oct 2026 (Bryce: no email for an ordinary approval). The admin
+ *  mail script only ever delivers "digest" mail to the owner's own address.
+ *  Best effort and never throws: the route runs it after answering, so the
+ *  approval never waits on it. */
 export async function notifyApproval(
   f: ApprovalFacts & { campaignId: string | null; held?: boolean },
   maybe = false

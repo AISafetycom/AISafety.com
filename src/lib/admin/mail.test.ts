@@ -144,7 +144,7 @@ describe('newsletterApprovalMail', () => {
         '',
         'To cancel it before it sends, or pause or stop it while it’s sending: https://aisafety.com/admin/newsletter',
         '',
-        'This email was sent by the admin itself, once for every approval of a real newsletter list.',
+        'This email was sent by the admin itself, about an approval of a real newsletter list.',
       ].join('\n')
     )
     expect(m.html).toContain('<li><strong>Approved by:</strong> plex</li>')
