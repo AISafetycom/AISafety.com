@@ -299,15 +299,13 @@ export default function NewsletterAdmin({
   const previewFrame = useRef<HTMLIFrameElement | null>(null)
   const [previewY, setPreviewY] = useState(0)
   const [busyId, setBusyId] = useState<string | null>(null)
-  /** The draft a test copy is on its way for, and how the last one went.
-   *  `edited` = the draft has changed since that copy went out. */
+  /** The draft a test copy is on its way for, and how the last copy of each
+   *  draft went, so testing one issue leaves the others' ticks alone (Bryce,
+   *  2 Oct 2026). `edited` = the draft has changed since that copy went out. */
   const [testingId, setTestingId] = useState<string | null>(null)
-  const [testResult, setTestResult] = useState<{
-    draftId: string
-    kind: 'ok' | 'error'
-    text: string
-    edited?: boolean
-  } | null>(null)
+  const [testResults, setTestResults] = useState<
+    Record<string, { kind: 'ok' | 'error'; text: string; edited?: boolean }>
+  >({})
   /** The draft with edits not yet written into it (typed text, a moved card,
    *  a save in flight): a test or an approval now would go without them. */
   const [unsavedId, setUnsavedId] = useState<string | null>(null)
@@ -542,7 +540,11 @@ export default function NewsletterAdmin({
    *  send), so it can be read and clicked through in a real inbox first. */
   async function sendTest(draft: Draft) {
     setTestingId(draft.id)
-    setTestResult(null)
+    setTestResults(rs => {
+      const rest = { ...rs }
+      delete rest[draft.id]
+      return rest
+    })
     try {
       const res = await fetch('/api/admin/newsletter/test', {
         method: 'POST',
@@ -564,17 +566,21 @@ export default function NewsletterAdmin({
             : (body.error ?? `HTTP ${res.status}`)
         )
       }
-      setTestResult({
-        draftId: draft.id,
-        kind: 'ok',
-        text: `Test sent to ${body.to} only. It arrives in a minute or two as “TEST: ${draft.subject}”.`,
-      })
+      setTestResults(rs => ({
+        ...rs,
+        [draft.id]: {
+          kind: 'ok',
+          text: `Test sent to ${body.to} only. It arrives in a minute or two as “TEST: ${draft.subject}”.`,
+        },
+      }))
     } catch (err) {
-      setTestResult({
-        draftId: draft.id,
-        kind: 'error',
-        text: `Test not sent: ${err instanceof Error ? err.message : String(err)}`,
-      })
+      setTestResults(rs => ({
+        ...rs,
+        [draft.id]: {
+          kind: 'error',
+          text: `Test not sent: ${err instanceof Error ? err.message : String(err)}`,
+        },
+      }))
     } finally {
       setTestingId(null)
     }
@@ -714,9 +720,12 @@ export default function NewsletterAdmin({
     )
     setPreviewY(previewScroll.current)
     setPreviewNonce(n => n + 1)
-    setTestResult(t =>
-      t && t.draftId === draftId && t.kind === 'ok' ? { ...t, edited: true } : t
-    )
+    setTestResults(rs => {
+      const t = rs[draftId]
+      return t?.kind === 'ok'
+        ? { ...rs, [draftId]: { ...t, edited: true } }
+        : rs
+    })
     if (text) setNotice({ kind: 'ok', text })
   }
 
@@ -846,7 +855,7 @@ export default function NewsletterAdmin({
             approvable &&
             holdsFor(draft, choice, Date.parse(data.fetchedAt)).length > 0
           const unsaved = unsavedId === draft.id
-          const result = testResult?.draftId === draft.id ? testResult : null
+          const result = testResults[draft.id] ?? null
           return (
             <div key={draft.id} className={adminStyles.editorBlock}>
               <div className={adminStyles.editorBlockHeader}>
