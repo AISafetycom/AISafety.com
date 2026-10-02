@@ -453,6 +453,21 @@ export interface ChatbotPanelData {
   /** Listings and links visitors clicked inside chatbot replies, busiest
    *  first. */
   destinations: ClickDestination[]
+  /** Whether people who tried the chatbot came back and used it again. */
+  repeatUse: ChatbotRepeatUse
+}
+
+/** Repeat use among visitors who sent the chatbot a message in range. Always
+ *  unique users; visitors with no id (private browsing) can't be followed
+ *  across visits, so they're left out. */
+export interface ChatbotRepeatUse {
+  /** Visitors who sent the chatbot at least one message. */
+  tried: number
+  /** Of those, visitors with any later visit to the site after the visit
+   *  they first messaged it in. */
+  cameBack: number
+  /** Of those, visitors who messaged the chatbot again on a later visit. */
+  usedAgain: number
 }
 
 export interface SearchPanelData {
@@ -796,6 +811,7 @@ const EMPTY: Omit<DashboardData, 'source'> = {
     openShareByPage: [],
     siteOpenShare: { name: 'Any page', active: 0, visitors: 0 },
     destinations: [],
+    repeatUse: { tried: 0, cameBack: 0, usedAgain: 0 },
   },
   search: {
     funnel: { opened: 0, searched: 0, clicked: 0 },
@@ -1785,7 +1801,51 @@ function chatbotPanels(
     ),
     siteOpenShare: siteShare(opens, views),
     destinations: destinationRows(clicks, unique),
+    repeatUse: chatbotRepeatUse(inRange),
   }
+}
+
+/** Did people who tried the chatbot use it again? For each visitor who sent
+ *  it a message in range, their in-range activity is split into visits the
+ *  same way as the Visits tile (a gap of SESSION_GAP_MS starts a new one), and
+ *  everything after the visit they first messaged in counts as coming back. */
+export function chatbotRepeatUse(inRange: AnalyticsEvent[]): ChatbotRepeatUse {
+  const tried = new Set<string>()
+  for (const e of inRange)
+    if (e.type === 'chatbot_message' && e.vid) tried.add(e.vid)
+  const activity = new Map<string, { t: number; message: boolean }[]>()
+  for (const e of inRange) {
+    if (!e.vid || !tried.has(e.vid)) continue
+    const t = Date.parse(e.ts)
+    if (Number.isNaN(t)) continue
+    const list = activity.get(e.vid) ?? []
+    list.push({ t, message: e.type === 'chatbot_message' })
+    activity.set(e.vid, list)
+  }
+  let cameBack = 0
+  let usedAgain = 0
+  for (const list of activity.values()) {
+    list.sort((a, b) => a.t - b.t)
+    let visit = 0
+    let firstMessageVisit = -1
+    let back = false
+    let again = false
+    for (let i = 0; i < list.length; i++) {
+      if (i > 0 && list[i].t - list[i - 1].t >= SESSION_GAP_MS) visit++
+      if (firstMessageVisit === -1) {
+        if (list[i].message) firstMessageVisit = visit
+      } else if (visit > firstMessageVisit) {
+        back = true
+        if (list[i].message) {
+          again = true
+          break
+        }
+      }
+    }
+    if (back) cameBack++
+    if (again) usedAgain++
+  }
+  return { tried: tried.size, cameBack, usedAgain }
 }
 
 /** Dashboard labels for how the search modal was opened (search_open.source). */

@@ -9,6 +9,7 @@ import {
   type Counted,
   type DateRange,
   type ChatbotFunnel,
+  type ChatbotRepeatUse,
   type ClickDestination,
   type CorrelationRow,
   type ListingRow,
@@ -787,6 +788,7 @@ export default async function AnalyticsPage({
               openShareByPage={data.chatbot.openShareByPage}
               siteOpenShare={data.chatbot.siteOpenShare}
               destinations={data.chatbot.destinations}
+              repeatUse={data.chatbot.repeatUse}
               conv={convStats}
               themes={themes}
               unique={unique}
@@ -2074,6 +2076,7 @@ function ChatbotView({
   openShareByPage,
   siteOpenShare,
   destinations,
+  repeatUse,
   conv,
   themes,
   unique,
@@ -2083,6 +2086,7 @@ function ChatbotView({
   openShareByPage: VisitorShare[]
   siteOpenShare: VisitorShare
   destinations: ClickDestination[]
+  repeatUse: ChatbotRepeatUse
   conv: ConversationStats | null
   themes: ThemeSummary | null
   unique: boolean
@@ -2101,6 +2105,9 @@ function ChatbotView({
     conv?.medianLength == null ? '—' : String(conv.medianLength)
   const share = (s: number | null) =>
     s == null ? '—' : `${Math.round(100 * s)}%`
+  const ratio = (part: number, whole: number) =>
+    share(whole === 0 ? null : part / whole)
+  const n = (v: number) => v.toLocaleString()
   return (
     <>
       <Panel title="Funnel · unique users">
@@ -2111,6 +2118,31 @@ function ChatbotView({
             { label: 'Clicked a result', value: funnel.clicked },
           ]}
         />
+      </Panel>
+
+      <Panel title="Repeat use · unique users">
+        <div className={styles.funnel}>
+          <Stat
+            label={`used it again on a later visit (${n(repeatUse.usedAgain)} of ${n(repeatUse.tried)} who sent a message)`}
+            value={ratio(repeatUse.usedAgain, repeatUse.tried)}
+          />
+          <Stat
+            label={`came back to the site on a later visit (${n(repeatUse.cameBack)} of ${n(repeatUse.tried)})`}
+            value={ratio(repeatUse.cameBack, repeatUse.tried)}
+          />
+          <Stat
+            label={`of those who came back used it again (${n(repeatUse.usedAgain)} of ${n(repeatUse.cameBack)})`}
+            value={ratio(repeatUse.usedAgain, repeatUse.cameBack)}
+          />
+        </div>
+        <p className={styles.caption}>
+          Visitors who sent the chatbot a message in the selected range, and
+          what they did on later visits in the same range (a new visit starts
+          after 30 minutes away, as in the Visits tile). Private-browsing
+          visitors can&apos;t be followed between visits, so they&apos;re left
+          out. People who first used it near the end of the range haven&apos;t
+          had long to come back, so longer ranges read truer.
+        </p>
       </Panel>
 
       <div className={styles.grid}>
