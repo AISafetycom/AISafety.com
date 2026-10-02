@@ -39,8 +39,8 @@
                                       and was deleted at once
                                   403 not posted from this page (another
                                       site or subdomain; nothing sent)
-  Every real-list approval (and every 202 on a real list) emails the owner,
-  after the answer has gone (notifyApproval).
+  A 202 on a real list emails the owner, after the answer has gone
+  (notifyApproval); an ordinary approval sends no email (Bryce, 2 Oct 2026).
 */
 
 import { after, NextRequest } from 'next/server'
@@ -186,9 +186,8 @@ export async function POST(req: NextRequest) {
       wave: choice,
       override: typeof override === 'string' ? override : null,
     })
-    // The owner hears about it once the answer has gone: the approval never
-    // waits on the mail (notifyApproval never throws).
-    if (isRealList(listId)) after(() => notifyApproval(result))
+    // No email for an ordinary approval (Bryce, 2 Oct 2026: "Let's not do
+    // these emails"); the owner still hears about a 202 below.
     return json(result)
   } catch (err) {
     if (err instanceof DraftProblemError) {
