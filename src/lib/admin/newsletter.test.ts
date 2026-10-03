@@ -31,6 +31,7 @@ import {
 } from './newsletter'
 import { createHash } from 'node:crypto'
 import cardEdit from './__fixtures__/newsletter-card-edit.json'
+import siteCardEdit from './__fixtures__/newsletter-site-card-edit.json'
 
 // Fixtures generated with the pipeline's own function
 // (~/Newsletter/ac.py content_digest) on 3 September 2026. The two sides
@@ -519,6 +520,63 @@ describe('card text fields', () => {
     expect(() =>
       setFieldsHtml(input, group, 'recNope', { title: 'x' })
     ).toThrow(FieldError)
+  })
+})
+
+/* ─── Card text edits on site cards (sitecards.py layout, 3 Oct 2026) ─── */
+
+describe('card text fields on site cards', () => {
+  const { group, training, events } = siteCardEdit
+
+  it('gives byte-identical output to the pipeline for both issues', () => {
+    for (const c of [training, events]) {
+      const out = setFieldsHtml(c.input, group, c.key, c.values)
+      expect(createHash('sha256').update(out.html, 'utf8').digest('hex')).toBe(
+        c.expectedHtmlSha256
+      )
+      expect(out.text).toBe(c.expectedText)
+    }
+  })
+
+  it('never rewrites the title line for an edit to another field', () => {
+    // "Hong Kong" is both the location and part of the program's name.
+    const out = setFieldsHtml(
+      training.input,
+      group,
+      training.key,
+      training.values
+    )
+    expect(out.text).toContain('* ML4Good Governance: Hong Kong October 2026\n')
+    expect(out.text).toContain(
+      '  Bootcamp · Hong Kong & Shenzhen · 9 days · Starts 12 Oct 2026\n'
+    )
+  })
+
+  it('swaps a whole part of a detail line before a match inside another part', () => {
+    const out = setFieldsHtml(events.input, group, events.key, events.values)
+    expect(out.text).toContain(
+      '  By Free Software Foundation · Free (donations welcome) · Register by 7 Oct 2026\n'
+    )
+  })
+
+  it("labels an event's time of day as Time, not Time commitment", () => {
+    const card = cardGroups(events.input)![0].cards.find(
+      c => c.key === events.key
+    )!
+    expect(card.fields.map(f => [f.name, f.label])).toEqual([
+      ['title', 'Title'],
+      ['m0', 'Location'],
+      ['m1', 'Dates'],
+      ['m2', 'Time'],
+      ['desc', 'Description'],
+      ['b0', 'Host'],
+      ['b1', 'Cost'],
+      ['b2', 'Applications'],
+    ])
+    const program = cardGroups(training.input)![0].cards[0]
+    expect(program.fields.find(f => f.name === 'b1')!.label).toBe(
+      'Time commitment'
+    )
   })
 })
 
