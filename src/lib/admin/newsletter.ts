@@ -2531,6 +2531,10 @@ function fieldLabel(name: string, icon: string | undefined, funding: boolean) {
   if (name === 'title') return 'Title'
   if (name === 'desc') return 'Description'
   if (icon === 'tag') return funding ? 'Type' : 'Cost'
+  // A timer line under an event's title is its time of day ("18:00 – 20:30",
+  // events/card.ts); a training program's timer rows sit at the bottom (b…).
+  if (name.startsWith('m') && (icon === 'timer' || icon === 'timer-half'))
+    return 'Time'
   return (icon && ICON_LABELS[icon]) || 'Detail'
 }
 
@@ -2558,20 +2562,42 @@ function cardFields(
 }
 
 /** The card's text segment with `old` swapped for `next` (both plain): a
- *  whole line first (after its "* " or "  " lead), else the first
- *  occurrence inside a line; unchanged when `old` isn't there. */
-function replacePlain(segment: string, old: string, next: string): string {
+ *  whole line first (after its "* " or "  " lead), then one whole
+ *  " · "-separated part of a detail line, else the first occurrence inside
+ *  a line; unchanged when `old` isn't there. Only the title itself may
+ *  change the "* " title line: a location edit used to rewrite "Hong Kong"
+ *  inside "ML4Good Governance: Hong Kong October 2026" (3 October 2026).
+ *  Mirrors render.py `_replace_plain()`. */
+function replacePlain(
+  segment: string,
+  old: string,
+  next: string,
+  isTitle = false
+): string {
   if (!old || old === next) return segment
   const lines = segment.split('\n')
+  const lockedTitle = (l: string) => !isTitle && l.startsWith('* ')
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i]
     const lead = l.startsWith('* ') || l.startsWith('  ') ? l.slice(0, 2) : ''
-    if (l.slice(lead.length) === old) {
+    if (l.slice(lead.length) === old && !lockedTitle(l)) {
       lines[i] = lead + next
       return lines.join('\n')
     }
   }
   for (let i = 0; i < lines.length; i++) {
+    const l = lines[i]
+    if (!l.startsWith('  ')) continue
+    const parts = l.slice(2).split(' · ')
+    const at = parts.indexOf(old)
+    if (at >= 0) {
+      parts[at] = next
+      lines[i] = '  ' + parts.join(' · ')
+      return lines.join('\n')
+    }
+  }
+  for (let i = 0; i < lines.length; i++) {
+    if (lockedTitle(lines[i])) continue
     const at = lines[i].indexOf(old)
     if (at >= 0) {
       lines[i] = lines[i].slice(0, at) + next + lines[i].slice(at + old.length)
@@ -2617,7 +2643,13 @@ export function setFieldsRaw(
       entry.o ??= {}
       if (!Object.prototype.hasOwnProperty.call(entry.o, name))
         entry.o[name] = old
-      if (seg) seg.t = replacePlain(seg.t, stripHtml(old), stripHtml(next))
+      if (seg)
+        seg.t = replacePlain(
+          seg.t,
+          stripHtml(old),
+          stripHtml(next),
+          name === 'title'
+        )
       if (name === 'title') entry.title = stripHtml(next)
       return `<!--f:${name}${icon ? `:${icon}` : ''}-->${next}<!--/f-->`
     }
