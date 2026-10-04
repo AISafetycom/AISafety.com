@@ -2586,19 +2586,17 @@ export default function QueueAdmin({
                 <span className={styles.segCount}>
                   {ordered.perKind[k.key]}
                 </span>
-                {/* The open kind lists its urgent items at the top; the
-                    others say how many are waiting there. */}
-                {!searching &&
-                  kind !== k.key &&
-                  ordered.urgentPerKind[k.key] > 0 && (
-                    <span
-                      className={styles.segUrgent}
-                      title={`${ordered.urgentPerKind[k.key]} urgent: ${URGENT_WHY[k.key]}`}
-                    >
-                      <Icon src={ICON.clock} size={12} />
-                      {ordered.urgentPerKind[k.key]}
-                    </span>
-                  )}
+                {/* How many of each kind are urgent, the open one included
+                    (Bryce, 4 Oct 2026: "Keep the urgent number there"). */}
+                {!searching && ordered.urgentPerKind[k.key] > 0 && (
+                  <span
+                    className={styles.segUrgent}
+                    title={`${ordered.urgentPerKind[k.key]} urgent: ${URGENT_WHY[k.key]}`}
+                  >
+                    <Icon src={ICON.clock} size={12} />
+                    {ordered.urgentPerKind[k.key]}
+                  </span>
+                )}
                 {/* Items already in "Fable replying" at the top are not
                     counted again here. */}
                 {!searching && kind !== k.key && (
