@@ -105,8 +105,15 @@ const KINDS: { key: Kind; label: string; title: string }[] = [
     title: 'Changes to the bots\u2019 rulebooks',
   },
 ]
+// The kind switch's tooltip on an urgent count (queue-urgent.ts).
+const URGENT_WHY: Record<Kind, string> = {
+  additions: 'starting or closing within four days',
+  changes:
+    'a live listing showing wrong information, or starting or closing within two weeks',
+  rules: '',
+}
 const SECTION_LABEL: Record<Section, string> = {
-  fable: 'Fable',
+  fable: 'Fable replying',
   urgent: 'Urgent',
   requests: 'Requests',
   broom: 'Broom',
@@ -1537,7 +1544,7 @@ export default function QueueAdmin({
     return marks
   }, [chatOn, chatRows, chatSeen, openId])
 
-  // The items in the Fable section, newest arrival first. One joins when
+  // The items in the "Fable replying" section, newest arrival first. One joins when
   // Fable is answering it or has answered unread while it is not the open
   // one (so a row never moves from under the item being chatted on), and
   // stays while it is open (so clicking it there does not send it back
@@ -2586,13 +2593,13 @@ export default function QueueAdmin({
                   ordered.urgentPerKind[k.key] > 0 && (
                     <span
                       className={styles.segUrgent}
-                      title={`${ordered.urgentPerKind[k.key]} urgent: starting or closing within two weeks, or a live listing showing wrong information`}
+                      title={`${ordered.urgentPerKind[k.key]} urgent: ${URGENT_WHY[k.key]}`}
                     >
                       <Icon src={ICON.clock} size={12} />
                       {ordered.urgentPerKind[k.key]}
                     </span>
                   )}
-                {/* Items already in the Fable section at the top are not
+                {/* Items already in "Fable replying" at the top are not
                     counted again here. */}
                 {!searching && kind !== k.key && (
                   <FableDot

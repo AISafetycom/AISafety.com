@@ -19,14 +19,14 @@ function fix(
 }
 
 describe('urgencyOf: dated additions', () => {
-  it('flags a start or deadline in the next two weeks, soonest first', () => {
+  it('flags a start or deadline in the next four days, soonest first', () => {
     expect(
       urgencyOf(
-        add({ 'Start date': '2026-10-17', Deadline: '2026-10-10' }),
+        add({ 'Start date': '2026-10-08', Deadline: '2026-10-07' }),
         undefined,
         TODAY
       )
-    ).toEqual({ days: 6, label: 'Closes 10 Oct' })
+    ).toEqual({ days: 3, label: 'Closes 7 Oct' })
     expect(
       urgencyOf(add({ 'Start date': '2026-10-06' }), undefined, TODAY)
     ).toEqual({ days: 2, label: 'Starts 6 Oct' })
@@ -50,23 +50,23 @@ describe('urgencyOf: dated additions', () => {
       urgencyOf(add({ 'Start date': '2026-10-03' }), undefined, TODAY)
     ).toBeNull()
     expect(
-      urgencyOf(add({ 'Start date': '2026-10-19' }), undefined, TODAY)
+      urgencyOf(add({ 'Start date': '2026-10-09' }), undefined, TODAY)
     ).toBeNull()
     expect(urgencyOf(add({ Name: 'Some org' }), undefined, TODAY)).toBeNull()
-    // the 14th day is still in
+    // the 4th day is still in
     expect(
-      urgencyOf(add({ 'Start date': '2026-10-18' }), undefined, TODAY)?.days
-    ).toBe(14)
+      urgencyOf(add({ 'Start date': '2026-10-08' }), undefined, TODAY)?.days
+    ).toBe(4)
   })
 
   it('looks past a passed deadline to an upcoming start', () => {
     expect(
       urgencyOf(
-        add({ 'Start date': '2026-10-12', Deadline: '2026-10-01' }),
+        add({ 'Start date': '2026-10-07', Deadline: '2026-10-01' }),
         undefined,
         TODAY
       )?.label
-    ).toBe('Starts 12 Oct')
+    ).toBe('Starts 7 Oct')
   })
 
   it('never flags what Fable says to skip, or a rule', () => {
@@ -88,11 +88,11 @@ describe('urgencyOf: dated additions', () => {
 
   it('counts an Unsure or unjudged addition', () => {
     expect(
-      urgencyOf(add({ Deadline: '2026-10-10' }, 'Unsure'), undefined, TODAY)
+      urgencyOf(add({ Deadline: '2026-10-06' }, 'Unsure'), undefined, TODAY)
     ).not.toBeNull()
     expect(
       urgencyOf(
-        { ...add({ Deadline: '2026-10-10' }), verdict: null },
+        { ...add({ Deadline: '2026-10-06' }), verdict: null },
         undefined,
         TODAY
       )
@@ -160,7 +160,7 @@ describe('urgencyOf: fixes to live listings', () => {
     ).toBeNull()
   })
 
-  it('dates a tidying fix by the listing it touches', () => {
+  it('dates a tidying fix by the listing it touches, two weeks ahead', () => {
     expect(
       urgencyOf(
         fix([{ field: 'Host name', to: 'Swiss AI Safety' }]),
@@ -168,6 +168,14 @@ describe('urgencyOf: fixes to live listings', () => {
         TODAY
       )
     ).toEqual({ days: 5, label: 'Starts 9 Oct' })
+    // the 14th day is still in for a fix (an addition stops at four)
+    expect(
+      urgencyOf(
+        fix([{ field: 'Host name', to: 'Swiss AI Safety' }]),
+        { start: '2026-10-18' },
+        TODAY
+      )?.days
+    ).toBe(14)
     expect(
       urgencyOf(
         fix([{ field: 'Host name', to: 'Swiss AI Safety' }]),

@@ -1,14 +1,18 @@
 // Which open Queue items lose their value by waiting, so the list can put
 // them first (Bryce, 4 Oct 2026: the backlog grows faster than it is
 // decided, and the old pile was barely touched). Two kinds:
-// - a listing whose start date or application deadline falls in the next
-//   two weeks: published late, nobody can still go or apply;
+// - a listing whose start date or application deadline is close: published
+//   late, nobody can still go or apply. For an addition that is the next
+//   four days (Bryce, 4 Oct 2026: two weeks swept in too much); for a fix
+//   to a live listing, the next two weeks;
 // - a fix to a live listing that is sending visitors wrong now: a closed
 //   listing still shown, a wrong link, a wrong date or application status.
 // Items Fable says to skip (Don't publish, Dismiss) and rule changes are
 // never urgent: leaving them costs nothing.
 
-export const URGENT_DAYS = 14
+/** How many days ahead a start date or deadline makes an item urgent. */
+export const ADD_URGENT_DAYS = 4
+export const CHANGE_URGENT_DAYS = 14
 
 /** A published listing's own dates (YYYY-MM-DD), from the site's catalog:
  *  a Change row carries only the fields it edits. */
@@ -78,12 +82,13 @@ function field(fields: Record<string, unknown>, name: string): unknown {
   return undefined
 }
 
-/** The soonest of `start` and `closes` that is today or later and within
- *  the window; a deadline on the start day reads as the start. */
+/** The soonest of `start` and `closes` that is today or later and at most
+ *  `window` days ahead; a deadline on the start day reads as the start. */
 function soonest(
   start: string | null,
   closes: string | null,
-  today: string
+  today: string,
+  window: number
 ): { days: number; label: string } | null {
   const t = dayNumber(today)
   let best: { days: number; label: string } | null = null
@@ -93,7 +98,7 @@ function soonest(
   ] as const) {
     if (!iso) continue
     const days = dayNumber(iso) - t
-    if (days < 0 || days > URGENT_DAYS) continue
+    if (days < 0 || days > window) continue
     if (!best || days < best.days) {
       best = { days, label: `${verb} ${when(days, iso)}` }
     }
@@ -157,7 +162,12 @@ export function urgencyOf(
     if (item.verdict === 'Fix') wrong = wrongInfo(item.changes)
   }
 
-  const dated = soonest(start, closes, today)
+  const dated = soonest(
+    start,
+    closes,
+    today,
+    item.type === 'Add' ? ADD_URGENT_DAYS : CHANGE_URGENT_DAYS
+  )
   if (dated && wrong) {
     return { days: dated.days, label: `${wrong} · ${dated.label}` }
   }
