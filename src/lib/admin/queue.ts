@@ -127,11 +127,24 @@ export interface QueueItem {
   /** Email/Discord: who the reply draft goes to (from the proposal's
    *  `reply` block, written at intake by the Secretary). */
   replyTo: string | null
+  /** Rejected Email/Form: the reply the Mac wrote for this rejection and
+   *  saved as a Gmail draft (Bryce, 4 Oct 2026: "when I reject something
+   *  which was suggested, it should have an email response like when I
+   *  accept something"). From the proposal's reply.reject block; null
+   *  when there is none for this decision. */
+  rejectReply: RejectReply | null
   rejectReason: string | null
   note: string | null
   edits: Record<string, unknown> | null
   decidedAt: string | null
   appliedAt: string | null
+  error: string | null
+}
+
+export interface RejectReply {
+  /** The words saved in Gmail; null until they are written. */
+  text: string | null
+  state: 'saved' | 'writing' | 'failed'
   error: string | null
 }
 
@@ -345,6 +358,25 @@ function discordCdnUrl(url: string | null): string | null {
   }
 }
 
+/** The reply.reject block the Mac writes (actions.reject_draft), when it
+ *  belongs to the row's current decision: an Undo and a fresh Reject make
+ *  an older block stale. */
+export function rejectReplyOf(
+  v: unknown,
+  decidedAt: string | null
+): RejectReply | null {
+  if (!isRecord(v)) return null
+  const since = Date.parse(str(v.since) ?? '')
+  const decided = Date.parse(decidedAt ?? '')
+  if (!Number.isFinite(since) || (Number.isFinite(decided) && since < decided))
+    return null
+  const text = str(v.text)
+  if (str(v.draft)) return { text, state: 'saved', error: null }
+  if (str(v.failed)) return { text, state: 'failed', error: str(v.failed) }
+  if (str(v.writing)) return { text, state: 'writing', error: null }
+  return null
+}
+
 function rowToItem(
   row: {
     id: string
@@ -363,6 +395,7 @@ function rowToItem(
   let summary: string | null = null
   let appliesTo: string | null = null
   let replyTo: string | null = null
+  let rejectReply: RejectReply | null = null
   let saidBy: SaidBy | null = null
   if (isRecord(proposal)) {
     changes = toChanges(proposal.changes)
@@ -375,6 +408,7 @@ function rowToItem(
       const to = str(proposal.reply.to)
       const who = str(proposal.reply.name)
       replyTo = to ? (who ? `${who} <${to}>` : to) : null
+      rejectReply = rejectReplyOf(proposal.reply.reject, str(f[F.decidedAt]))
       if (proposal.reply.platform === 'discord' && who) {
         const how = str(proposal.reply.how)
         saidBy = {
@@ -431,6 +465,7 @@ function rowToItem(
     replyDraft: str(f[F.replyDraft]),
     replyStatus: str(f[F.replyStatus]),
     replyTo,
+    rejectReply,
     saidBy,
     rejectReason: str(f[F.rejectReason]),
     note: str(f[F.note]),
