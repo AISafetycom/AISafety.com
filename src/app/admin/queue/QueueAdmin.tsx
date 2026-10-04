@@ -40,6 +40,12 @@ import type { FableChange } from '@/lib/admin/queue-fable'
 import Position, { forgetOrder } from './Position'
 import { SORT_FIELD, sortValue } from '@/lib/admin/queue-place'
 import {
+  byUrgency,
+  urgencyOf,
+  type ListingDates,
+  type Urgency,
+} from '@/lib/admin/queue-urgent'
+import {
   fileNameOf,
   hasExpiredPicture,
   isImageLink,
@@ -68,9 +74,21 @@ const REFRESH_MIN_GAP_MS = 5 * 1000
 // The list shows one kind of work at a time (additions to judge whole,
 // changes to judge as a diff, or rules for the bots), grouped by where each
 // item came from. Bryce, 11 Sept 2026: "to be in the headspace for one of
-// those all at once".
-type Section = 'requests' | 'broom' | 'rules' | 'comb'
-const SECTIONS: Section[] = ['requests', 'broom', 'rules', 'comb']
+// those all at once". Above the rest, whatever its source, sits what loses
+// its value by waiting (queue-urgent.ts; Bryce, 4 Oct 2026: "I tend to
+// have a huge backlog … a way of triaging"), and above that every item
+// Fable is answering or has answered unread, whatever its kind (Bryce,
+// 4 Oct 2026: "when Fable is responding to something it should go to the
+// top so I can see").
+type Section = 'fable' | 'urgent' | 'requests' | 'broom' | 'rules' | 'comb'
+const SECTIONS: Section[] = [
+  'fable',
+  'urgent',
+  'requests',
+  'broom',
+  'rules',
+  'comb',
+]
 type Kind = 'additions' | 'changes' | 'rules'
 const KINDS: { key: Kind; label: string; title: string }[] = [
   {
@@ -89,7 +107,16 @@ const KINDS: { key: Kind; label: string; title: string }[] = [
     title: 'Changes to the bots\u2019 rulebooks',
   },
 ]
+// The kind switch's tooltip on an urgent count (queue-urgent.ts).
+const URGENT_WHY: Record<Kind, string> = {
+  additions: 'starting or closing within four days',
+  changes:
+    'a live listing showing wrong information, or starting or closing within two weeks',
+  rules: '',
+}
 const SECTION_LABEL: Record<Section, string> = {
+  fable: 'Fable replying',
+  urgent: 'Urgent',
   requests: 'Requests',
   broom: 'Broom',
   rules: 'Rules',
@@ -190,12 +217,15 @@ const ICON = {
   pencil: '/images/icons/pencil-small.svg',
   chevron: '/images/icons/chevron-down.svg',
   search: '/images/icons/magnifying-glass.svg',
+  clock: '/images/icons/clock.svg',
 } as const
 
 // Each section's head carries its icon, in grey: colour in the list is kept
 // for the verdicts, and a teal Comb or amber Requests icon read as Publish
 // and Unsure (Bryce, 24 Sept 2026).
 const SECTION_ICON: Record<Section, string> = {
+  fable: ICON.stars,
+  urgent: ICON.clock,
   requests: ICON.requests,
   broom: ICON.broom,
   rules: ICON.rule,
@@ -361,6 +391,13 @@ function startOfToday(): number {
   const d = new Date()
   d.setHours(0, 0, 0, 0)
   return d.getTime()
+}
+
+/** The viewer's calendar day at `ms`, as YYYY-MM-DD. */
+function isoDate(ms: number): string {
+  const d = new Date(ms)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
 /** Decided at or after the given moment. A row with no decision time
@@ -717,13 +754,15 @@ function proposedEdits(item: QueueItem): Record<string, unknown> {
     : {}
 }
 
-/** What the lookup answers: a logo and the listing's own link, each by
- *  target record, for the records that have one. */
+/** What the lookup answers: a logo, the listing's own link and (published
+ *  events and training) its dates, each by target record, for the records
+ *  that have one. */
 interface TargetLookup {
   logos: Record<string, string>
   links: Record<string, string>
+  dates: Record<string, ListingDates>
 }
-const NO_TARGETS: TargetLookup = { logos: {}, links: {} }
+const NO_TARGETS: TargetLookup = { logos: {}, links: {}, dates: {} }
 
 /** The list arrives without most logos, and a Change row without its
  *  listing's link (its proposal names only the fields it edits), so it
@@ -751,8 +790,12 @@ async function loadTargets(items: QueueItem[]): Promise<TargetLookup> {
       body: JSON.stringify({ targets }),
     })
     const data = (await res.json()) as Partial<TargetLookup>
-    if (res.ok && (data.logos || data.links)) {
-      return { logos: data.logos ?? {}, links: data.links ?? {} }
+    if (res.ok && (data.logos || data.links || data.dates)) {
+      return {
+        logos: data.logos ?? {},
+        links: data.links ?? {},
+        dates: data.dates ?? {},
+      }
     }
   } catch {
     // not answered: asked again below
@@ -1147,6 +1190,11 @@ export default function QueueAdmin({
   const [live, setLive] = useState<
     Record<string, { fields: Record<string, unknown>; schema: FieldInfo[] }>
   >({})
+  // A published event's or training's start date and deadline, by record,
+  // so a Change on one that is about to happen counts as urgent.
+  const [listingDates, setListingDates] = useState<
+    Record<string, ListingDates>
+  >({})
   const [showDone, setShowDone] = useState(false)
   // A decision opened from Done today: the item itself in place of the
   // list, with a way back (Bryce, 4 Oct 2026).
@@ -1171,6 +1219,8 @@ export default function QueueAdmin({
   const [theme, setTheme] = useState<Theme>('light')
   const [kind, setKind] = useState<Kind>('additions')
   const [collapsed, setCollapsed] = useState<Record<Section, boolean>>({
+    fable: false,
+    urgent: false,
     requests: false,
     broom: false,
     rules: false,
@@ -1347,6 +1397,9 @@ export default function QueueAdmin({
       // follow in the background, each filled in as it arrives. A refresh
       // asks only for what is new to it.
       void loadTargets(next).then(found => {
+        if (Object.keys(found.dates).length) {
+          setListingDates(prev => ({ ...prev, ...found.dates }))
+        }
         if (
           !Object.keys(found.logos).length &&
           !Object.keys(found.links).length
@@ -1529,6 +1582,25 @@ export default function QueueAdmin({
     return marks
   }, [chatOn, chatRows, chatSeen, openId])
 
+  // The items in the "Fable replying" section, newest arrival first. One joins when
+  // Fable is answering it or has answered unread while it is not the open
+  // one (so a row never moves from under the item being chatted on), and
+  // stays while it is open (so clicking it there does not send it back
+  // down); it goes back to its place once it is left with nothing unread.
+  const [fableTop, setFableTop] = useState<string[]>([])
+  useEffect(() => {
+    setFableTop(prev => {
+      const next = prev.filter(id => id === openId || fableMarks[id])
+      for (const id of Object.keys(fableMarks)) {
+        if (id !== openId && !next.includes(id)) next.unshift(id)
+      }
+      return next.length === prev.length &&
+        next.every((id, i) => id === prev[i])
+        ? prev
+        : next
+    })
+  }, [fableMarks, openId])
+
   /** The strongest mark among `list`, for a folded heading's dot. */
   const markAmong = (list: QueueItem[]): FableMark | null => {
     let mark: FableMark | null = null
@@ -1540,10 +1612,12 @@ export default function QueueAdmin({
     return mark
   }
 
-  // One flat, ordered list of open items: requests, Broom, rules, then Comb
-  // with Fable's Publish verdicts first, each section split by resource
-  // page. W/Q and auto-advance walk it, opening a folded page as they
-  // reach it; a folded section is passed over.
+  // One flat, ordered list of open items: what can't wait, requests, Broom,
+  // rules, then Comb with Fable's Publish verdicts first, each section
+  // (Urgent aside) split by resource page and oldest first within it, so
+  // the old pile rises instead of sinking under each day's new finds. W/Q
+  // and auto-advance walk it, opening a folded page as they reach it; a
+  // folded section is passed over.
   // What search looks through, per item. Built again only when the list
   // changes, so each key typed just runs the words over it.
   const searchDocs = useMemo(() => {
@@ -1571,6 +1645,8 @@ export default function QueueAdmin({
 
   const ordered = useMemo(() => {
     const groups: Record<Section, QueueItem[]> = {
+      fable: [],
+      urgent: [],
       requests: [],
       broom: [],
       rules: [],
@@ -1582,6 +1658,14 @@ export default function QueueAdmin({
       changes: 0,
       rules: 0,
     }
+    // How many of each kind can't wait, for the switch.
+    const urgentPerKind: Record<Kind, number> = {
+      additions: 0,
+      changes: 0,
+      rules: 0,
+    }
+    const urgencies = new Map<string, Urgency>()
+    const today = isoDate(dayStart)
     let open = 0
     // During a search: what each matching item matched, for its row.
     const hits = new Map<string, SearchHit>()
@@ -1607,27 +1691,49 @@ export default function QueueAdmin({
         continue
       }
       perKind[k]++
-      if (k === kind) groups[sectionOf(item)].push(item)
+      const urgency = urgencyOf(
+        item,
+        item.targetRecord ? listingDates[item.targetRecord] : undefined,
+        today
+      )
+      if (urgency) {
+        urgencies.set(item.id, urgency)
+        urgentPerKind[k]++
+      }
+      if (fableTop.includes(item.id)) groups.fable.push(item)
+      else if (k === kind) {
+        groups[urgency ? 'urgent' : sectionOf(item)].push(item)
+      }
     }
-    const newest = (a: QueueItem, b: QueueItem) =>
-      a.createdAt < b.createdAt ? 1 : -1
+    const oldest = (a: QueueItem, b: QueueItem) =>
+      a.createdAt < b.createdAt ? -1 : 1
     const byVerdict = (a: QueueItem, b: QueueItem) =>
-      verdictRank(a.verdict) - verdictRank(b.verdict) || newest(a, b)
-    groups.requests.sort(newest)
+      verdictRank(a.verdict) - verdictRank(b.verdict) || oldest(a, b)
+    const urgentAt = (i: QueueItem) => ({
+      urgency: urgencies.get(i.id) ?? { days: null, label: '' },
+      createdAt: i.createdAt,
+    })
+    groups.urgent.sort((a, b) => byUrgency(urgentAt(a), urgentAt(b)))
+    groups.fable.sort((a, b) => fableTop.indexOf(a.id) - fableTop.indexOf(b.id))
+    groups.requests.sort(oldest)
     groups.broom.sort(byVerdict)
-    groups.rules.sort(newest)
+    groups.rules.sort(oldest)
     groups.comb.sort(byVerdict)
     done.sort((a, b) => ((a.decidedAt ?? '') < (b.decidedAt ?? '') ? 1 : -1))
     const doneHits = search ? done.filter(i => hits.has(i.id)) : done
     // Sub-heads only where a section spans more than one page; a section on
     // a single page lists its items as they are.
     const pages: Record<Section, PageGroup[]> = {
+      fable: [],
+      urgent: [],
       requests: [],
       broom: [],
       rules: [],
       comb: [],
     }
     for (const s of SECTIONS) {
+      // Fable and Urgent keep their own order; their rows name their page.
+      if (s === 'fable' || s === 'urgent') continue
       const split = splitByPage(groups[s])
       pages[s] = split.length > 1 ? split : []
     }
@@ -1686,6 +1792,8 @@ export default function QueueAdmin({
       foldOf,
       open,
       perKind,
+      urgentPerKind,
+      urgencies,
     }
   }, [
     items,
@@ -1696,6 +1804,8 @@ export default function QueueAdmin({
     selectedId,
     search,
     searchDocs,
+    listingDates,
+    fableTop,
   ])
 
   const selected = useMemo(() => {
@@ -2603,11 +2713,27 @@ export default function QueueAdmin({
                 <span className={styles.segCount}>
                   {ordered.perKind[k.key]}
                 </span>
+                {/* How many of each kind are urgent, the open one included
+                    (Bryce, 4 Oct 2026: "Keep the urgent number there"). */}
+                {!searching && ordered.urgentPerKind[k.key] > 0 && (
+                  <span
+                    className={styles.segUrgent}
+                    title={`${ordered.urgentPerKind[k.key]} urgent: ${URGENT_WHY[k.key]}`}
+                  >
+                    <Icon src={ICON.clock} size={12} />
+                    {ordered.urgentPerKind[k.key]}
+                  </span>
+                )}
+                {/* Items already in "Fable replying" at the top are not
+                    counted again here. */}
                 {!searching && kind !== k.key && (
                   <FableDot
                     mark={markAmong(
                       (items ?? []).filter(
-                        i => isOpen(i) && kindOf(i) === k.key
+                        i =>
+                          isOpen(i) &&
+                          kindOf(i) === k.key &&
+                          !fableTop.includes(i.id)
                       )
                     )}
                   />
@@ -2875,6 +3001,14 @@ export default function QueueAdmin({
                               !pending[item.id] && Boolean(draft(item.id).error)
                             }
                             fable={fableMarks[item.id]}
+                            showKind={
+                              section === 'fable' && kindOf(item) !== kind
+                            }
+                            urgency={
+                              section === 'fable' || section === 'urgent'
+                                ? ordered.urgencies.get(item.id)
+                                : undefined
+                            }
                             onClick={() => select(item.id)}
                             onLogoError={() => logoDied(item)}
                           />
@@ -3148,6 +3282,7 @@ function Row({
   showKind = false,
   search = null,
   hit,
+  urgency,
   onClick,
   onLogoError,
 }: {
@@ -3167,6 +3302,8 @@ function Row({
   search?: SearchQuery | null
   /** What the search matched here: an excerpt when it is off the row. */
   hit?: SearchHit
+  /** In the Urgent section: why it can't wait ("Closes 10 Oct"). */
+  urgency?: Urgency
   onClick: () => void
   /** The picture's link has stopped working. */
   onLogoError: () => void
@@ -3197,6 +3334,12 @@ function Row({
           <Marked text={splitTitle(item).name ?? item.title} search={search} />
         </span>
         <span className={styles.rowMeta}>
+          {urgency && (
+            <span className={`${styles.withIcon} ${styles.urgentTag}`}>
+              <Icon src={ICON.clock} size={12} />
+              {urgency.label}
+            </span>
+          )}
           {showKind && <span>{KIND_WORD[item.type]}</span>}
           {item.source !== 'Comb' && <span>{item.source}</span>}
           {showPage && item.page && <span>{pageLabel(item)}</span>}

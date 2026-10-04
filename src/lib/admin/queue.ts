@@ -33,6 +33,7 @@ import {
 import { sealToken } from './session'
 import { isExpiredAttachment } from './attachment-url'
 import { roomFor, SORT_FIELD, type Placed } from './queue-place'
+import type { ListingDates } from './queue-urgent'
 
 export const QUEUE_TABLE_ID = 'tblonlKwIFJ7Aa8QN'
 const BROOM_ISSUES_TABLE_ID = 'tblntD3WITPEgjHRK'
@@ -211,24 +212,33 @@ function toChanges(v: unknown): ProposedChange[] {
 export interface TargetLookup {
   logos: Record<string, string>
   links: Record<string, string>
+  /** A published event's or training's start date and deadline, so the
+   *  page can tell which Changes touch a listing that is about to happen
+   *  (queue-urgent.ts). */
+  dates: Record<string, ListingDates>
 }
 
-/** Record id → logo and link for every published listing, from the
- *  chatbot's catalog (cached five minutes; its ids are "<type>:<record
- *  id>"). Empty when the catalog cannot be built: the list is not worth
- *  an error. */
+/** Record id → logo, link and (events, training) dates for every published
+ *  listing, from the chatbot's catalog (cached five minutes; its ids are
+ *  "<type>:<record id>"). Empty when the catalog cannot be built: the list
+ *  is not worth an error. */
 async function catalogTargets(): Promise<{
   logos: Map<string, string>
   links: Map<string, string>
+  dates: Map<string, ListingDates>
 }> {
   const logos = new Map<string, string>()
   const links = new Map<string, string>()
+  const dates = new Map<string, ListingDates>()
   try {
     for (const l of (await getCatalog()).listings) {
       const rec = l.id.slice(l.id.indexOf(':') + 1)
       if (!isRecordId(rec)) continue
       if (l.logo && !isExpiredAttachment(l.logo)) logos.set(rec, l.logo)
       if (l.url && /^https?:\/\//.test(l.url)) links.set(rec, l.url)
+      const start = l.meta.startDate ?? null
+      const closes = l.meta.applicationsClose ?? null
+      if (start || closes) dates.set(rec, { start, closes })
     }
   } catch (e) {
     console.error(
@@ -236,7 +246,7 @@ async function catalogTargets(): Promise<{
       e instanceof Error ? e.message : e
     )
   }
-  return { logos, links }
+  return { logos, links, dates }
 }
 
 /** Airtable attachment links carry their expiry (ms since the epoch) as a
@@ -508,7 +518,7 @@ export async function listQueue(): Promise<QueueItem[]> {
 export async function queueTargets(
   targets: { table: string; record: string }[]
 ): Promise<TargetLookup> {
-  const out: TargetLookup = { logos: {}, links: {} }
+  const out: TargetLookup = { logos: {}, links: {}, dates: {} }
   // record → table, deduplicated
   const wanted = new Map<string, string>()
   for (const t of targets) {
@@ -522,6 +532,8 @@ export async function queueTargets(
   for (const [record, table] of wanted) {
     const link = catalog.links.get(record)
     if (link) out.links[record] = link
+    const dates = catalog.dates.get(record)
+    if (dates) out.dates[record] = dates
     const logo = catalog.logos.get(record)
     if (logo) out.logos[record] = logo
     else rest.push({ table, record })

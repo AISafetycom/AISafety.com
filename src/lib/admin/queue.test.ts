@@ -392,18 +392,21 @@ describe('queueTargets', () => {
           id: `organization:${rid('org')}`,
           logo: 'https://v5.airtableusercontent.com/org.png',
           url: 'https://example.org/',
+          meta: {},
         },
         // a community without a join link: the catalog stands in a "#"
         {
           id: `community:${rid('comm')}`,
           logo: 'https://v5.airtableusercontent.com/comm.png',
           url: '#',
+          meta: {},
         },
         // an advisor reached by email, which is no link to open
         {
           id: `person:${rid('adv')}`,
           logo: null,
           url: 'mailto:someone@example.org',
+          meta: {},
         },
       ],
     } as never)
@@ -419,13 +422,41 @@ describe('queueTargets', () => {
       [rid('org')]: 'https://v5.airtableusercontent.com/org.png',
       [rid('comm')]: 'https://v5.airtableusercontent.com/comm.png',
     })
+    expect(found.dates).toEqual({})
+  })
+
+  it('answers a published event’s start date and deadline', async () => {
+    vi.mocked(getCatalog).mockResolvedValue({
+      listings: [
+        {
+          id: `event:${rid('event')}`,
+          logo: null,
+          url: 'https://luma.com/x',
+          meta: { startDate: '2026-10-09', applicationsClose: '2026-10-08' },
+        },
+        {
+          id: `training:${rid('course')}`,
+          logo: null,
+          url: 'https://example.org/course',
+          meta: { startDate: '2026-11-02' },
+        },
+      ],
+    } as never)
+    const found = await queueTargets([
+      { table: EVENTS, record: rid('event') },
+      { table: EVENTS, record: rid('course') },
+    ])
+    expect(found.dates).toEqual({
+      [rid('event')]: { start: '2026-10-09', closes: '2026-10-08' },
+      [rid('course')]: { start: '2026-11-02', closes: null },
+    })
   })
 
   it('is empty when the catalog cannot be built', async () => {
     vi.mocked(getCatalog).mockRejectedValue(new Error('Airtable is down'))
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const found = await queueTargets([{ table: EVENTS, record: rid('org') }])
-    expect(found).toEqual({ logos: {}, links: {} })
+    expect(found).toEqual({ logos: {}, links: {}, dates: {} })
     spy.mockRestore()
   })
 })
