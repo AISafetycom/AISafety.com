@@ -30,6 +30,7 @@ import {
   handledOutside,
   mergeEdits,
   queueTargets,
+  rejectReplyOf,
   undoItem,
   type QueueItem,
 } from './queue'
@@ -72,6 +73,7 @@ function item(over: Partial<QueueItem>): QueueItem {
     replyStatus: null,
     saidBy: null,
     replyTo: null,
+    rejectReply: null,
     rejectReason: null,
     note: null,
     edits: null,
@@ -509,5 +511,33 @@ describe('mergeEdits', () => {
     expect(mergeEdits(null, { Scale: 'Medium' }, ['Scale'])).toEqual({
       Scale: 'Medium',
     })
+  })
+})
+
+describe('rejectReplyOf', () => {
+  const decided = '2026-10-04T12:00:00.000Z'
+  it('reads a saved rejection reply for this decision', () => {
+    expect(
+      rejectReplyOf(
+        { since: decided, text: 'Thanks – not this one.', draft: 'r-1' },
+        decided
+      )
+    ).toEqual({ text: 'Thanks – not this one.', state: 'saved', error: null })
+  })
+  it('reports one being written, or one that failed', () => {
+    expect(
+      rejectReplyOf({ since: decided, writing: decided }, decided)?.state
+    ).toBe('writing')
+    expect(
+      rejectReplyOf({ since: decided, failed: 'Gmail said no' }, decided)
+    ).toEqual({ text: null, state: 'failed', error: 'Gmail said no' })
+  })
+  it('ignores a reply from an earlier rejection (Undo, then Reject again)', () => {
+    expect(
+      rejectReplyOf(
+        { since: '2026-10-04T11:00:00.000Z', text: 'old', draft: 'r-0' },
+        decided
+      )
+    ).toBeNull()
   })
 })

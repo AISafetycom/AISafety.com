@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { fableChangesOf, type FableChange } from '@/lib/admin/queue-fable'
 import Icon from '@/components/Icon'
 import type { AgentInfo, QueueItem } from '@/lib/admin/queue'
 import styles from './queue.module.css'
@@ -63,6 +64,9 @@ interface Msg {
   note?: string
   /** Fable wrote to Airtable while answering: the page re-reads the record. */
   wrote?: boolean
+  /** What that reply changed on this item's own listing, read by the Mac
+   *  before and after it. */
+  changed?: FableChange[]
 }
 
 interface Event {
@@ -176,6 +180,7 @@ export default function Chat({
   onSetEdits,
   onSetReply,
   onWrote,
+  onFableChanges,
   focusTick,
 }: {
   item: QueueItem
@@ -193,6 +198,8 @@ export default function Chat({
   onSetReply: (text: string | null) => void
   /** A reply that changed Airtable has landed: re-read the live record. */
   onWrote?: () => void
+  /** The fields Fable has changed on the listing so far in this thread. */
+  onFableChanges?: (changes: FableChange[]) => void
   /** Bumped by the F key: focus the box. */
   focusTick: number
 }) {
@@ -238,6 +245,13 @@ export default function Chat({
   const undoRef = useRef<Record<string, Undo>>({})
   // How many messages the page has already looked at for blocks to apply.
   const seenRef = useRef<number | null>(null)
+
+  // The page's changed fields list what Fable changed on the listing.
+  const onChangesRef = useRef(onFableChanges)
+  onChangesRef.current = onFableChanges
+  useEffect(() => {
+    if (messages) onChangesRef.current?.(fableChangesOf(messages))
+  }, [messages])
 
   /** Apply the blocks in a reply that has just arrived. */
   const applyFrom = useCallback(

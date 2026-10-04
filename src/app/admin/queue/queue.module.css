@@ -2534,3 +2534,55 @@ button.chatFileChip:hover {
   max-height: 220px;
   object-fit: contain;
 }
+
+/* A field Fable changed straight in Airtable from the chat (4 Oct 2026):
+   the "edited" mark's place, in its own words. */
+.byFable {
+  margin-left: 8px;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 400;
+  color: var(--q-accent);
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: help;
+}
+
+/* Done today: a decision opens on a click, like a row in the list
+   (Bryce, 4 Oct 2026: "Would be good if I could click on a listing in
+   Done somehow"). */
+.doneRowOpen {
+  cursor: pointer;
+}
+
+.doneRowOpen:hover {
+  border-color: var(--q-accent);
+}
+
+.backLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--q-accent);
+  cursor: pointer;
+}
+
+.backLink:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.backLink kbd {
+  margin-left: 2px;
+}
+
+.backArrow {
+  display: inline-flex;
+  transform: scaleX(-1);
+}
