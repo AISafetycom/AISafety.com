@@ -48,7 +48,7 @@
 
 .rowAt {
   background: var(--q-sel);
-  box-shadow: inset 0 -2px 0 var(--q-accent);
+  box-shadow: inset 0 0 0 2px var(--q-accent);
 }
 
 .name {

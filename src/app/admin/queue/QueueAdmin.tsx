@@ -4203,26 +4203,13 @@ function Detail({
                       ) : null
                     })() ??
                       (d.editing === c.field ? (
-                        <textarea
-                          ref={fitToText}
-                          onInput={e => fitToText(e.currentTarget)}
-                          className={styles.input}
-                          rows={2}
-                          autoFocus
-                          defaultValue={d.edits[c.field] ?? show(c.to)}
-                          onKeyDown={e => {
-                            if (e.key === 'Escape') {
-                              e.preventDefault()
-                              setD({ editing: null })
-                            } else if (isDoneKey(e)) {
-                              e.preventDefault()
-                              e.currentTarget.blur()
-                            }
-                          }}
-                          onBlur={e => {
+                        <ProposedEditor
+                          value={d.edits[c.field] ?? show(c.to)}
+                          cap={c.field === cap.field ? cap.cap : undefined}
+                          onCancel={() => setD({ editing: null })}
+                          onSave={text => {
                             // Closing the box without changing anything is
                             // not an edit.
-                            const text = e.target.value
                             const edits = { ...d.edits }
                             if (text === show(c.to)) delete edits[c.field]
                             else edits[c.field] = text
@@ -4230,14 +4217,26 @@ function Detail({
                           }}
                         />
                       ) : (
-                        <EditableValue
-                          text={friendly(
-                            c.field in d.edits ? d.edits[c.field] : show(c.to)
+                        <>
+                          <EditableValue
+                            text={friendly(
+                              c.field in d.edits ? d.edits[c.field] : show(c.to)
+                            )}
+                            edited={c.field in d.edits}
+                            canEdit={!revising}
+                            onEdit={() => setD({ editing: c.field })}
+                          />
+                          {c.field === cap.field && (
+                            <Counted
+                              text={
+                                c.field in d.edits
+                                  ? d.edits[c.field]
+                                  : show(c.to)
+                              }
+                              cap={cap.cap}
+                            />
                           )}
-                          edited={c.field in d.edits}
-                          canEdit={!revising}
-                          onEdit={() => setD({ editing: c.field })}
-                        />
+                        </>
                       ))}
                   </span>
                 </div>
@@ -4248,6 +4247,7 @@ function Detail({
                   change={c}
                   page={item.page}
                   live={live?.fields[c.field]}
+                  cap={c.field === cap.field ? cap.cap : undefined}
                 />
               ))}
               {extraFields.map(k => (
@@ -4719,11 +4719,13 @@ function FableChangeRow({
   change,
   page,
   live,
+  cap,
 }: {
   change: FableChange
   page: string | null
   /** The record's field now, for a fresh link to the new picture. */
   live: unknown
+  cap?: number
 }) {
   const pictureField = touchesPicture(change)
   const side = (v: unknown, open: boolean) => {
@@ -4753,6 +4755,7 @@ function FableChangeRow({
         >
           by Fable
         </em>
+        {cap !== undefined && <Counted text={show(change.to)} cap={cap} />}
       </span>
     </div>
   )
@@ -4859,9 +4862,7 @@ function ExtraChangeRow({
       </span>
       <span className={styles.to}>
         {to}
-        {edit !== undefined && cap !== undefined && !editing && (
-          <Counted text={edit} cap={cap} />
-        )}
+        {cap !== undefined && !editing && <Counted text={value} cap={cap} />}
         {canEdit && edit !== undefined && !editing && (
           <button
             type="button"
@@ -5389,6 +5390,49 @@ function ImageSlot({
 function Counted({ text, cap }: { text: string; cap: number }) {
   const n = text.trim().length
   return n ? <CharCount n={n} cap={cap} /> : null
+}
+
+/** The box a proposed change's new value is typed over in, with a capped
+ *  field's count kept live while typing (Bryce, 5 Oct 2026: "Editing a
+ *  field that has a character limit should always show it"). */
+function ProposedEditor({
+  value,
+  cap,
+  onSave,
+  onCancel,
+}: {
+  value: string
+  cap?: number
+  onSave: (text: string) => void
+  onCancel: () => void
+}) {
+  const [typed, setTyped] = useState(value)
+  return (
+    <>
+      <textarea
+        ref={fitToText}
+        onInput={e => {
+          fitToText(e.currentTarget)
+          setTyped(e.currentTarget.value)
+        }}
+        className={styles.input}
+        rows={2}
+        autoFocus
+        defaultValue={value}
+        onKeyDown={e => {
+          if (e.key === 'Escape') {
+            e.preventDefault()
+            onCancel()
+          } else if (isDoneKey(e)) {
+            e.preventDefault()
+            e.currentTarget.blur()
+          }
+        }}
+        onBlur={e => onSave(e.target.value)}
+      />
+      {cap !== undefined && <Counted text={typed} cap={cap} />}
+    </>
+  )
 }
 
 function FieldEditor({
