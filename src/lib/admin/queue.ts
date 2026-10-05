@@ -121,6 +121,11 @@ export interface QueueItem {
   /** Rule: what changes, in plain words, and which rulebook it touches. */
   summary: string | null
   appliesTo: string | null
+  /** Rule: the new rulebook text as it will read, and the text it takes
+   *  the place of (null when it only adds). Shown on the card so the rule
+   *  is judged on its words (Bryce, 5 Oct 2026, the teach loop). */
+  ruleWording: string | null
+  ruleWas: string | null
   verdict: Verdict | null
   reasons: string[]
   rejectChips: string[]
@@ -445,6 +450,8 @@ function rowToItem(
   let diff: string | null = null
   let summary: string | null = null
   let appliesTo: string | null = null
+  let ruleWording: string | null = null
+  let ruleWas: string | null = null
   let replyTo: string | null = null
   let rejectReply: RejectReply | null = null
   let saidBy: SaidBy | null = null
@@ -453,6 +460,8 @@ function rowToItem(
     diff = str(proposal.diff)
     summary = str(proposal.summary)
     appliesTo = str(proposal.applies_to) ?? str(proposal.appliesTo)
+    ruleWording = str(proposal.wording)
+    ruleWas = str(proposal.was)
     name = str(proposal.name)
     url = str(proposal.url)
     if (isRecord(proposal.reply)) {
@@ -526,6 +535,8 @@ function rowToItem(
     diff,
     summary,
     appliesTo,
+    ruleWording,
+    ruleWas,
     verdict: str(f[F.verdict]) as Verdict | null,
     reasons: lines(f[F.reasons]),
     rejectChips: lines(f[F.rejectChips]),
