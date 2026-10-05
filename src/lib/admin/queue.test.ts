@@ -74,6 +74,7 @@ function item(over: Partial<QueueItem>): QueueItem {
     saidBy: null,
     replyTo: null,
     rejectReply: null,
+    rejectDrafts: {},
     rejectReason: null,
     note: null,
     edits: null,

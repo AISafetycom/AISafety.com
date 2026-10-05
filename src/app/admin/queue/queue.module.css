@@ -881,6 +881,9 @@
   background: var(--q-panel);
   color: var(--q-text-2);
   white-space: pre-wrap;
+  /* A long link (a WhatsApp invite) wraps instead of widening the box
+     under the reply beside it (Bryce, 5 Oct 2026). */
+  overflow-wrap: anywhere;
   border-radius: 0 6px 6px 0;
 }
 
@@ -950,6 +953,15 @@
 
 /* A request and its reply side by side, so the two read as one exchange
    (Bryce, 14 Sept 2026); one column when the detail column is narrow. */
+/* The accept reply and, under it, the rejection reply (Bryce, 5 Oct 2026:
+   both shown, both written in advance). */
+.replies {
+  min-width: 0;
+  display: grid;
+  gap: 22px;
+  align-content: start;
+}
+
 .exchange {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
