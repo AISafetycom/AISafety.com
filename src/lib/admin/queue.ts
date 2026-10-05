@@ -131,7 +131,8 @@ export interface QueueItem {
   /** Rejected Email/Form: the reply the Mac wrote for this rejection and
    *  saved as a Gmail draft (Bryce, 4 Oct 2026: "when I reject something
    *  which was suggested, it should have an email response like when I
-   *  accept something"). From the proposal's reply.reject block; null
+   *  accept something"). Rejected Discord: Fable's decline, kept here to
+   *  copy (5 Oct 2026). From the proposal's reply.reject block; null
    *  when there is none for this decision. */
   rejectReply: RejectReply | null
   rejectReason: string | null
@@ -143,9 +144,11 @@ export interface QueueItem {
 }
 
 export interface RejectReply {
-  /** The words saved in Gmail; null until they are written. */
+  /** The words saved in Gmail (or, for Discord, to copy); null until they
+   *  are written. */
   text: string | null
-  state: 'saved' | 'writing' | 'failed'
+  /** saved = a Gmail draft · ready = a Discord reply to copy and send by hand */
+  state: 'saved' | 'ready' | 'writing' | 'failed'
   error: string | null
 }
 
@@ -382,6 +385,7 @@ export function rejectReplyOf(
     return null
   const text = str(v.text)
   if (str(v.draft)) return { text, state: 'saved', error: null }
+  if (str(v.ready) && text) return { text, state: 'ready', error: null }
   if (str(v.failed)) return { text, state: 'failed', error: str(v.failed) }
   if (str(v.writing)) return { text, state: 'writing', error: null }
   return null
