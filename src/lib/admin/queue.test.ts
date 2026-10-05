@@ -524,6 +524,18 @@ describe('rejectReplyOf', () => {
       )
     ).toEqual({ text: 'Thanks – not this one.', state: 'saved', error: null })
   })
+  it('reads a Discord decline kept to copy', () => {
+    expect(
+      rejectReplyOf(
+        { since: decided, text: 'From Fable:\n>>> Thanks', ready: decided },
+        decided
+      )
+    ).toEqual({
+      text: 'From Fable:\n>>> Thanks',
+      state: 'ready',
+      error: null,
+    })
+  })
   it('reports one being written, or one that failed', () => {
     expect(
       rejectReplyOf({ since: decided, writing: decided }, decided)?.state

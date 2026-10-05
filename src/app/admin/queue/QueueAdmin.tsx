@@ -920,19 +920,37 @@ function wantsDraft(item: QueueItem): boolean {
 const REJECT_REPLIES_SINCE = Date.parse('2026-10-04T11:50:00Z')
 
 /** A rejected emailed or form suggestion whose reply is not in Gmail yet
- *  (Bryce, 4 Oct 2026: a rejection gets an email response too). */
+ *  (Bryce, 4 Oct 2026: a rejection gets an email response too), or a
+ *  rejected Discord request whose decline is not written yet (5 Oct 2026). */
 function wantsRejectReply(item: QueueItem): boolean {
   return (
     item.status === 'Rejected' &&
-    (item.source === 'Email' || item.source === 'Form') &&
+    (item.source === 'Email' ||
+      item.source === 'Form' ||
+      item.source === 'Discord') &&
     Boolean(item.replyTo) &&
     item.rejectReply?.state !== 'saved' &&
+    item.rejectReply?.state !== 'ready' &&
     Date.parse(item.decidedAt ?? '') >= REJECT_REPLIES_SINCE
   )
 }
 
+/** A rejected Discord request's decline, ready to copy. */
+function discordRejectText(item: QueueItem): string | null {
+  return item.source === 'Discord' &&
+    item.status === 'Rejected' &&
+    item.rejectReply?.state === 'ready'
+    ? item.rejectReply.text
+    : null
+}
+
 function replyLabel(item: QueueItem): string {
   if (item.status === 'Rejected') {
+    if (item.source === 'Discord') {
+      // A ready decline shows as Copy reply / Open on Discord instead.
+      if (item.rejectReply?.state === 'failed') return 'Reply failed'
+      return wantsRejectReply(item) ? 'Fable is writing the reply' : ''
+    }
     if (item.rejectReply?.state === 'saved') return 'Reply draft saved in Gmail'
     if (item.rejectReply?.state === 'failed') return 'Reply draft failed'
     return wantsRejectReply(item) ? 'Reply on its way to Gmail' : ''
@@ -2166,19 +2184,25 @@ export default function QueueAdmin({
             chat: false,
           }
       if (agent) setAgentOnline(!res.offline)
+      const discord = item.source === 'Discord'
       const sub = res.ok
-        ? res.detail || 'Reply draft saved in Gmail'
+        ? res.detail ||
+          (discord
+            ? 'Reply ready · copy it and send it yourself on Discord'
+            : 'Reply draft saved in Gmail')
         : res.offline
           ? `Mac agent not reachable · the Mac writes the reply within five minutes`
-          : `Reply draft failed: ${res.detail}`
-      if (!res.offline) {
-        const reply: RejectReply = res.ok
+          : `${discord ? 'Reply' : 'Reply draft'} failed: ${res.detail}`
+      const reply: RejectReply | null = res.offline
+        ? null
+        : res.ok
           ? {
               text: res.rejectText ?? null,
-              state: 'saved',
+              state: discord ? 'ready' : 'saved',
               error: null,
             }
           : { text: null, state: 'failed', error: res.detail }
+      if (reply) {
         setItems(prev =>
           prev
             ? prev.map(i =>
@@ -2189,8 +2213,15 @@ export default function QueueAdmin({
             : prev
         )
       }
+      // The toast's item too, so a Discord decline gets its Copy button.
       setToast(prev =>
-        prev && prev.item.id === item.id ? { ...prev, sub } : prev
+        prev && prev.item.id === item.id
+          ? {
+              ...prev,
+              sub,
+              item: reply ? { ...prev.item, rejectReply: reply } : prev.item,
+            }
+          : prev
       )
     },
     [agent]
@@ -2318,7 +2349,9 @@ export default function QueueAdmin({
                       : `Reply draft: ${WORKER_NOTE}`
                     : rejectReplyPending
                       ? agent
-                        ? 'Fable is writing the reply for Gmail…'
+                        ? updated.source === 'Discord'
+                          ? 'Fable is writing the reply…'
+                          : 'Fable is writing the reply for Gmail…'
                         : 'Reply: the Mac writes it within five minutes'
                       : updated.source === 'Discord' && updated.replyDraft
                         ? 'Reply drafted · copy it and send it yourself on Discord'
@@ -3119,11 +3152,16 @@ export default function QueueAdmin({
           </span>
           {toast.state === 'done' &&
             toast.item.source === 'Discord' &&
-            toast.item.replyDraft &&
-            !toast.no && (
+            (toast.no
+              ? discordRejectText(toast.item)
+              : toast.item.replyDraft) && (
               <>
                 <CopyReply
-                  text={toast.item.replyDraft}
+                  text={
+                    (toast.no
+                      ? discordRejectText(toast.item)
+                      : toast.item.replyDraft) ?? ''
+                  }
                   className={styles.toastUndo}
                 />
                 {toast.item.sourceLink && (
@@ -3549,16 +3587,40 @@ function Detail({
         <h3 className={styles.h3}>
           Reply{item.replyTo ? ` to ${item.replyTo}` : ''}
         </h3>
-        {item.rejectReply?.text && (
-          <ReplyDraft
-            text={item.rejectReply.text}
-            edited={false}
-            canEdit={false}
-            onEdit={() => {}}
-          />
-        )}
+        {item.rejectReply?.text &&
+          (item.source === 'Discord' ? (
+            <CopyBox text={item.rejectReply.text} />
+          ) : (
+            <ReplyDraft
+              text={item.rejectReply.text}
+              edited={false}
+              canEdit={false}
+              onEdit={() => {}}
+            />
+          ))}
         <p className={styles.note}>
-          {item.rejectReply?.state === 'saved' ? (
+          {item.source === 'Discord' ? (
+            item.rejectReply?.state === 'ready' ? (
+              <>
+                Click it to copy, then send it yourself
+                {item.sourceLink ? (
+                  <>
+                    {' '}
+                    <a href={item.sourceLink} target="_blank" rel="noreferrer">
+                      on Discord
+                    </a>
+                  </>
+                ) : (
+                  ' on Discord'
+                )}
+                . Nothing was sent.
+              </>
+            ) : item.rejectReply?.state === 'failed' ? (
+              `The reply could not be written${item.rejectReply.error ? `: ${item.rejectReply.error}` : '.'}`
+            ) : (
+              'Fable is writing it from your reason. Nothing is sent.'
+            )
+          ) : item.rejectReply?.state === 'saved' ? (
             <>
               Saved in Gmail as a draft
               {item.sourceLink && (
@@ -5413,10 +5475,17 @@ function DoneList({
                 <span className={styles.error}>{errorFor(item.id)}</span>
               )}
               {item.source === 'Discord' &&
-                item.replyDraft &&
-                item.status !== 'Rejected' && (
+                (item.status === 'Rejected'
+                  ? discordRejectText(item)
+                  : item.replyDraft) && (
                   <>
-                    <CopyReply text={item.replyDraft} />
+                    <CopyReply
+                      text={
+                        (item.status === 'Rejected'
+                          ? discordRejectText(item)
+                          : item.replyDraft) ?? ''
+                      }
+                    />
                     {item.sourceLink && (
                       <OpenOnDiscord href={item.sourceLink} />
                     )}
