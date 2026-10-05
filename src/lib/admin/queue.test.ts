@@ -27,6 +27,7 @@ import {
   asAttachmentPreview,
   asAttachmentWrite,
   closeHandledRows,
+  extraEdits,
   handledOutside,
   mergeEdits,
   queueTargets,
@@ -377,6 +378,135 @@ describe('picture fields on Apply and Undo', () => {
       fields: { 'Host name': 'Mangrove' },
     })
     expect(patches[1].fields[STATUS]).toBe('Pending')
+  })
+})
+
+// A change with fields edited beyond its proposal (Bryce, 5 Oct 2026: "I
+// want a way of editing other random fields too"): Accept writes them with
+// the proposed ones and keeps what they held; Undo puts that back.
+describe('fields edited beyond a change’s proposal', () => {
+  const ROW = 'fldzCgKQbopgcbrwq'
+  const schema = [
+    { id: 'fldName', name: 'Name', type: 'singleLineText' },
+    { id: 'fldDesc', name: 'Description', type: 'multilineText' },
+    { id: 'fldOpen', name: 'Open?', type: 'checkbox' },
+    { id: 'fldLogo', name: 'Logo', type: 'multipleAttachments' },
+    { id: 'fldOrgs', name: 'Organizations', type: 'multipleRecordLinks' },
+    { id: 'fldAge', name: 'Age', type: 'formula' },
+  ]
+  let patches: { path: string; fields: Record<string, unknown> }[]
+
+  beforeEach(() => {
+    patches = []
+    process.env.AIRTABLE_TOKEN = 'test-token'
+    process.env.AIRTABLE_BASE_ID = 'appTest'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({ tables: [{ id: FUNDING, fields: schema }] })
+      )
+    )
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(
+      async (path: string, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          const body = JSON.parse(String(init.body)) as {
+            fields: Record<string, unknown>
+          }
+          patches.push({ path, fields: body.fields })
+          return new Response('{}', { status: 200 })
+        }
+        // the record as it is before Accept: an unticked box is absent
+        return Response.json({
+          id: rid('fund'),
+          fields: { Name: 'Old name', Description: 'Old words' },
+        })
+      }
+    )
+  })
+
+  const change = (over: Partial<QueueItem> = {}) =>
+    item({
+      type: 'Change',
+      source: 'Broom',
+      page: '/funding',
+      targetTable: FUNDING,
+      targetRecord: rid('fund'),
+      changes: [{ field: 'Name', from: 'Old name', to: 'New name' }],
+      ...over,
+    })
+
+  it('keeps only the fields that can be written', () => {
+    expect(
+      extraEdits(
+        change(),
+        {
+          Name: 'Typed name',
+          Description: 'Fresh words',
+          'Open?': true,
+          'Publish?': true,
+          Logo: 'https://x.org/a.png',
+          Organizations: ['recA'],
+          Age: '3',
+        },
+        schema
+      )
+    ).toEqual({ Description: 'Fresh words', 'Open?': true })
+  })
+
+  it('writes them with the proposed fields and keeps what they held', async () => {
+    const edits = { Description: 'Fresh words', 'Open?': true }
+    await acceptItem(change(), edits)
+    expect(patches[0]).toEqual({
+      path: `${FUNDING}/${rid('fund')}`,
+      fields: {
+        Name: 'New name',
+        Description: 'Fresh words',
+        'Open?': true,
+      },
+    })
+    expect(patches[1].fields[STATUS]).toBe('Applied')
+    expect(JSON.parse(String(patches[1].fields[ROW]))).toEqual({
+      ...edits,
+      '(before)': { Description: 'Old words', 'Open?': false },
+    })
+  })
+
+  it('writes them on a flag with nothing proposed', async () => {
+    await acceptItem(change({ changes: [] }), { Description: 'Fresh words' })
+    expect(patches[0].fields).toEqual({ Description: 'Fresh words' })
+  })
+
+  it('reads nothing more when only proposed fields were edited', async () => {
+    await acceptItem(change(), { Name: 'Typed name' })
+    expect(patches[0].fields).toEqual({ Name: 'Typed name' })
+    expect(JSON.parse(String(patches[1].fields[ROW]))).toEqual({
+      Name: 'Typed name',
+    })
+    expect(
+      mocks.airtableRequest.mock.calls.every(
+        ([, init]) => (init as RequestInit | undefined)?.method === 'PATCH'
+      )
+    ).toBe(true)
+  })
+
+  it('on Undo, puts them back too and keeps the edits as the draft', async () => {
+    await undoItem(
+      change({
+        status: 'Applied',
+        edits: { Description: 'Fresh words', 'Open?': true },
+        before: { Description: 'Old words', 'Open?': false },
+      })
+    )
+    expect(patches[0]).toEqual({
+      path: `${FUNDING}/${rid('fund')}`,
+      fields: { Name: 'Old name', Description: 'Old words', 'Open?': false },
+    })
+    expect(patches[1].fields[STATUS]).toBe('Pending')
+    expect(JSON.parse(String(patches[1].fields[ROW]))).toEqual({
+      Description: 'Fresh words',
+      'Open?': true,
+    })
   })
 })
 

@@ -2598,3 +2598,29 @@ button.chatFileChip:hover {
   display: inline-flex;
   transform: scaleX(-1);
 }
+
+/* A field edited beyond what a change proposes: the cross drops the edit,
+   shown on the row's hover like the pencil. */
+.dropEdit {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--q-muted);
+  vertical-align: middle;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+
+.diffRow:hover .dropEdit,
+.dropEdit:focus-visible {
+  opacity: 1;
+}
+
+.dropEdit:hover {
+  color: var(--q-danger);
+}
