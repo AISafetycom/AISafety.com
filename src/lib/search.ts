@@ -179,6 +179,15 @@ function scoreEntry(entry: SearchEntry, regexes: TokenRegex[]): number {
   return score
 }
 
+// A name-only entry matches a query that is its title, or the start of it
+// once the first word is typed in full: "listing" and "listing pol" find
+// Listing policy, "policy" and words from its description don't.
+function matchesName(entry: SearchEntry, query: string): boolean {
+  const title = entry.title.toLowerCase()
+  const firstWord = title.split(/\s+/)[0]
+  return title.startsWith(query) && query.length >= firstWord.length
+}
+
 export function search(
   index: SearchEntry[],
   query: string,
@@ -193,8 +202,10 @@ export function search(
 
   const tokens = trimmed.split(/\s+/).filter(Boolean)
   const regexes = compileTokenRegexes(tokens)
+  const phrase = tokens.join(' ')
   const scored: Scored[] = []
   for (const entry of scoped) {
+    if (entry.nameOnly && !matchesName(entry, phrase)) continue
     const score = scoreEntry(entry, regexes)
     if (score > 0) scored.push({ entry, score })
   }
