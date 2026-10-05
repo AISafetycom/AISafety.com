@@ -9,5 +9,11 @@ export const revalidate = 0
 export default async function QueueAdminPage() {
   // View-only sessions get the same page without the deciding parts; the
   // API refuses their writes regardless.
-  return <QueueAdmin canEdit={await canReviewQueue()} />
+  // The base id lets Q open the shown listing's record in Airtable.
+  return (
+    <QueueAdmin
+      canEdit={await canReviewQueue()}
+      airtableBase={process.env.AIRTABLE_BASE_ID ?? null}
+    />
+  )
 }

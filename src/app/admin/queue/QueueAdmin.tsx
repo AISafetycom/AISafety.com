@@ -1163,10 +1163,13 @@ type Action = Decision | 'undo'
 
 export default function QueueAdmin({
   canEdit,
+  airtableBase,
 }: {
   /** False for a view-only grant: the same queue with nothing to click that
    *  would decide anything. The API refuses those writes regardless. */
   canEdit: boolean
+  /** The base the listings live in, for Q's link to a record. */
+  airtableBase: string | null
 }) {
   const [items, setItems] = useState<QueueItem[] | null>(null)
   // The list as it is now, for callbacks that must not go stale.
@@ -2690,6 +2693,18 @@ export default function QueueAdmin({
           }
           break
         }
+        case 'q':
+          // The listing's record in Airtable, in a new tab (Bryce, 5 Oct
+          // 2026: "make Q open the listing in airtable").
+          if (airtableBase && item?.targetTable && item.targetRecord) {
+            e.preventDefault()
+            window.open(
+              `https://airtable.com/${airtableBase}/${item.targetTable}/${item.targetRecord}`,
+              '_blank',
+              'noopener'
+            )
+          }
+          break
         case 'd':
           // The page tag's link: the live page at this record's card, the
           // name copied on the way, as a click on the tag does (Bryce, 19
@@ -2739,6 +2754,7 @@ export default function QueueAdmin({
     select,
     searching,
     clearSearch,
+    airtableBase,
   ])
 
   // Enter or the down arrow in the search box goes to the first match, so
@@ -3327,6 +3343,10 @@ export default function QueueAdmin({
                 <kbd>S</kbd>
               </dt>
               <dd>open the listing&apos;s link in a new tab</dd>
+              <dt>
+                <kbd>Q</kbd>
+              </dt>
+              <dd>open the listing in Airtable</dd>
               <dt>
                 <kbd>D</kbd>
               </dt>
