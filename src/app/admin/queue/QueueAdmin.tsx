@@ -37,6 +37,7 @@ import SitePreview, {
   seedPreviews,
 } from './SitePreview'
 import Chat, { CharCount, descriptionCap } from './Chat'
+import FieldPicker from './FieldPicker'
 import type { FableChange } from '@/lib/admin/queue-fable'
 import Position, { forgetOrder } from './Position'
 import { SORT_FIELD, sortValue } from '@/lib/admin/queue-place'
@@ -675,6 +676,9 @@ function isEditable(v: unknown): boolean {
   )
 }
 
+/** Field types Airtable stores as a number. */
+const NUMERIC_TYPES = new Set(['number', 'currency', 'percent', 'rating'])
+
 /** Turn what was typed back into the shape Airtable expects for that field:
  *  a list stays a list, a number stays a number, empty clears the field. */
 function coerceEdits(
@@ -695,7 +699,7 @@ function coerceEdits(
         .map(x => x.trim())
         .filter(Boolean)
     } else if (
-      (type === 'number' || typeof was === 'number') &&
+      (NUMERIC_TYPES.has(type ?? '') || typeof was === 'number') &&
       !Number.isNaN(Number(t))
     ) {
       out[k] = Number(t)
@@ -889,10 +893,16 @@ function copyListingName(item: QueueItem): void {
     .catch(() => {})
 }
 
-function acceptLabel(item: QueueItem): string {
+function acceptLabel(
+  item: QueueItem,
+  edits: Record<string, string> = {}
+): string {
   if (item.type === 'Add') return 'Publish'
   if (item.type === 'Change') {
-    return item.changes.length ? 'Apply change' : 'Accept flag'
+    // a field edited beyond the (empty) proposal makes it a change too
+    return item.changes.length || Object.keys(edits).length
+      ? 'Apply change'
+      : 'Accept flag'
   }
   return 'Apply rule'
 }
@@ -1213,6 +1223,7 @@ export default function QueueAdmin({
   // Bumped by the F key so the chat box takes focus.
   const [chatFocus, setChatFocus] = useState(0)
   const [placeFocus, setPlaceFocus] = useState(0)
+  const [fieldFocus, setFieldFocus] = useState(0)
   const wantedRef = useRef<string | null>(null)
   // The focused item's record as it is in Airtable now, plus the table's
   // field list, so empty fields (a missing logo) show as empty. By item id.
@@ -1892,13 +1903,10 @@ export default function QueueAdmin({
 
   useEffect(() => {
     if (!selected) return
-    // Additions always; a Change only when it swaps a picture, whose old
-    // side is snapshotted without a working link (the live read supplies
-    // one).
-    const wantsLive =
-      selected.type === 'Add' ||
-      (selected.type === 'Change' &&
-        (selected.changes.some(touchesPicture) || fableIds[selected.id]))
+    // Additions and changes: a change's old picture is snapshotted without
+    // a working link (the live read supplies one), and its other fields
+    // can be edited too, from what the record holds now.
+    const wantsLive = selected.type === 'Add' || selected.type === 'Change'
     if (!wantsLive) return
     if (!selected.targetTable || !selected.targetRecord) return
     // A read whose picture links have run out (the page was left open for
@@ -2570,7 +2578,12 @@ export default function QueueAdmin({
               edits: coerceEdits(
                 d.edits,
                 item.type === 'Change'
-                  ? Object.fromEntries(item.changes.map(c => [c.field, c.to]))
+                  ? {
+                      ...live[item.id]?.fields,
+                      ...Object.fromEntries(
+                        item.changes.map(c => [c.field, c.to])
+                      ),
+                    }
                   : (live[item.id]?.fields ?? item.fields ?? {}),
                 new Map((live[item.id]?.schema ?? []).map(f => [f.name, f]))
               ),
@@ -2617,6 +2630,18 @@ export default function QueueAdmin({
           if (canEdit && item?.type === 'Add' && isOpen(item)) {
             e.preventDefault()
             setPlaceFocus(n => n + 1)
+          }
+          break
+        case 'e':
+          // A field the change does not touch (Bryce, 5 Oct 2026).
+          if (
+            canEdit &&
+            item?.type === 'Change' &&
+            isOpen(item) &&
+            item.status !== 'Revising'
+          ) {
+            e.preventDefault()
+            setFieldFocus(n => n + 1)
           }
           break
         case '1':
@@ -3131,6 +3156,7 @@ export default function QueueAdmin({
                 chatAgent={canEdit && agentChat ? agent : null}
                 chatFocus={chatFocus}
                 placeFocus={placeFocus}
+                fieldFocus={fieldFocus}
                 readOnly={!canEdit || !isOpen(selected)}
               />
             ) : (
@@ -3289,6 +3315,13 @@ export default function QueueAdmin({
                 on an addition, choose where it goes on its page: type to find a
                 listing, <kbd>↑</kbd> <kbd>↓</kbd> and <kbd>Enter</kbd> puts it
                 after that one
+              </dd>
+              <dt>
+                <kbd>E</kbd>
+              </dt>
+              <dd>
+                on a change, edit a field it does not touch: type to find the
+                field, <kbd>↑</kbd> <kbd>↓</kbd> and <kbd>Enter</kbd> opens it
               </dd>
               <dt>
                 <kbd>S</kbd>
@@ -3512,6 +3545,7 @@ function Detail({
   chatAgent,
   chatFocus,
   placeFocus,
+  fieldFocus,
   readOnly,
   onFable,
   onBack,
@@ -3538,6 +3572,8 @@ function Detail({
   chatFocus: number
   /** Bumped by P: open the Position list on an addition. */
   placeFocus: number
+  /** Bumped by E: open the field list on a change. */
+  fieldFocus: number
   /** A view-only session: no editing, no deciding. */
   readOnly: boolean
 }) {
@@ -3578,7 +3614,10 @@ function Detail({
   const editCount = Object.keys(d.edits).length
   const original: Record<string, unknown> =
     item.type === 'Change'
-      ? Object.fromEntries(item.changes.map(c => [c.field, c.to]))
+      ? {
+          ...live?.fields,
+          ...Object.fromEntries(item.changes.map(c => [c.field, c.to])),
+        }
       : (live?.fields ?? item.fields ?? {})
   const types = new Map((live?.schema ?? []).map(f => [f.name, f]))
   const editsToSave = () => coerceEdits(d.edits, original, types)
@@ -3595,6 +3634,66 @@ function Detail({
       !COMPUTED_TYPES.has(types.get(c.field)?.type ?? '')
   )
   const fableFields = new Map(fableChanges.map(c => [c.field, c]))
+
+  // Fields edited beyond what a change proposes (Bryce, 5 Oct 2026: "I
+  // want a way of editing other random fields too"), each a row under the
+  // proposed ones, from what the record holds now. A decided change shows
+  // the ones that went with it, from what they held before.
+  const proposedFields = new Set(item.changes.map(c => c.field))
+  const extraEdits: Record<string, string> =
+    item.type !== 'Change'
+      ? {}
+      : isOpen(item)
+        ? d.edits
+        : item.status === 'Applied' && item.before
+          ? Object.fromEntries(
+              Object.entries(editsAsText(item.edits ?? {})).filter(
+                ([k]) => k in item.before!
+              )
+            )
+          : {}
+  const extraFields =
+    item.type !== 'Change'
+      ? []
+      : [
+          ...Object.keys(extraEdits),
+          ...(d.editing && !(d.editing in extraEdits) ? [d.editing] : []),
+        ].filter(
+          k =>
+            !proposedFields.has(k) &&
+            !UNPICKABLE_TYPES.has(types.get(k)?.type ?? '')
+        )
+  const extraWas = (k: string): unknown =>
+    isOpen(item) ? live?.fields[k] : item.before?.[k]
+  // What the picker offers: the record's other fields that can be typed
+  // into, in the table's order.
+  const pickable =
+    item.type !== 'Change' || !live
+      ? null
+      : live.schema
+          .filter(
+            f =>
+              !HOUSEKEEPING.test(f.name) &&
+              !COMPUTED_TYPES.has(f.type) &&
+              !UNPICKABLE_TYPES.has(f.type) &&
+              !proposedFields.has(f.name) &&
+              !fableFields.has(f.name) &&
+              !extraFields.includes(f.name)
+          )
+          .map(f => ({
+            name: f.name,
+            value: friendly(show(live.fields[f.name])),
+          }))
+  const pickField = (name: string) => {
+    // A box is ticked or unticked at once; anything else opens its editor.
+    if (types.get(name)?.type === 'checkbox') {
+      const was = live?.fields[name] === true
+      setD({ edits: { ...d.edits, [name]: was ? 'false' : 'true' } })
+    } else {
+      setD({ editing: name })
+    }
+  }
+  const cap = descriptionCap(item)
 
   // An addition to a page kept in a manual order gets the Position
   // picker, which stands in for its Sort field.
@@ -4032,11 +4131,13 @@ function Detail({
           )}
 
         {item.type === 'Change' &&
-          (nothingToApply && fableChanges.length === 0 ? (
+          (nothingToApply &&
+          fableChanges.length === 0 &&
+          extraFields.length === 0 ? (
             <p className={styles.note}>
               No field change proposed. Accept says the flag was right and you
               have dealt with it, and clears it in Airtable; Reject clears it as
-              wrong; or ask Fable for a change.
+              wrong; edit a field yourself; or ask Fable for a change.
             </p>
           ) : (
             <div className={styles.diff}>
@@ -4129,8 +4230,38 @@ function Detail({
                   live={live?.fields[c.field]}
                 />
               ))}
+              {extraFields.map(k => (
+                <ExtraChangeRow
+                  key={`extra:${k}`}
+                  field={k}
+                  page={item.page}
+                  info={types.get(k)}
+                  was={extraWas(k)}
+                  edit={extraEdits[k]}
+                  editing={d.editing === k}
+                  canEdit={!revising}
+                  cap={k === cap.field ? cap.cap : undefined}
+                  onEditing={on => setD({ editing: on ? k : null })}
+                  onEdit={text => {
+                    const edits = { ...d.edits }
+                    if (text === null) delete edits[k]
+                    else edits[k] = text
+                    setD({ editing: null, edits })
+                  }}
+                />
+              ))}
             </div>
           ))}
+
+        {item.type === 'Change' && (
+          <FieldPicker
+            key={item.id}
+            fields={pickable}
+            canEdit={!revising}
+            focusTick={fieldFocus}
+            onPick={pickField}
+          />
+        )}
 
         {item.type === 'Rule' && (
           <section className={styles.block}>
@@ -4330,7 +4461,7 @@ function Detail({
                 src={item.type === 'Add' ? ICON.plus : ICON.check}
                 size={12}
               />
-              {d.busy ? 'Applying…' : acceptLabel(item)} <kbd>A</kbd>
+              {d.busy ? 'Applying…' : acceptLabel(item, d.edits)} <kbd>A</kbd>
             </button>
             <button
               className={`${styles.button} ${styles.danger}`}
@@ -4602,6 +4733,126 @@ function FableChangeRow({
         >
           by Fable
         </em>
+      </span>
+    </div>
+  )
+}
+
+/** Field types the change view does not offer to edit: pictures upload
+ *  straight onto the record (an addition's slot does that), links to other
+ *  records and people are ids, not text. */
+const UNPICKABLE_TYPES = new Set([
+  'multipleAttachments',
+  'multipleRecordLinks',
+  'singleCollaborator',
+  'multipleCollaborators',
+])
+
+/** A field's value as its editor holds it: text, empty for nothing. */
+function editText(v: unknown): string {
+  if (v === null || v === undefined || v === '') return ''
+  if (v === true) return 'true'
+  if (v === false) return 'false'
+  return show(v)
+}
+
+/** A field edited beyond what a change proposes: what the record holds,
+ *  the arrow, and the edit, which opens its field's own editor on a click
+ *  and can be dropped again with the cross. */
+function ExtraChangeRow({
+  field,
+  page,
+  info,
+  was,
+  edit,
+  editing,
+  canEdit,
+  cap,
+  onEditing,
+  onEdit,
+}: {
+  field: string
+  page: string | null
+  info: FieldInfo | undefined
+  /** The record's value now (before Accept, on a decided change). */
+  was: unknown
+  /** The edit as text; undefined while the field is only open. */
+  edit: string | undefined
+  editing: boolean
+  canEdit: boolean
+  cap?: number
+  onEditing: (on: boolean) => void
+  /** The new text, or null to drop the edit (also when it is back to
+   *  what the record holds). */
+  onEdit: (text: string | null) => void
+}) {
+  const box = info?.type === 'checkbox'
+  const base = box ? (was === true ? 'true' : 'false') : editText(was)
+  const value = edit ?? base
+  // Back to what the record holds is not an edit.
+  const save = (text: string) => onEdit(text === base ? null : text)
+  let to: React.ReactNode
+  if (editing && !box) {
+    to = (
+      <FieldEditor
+        info={info}
+        value={value}
+        cap={cap}
+        onSave={save}
+        onCancel={() => onEditing(false)}
+      />
+    )
+  } else if (box) {
+    to = (
+      <label className={styles.check}>
+        <input
+          type="checkbox"
+          checked={value === 'true'}
+          disabled={!canEdit}
+          onChange={e => save(e.target.checked ? 'true' : 'false')}
+        />
+        {value === 'true' ? 'Yes' : 'No'}
+      </label>
+    )
+  } else {
+    to = (
+      <EditableValue
+        text={value === '' ? '—' : friendly(value)}
+        muted={value === ''}
+        edited={edit !== undefined}
+        canEdit={canEdit}
+        onEdit={() => onEditing(true)}
+      />
+    )
+  }
+  return (
+    <div className={styles.diffRow}>
+      <span className={styles.label}>
+        <FieldIcon page={page} name={field} value={value} size={12} />
+        {field}
+      </span>
+      <span className={styles.from}>
+        {box ? (was === true ? 'Yes' : 'No') : friendly(show(was))}
+      </span>
+      <span className={styles.arrow}>
+        <Icon src={ICON.arrow} size={12} />
+      </span>
+      <span className={styles.to}>
+        {to}
+        {edit !== undefined && cap !== undefined && !editing && (
+          <Counted text={edit} cap={cap} />
+        )}
+        {canEdit && edit !== undefined && !editing && (
+          <button
+            type="button"
+            className={styles.dropEdit}
+            title={`Leave ${field} as it is`}
+            aria-label={`Leave ${field} as it is`}
+            onClick={() => onEdit(null)}
+          >
+            <Icon src="/images/icons/x-small.svg" size={12} />
+          </button>
+        )}
       </span>
     </div>
   )

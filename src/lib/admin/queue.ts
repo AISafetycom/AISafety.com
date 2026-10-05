@@ -148,6 +148,9 @@ export interface QueueItem {
   rejectReason: string | null
   note: string | null
   edits: Record<string, unknown> | null
+  /** Applied Change: what the fields edited beyond the proposal held
+   *  before Accept wrote them, for Undo to put back. */
+  before?: Record<string, unknown> | null
   decidedAt: string | null
   appliedAt: string | null
   error: string | null
@@ -180,6 +183,30 @@ export class QueueError extends Error {
 
 const TABLE_ID_RE = /^tbl[A-Za-z0-9]{14}$/
 const PROTECTED_FIELDS = new Set(['Publish?', 'Hide?'])
+
+/** The key in a row's saved edits (JSON) that keeps, once a Change is
+ *  applied, what its extra fields held before; never a field name. */
+const BEFORE_KEY = '(before)'
+
+/** Columns Airtable fills itself, and ones the page has no editor for
+ *  (pictures, links to other records): never written as an extra field. */
+const UNWRITABLE_TYPES = new Set([
+  'formula',
+  'rollup',
+  'lookup',
+  'multipleLookupValues',
+  'count',
+  'autoNumber',
+  'createdTime',
+  'lastModifiedTime',
+  'createdBy',
+  'lastModifiedBy',
+  'button',
+  'multipleAttachments',
+  'multipleRecordLinks',
+  'singleCollaborator',
+  'multipleCollaborators',
+])
 
 function str(v: unknown): string | null {
   return typeof v === 'string' && v.trim() !== '' ? v : null
@@ -459,7 +486,14 @@ function rowToItem(
       fields = rest
     }
   }
-  const edits = parseJson(f[F.edits])
+  const saved = parseJson(f[F.edits])
+  let edits: Record<string, unknown> | null = null
+  let before: Record<string, unknown> | null = null
+  if (isRecord(saved)) {
+    const { [BEFORE_KEY]: was, ...rest } = saved
+    edits = rest
+    before = isRecord(was) ? was : null
+  }
   // The reply the page sent with Reject shows at once, before the Mac has
   // saved it (Undo clears it, so it always belongs to this decision).
   const chosenReject = str(f[F.rejectReply])
@@ -503,7 +537,8 @@ function rowToItem(
     saidBy,
     rejectReason: str(f[F.rejectReason]),
     note: str(f[F.note]),
-    edits: isRecord(edits) ? edits : null,
+    edits,
+    before,
     decidedAt: str(f[F.decidedAt]),
     appliedAt: str(f[F.appliedAt]),
     error: str(f[F.error]),
@@ -1479,6 +1514,53 @@ export async function closeHandledRows(items: QueueItem[]): Promise<string[]> {
 
 // ─── Decisions ──────────────────────────────────────────────────────────────
 
+/** A Change's edits to fields its proposal does not name (Bryce, 5 Oct
+ *  2026: "I want a way of editing other random fields too"), the ones that
+ *  can be written: not Publish?/Hide?, nor a column Airtable fills itself,
+ *  a picture or a link to other records. */
+export function extraEdits(
+  item: QueueItem,
+  edits: Record<string, unknown>,
+  schema: FieldInfo[]
+): Record<string, unknown> {
+  const proposed = new Set(item.changes.map(c => c.field))
+  const types = new Map(schema.map(f => [f.name, f.type]))
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(edits)) {
+    if (proposed.has(k) || k === BEFORE_KEY) continue
+    if (PROTECTED_FIELDS.has(k) || k.length > 100) continue
+    if (UNWRITABLE_TYPES.has(types.get(k) ?? '')) continue
+    out[k] = v
+  }
+  return out
+}
+
+/** What these fields of the record hold now (an empty one as null, an
+ *  unticked box as false). */
+async function currentValues(
+  table: string,
+  record: string,
+  names: string[]
+): Promise<Record<string, unknown>> {
+  const res = await airtableRequest(`${table}/${record}`)
+  if (!res.ok) {
+    throw new QueueError(
+      `Airtable read failed: ${res.status} ${(await res.text()).slice(0, 300)}`,
+      502
+    )
+  }
+  const data = (await res.json()) as { fields?: RawFields }
+  const types = new Map(
+    (await getTableSchema(table)).map(f => [f.name, f.type])
+  )
+  const out: Record<string, unknown> = {}
+  for (const k of names) {
+    const v = data.fields?.[k]
+    out[k] = v ?? (types.get(k) === 'checkbox' ? false : null)
+  }
+  return out
+}
+
 export async function acceptItem(
   item: QueueItem,
   edits: Record<string, unknown>,
@@ -1486,7 +1568,7 @@ export async function acceptItem(
 ): Promise<void> {
   requireOpen(item)
   const stamp = now()
-  const editsJson = Object.keys(edits).length ? JSON.stringify(edits) : null
+  let editsJson = Object.keys(edits).length ? JSON.stringify(edits) : null
   // The reply draft as it reads on the page goes on the row first, so the
   // Mac agent (or the worker) saves exactly what the admin approved.
   const draft =
@@ -1512,6 +1594,18 @@ export async function acceptItem(
         // A proposed picture goes to Airtable as an attachment list.
         fields[c.field] =
           c.field in edits ? edits[c.field] : (asAttachments(c.to) ?? c.to)
+      }
+      // Fields edited beyond the proposal go in the same write; what they
+      // held is kept on the row so Undo can put it back.
+      const extra = extraEdits(item, edits, await getTableSchema(t.table))
+      if (Object.keys(extra).length > 0) {
+        const before = await currentValues(
+          t.table,
+          t.record,
+          Object.keys(extra)
+        )
+        Object.assign(fields, extra)
+        editsJson = JSON.stringify({ ...edits, [BEFORE_KEY]: before })
       }
       if (Object.keys(fields).length > 0) {
         await patchRecord(
@@ -1690,8 +1784,18 @@ export async function undoItem(item: QueueItem): Promise<void> {
       if (PROTECTED_FIELDS.has(c.field)) continue
       fields[c.field] = c.from ?? null
     }
+    // The fields edited beyond the proposal, as they were before Accept.
+    for (const [k, v] of Object.entries(item.before ?? {})) {
+      if (PROTECTED_FIELDS.has(k) || k in fields) continue
+      fields[k] = v
+    }
     const back = await withAttachmentShapes(t.table, fields, 'skip')
     if (Object.keys(back).length) await patchRecord(t.table, t.record, back)
+    // The edits stay as the page's draft; what they replaced is spent.
+    if (item.before) {
+      const kept = item.edits ?? {}
+      reopen[F.edits] = Object.keys(kept).length ? JSON.stringify(kept) : null
+    }
     await patchQueueRow(item.id, reopen)
     refreshCache()
     return
