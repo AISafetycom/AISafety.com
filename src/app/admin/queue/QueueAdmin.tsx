@@ -4294,6 +4294,27 @@ function Detail({
             )}
           </section>
         )}
+        {item.type === 'Rule' && item.ruleWording && (
+          // The rule as it will read, folded away: the summary is what gets
+          // read (9 Sept 2026: no diffs on the card); the words are there on
+          // a click for a rule worth checking closely (5 Oct 2026).
+          <details className={styles.findingMore}>
+            <summary>Exact wording</summary>
+            <div className={styles.block}>
+              <blockquote className={styles.quote}>
+                {item.ruleWording}
+              </blockquote>
+              {item.ruleWas && (
+                <>
+                  <h3 className={styles.h3}>Replaces</h3>
+                  <blockquote className={`${styles.quote} ${styles.from}`}>
+                    {item.ruleWas}
+                  </blockquote>
+                </>
+              )}
+            </div>
+          </details>
+        )}
 
         {(hasCard || !excerptBlock) && replyBlock}
 
