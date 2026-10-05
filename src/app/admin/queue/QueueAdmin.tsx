@@ -13,6 +13,7 @@ import type {
   RejectReply,
 } from '@/lib/admin/queue'
 import { missingFields } from '@/lib/admin/queue-needed'
+import { rejectReplyFor, shownDeclineChip } from '@/lib/admin/queue-decline'
 import {
   itemParts,
   markRanges,
@@ -997,6 +998,13 @@ interface Draft {
   /** The reply draft as edited on the page (null = as written at intake). */
   reply: string | null
   editingReply: boolean
+  /** The rejection reply as retyped on the page (null = Fable's, written
+   *  in advance for each reason); an edit is sent whatever the reason. */
+  decline: string | null
+  editingDecline: boolean
+  /** The reason the pointer or keyboard is on while the reasons are open:
+   *  the rejection reply follows it, so what is shown is what is sent. */
+  focusChip: string | null
   busy: boolean
   error: string | null
 }
@@ -1009,6 +1017,9 @@ const FRESH: Draft = {
   other: '',
   reply: null,
   editingReply: false,
+  decline: null,
+  editingDecline: false,
+  focusChip: null,
   busy: false,
   error: null,
 }
@@ -2350,9 +2361,13 @@ export default function QueueAdmin({
                     : rejectReplyPending
                       ? agent
                         ? updated.source === 'Discord'
-                          ? 'Fable is writing the reply…'
-                          : 'Fable is writing the reply for Gmail…'
-                        : 'Reply: the Mac writes it within five minutes'
+                          ? updated.rejectReply?.text
+                            ? 'Getting the reply ready to copy…'
+                            : 'Fable is writing the reply…'
+                          : updated.rejectReply?.text
+                            ? 'Saving the reply draft in Gmail…'
+                            : 'Fable is writing the reply for Gmail…'
+                        : 'Reply: the Mac saves it within five minutes'
                       : updated.source === 'Discord' && updated.replyDraft
                         ? 'Reply drafted · copy it and send it yourself on Discord'
                         : undefined,
@@ -2567,7 +2582,16 @@ export default function QueueAdmin({
             !d.busy
           ) {
             e.preventDefault()
-            void act(item, 'reject', { reason: d.chip ?? d.other.trim() })
+            void act(item, 'reject', {
+              reason: d.chip ?? d.other.trim(),
+              rejectReply: rejectReplyFor({
+                chips: item.rejectChips,
+                drafts: item.rejectDrafts,
+                edited: d.decline,
+                chip: d.chip,
+                typed: d.other,
+              }),
+            })
           }
           break
         case 'r':
@@ -2604,7 +2628,16 @@ export default function QueueAdmin({
               // the number picks the reason and rejects in one go
               e.preventDefault()
               setDraft(item.id, { chip })
-              void act(item, 'reject', { reason: chip })
+              void act(item, 'reject', {
+                reason: chip,
+                rejectReply: rejectReplyFor({
+                  chips: item.rejectChips,
+                  drafts: item.rejectDrafts,
+                  edited: d.decline,
+                  chip,
+                  typed: '',
+                }),
+              })
             }
           }
           break
@@ -3513,6 +3546,35 @@ function Detail({
   const revising = item.status === 'Revising' || readOnly
   const nothingToApply = item.type === 'Change' && item.changes.length === 0
   const reason = d.chip ?? d.other.trim()
+  // The reasons open in the bar at the bottom, which then grows over the
+  // rejection reply; bring the reply up above it, so the reply each reason
+  // would send can be read before picking one.
+  const declineRef = useRef<HTMLElement>(null)
+  const actionsRef = useRef<HTMLDivElement>(null)
+  const rejecting = d.mode === 'reject'
+  useEffect(() => {
+    if (!rejecting) return
+    const frame = requestAnimationFrame(() => {
+      const el = declineRef.current
+      const bar = actionsRef.current
+      if (!el || !bar) return
+      el.style.scrollMarginBottom = `${bar.offsetHeight + 16}px`
+      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [rejecting, item.id])
+  // Reject sends the rejection reply as the page shows it for that reason.
+  const rejectWith = (chip: string | null) =>
+    act('reject', {
+      reason: chip ?? reason,
+      rejectReply: rejectReplyFor({
+        chips: item.rejectChips,
+        drafts: item.rejectDrafts,
+        edited: d.decline,
+        chip: chip ?? d.chip,
+        typed: d.other,
+      }),
+    })
   const editCount = Object.keys(d.edits).length
   const original: Record<string, unknown> =
     item.type === 'Change'
@@ -3617,6 +3679,8 @@ function Detail({
               </>
             ) : item.rejectReply?.state === 'failed' ? (
               `The reply could not be written${item.rejectReply.error ? `: ${item.rejectReply.error}` : '.'}`
+            ) : item.rejectReply?.text ? (
+              'Getting it ready to copy. Nothing is sent.'
             ) : (
               'Fable is writing it from your reason. Nothing is sent.'
             )
@@ -3635,19 +3699,96 @@ function Detail({
             </>
           ) : item.rejectReply?.state === 'failed' ? (
             `The draft could not be saved${item.rejectReply.error ? `: ${item.rejectReply.error}` : '.'}`
+          ) : item.rejectReply?.text ? (
+            'Saving it in Gmail as a draft. Nothing is sent.'
           ) : (
             'Fable is writing it from your reason; it goes into Gmail as a draft. Nothing is sent.'
           )}
         </p>
       </section>
     ) : null
-  const replyBlock =
-    item.status === 'Rejected' ? (
-      rejectReplyBlock
-    ) : item.replyDraft ? (
+  // The rejection reply, written in advance for each reason (Bryce, 5 Oct
+  // 2026: "in the same way as the accept reply"): shown under the accept
+  // reply, following the reason in focus while the reasons are open, and
+  // sent with Reject exactly as it reads. A typed reason has Fable write it
+  // from that reason instead, unless the reply was edited.
+  const declineChip = shownDeclineChip(
+    item.rejectChips,
+    item.rejectDrafts,
+    d.mode === 'reject' ? d.focusChip : null
+  )
+  const showDecline =
+    isOpen(item) &&
+    Boolean(item.replyTo) &&
+    (declineChip !== null || d.decline !== null)
+  const declineFromReason =
+    d.mode === 'reject' && d.other.trim() !== '' && d.decline === null
+  const declineText =
+    d.decline ?? (declineChip ? item.rejectDrafts[declineChip] : '')
+  const declineBlock = showDecline ? (
+    <section className={styles.block} ref={declineRef}>
+      <h3 className={styles.h3}>Reply if you reject</h3>
+      {declineFromReason ? (
+        <p className={styles.note}>
+          Fable writes this one from your reason when you reject.
+        </p>
+      ) : d.editingDecline ? (
+        <textarea
+          ref={fitToText}
+          onInput={e => fitToText(e.currentTarget)}
+          className={`${styles.input} ${styles.replyInput}`}
+          rows={Math.min(14, Math.max(4, declineText.split('\n').length + 1))}
+          autoFocus
+          defaultValue={declineText}
+          onKeyDown={e => {
+            if (e.key === 'Escape') {
+              e.preventDefault()
+              setD({ editingDecline: false })
+            } else if (isDoneKey(e)) {
+              e.preventDefault()
+              e.currentTarget.blur()
+            }
+          }}
+          onBlur={e => {
+            const text = e.target.value
+            setD({
+              editingDecline: false,
+              decline:
+                declineChip && text === item.rejectDrafts[declineChip]
+                  ? null
+                  : text,
+            })
+          }}
+        />
+      ) : (
+        <ReplyDraft
+          text={declineText}
+          edited={d.decline !== null}
+          canEdit={!revising}
+          onEdit={() => setD({ editingDecline: true })}
+        />
+      )}
+      {!declineFromReason && (
+        <p className={styles.note}>
+          {d.decline !== null || !declineChip
+            ? 'Reject saves this'
+            : `Reject for “${declineChip}” saves this`}
+          {item.source === 'Discord'
+            ? ' here to copy into Discord. Nothing is sent.'
+            : ' as a Gmail draft. Nothing is sent.'}
+        </p>
+      )}
+    </section>
+  ) : null
+
+  const acceptBlock =
+    item.status === 'Rejected' ? null : item.replyDraft ? (
       <section className={styles.block}>
         <h3 className={styles.h3}>
-          Reply draft{item.replyTo ? ` to ${item.replyTo}` : ''}
+          {showDecline
+            ? `Reply if you ${item.type === 'Add' ? 'publish' : 'accept'}`
+            : 'Reply draft'}
+          {item.replyTo ? `${showDecline ? ' ·' : ''} to ${item.replyTo}` : ''}
           {item.source === 'Discord' &&
             d.reply !== null &&
             d.reply !== item.replyDraft && (
@@ -3714,6 +3855,16 @@ function Detail({
           </p>
         )}
       </section>
+    ) : null
+
+  const replyBlock =
+    item.status === 'Rejected' ? (
+      rejectReplyBlock
+    ) : acceptBlock || declineBlock ? (
+      <div className={styles.replies}>
+        {acceptBlock}
+        {declineBlock}
+      </div>
     ) : null
 
   // The side panel: the verdict with its reasons, and under it the chat
@@ -4056,7 +4207,7 @@ function Detail({
         </aside>
       )}
 
-      <div className={styles.actions}>
+      <div className={styles.actions} ref={actionsRef}>
         {!isOpen(item) ? (
           // A decision opened from Done today: what was decided, and Undo.
           <div className={styles.buttons}>
@@ -4108,9 +4259,13 @@ function Detail({
                   key={chip}
                   className={`${styles.chip} ${d.chip === chip ? styles.chipOn : ''}`}
                   disabled={d.busy}
+                  onMouseEnter={() => setD({ focusChip: chip })}
+                  onMouseLeave={() => setD({ focusChip: null })}
+                  onFocus={() => setD({ focusChip: chip })}
+                  onBlur={() => setD({ focusChip: null })}
                   onClick={() => {
                     setD({ chip })
-                    act('reject', { reason: chip })
+                    rejectWith(chip)
                   }}
                 >
                   <kbd>{i + 1}</kbd>
@@ -4135,10 +4290,10 @@ function Detail({
                   if (/^[1-9]$/.test(e.key) && chip && !d.busy) {
                     e.preventDefault()
                     setD({ chip })
-                    act('reject', { reason: chip })
+                    rejectWith(chip)
                   } else if (e.key === 'Enter' && !d.busy) {
                     e.preventDefault()
-                    act('reject', { reason })
+                    rejectWith(null)
                   } else if (e.key === 'Escape' && !d.busy) {
                     e.stopPropagation()
                     setD({ mode: 'idle', chip: null, other: '' })
@@ -4150,7 +4305,7 @@ function Detail({
               <button
                 className={`${styles.button} ${styles.danger}`}
                 disabled={d.busy}
-                onClick={() => act('reject', { reason })}
+                onClick={() => rejectWith(null)}
               >
                 <Icon src={ICON.x} size={12} />
                 {d.busy ? 'Rejecting…' : 'Confirm reject'} <kbd>↵</kbd>

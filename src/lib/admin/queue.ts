@@ -31,6 +31,7 @@ import {
   type AirtableRow,
 } from './airtable'
 import { sealToken } from './session'
+import { parseRejectDrafts } from './queue-decline'
 import { isExpiredAttachment } from './attachment-url'
 import { roomFor, SORT_FIELD, type Placed } from './queue-place'
 import type { ListingDates } from './queue-urgent'
@@ -62,6 +63,11 @@ const F = {
   appliedAt: 'fldML8YnyaDYaAmTb',
   error: 'fldrJcvFN3FCcyQPn',
   dedupKey: 'fldHuxapq09JkiohE',
+  // Rejection replies written in advance by the Mac worker, one per reject
+  // chip (JSON), and the one the page showed when Reject was pressed – the
+  // Mac saves exactly that (Bryce, 5 Oct 2026).
+  rejectDrafts: 'fldPusDzL9nnzibyt',
+  rejectReply: 'fldUQqwJn7btv6EBP',
 } as const
 
 export type QueueType = 'Add' | 'Change' | 'Rule'
@@ -135,6 +141,10 @@ export interface QueueItem {
    *  copy (5 Oct 2026). From the proposal's reply.reject block; null
    *  when there is none for this decision. */
   rejectReply: RejectReply | null
+  /** Open Email/Form/Discord rows: the rejection reply written in advance
+   *  for each reject chip (chip → reply), shown under the accept reply.
+   *  Empty until the Mac worker has written them. */
+  rejectDrafts: Record<string, string>
   rejectReason: string | null
   note: string | null
   edits: Record<string, unknown> | null
@@ -450,6 +460,15 @@ function rowToItem(
     }
   }
   const edits = parseJson(f[F.edits])
+  // The reply the page sent with Reject shows at once, before the Mac has
+  // saved it (Undo clears it, so it always belongs to this decision).
+  const chosenReject = str(f[F.rejectReply])
+  if (chosenReject && str(f[F.status]) === 'Rejected') {
+    rejectReply =
+      rejectReply === null
+        ? { text: chosenReject, state: 'writing', error: null }
+        : { ...rejectReply, text: rejectReply.text ?? chosenReject }
+  }
   return {
     id: row.id,
     createdAt: row.createdTime,
@@ -480,6 +499,7 @@ function rowToItem(
     replyStatus: str(f[F.replyStatus]),
     replyTo,
     rejectReply,
+    rejectDrafts: parseRejectDrafts(f[F.rejectDrafts]),
     saidBy,
     rejectReason: str(f[F.rejectReason]),
     note: str(f[F.note]),
@@ -1573,18 +1593,23 @@ export function agentInfo(email: string): AgentInfo | null {
 
 export async function rejectItem(
   item: QueueItem,
-  reason: string
+  reason: string,
+  reply: string | null = null
 ): Promise<void> {
   requireOpen(item)
   // The reason is optional (Bryce, 24 Sept 2026: "I should be able to
   // reject without a reason").
   const why = reason.trim()
   const stamp = now()
+  // The rejection reply as the page showed it, saved by the Mac as it
+  // reads; none (a typed reason) and Fable writes it from the reason.
+  const words = item.replyTo ? (reply ?? '').trim().slice(0, 5000) : ''
   const fields: Record<string, unknown> = {
     [F.status]: 'Rejected',
     [F.rejectReason]: why || null,
     [F.decidedAt]: stamp,
     [F.error]: null,
+    [F.rejectReply]: words || null,
   }
   if (item.type === 'Change' && item.issueRow && isRecordId(item.issueRow)) {
     // A dismissed Broom flag is done with: clear the flag row now.
@@ -1649,6 +1674,7 @@ export async function undoItem(item: QueueItem): Promise<void> {
     [F.appliedAt]: null,
     [F.rejectReason]: null,
     [F.error]: null,
+    [F.rejectReply]: null,
   }
   if (item.status === 'Applied' && item.type === 'Add') {
     const t = target(item)

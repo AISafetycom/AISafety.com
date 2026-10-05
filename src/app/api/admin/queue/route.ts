@@ -140,7 +140,11 @@ export async function POST(req: NextRequest) {
         typeof body.replyDraft === 'string' ? body.replyDraft : null
       )
     } else if (action === 'reject') {
-      await rejectItem(item, typeof body.reason === 'string' ? body.reason : '')
+      await rejectItem(
+        item,
+        typeof body.reason === 'string' ? body.reason : '',
+        typeof body.rejectReply === 'string' ? body.rejectReply : null
+      )
     } else if (action === 'edit') {
       await saveEdits(
         item,
