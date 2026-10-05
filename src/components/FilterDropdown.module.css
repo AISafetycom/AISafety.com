@@ -45,6 +45,13 @@
   padding: 20px;
 }
 
+/* Opt-in (maxListHeight): long lists scroll inside the popover. */
+.scrollList {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
 /* Keep each option on one line so the popover hugs the widest one. */
 .option {
   white-space: nowrap;

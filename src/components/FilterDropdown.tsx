@@ -1,6 +1,7 @@
 'use client'
 
 import Icon from './Icon'
+import SearchBar from './SearchBar'
 import { useEffect, useRef, useState } from 'react'
 import { trackFilterApply } from '@/lib/analytics'
 import { trackedFilterGroup, trackedFilterValue } from '@/lib/filter-tracking'
@@ -19,6 +20,12 @@ interface FilterDropdownProps {
    *  Renamed titles and options keep logging their original names via
    *  lib/filter-tracking, so history stays in one line. */
   trackingPage?: string
+  /** Show a search box above the options that narrows them as you type.
+   *  For long lists; off by default. */
+  searchable?: boolean
+  /** Cap the option list at this many pixels tall and scroll inside it.
+   *  For long lists; off by default. */
+  maxListHeight?: number
 }
 
 // A single pill-shaped filter that opens a checkbox popover. Used in the
@@ -31,8 +38,11 @@ export default function FilterDropdown({
   onToggle,
   icon,
   trackingPage,
+  searchable,
+  maxListHeight,
 }: FilterDropdownProps) {
   const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
   const [pos, setPos] = useState({ top: 0, left: 0 })
   const ref = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -76,6 +86,11 @@ export default function FilterDropdown({
         ? `${title}: ${selected[0]}`
         : `${title}: ${selected[0]} +${selected.length - 1}`
 
+  const needle = query.trim().toLowerCase()
+  const visibleOptions = needle
+    ? options.filter(option => option.toLowerCase().includes(needle))
+    : options
+
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button
@@ -90,6 +105,8 @@ export default function FilterDropdown({
           if (!open) {
             const r = buttonRef.current?.getBoundingClientRect()
             if (r) setPos({ top: r.bottom + 8, left: r.left })
+            // Each opening starts from the full list.
+            setQuery('')
           }
           setOpen(o => !o)
         }}
@@ -109,8 +126,23 @@ export default function FilterDropdown({
           className={`${styles.popover} border-plus-fill drop-shadow-extra-dark`}
           style={{ top: pos.top, left: pos.left }}
         >
-          <div className="flex flex-col gap-16px">
-            {options.map(option => (
+          {searchable && (
+            <SearchBar
+              value={query}
+              onChange={setQuery}
+              placeholder="Search"
+              aria-label={`Search ${title.toLowerCase()} options`}
+              wrapperClassName="margin-bottom-16px"
+            />
+          )}
+          <div
+            className={`flex flex-col gap-16px${maxListHeight ? ` ${styles.scrollList}` : ''}`}
+            style={maxListHeight ? { maxHeight: maxListHeight } : undefined}
+          >
+            {searchable && visibleOptions.length === 0 && (
+              <p className="paragraph-small color-teal-300">Nothing found.</p>
+            )}
+            {visibleOptions.map(option => (
               <label
                 key={option}
                 className={`flex items-center cursor-pointer ${styles.option}`}
