@@ -929,18 +929,22 @@ export interface PreviewTarget {
 /** Every open item's card in one go, so the page can hold them ready
  *  before an item is opened: one list read per 40 records of a table
  *  (Airtable allows five requests a second, so tables run one after
- *  another), keyed "table/record". Unknown or deleted records map to null. */
+ *  another), in the order of the targets. Unknown or deleted records map to
+ *  null. A card per target, not per record: two items on one record (a
+ *  logo flag with no edits and a rename, say) each get their own card –
+ *  keyed by record, the second overwrote the first, and the rename's card
+ *  showed the old name (Bryce, 5 Oct 2026, AI Safety at UCLA). */
 export async function getPreviewListings(
   targets: PreviewTarget[]
-): Promise<Record<string, PreviewListing | null>> {
-  const out: Record<string, PreviewListing | null> = {}
-  const byTable = new Map<string, PreviewTarget[]>()
-  for (const t of targets) {
-    if (!TABLE_ID_RE.test(t.table) || !isRecordId(t.record)) continue
+): Promise<(PreviewListing | null)[]> {
+  const out: (PreviewListing | null)[] = targets.map(() => null)
+  const byTable = new Map<string, { t: PreviewTarget; at: number }[]>()
+  targets.forEach((t, at) => {
+    if (!TABLE_ID_RE.test(t.table) || !isRecordId(t.record)) return
     const list = byTable.get(t.table) ?? []
-    list.push(t)
+    list.push({ t, at })
     byTable.set(t.table, list)
-  }
+  })
   for (const [table, list] of byTable) {
     const schema = await getTableSchema(table)
     for (let i = 0; i < list.length; i += 40) {
@@ -949,7 +953,7 @@ export async function getPreviewListings(
       params.set('returnFieldsByFieldId', 'true')
       params.set(
         'filterByFormula',
-        `OR(${chunk.map(t => `RECORD_ID()='${t.record}'`).join(',')})`
+        `OR(${chunk.map(({ t }) => `RECORD_ID()='${t.record}'`).join(',')})`
       )
       const rows = new Map(
         (await listAll<Record<string, unknown>>(table, params)).map(r => [
@@ -957,9 +961,9 @@ export async function getPreviewListings(
           r,
         ])
       )
-      for (const t of chunk) {
+      for (const { t, at } of chunk) {
         const r = rows.get(t.record)
-        out[`${table}/${t.record}`] = r
+        out[at] = r
           ? mapPreview(
               table,
               { ...r, fields: { ...r.fields } },

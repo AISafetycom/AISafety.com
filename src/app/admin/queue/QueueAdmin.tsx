@@ -844,13 +844,17 @@ async function preloadCards(items: QueueItem[]): Promise<void> {
       body: JSON.stringify({ targets }),
     })
     const data = (await res.json()) as {
-      previews?: Record<string, { kind: PreviewKind | null; listing?: unknown }>
+      cards?: ({ kind: PreviewKind | null; listing?: unknown } | null)[]
     }
-    if (!res.ok || !data.previews) return
+    const cards = data.cards
+    if (!res.ok || !Array.isArray(cards)) return
+    // One card per target, in order: two items on one record (a logo flag
+    // and a rename) each keep their own edits. Targets past the route's
+    // limit get no answer and are left to the single-card route.
     seedPreviews(
-      targets.map(t => ({
+      targets.slice(0, cards.length).map((t, at) => ({
         ...t,
-        preview: data.previews?.[`${t.table}/${t.record}`] ?? { kind: null },
+        preview: cards[at] ?? { kind: null },
       }))
     )
   } catch {
