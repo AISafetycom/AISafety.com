@@ -11,6 +11,7 @@ import {
   HOMEPAGE,
   isLikelyBot,
   isScannerBurst,
+  isTestCopyClick,
   LIST_ID_RE,
   loadLinkList,
   recordClick,
@@ -50,9 +51,11 @@ export async function followLink(
     const ip = clientAddress(req)
     // The session check reads the cookie after the redirect has gone, and
     // the burst check waits out its window there too, so a reader never
-    // waits on either.
+    // waits on either. A click on a test copy before the issue has gone out
+    // isn't a reader's either.
     after(async () => {
       if (await isAdmin()) return
+      if (await isTestCopyClick(links.c)) return
       if (await isScannerBurst(list, Number(n), ip)) return
       await recordClick(links.c, link)
     })

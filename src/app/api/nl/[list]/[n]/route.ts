@@ -6,8 +6,9 @@
   src/lib/newsletter-clicks.ts) and counts the click for that campaign.
   Only links in our own lists can be followed. The count happens after the
   redirect (after()), and link checkers, prefetchers, scanner bursts, the
-  admin preview (`?p=1`) and anyone signed in to the admin (the team trying
-  a test copy, or reading their own copy of an issue) aren't counted. A
+  admin preview (`?p=1`), anyone signed in to the admin (the team trying
+  a test copy, or reading their own copy of an issue) and any click on an
+  issue that has had a test copy but hasn't gone out yet aren't counted. A
   link that can't be found goes to the homepage rather than an error. The
   work is in ../../follow.ts, shared with the catch-all route next door.
 */

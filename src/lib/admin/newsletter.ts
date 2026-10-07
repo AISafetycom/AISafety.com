@@ -93,6 +93,8 @@ import {
   type CampaignClicks,
   LINKS_BASE,
   LIST_ID_RE,
+  noteSendTime,
+  noteTestCopy,
   readClicks,
 } from '@/lib/newsletter-clicks'
 
@@ -3019,7 +3021,11 @@ export async function sendTestCopy(
   to: string,
   knownMessageId?: string
 ): Promise<{ to: string }> {
-  const { problems, messageId } = await readDraft(draftId, null, knownMessageId)
+  const { campaign, problems, messageId } = await readDraft(
+    draftId,
+    null,
+    knownMessageId
+  )
   if (problems.length > 0 || !messageId) {
     throw new DraftProblemError(
       problems.length > 0 ? problems : ['no message on the draft']
@@ -3038,6 +3044,15 @@ export async function sendTestCopy(
     )
   }
   console.info(`[newsletter] test copy of draft ${draftId} sent`)
+  // Its clicks are set aside until the issue goes out (newsletter-clicks.ts).
+  // The copy has gone either way, so a failed note is only logged.
+  try {
+    await noteTestCopy(baseIssueName(campaign.name))
+  } catch (err) {
+    console.error(
+      `[newsletter] noting the test copy of draft ${draftId} failed, so its clicks will count: ${err instanceof Error ? err.message : String(err)}`
+    )
+  }
   return { to }
 }
 
@@ -3752,6 +3767,18 @@ async function createAndConfirm(a: {
           `The draft (campaign ${a.draftId}) couldn’t be deleted; it now shows as already sent.`
         )
       }
+    }
+    // Clicks on a test copy of this issue count from its first send on
+    // (newsletter-clicks.ts); a later wave doesn't move that time.
+    try {
+      await noteSendTime(a.baseName, Date.parse(facts.sendAt))
+    } catch (err) {
+      console.error(
+        `[newsletter] recording the send time of campaign ${newId} failed: ${err instanceof Error ? err.message : String(err)}`
+      )
+      notes.push(
+        'The send time couldn’t be recorded, so if a test copy of this issue was sent, readers’ clicks may not be counted for up to 30 days.'
+      )
     }
     if (isRealList(a.listId)) {
       try {

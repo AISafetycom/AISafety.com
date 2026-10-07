@@ -9,6 +9,7 @@ const h = vi.hoisted(() => ({
   tasks: [] as (() => Promise<void>)[],
   isAdmin: vi.fn(async () => false),
   isScannerBurst: vi.fn(async () => false),
+  isTestCopyClick: vi.fn(async () => false),
   recordClick: vi.fn(async () => {}),
   loadLinkList: vi.fn(),
 }))
@@ -22,6 +23,7 @@ vi.mock('@/lib/newsletter-clicks', async importOriginal => ({
   ...(await importOriginal<typeof import('@/lib/newsletter-clicks')>()),
   loadLinkList: h.loadLinkList,
   isScannerBurst: h.isScannerBurst,
+  isTestCopyClick: h.isTestCopyClick,
   recordClick: h.recordClick,
 }))
 
@@ -56,6 +58,7 @@ beforeEach(() => {
   h.tasks.length = 0
   h.isAdmin.mockReset().mockResolvedValue(false)
   h.isScannerBurst.mockReset().mockResolvedValue(false)
+  h.isTestCopyClick.mockReset().mockResolvedValue(false)
   h.recordClick.mockReset()
   h.loadLinkList.mockReset().mockResolvedValue(links)
 })
@@ -86,6 +89,15 @@ describe('GET /api/nl/<list>/<n>', () => {
     const res = await linkRoute.GET(req(`/api/nl/${LIST}/1`), link(LIST, '1'))
     expect(res.headers.get('location')).toBe('https://lensacademy.org/')
     await runAfter()
+    expect(h.recordClick).not.toHaveBeenCalled()
+  })
+
+  it('does not count a test copy clicked before the issue goes out', async () => {
+    h.isTestCopyClick.mockResolvedValue(true)
+    const res = await linkRoute.GET(req(`/api/nl/${LIST}/1`), link(LIST, '1'))
+    expect(res.headers.get('location')).toBe('https://lensacademy.org/')
+    await runAfter()
+    expect(h.isTestCopyClick).toHaveBeenCalledWith(links.c)
     expect(h.recordClick).not.toHaveBeenCalled()
   })
 
