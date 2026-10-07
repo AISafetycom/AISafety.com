@@ -1025,11 +1025,11 @@
   overflow-wrap: anywhere;
 }
 
+/* Same weight as the old value, so the two read side by side word for word. */
 .to {
   color: var(--q-text);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-weight: 500;
 }
 
 /* A change to a logo or image field: the picture itself, the site's dark
