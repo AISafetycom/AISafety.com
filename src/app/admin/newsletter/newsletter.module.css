@@ -554,11 +554,6 @@
   overflow-wrap: anywhere;
 }
 
-.warningChange {
-  display: block;
-  color: var(--teal-300);
-}
-
 /* The confirm dialog's ticks: one box per kind of warning, the list
    scrolling inside the dialog when it's long. */
 .dialogChecks {

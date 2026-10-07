@@ -654,7 +654,7 @@ describe('approveAndSend: pre-send checks', () => {
     expect(older.blocks).toEqual([])
   })
 
-  it('asks for a tick on edited card text, and sends once it has the ticks', async () => {
+  it('sends card text edited by hand without asking for a tick', async () => {
     const e = buildEmail({
       cards: [
         {
@@ -671,19 +671,37 @@ describe('approveAndSend: pre-send checks', () => {
     const ac = makeAC({ email: e })
     vi.stubGlobal('fetch', ac.fetchMock)
     const nl = await freshModule()
+    await expect(nl.approveAndSend('200', '6', WHO)).resolves.toMatchObject({
+      campaignId: '201',
+    })
+  })
+
+  it('asks for a tick on a word left in an edit, and sends once it has the ticks', async () => {
+    const e = buildEmail({
+      cards: [
+        {
+          key: 'recAAAAAAAAAAAAAA',
+          title: 'The Big Tent',
+          fields: [
+            ['title', '', 'The Big Tent'],
+            ['desc', '', 'A rewritten description. test'],
+          ],
+          o: { desc: 'AI safety convention for the whole community.' },
+        },
+      ],
+    })
+    const ac = makeAC({ email: e })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
     const first = await outcome(nl.approveAndSend('200', '6', WHO))
     expect(first.err).toBeInstanceOf(nl.NeedsConfirmationError)
     const warnings = (first.err as InstanceType<NL['NeedsConfirmationError']>)
       .warnings
-    expect(warnings).toHaveLength(1)
-    expect(warnings[0]).toMatchObject({
-      kind: 'edited',
-      from: 'AI safety convention for the whole community.',
-      to: 'A rewritten description.',
-    })
+    expect(warnings.map(w => w.kind)).toEqual(['words'])
+    expect(warnings[0].text).toMatch(/“test” in the email/)
     // A stale tick (an id from before a later edit) doesn't count.
     const stale = await outcome(
-      nl.approveAndSend('200', '6', { ...WHO, confirmed: ['edited:g0:old'] })
+      nl.approveAndSend('200', '6', { ...WHO, confirmed: ['words:old'] })
     )
     expect(stale.err).toBeInstanceOf(nl.NeedsConfirmationError)
     expect(ac.creates).toHaveLength(0)
@@ -885,7 +903,7 @@ describe('contentChecks', () => {
     expect(r.warnings).toEqual([])
   })
 
-  it('asks about card text edited since Pen wrote it, with old → new', async () => {
+  it('leaves card text edited since Pen wrote it alone', async () => {
     const { contentChecks } = await nl()
     const e = buildEmail({
       cards: [
@@ -901,15 +919,7 @@ describe('contentChecks', () => {
       ],
     })
     const r = contentChecks(input({ html: e.html }))
-    expect(r.warnings).toEqual([
-      {
-        id: expect.stringMatching(/^edited:g0:recAAAAAAAAAAAAAA:title:/),
-        kind: 'edited',
-        text: '“Renamed Tent” – Title',
-        from: 'The Big Tent',
-        to: 'Renamed Tent',
-      },
-    ])
+    expect(r.warnings).toEqual([])
   })
 
   it('asks about dates and deadlines already past everywhere (UTC−12)', async () => {

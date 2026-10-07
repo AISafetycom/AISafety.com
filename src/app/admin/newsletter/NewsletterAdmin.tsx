@@ -93,15 +93,13 @@ interface Draft {
   cards: CardGroup[] | null
 }
 
-/** Something to look at before sending: card text edited since Pen wrote
- *  it, leftover words (TEST, TODO…), or a date already past. */
+/** Something to look at before sending: leftover words (TEST, TODO…) or a
+ *  date already past. */
 interface SendWarning {
   /** Sent back when ticked; the server checks every current one was. */
   id: string
-  kind: 'edited' | 'words' | 'date'
+  kind: 'words' | 'date'
   text: string
-  from?: string
-  to?: string
 }
 
 /** One wave of the list (see WavePlan in src/lib/admin/newsletter.ts). */
@@ -152,7 +150,6 @@ type StopAction = 'cancel' | 'pause' | 'stop' | 'resume'
 const OVERRIDE_MIN_CHARS = 10
 
 const WARNING_GROUPS: Array<{ kind: SendWarning['kind']; title: string }> = [
-  { kind: 'edited', title: 'Card text changed since Pen wrote it' },
   { kind: 'words', title: 'Words that look left over' },
   { kind: 'date', title: 'Dates or deadlines already past' },
 ]
@@ -1852,19 +1849,12 @@ function ReorderPanel({
   )
 }
 
-/** The warnings as a list; an edit shows the text as Pen wrote it → now. */
+/** The warnings as a list. */
 function WarningItems({ items }: { items: SendWarning[] }) {
   return (
     <ul className={styles.warningList}>
       {items.map(w => (
-        <li key={w.id}>
-          {w.text}
-          {w.from != null && w.to != null && (
-            <span className={styles.warningChange}>
-              “{w.from}” → “{w.to}”
-            </span>
-          )}
-        </li>
+        <li key={w.id}>{w.text}</li>
       ))}
     </ul>
   )
