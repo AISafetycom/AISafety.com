@@ -34,7 +34,7 @@ vi.mock('@/lib/admin/auth', () => ({
   canViewNewsletter: async () => true,
   hasFreshSession: async () => session.fresh,
   currentAdmin: async () => ({ name: 'Bryce', email: 'bryce@example.com' }),
-  NEWSLETTER_FRESH_SECONDS: 1800,
+  NEWSLETTER_FRESH_SECONDS: 14400,
 }))
 const afterQueue: Array<() => unknown> = []
 vi.mock('next/server', async importOriginal => ({

@@ -34,7 +34,7 @@ vi.mock('@/lib/admin/auth', () => ({
   canViewNewsletter: async () => true,
   hasFreshSession: async () => true,
   currentAdmin: async () => ({ name: 'Bryce', email: 'bryce@example.com' }),
-  NEWSLETTER_FRESH_SECONDS: 1800,
+  NEWSLETTER_FRESH_SECONDS: 14400,
 }))
 vi.mock('next/server', async importOriginal => ({
   ...(await importOriginal<typeof import('next/server')>()),

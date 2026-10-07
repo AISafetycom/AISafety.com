@@ -37,12 +37,14 @@ const SESSION_MAX_AGE = 60 * 60 * 24 * 7
 /** A Google sign-in must complete within this long of starting. */
 const OAUTH_MAX_AGE = 60 * 10
 /** How recently a session must have been minted by Google for the actions
- *  that matter most: approving a newsletter send, and changing who can sign
- *  in. A stolen session cookie can't pass this on its own: the
+ *  that matter most: changing who can sign in, and (below) approving a
+ *  newsletter send. A stolen session cookie can't pass this on its own: the
  *  re-confirmation is a full trip through Google, which needs the live Google
  *  login in the browser, not just our cookie. */
 export const SENSITIVE_FRESH_SECONDS = 60 * 30
-export const NEWSLETTER_FRESH_SECONDS = SENSITIVE_FRESH_SECONDS
+/** Newsletter approvers work in the editor for long stretches, so its
+ *  re-confirmation comes every 4 hours rather than every 30 minutes. */
+export const NEWSLETTER_FRESH_SECONDS = 60 * 60 * 4
 
 interface SessionPayload {
   v: 1
