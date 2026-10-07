@@ -57,8 +57,8 @@
     answer didn't;
   - `sendChecks()` refuses emails with missing footer tags, the wrong sender
     for the list, broken click-counter links, oversized HTML or an older issue
-    still waiting, and asks the approver to tick edited card text, leftover
-    words (TEST, TODO…) and dates already past;
+    still waiting, and asks the approver to tick leftover words (TEST,
+    TODO…) and dates already past;
   - only production may send to (or edit drafts on) the real lists 6/7/8,
     and while NEWSLETTER_WARMUP is on a send to more than
     MAX_UNSEGMENTED_SEND people must name a wave;
@@ -1456,11 +1456,8 @@ export interface SendWarning {
   /** Stable while the finding is the same; changes when the text changes,
    *  so a tick given to older text doesn't count for newer text. */
   id: string
-  kind: 'edited' | 'words' | 'date'
+  kind: 'words' | 'date'
   text: string
-  /** Edited card text: as Pen wrote it, and now. */
-  from?: string
-  to?: string
 }
 
 export interface SendChecks {
@@ -1631,30 +1628,9 @@ export function contentChecks(input: {
       `the email is ${Math.round(bytes / 1024)} KB, over the ${MAX_HTML_BYTES / 1024} KB limit (Gmail cuts emails off at about 102 KB) – shorten the issue`
     )
 
-  // Card text changed on this page since Pen wrote it.
-  const groups = cardGroups(html) ?? []
-  for (const g of groups) {
-    for (const c of g.cards) {
-      for (const f of c.fields) {
-        if (f.original == null) continue
-        warnings.push({
-          id: `edited:${g.id}:${c.key}:${f.name}:${shortHash(f.value)}`,
-          kind: 'edited',
-          text: `“${c.title}” – ${f.label}`,
-          from: f.original,
-          to: f.value,
-        })
-      }
-      if (c.fit != null && c.pipelineFit != null && c.fit !== c.pipelineFit)
-        warnings.push({
-          id: `edited:${g.id}:${c.key}:fit:${shortHash(c.fit)}`,
-          kind: 'edited',
-          text: `“${c.title}” – Consider applying if`,
-          from: c.pipelineFit,
-          to: c.fit || '(removed)',
-        })
-    }
-  }
+  // Card text changed by hand on this page isn't flagged: an edit is the
+  // approver's own choice (Bryce, 7 Oct 2026). A typo or a "test" left in
+  // it is still caught by the leftover-word check below.
 
   // Leftovers: TEST, TODO, {{…}}, merge tags we never use. Every place in
   // the subject and the email; the plain-text version (rebuilt from the same
@@ -1707,7 +1683,7 @@ export function contentChecks(input: {
       .filter(s => s.c)
       .map(s => [s.c as string, s.t])
   )
-  for (const g of groups) {
+  for (const g of cardGroups(html) ?? []) {
     for (const c of g.cards) {
       const lines = c.fields.length
         ? c.fields

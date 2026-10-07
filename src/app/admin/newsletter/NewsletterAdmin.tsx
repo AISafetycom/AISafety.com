@@ -1,6 +1,12 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react'
 import adminStyles from '../admin.module.css'
 import styles from './newsletter.module.css'
 import NewsletterAlerts from './NewsletterAlerts'
@@ -87,15 +93,13 @@ interface Draft {
   cards: CardGroup[] | null
 }
 
-/** Something to look at before sending: card text edited since Pen wrote
- *  it, leftover words (TEST, TODO…), or a date already past. */
+/** Something to look at before sending: leftover words (TEST, TODO…) or a
+ *  date already past. */
 interface SendWarning {
   /** Sent back when ticked; the server checks every current one was. */
   id: string
-  kind: 'edited' | 'words' | 'date'
+  kind: 'words' | 'date'
   text: string
-  from?: string
-  to?: string
 }
 
 /** One wave of the list (see WavePlan in src/lib/admin/newsletter.ts). */
@@ -146,7 +150,6 @@ type StopAction = 'cancel' | 'pause' | 'stop' | 'resume'
 const OVERRIDE_MIN_CHARS = 10
 
 const WARNING_GROUPS: Array<{ kind: SendWarning['kind']; title: string }> = [
-  { kind: 'edited', title: 'Card text changed since Pen wrote it' },
   { kind: 'words', title: 'Words that look left over' },
   { kind: 'date', title: 'Dates or deadlines already past' },
 ]
@@ -1186,6 +1189,40 @@ export default function NewsletterAdmin({
 
 const keysOf = (groups: CardGroup[]) => groups.map(g => g.cards.map(c => c.key))
 
+/** Sets a text box's height to its text. scrollHeight leaves out the
+ *  border; offset - client is exactly that. */
+function fitToText(el: HTMLTextAreaElement | null) {
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`
+}
+
+/** A text box that is always as tall as its text, while typing too (Bryce,
+ *  7 Oct 2026). It refits when the text is set from outside (Pen's text),
+ *  when its width changes, and once the web font has loaded. */
+function GrowingTextarea(
+  props: Omit<React.TextareaHTMLAttributes<HTMLTextAreaElement>, 'rows'>
+) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  useLayoutEffect(() => fitToText(ref.current), [props.value])
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    void document.fonts?.ready.then(() => fitToText(el))
+    let width = el.clientWidth
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth === width) return
+      width = el.clientWidth
+      fitToText(el)
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+  return (
+    <textarea {...props} ref={ref} rows={1} className={styles.fitTextarea} />
+  )
+}
+
 /** Drag-and-drop ordering of a draft's cards, one list per section (a card
  *  never leaves its section). Saving rewrites the draft inside
  *  ActiveCampaign; nothing is sent. Arrow keys on a focused row are the
@@ -1658,18 +1695,8 @@ function ReorderPanel({
                         <div key={f.name} className={styles.fieldBlock}>
                           <label className={styles.fitLabel}>
                             {f.label}
-                            <textarea
-                              className={`${styles.fitTextarea} ${
-                                f.name === 'desc' ? '' : styles.fieldShort
-                              }`}
+                            <GrowingTextarea
                               value={v}
-                              rows={
-                                f.name === 'desc'
-                                  ? 6
-                                  : f.name === 'title'
-                                    ? 2
-                                    : 1
-                              }
                               autoFocus={n === 0}
                               onChange={e =>
                                 setValues(vs => ({
@@ -1738,10 +1765,8 @@ function ReorderPanel({
                       <div className={styles.fieldBlock}>
                         <label className={styles.fitLabel}>
                           Consider applying if
-                          <textarea
-                            className={styles.fitTextarea}
+                          <GrowingTextarea
                             value={fitText}
-                            rows={4}
                             autoFocus={c.fields.length === 0}
                             onChange={e => setFitText(e.target.value)}
                             onBlur={() => void saveCard()}
@@ -1824,19 +1849,12 @@ function ReorderPanel({
   )
 }
 
-/** The warnings as a list; an edit shows the text as Pen wrote it → now. */
+/** The warnings as a list. */
 function WarningItems({ items }: { items: SendWarning[] }) {
   return (
     <ul className={styles.warningList}>
       {items.map(w => (
-        <li key={w.id}>
-          {w.text}
-          {w.from != null && w.to != null && (
-            <span className={styles.warningChange}>
-              “{w.from}” → “{w.to}”
-            </span>
-          )}
-        </li>
+        <li key={w.id}>{w.text}</li>
       ))}
     </ul>
   )
@@ -1960,9 +1978,7 @@ function ConfirmSend({
                 </ul>
                 <label className={styles.fitLabel}>
                   To send it anyway, say why (kept with the send)
-                  <textarea
-                    className={`${styles.fitTextarea} ${styles.fieldShort}`}
-                    rows={2}
+                  <GrowingTextarea
                     maxLength={500}
                     value={reason}
                     onChange={e => setReason(e.target.value)}
