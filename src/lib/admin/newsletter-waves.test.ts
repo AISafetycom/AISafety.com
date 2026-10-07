@@ -34,7 +34,7 @@ vi.mock('@/lib/admin/auth', () => ({
   canViewNewsletter: async () => true,
   hasFreshSession: async () => session.fresh,
   currentAdmin: async () => ({ name: 'Bryce', email: 'bryce@example.com' }),
-  NEWSLETTER_FRESH_SECONDS: 1800,
+  NEWSLETTER_FRESH_SECONDS: 14400,
 }))
 const afterQueue: Array<() => unknown> = []
 vi.mock('next/server', async importOriginal => ({
@@ -105,7 +105,7 @@ describe('waves on the page', () => {
     const [d] = await nl.listDrafts()
     expect(d.blocks).toEqual([])
     expect(d.alreadySent).toBeNull()
-    expect(d.sendDelayMinutes).toBe(10)
+    expect(d.sendDelayMinutes).toBe(5)
     expect(d.waves).toMatchObject({
       error: null,
       active: 2889,
@@ -288,18 +288,18 @@ describe('approving a wave', () => {
     )
   })
 
-  it('goes out ten minutes after approval on a real list, two on a test list', async () => {
+  it('goes out five minutes after approval on a real list, two on a test list', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-10-08T15:00:00Z'))
     const ac = makeAC(waved())
     vi.stubGlobal('fetch', ac.fetchMock)
     let nl = await freshModule()
     const r = await nl.approveAndSend('200', '6', { ...WHO, wave: wave(1) })
-    expect(r.sendAt).toBe('2026-10-08T15:10:00.000Z')
+    expect(r.sendAt).toBe('2026-10-08T15:05:00.000Z')
     // AC's sdate is in the account's time (UTC−5 here).
     expect(
       ac.calls.find(c => c.action === 'campaign_create')!.form!.get('sdate')
-    ).toBe('2026-10-08 10:10:00')
+    ).toBe('2026-10-08 10:05:00')
 
     const test = makeAC({ draftList: '5' })
     vi.stubGlobal('fetch', test.fetchMock)
@@ -661,7 +661,7 @@ describe('the owner’s notice', () => {
       `“${ISSUE} · wave 1/4” was approved by plex and is scheduled to send.`,
       'Wave: 1 of 4',
       'To: 494 people on AISafety.com Events (list 6)',
-      'Sends: 8 October 2026, 15:10 UTC',
+      'Sends: 8 October 2026, 15:05 UTC',
       'Approved by: plex',
       'Campaign: 201',
       'To cancel it before it sends, or pause or stop it while it’s sending: https://aisafety.com/admin/newsletter',

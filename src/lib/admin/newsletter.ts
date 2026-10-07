@@ -104,7 +104,7 @@ const MARKER_RE = /<!--aisafety-issue:([0-9a-f]{16})-->/
  *  notice a mistake and cancel the send under Recent sends before anyone gets
  *  it; the test lists keep two, the practical minimum (AC rejects sdates in
  *  the past and runs its scheduler about once a minute). */
-const SEND_DELAY_MINUTES_REAL = 10
+const SEND_DELAY_MINUTES_REAL = 5
 const SEND_DELAY_MINUTES_TEST = 2
 
 export function sendDelayMinutes(listId: string): number {
