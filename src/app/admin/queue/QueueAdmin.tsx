@@ -4226,15 +4226,16 @@ function Detail({
                         ) : null
                       })() ??
                         (d.editing === c.field ? (
-                          <ProposedEditor
-                            value={d.edits[c.field] ?? show(c.to)}
+                          <FieldEditor
+                            info={types.get(c.field)}
+                            value={d.edits[c.field] ?? editText(c.to)}
                             cap={c.field === cap.field ? cap.cap : undefined}
                             onCancel={() => setD({ editing: null })}
                             onSave={text => {
                               // Closing the box without changing anything is
                               // not an edit.
                               const edits = { ...d.edits }
-                              if (text === show(c.to)) delete edits[c.field]
+                              if (text === editText(c.to)) delete edits[c.field]
                               else edits[c.field] = text
                               setD({ editing: null, edits })
                             }}
@@ -5441,59 +5442,20 @@ function ImageSlot({
   )
 }
 
-/** The right control for a field's Airtable type: a dropdown of the
- *  field's own options, toggle chips for a multi-select, a date or number
- *  input, else a text box. Values travel as text (lists comma-joined) and
- *  coerceEdits turns them back into the field's shape. */
 /** The count under a description; none while it is empty. */
 function Counted({ text, cap }: { text: string; cap: number }) {
   const n = text.trim().length
   return n ? <CharCount n={n} cap={cap} /> : null
 }
 
-/** The box a proposed change's new value is typed over in, with a capped
- *  field's count kept live while typing (Bryce, 5 Oct 2026: "Editing a
- *  field that has a character limit should always show it"). */
-function ProposedEditor({
-  value,
-  cap,
-  onSave,
-  onCancel,
-}: {
-  value: string
-  cap?: number
-  onSave: (text: string) => void
-  onCancel: () => void
-}) {
-  const [typed, setTyped] = useState(value)
-  return (
-    <>
-      <textarea
-        ref={fitToText}
-        onInput={e => {
-          fitToText(e.currentTarget)
-          setTyped(e.currentTarget.value)
-        }}
-        className={styles.input}
-        rows={2}
-        autoFocus
-        defaultValue={value}
-        onKeyDown={e => {
-          if (e.key === 'Escape') {
-            e.preventDefault()
-            onCancel()
-          } else if (isDoneKey(e)) {
-            e.preventDefault()
-            e.currentTarget.blur()
-          }
-        }}
-        onBlur={e => onSave(e.target.value)}
-      />
-      {cap !== undefined && <Counted text={typed} cap={cap} />}
-    </>
-  )
-}
-
+/** The right control for a field's Airtable type: a dropdown of the
+ *  field's own options, toggle chips for a multi-select, a date or number
+ *  input, else a text box. Values travel as text (lists comma-joined) and
+ *  coerceEdits turns them back into the field's shape. A proposed change's
+ *  new value opens in it too (Bryce, 7 Oct 2026: a select field "should be
+ *  a dropdown"), and a capped field's count stays live while typing (5 Oct
+ *  2026: "Editing a field that has a character limit should always show
+ *  it"). */
 function FieldEditor({
   info,
   value,
@@ -5548,6 +5510,11 @@ function FieldEditor({
         onBlur={e => save(e.target.value)}
       >
         <option value="">—</option>
+        {/* A value that is not one of the field's options stays listed,
+            or the box would open on "—" and blank the field on close. */}
+        {value && !choices.includes(value) && (
+          <option value={value}>{value}</option>
+        )}
         {choices.map(c => (
           <option key={c} value={c}>
             {c}
