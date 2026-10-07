@@ -395,9 +395,10 @@
   color: var(--teal-300);
 }
 
+/* Always as tall as its text (GrowingTextarea sets the height), so there is
+   no scrollbar and no drag handle. */
 .fitTextarea {
   width: 100%;
-  min-height: 96px;
   padding: 8px 10px;
   border: 1px solid var(--teal-700);
   border-radius: 6px;
@@ -407,7 +408,8 @@
   font-size: 13px;
   font-weight: 400;
   line-height: 1.5;
-  resize: vertical;
+  resize: none;
+  overflow: hidden;
 }
 
 .fitTextarea:focus-visible {
@@ -415,17 +417,11 @@
   outline-offset: 1px;
 }
 
-/* Card text editor (25 Sept 2026): one block per piece of text on the card.
-   Short fields (title, rows) start one or two lines tall; the description
-   keeps the tall box. */
+/* Card text editor (25 Sept 2026): one block per piece of text on the card. */
 .fieldBlock {
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-
-.fieldShort {
-  min-height: 0;
 }
 
 .fieldActions {
