@@ -14,7 +14,7 @@
                                   re-verifies the draft under a lock and
                                   schedules it — to the whole list, or to
                                   wave k of n (the saved segment `segment`)
-                                  — to send in 10 minutes (2 on the test
+                                  — to send in 5 minutes (2 on the test
                                   lists). The draft shell is deleted after a
                                   whole-list send or the last wave, and kept
                                   for the next wave otherwise. `confirmed` =

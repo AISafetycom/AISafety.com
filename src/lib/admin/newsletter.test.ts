@@ -937,8 +937,8 @@ describe('editLockFor', () => {
 })
 
 describe('send delay', () => {
-  it('ten minutes on the real lists, two on the test lists', () => {
-    for (const l of ['6', '7', '8']) expect(sendDelayMinutes(l)).toBe(10)
+  it('five minutes on the real lists, two on the test lists', () => {
+    for (const l of ['6', '7', '8']) expect(sendDelayMinutes(l)).toBe(5)
     for (const l of ['4', '5']) expect(sendDelayMinutes(l)).toBe(2)
   })
 })
