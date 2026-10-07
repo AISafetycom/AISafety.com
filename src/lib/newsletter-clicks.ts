@@ -378,6 +378,83 @@ export async function isScannerBurst(
   }
 }
 
+// ─── Test copies ─────────────────────────────────────────────────────────────
+
+// A test copy (Send test on /admin/newsletter) is the issue's own email,
+// links and all, so its clicks can't be told from a reader's by the link.
+// They are told apart by time instead: once a test copy of an issue has been
+// mailed, its clicks don't count until the issue itself goes out (the
+// scheduled time of its first send or first wave). The admin-session rule
+// only catches a click from a browser signed in to the admin; this catches
+// the rest (another browser, a mail app's own).
+
+/** When the first test copy of an issue was mailed (epoch ms). Lapses after
+ *  30 days, so an issue whose send time failed to record can't lose its
+ *  readers' clicks for good. */
+const TEST_COPY_PREFIX = 'aisafety:newsletter:test-copy:'
+const TEST_COPY_TTL_SECONDS = 60 * 60 * 24 * 30
+/** When an issue first goes out to its list (epoch ms); later waves never
+ *  move it. No expiry: one small key per issue. */
+const SENDS_FROM_PREFIX = 'aisafety:newsletter:sends-from:'
+
+/** Note that a test copy of `campaign` (the issue name, as in its link
+ *  lists) was mailed; later copies change nothing. Nothing without a store
+ *  (a laptop). Throws on a store error. */
+export async function noteTestCopy(
+  campaign: string,
+  at = Date.now()
+): Promise<void> {
+  if (!store) return
+  await store.set(TEST_COPY_PREFIX + campaign, at, {
+    nx: true,
+    ex: TEST_COPY_TTL_SECONDS,
+  })
+}
+
+/** Note when `campaign` goes out to its list. The first send or wave sets
+ *  it; later ones change nothing. Nothing without a store. Throws on a
+ *  store error. */
+export async function noteSendTime(
+  campaign: string,
+  at: number
+): Promise<void> {
+  if (!store) return
+  await store.set(SENDS_FROM_PREFIX + campaign, at, { nx: true })
+}
+
+/** Pure: whether a click at `now` belongs to a test copy, given the stored
+ *  test-copy time and send time (null when absent). An issue never sent as
+ *  a test counts every click, as before. */
+export function isBeforeSend(
+  testCopyAt: unknown,
+  sendsFrom: unknown,
+  now: number
+): boolean {
+  if (testCopyAt == null) return false
+  if (sendsFrom == null) return true
+  return now < Number(sendsFrom)
+}
+
+/** Whether this click on `campaign` came from a test copy, so not to be
+ *  counted. False (count it) with no store or a store error. */
+export async function isTestCopyClick(
+  campaign: string,
+  now = Date.now()
+): Promise<boolean> {
+  if (!store) return false
+  try {
+    const [testCopyAt, sendsFrom] = await store.mget<
+      [number | null, number | null]
+    >(TEST_COPY_PREFIX + campaign, SENDS_FROM_PREFIX + campaign)
+    return isBeforeSend(testCopyAt, sendsFrom, now)
+  } catch (err) {
+    console.warn(
+      `[newsletter-clicks] test copy check failed: ${err instanceof Error ? err.message : String(err)}`
+    )
+    return false
+  }
+}
+
 // ─── Counts ──────────────────────────────────────────────────────────────────
 
 /** One hash per campaign: a field per link (its label and destination as

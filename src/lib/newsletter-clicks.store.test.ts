@@ -23,11 +23,20 @@ const redis = vi.hoisted(() => ({ hang: false, down: false }))
 
 vi.mock('@upstash/redis', () => {
   class FakeRedis {
-    async set(key: string, value: string, opts?: { nx?: boolean }) {
+    async set(
+      key: string,
+      value: string | number,
+      opts?: { nx?: boolean; ex?: number }
+    ) {
       if (redis.down) throw new Error('store down')
       if (opts?.nx && strings.has(key)) return null
-      strings.set(key, value)
+      strings.set(key, String(value))
+      if (opts?.ex) ttls.set(key, opts.ex)
       return 'OK'
+    }
+    async mget(...keys: string[]) {
+      if (redis.down) throw new Error('store down')
+      return keys.map(k => strings.get(k) ?? null)
     }
     async get(key: string) {
       if (redis.hang) return new Promise(() => {})
@@ -357,5 +366,51 @@ describe('recordClick', () => {
     const h = hashes.get('aisafety:newsletter:clicks:Events · Week 46, 2026')
     expect(h?.get('__total')).toBe(2)
     expect(h?.get(JSON.stringify({ t: 'Lens', u: link.u }))).toBe(2)
+  })
+})
+
+describe('test copies', () => {
+  const issue = 'Funding · Issue #30, 2026'
+  const t0 = Date.parse('2026-10-07T12:00:00Z')
+
+  it('counts every click on an issue that never had a test copy', async () => {
+    expect(await m.isTestCopyClick('Events · Week 50, 2026', t0)).toBe(false)
+  })
+
+  it('sets aside clicks from a test copy until the issue goes out', async () => {
+    await m.noteTestCopy(issue, t0)
+    expect(ttls.get(`aisafety:newsletter:test-copy:${issue}`)).toBe(
+      60 * 60 * 24 * 30
+    )
+    // Tested, not approved yet.
+    expect(await m.isTestCopyClick(issue, t0 + 60_000)).toBe(true)
+    // Approved, scheduled ten minutes out: still a test copy until then.
+    const sendAt = t0 + 3_600_000
+    await m.noteSendTime(issue, sendAt)
+    expect(await m.isTestCopyClick(issue, sendAt - 1)).toBe(true)
+    // Gone out: every click counts, a test copy's included.
+    expect(await m.isTestCopyClick(issue, sendAt)).toBe(false)
+  })
+
+  it('keeps the first send time when a later wave is approved', async () => {
+    const name = 'Training · Week 51, 2026'
+    await m.noteTestCopy(name, t0)
+    await m.noteSendTime(name, t0 + 1000)
+    await m.noteSendTime(name, t0 + 86_400_000)
+    expect(await m.isTestCopyClick(name, t0 + 2000)).toBe(false)
+  })
+
+  it('keeps the first test copy time when another is sent', async () => {
+    const name = 'Events · Week 52, 2026'
+    await m.noteTestCopy(name, t0)
+    await m.noteTestCopy(name, t0 + 5000)
+    expect(strings.get(`aisafety:newsletter:test-copy:${name}`)).toBe(
+      String(t0)
+    )
+  })
+
+  it('counts the click when it can’t tell (store down)', async () => {
+    redis.down = true
+    expect(await m.isTestCopyClick(issue, t0)).toBe(false)
   })
 })

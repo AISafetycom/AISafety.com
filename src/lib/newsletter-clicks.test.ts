@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   HOMEPAGE,
+  isBeforeSend,
   isBurst,
   isLikelyBot,
   LIST_ID_RE,
@@ -182,6 +183,20 @@ describe('isBurst', () => {
     for (const at of times) expect(isBurst(times, at)).toBe(false)
     expect(isBurst([0, 2 * S], 2 * S)).toBe(false)
     expect(isBurst([0], 0)).toBe(false)
+  })
+})
+
+describe('isBeforeSend', () => {
+  it('counts every click on an issue never sent as a test', () => {
+    expect(isBeforeSend(null, null, 5)).toBe(false)
+    expect(isBeforeSend(null, 10, 5)).toBe(false)
+  })
+
+  it('sets aside a test copy’s clicks until the issue goes out', () => {
+    expect(isBeforeSend(1, null, 5)).toBe(true)
+    expect(isBeforeSend(1, 10, 9)).toBe(true)
+    expect(isBeforeSend(1, '10', 10)).toBe(false)
+    expect(isBeforeSend('1', 10, 11)).toBe(false)
   })
 })
 
