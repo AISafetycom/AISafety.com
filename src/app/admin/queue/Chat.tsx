@@ -280,6 +280,14 @@ export default function Chat({
     },
     [canEditField, onSetEdits, onSetReply, onWrote]
   )
+  // Read through a ref by loadHistory, so that it changes only with the
+  // agent's token or the item. The page hands down new callbacks on every
+  // render, and each loaded history re-renders the page (the changed
+  // fields above): with applyFrom as a dependency the history reloaded the
+  // moment it landed, thousands of times a minute, and an expired token
+  // turned that into 2.4 million refusals in the Mac agent's log (7 Oct 2026).
+  const applyFromRef = useRef(applyFrom)
+  applyFromRef.current = applyFrom
 
   const undoFor = (msg: Msg): (() => void) | undefined => {
     const u = undoRef.current[msg.at]
@@ -333,12 +341,12 @@ export default function Chat({
     // still applies its blocks; ones from before the page opened do not –
     // they were applied when they came, and are on the row.
     if (seenRef.current !== null) {
-      for (const msg of list.slice(seenRef.current)) applyFrom(msg)
+      for (const msg of list.slice(seenRef.current)) applyFromRef.current(msg)
     }
     seenRef.current = list.length
     setMessages(list)
     setPending(Boolean(data.pending))
-  }, [call, applyFrom])
+  }, [call])
 
   useEffect(() => {
     let alive = true
