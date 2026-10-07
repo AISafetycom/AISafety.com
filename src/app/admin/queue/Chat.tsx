@@ -85,6 +85,14 @@ interface Event {
   error?: string
 }
 
+/** Shown when a reply's stream stops before it says it is done: the Mac
+ *  agent stopped mid-answer, usually a restart. The Mac leaves the same
+ *  note in the thread when it starts again (7 Oct 2026: a question about
+ *  Athena Mentorship Program, sent a second before a restart, sat there
+ *  with nothing under it). */
+const CUT_OFF =
+  "Fable's reply was cut off – the Queue helper on the Mac stopped. Send your message again."
+
 const EDITS_RE = /```edits\s*\n([\s\S]*?)```/g
 const REPLY_RE = /```reply\s*\n([\s\S]*?)```/g
 const BLOCK_RE = /```(edits|reply)\s*\n([\s\S]*?)```/g
@@ -346,6 +354,7 @@ export default function Chat({
     seenRef.current = list.length
     setMessages(list)
     setPending(Boolean(data.pending))
+    return { list, pending: Boolean(data.pending) }
   }, [call])
 
   useEffect(() => {
@@ -595,6 +604,23 @@ export default function Chat({
     void deliver(msg, going)
   }
 
+  /** The reply's stream stopped without ending. Re-read the thread: a Mac
+   *  that is still answering lands the reply through the pending poll, and
+   *  one that restarted has put the note in the thread itself. A Mac that
+   *  is down (or left the message unanswered) gets the note here. */
+  const cutOff = async () => {
+    setLive(null)
+    setNote(null)
+    try {
+      const { list, pending } = await loadHistory()
+      if (pending || list[list.length - 1]?.role !== 'you') return
+    } catch {
+      // The Mac is not answering yet (a restart takes a few seconds).
+    }
+    seenRef.current = (seenRef.current ?? 0) + 1
+    setMessages(m => [...(m ?? []), { role: 'error', text: CUT_OFF, at: '' }])
+  }
+
   const deliver = async (msg: string, going: Pending[]) => {
     setError(null)
     setBusy(true)
@@ -610,6 +636,10 @@ export default function Chat({
     ])
     seenRef.current = (seenRef.current ?? 0) + 1
     setLive([])
+    // Every reply ends with a done or error event; a stream that stops
+    // without one was cut off.
+    let streaming = false
+    let ended = false
     try {
       // The files go as base64 beside the words; the Mac saves them and
       // lists their paths under the message for Fable.
@@ -629,6 +659,7 @@ export default function Chat({
         throw new Error(data.error ?? `HTTP ${res.status}`)
       }
       const reader = res.body.getReader()
+      streaming = true
       const decoder = new TextDecoder()
       let buf = ''
       for (;;) {
@@ -642,7 +673,9 @@ export default function Chat({
           for (const line of chunk.split('\n')) {
             if (!line.startsWith('data: ')) continue
             try {
-              handle(JSON.parse(line.slice(6)) as Event)
+              const ev = JSON.parse(line.slice(6)) as Event
+              if (ev.type === 'done' || ev.type === 'error') ended = true
+              handle(ev)
             } catch {
               // a half line; the next chunk completes it
             }
@@ -650,10 +683,17 @@ export default function Chat({
           cut = buf.indexOf('\n\n')
         }
       }
+      if (!ended) await cutOff()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'The Mac agent did not answer.')
-      setLive(null)
-      setNote(null)
+      if (streaming && !ended) {
+        await cutOff()
+      } else {
+        setError(
+          e instanceof Error ? e.message : 'The Mac agent did not answer.'
+        )
+        setLive(null)
+        setNote(null)
+      }
     } finally {
       setBusy(false)
     }
