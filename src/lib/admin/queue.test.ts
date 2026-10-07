@@ -276,6 +276,7 @@ describe('asAttachmentWrite', () => {
 // Applying and undoing a change to a picture field, against a stand-in
 // for Airtable: the base's schema (one meta read) and a patch log.
 describe('picture fields on Apply and Undo', () => {
+  const EDITS = 'fldzCgKQbopgcbrwq'
   const link = 'https://try.mangrove.one/logo-final/apple-touch-icon-180-b1.png'
   const blob =
     'https://vfnmdozpctvdobh7.public.blob.vercel-storage.com/queue-logos/mangrove-2026-09-22.png'
@@ -380,6 +381,51 @@ describe('picture fields on Apply and Undo', () => {
       fields: { 'Host name': 'Mangrove' },
     })
     expect(patches[1].fields[STATUS]).toBe('Pending')
+  })
+
+  // Threading the Needle, 7 Oct 2026: Fable put finished logos on the
+  // record from the chat, and Apply would have written Broom's raw file
+  // and a "dark version of the same new mark" placeholder back over them.
+  it('leaves a field Fable already changed, and Undo leaves it too', async () => {
+    const twoLogos = logoChange({
+      changes: [
+        { field: 'Logo', from: 'old.jpg', to: 'dark version of the new mark' },
+        { field: 'Host name', from: 'Mangrove', to: 'Mangrove Games' },
+      ],
+    })
+    await acceptItem(twoLogos, {}, null, ['Logo', 'Name'])
+    expect(patches[0]).toEqual({
+      path: `${EVENTS}/${rid('live')}`,
+      fields: { 'Host name': 'Mangrove Games' },
+    })
+    expect(patches[1].fields[STATUS]).toBe('Applied')
+    // Only proposed fields are kept; the row remembers which.
+    expect(JSON.parse(String(patches[1].fields[EDITS]))).toEqual({
+      '(kept by Fable)': ['Logo'],
+    })
+
+    patches = []
+    await undoItem({
+      ...twoLogos,
+      status: 'Applied',
+      keptByFable: ['Logo'],
+      changes: [
+        { field: 'Logo', from: [{ url: link }], to: blob },
+        { field: 'Host name', from: 'Mangrove', to: 'Mangrove Games' },
+      ],
+    })
+    expect(patches[0]).toEqual({
+      path: `${EVENTS}/${rid('live')}`,
+      fields: { 'Host name': 'Mangrove' },
+    })
+    expect(patches[1].fields[STATUS]).toBe('Pending')
+    expect(patches[1].fields[EDITS]).toBeNull()
+  })
+
+  it('clears the flag and writes nothing when Fable changed every proposed field', async () => {
+    await acceptItem(logoChange({ issueRow: rid('issue') }), {}, null, ['Logo'])
+    expect(patches.map(p => p.path)).toEqual([`${QUEUE}/${rid('q1')}`])
+    expect(patches[0].fields[STATUS]).toBe('Applied')
   })
 })
 
