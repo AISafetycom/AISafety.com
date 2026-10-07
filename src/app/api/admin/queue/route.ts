@@ -137,7 +137,11 @@ export async function POST(req: NextRequest) {
       await acceptItem(
         item,
         sanitiseEdits(body.edits),
-        typeof body.replyDraft === 'string' ? body.replyDraft : null
+        typeof body.replyDraft === 'string' ? body.replyDraft : null,
+        // Proposed fields Fable has already changed on the record.
+        Array.isArray(body.keep)
+          ? body.keep.filter((k): k is string => typeof k === 'string')
+          : []
       )
     } else if (action === 'reject') {
       await rejectItem(
