@@ -1245,6 +1245,9 @@ export default function QueueAdmin({
   // Items whose chat shows Fable changed the listing: read it live, so the
   // changed fields can show its pictures and skip computed fields.
   const [fableIds, setFableIds] = useState<Record<string, true>>({})
+  // The fields Fable changed on each item's record from the chat, so the
+  // A key keeps them as the Apply button does.
+  const fableFieldsRef = useRef<Record<string, string[]>>({})
   // "Done today" is the viewer's own calendar day, not the last 24 hours:
   // the server sends a day's worth, the browser keeps what was decided
   // since its local midnight, and moves on when the next one passes.
@@ -2578,6 +2581,7 @@ export default function QueueAdmin({
           ) {
             e.preventDefault()
             void act(item, 'accept', {
+              keep: fableFieldsRef.current[item.id] ?? [],
               edits: coerceEdits(
                 d.edits,
                 item.type === 'Change'
@@ -3143,8 +3147,10 @@ export default function QueueAdmin({
               />
             ) : selected ? (
               <Detail
-                onFable={() => {
+                onFable={fields => {
                   const id = selected.id
+                  fableFieldsRef.current[id] = fields
+                  if (!fields.length) return
                   setFableIds(prev =>
                     prev[id] ? prev : { ...prev, [id]: true }
                   )
@@ -3578,7 +3584,8 @@ function Detail({
   /** Fable changed the record from the chat: re-read it. */
   onWrote: () => void
   /** The chat shows Fable changed the listing: the page reads it live. */
-  onFable?: () => void
+  /** Fable changed fields on the record from the chat: their names. */
+  onFable?: (fields: string[]) => void
   /** A decision opened from Done today: back to that list. */
   onBack?: () => void
   /** A decision opened from Done today: take it back (null: view only). */
@@ -3654,6 +3661,11 @@ function Detail({
       !COMPUTED_TYPES.has(types.get(c.field)?.type ?? '')
   )
   const fableFields = new Map(fableChanges.map(c => [c.field, c]))
+  // The proposed fields Fable changed: Accept leaves them as they are.
+  const fableKept =
+    item.type === 'Change'
+      ? item.changes.map(c => c.field).filter(k => fableFields.has(k))
+      : []
 
   // Fields edited beyond what a change proposes (Bryce, 5 Oct 2026: "I
   // want a way of editing other random fields too"), each a row under the
@@ -4161,95 +4173,111 @@ function Detail({
             </p>
           ) : (
             <div className={styles.diff}>
-              {item.changes.map(c => (
-                <div key={c.field} className={styles.diffRow}>
-                  <span className={styles.label}>
-                    <FieldIcon
-                      page={item.page}
-                      name={c.field}
-                      value={show(c.to)}
-                      size={12}
-                    />
-                    {c.field}
-                  </span>
-                  <span className={styles.from}>
-                    {(() => {
-                      const pic = pictureOf(c.from, live?.fields[c.field], {
-                        pictureField: touchesPicture(c),
-                        open: isOpen(item),
-                      })
-                      return pic ? (
-                        <Picture key={pic.url ?? ''} {...pic} />
-                      ) : (
-                        friendly(show(c.from))
-                      )
-                    })()}
-                  </span>
-                  <span className={styles.arrow}>
-                    <Icon src={ICON.arrow} size={12} />
-                  </span>
-                  <span className={styles.to}>
-                    {(() => {
-                      // A proposed picture is shown, not its JSON, and
-                      // is not typed over: it is taken or refused whole.
-                      if (c.field in d.edits || d.editing === c.field) {
-                        return null
-                      }
-                      const pic = pictureOf(c.to, null, {
-                        pictureField: touchesPicture(c),
-                      })
-                      return pic ? (
-                        <Picture key={pic.url ?? ''} {...pic} />
-                      ) : null
-                    })() ??
-                      (d.editing === c.field ? (
-                        <ProposedEditor
-                          value={d.edits[c.field] ?? show(c.to)}
-                          cap={c.field === cap.field ? cap.cap : undefined}
-                          onCancel={() => setD({ editing: null })}
-                          onSave={text => {
-                            // Closing the box without changing anything is
-                            // not an edit.
-                            const edits = { ...d.edits }
-                            if (text === show(c.to)) delete edits[c.field]
-                            else edits[c.field] = text
-                            setD({ editing: null, edits })
-                          }}
-                        />
-                      ) : (
-                        <>
-                          <EditableValue
-                            text={friendly(
-                              c.field in d.edits ? d.edits[c.field] : show(c.to)
-                            )}
-                            edited={c.field in d.edits}
-                            canEdit={!revising}
-                            onEdit={() => setD({ editing: c.field })}
+              {item.changes.map(c =>
+                // A proposed field Fable has since changed on the record
+                // shows Fable's value in its place, once; Accept keeps it.
+                fableFields.has(c.field) ? (
+                  <FableChangeRow
+                    key={`fable:${c.field}`}
+                    change={fableFields.get(c.field)!}
+                    page={item.page}
+                    live={live?.fields[c.field]}
+                    cap={c.field === cap.field ? cap.cap : undefined}
+                  />
+                ) : (
+                  <div key={c.field} className={styles.diffRow}>
+                    <span className={styles.label}>
+                      <FieldIcon
+                        page={item.page}
+                        name={c.field}
+                        value={show(c.to)}
+                        size={12}
+                      />
+                      {c.field}
+                    </span>
+                    <span className={styles.from}>
+                      {(() => {
+                        const pic = pictureOf(c.from, live?.fields[c.field], {
+                          pictureField: touchesPicture(c),
+                          open: isOpen(item),
+                        })
+                        return pic ? (
+                          <Picture key={pic.url ?? ''} {...pic} />
+                        ) : (
+                          friendly(show(c.from))
+                        )
+                      })()}
+                    </span>
+                    <span className={styles.arrow}>
+                      <Icon src={ICON.arrow} size={12} />
+                    </span>
+                    <span className={styles.to}>
+                      {(() => {
+                        // A proposed picture is shown, not its JSON, and
+                        // is not typed over: it is taken or refused whole.
+                        if (c.field in d.edits || d.editing === c.field) {
+                          return null
+                        }
+                        const pic = pictureOf(c.to, null, {
+                          pictureField: touchesPicture(c),
+                        })
+                        return pic ? (
+                          <Picture key={pic.url ?? ''} {...pic} />
+                        ) : null
+                      })() ??
+                        (d.editing === c.field ? (
+                          <ProposedEditor
+                            value={d.edits[c.field] ?? show(c.to)}
+                            cap={c.field === cap.field ? cap.cap : undefined}
+                            onCancel={() => setD({ editing: null })}
+                            onSave={text => {
+                              // Closing the box without changing anything is
+                              // not an edit.
+                              const edits = { ...d.edits }
+                              if (text === show(c.to)) delete edits[c.field]
+                              else edits[c.field] = text
+                              setD({ editing: null, edits })
+                            }}
                           />
-                          {c.field === cap.field && (
-                            <Counted
-                              text={
+                        ) : (
+                          <>
+                            <EditableValue
+                              text={friendly(
                                 c.field in d.edits
                                   ? d.edits[c.field]
                                   : show(c.to)
-                              }
-                              cap={cap.cap}
+                              )}
+                              edited={c.field in d.edits}
+                              canEdit={!revising}
+                              onEdit={() => setD({ editing: c.field })}
                             />
-                          )}
-                        </>
-                      ))}
-                  </span>
-                </div>
-              ))}
-              {fableChanges.map(c => (
-                <FableChangeRow
-                  key={`fable:${c.field}`}
-                  change={c}
-                  page={item.page}
-                  live={live?.fields[c.field]}
-                  cap={c.field === cap.field ? cap.cap : undefined}
-                />
-              ))}
+                            {c.field === cap.field && (
+                              <Counted
+                                text={
+                                  c.field in d.edits
+                                    ? d.edits[c.field]
+                                    : show(c.to)
+                                }
+                                cap={cap.cap}
+                              />
+                            )}
+                          </>
+                        ))}
+                    </span>
+                  </div>
+                )
+              )}
+              {fableChanges
+                .filter(c => !proposedFields.has(c.field))
+                .map(c => (
+                  <FableChangeRow
+                    key={`fable:${c.field}`}
+                    change={c}
+                    page={item.page}
+                    live={live?.fields[c.field]}
+                    cap={c.field === cap.field ? cap.cap : undefined}
+                  />
+                ))}
               {extraFields.map(k => (
                 <ExtraChangeRow
                   key={`extra:${k}`}
@@ -4378,7 +4406,7 @@ function Detail({
                     ? prev
                     : { id: item.id, list }
                 )
-                if (list.length) onFable?.()
+                onFable?.(list.map(c => c.field))
               }}
               focusTick={chatFocus}
             />
@@ -4503,7 +4531,9 @@ function Detail({
             <button
               className={`${styles.button} ${styles.primary}`}
               disabled={d.busy}
-              onClick={() => act('accept', { edits: editsToSave() })}
+              onClick={() =>
+                act('accept', { edits: editsToSave(), keep: fableKept })
+              }
             >
               <Icon
                 src={item.type === 'Add' ? ICON.plus : ICON.check}
@@ -4741,8 +4771,9 @@ function ByFable({ change }: { change?: FableChange }) {
 }
 
 /** A field Fable changed on the listing from the chat, among a change's
- *  fields: it is on the record already, so it is shown, not edited, and
- *  Accept does not write it again. */
+ *  fields (in the place of the proposed one when the proposal names it):
+ *  it is on the record already, so it is shown, not edited, and Accept
+ *  neither writes it again nor writes the proposal over it. */
 function FableChangeRow({
   change,
   page,
@@ -4779,7 +4810,7 @@ function FableChangeRow({
         {side(change.to, true)}
         <em
           className={styles.byFable}
-          title="Fable changed this in Airtable from the chat, so it is on the record already."
+          title="Fable changed this in Airtable from the chat, so it is on the record already. Apply keeps it."
         >
           by Fable
         </em>

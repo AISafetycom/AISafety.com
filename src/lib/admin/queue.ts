@@ -157,6 +157,10 @@ export interface QueueItem {
   /** Applied Change: what the fields edited beyond the proposal held
    *  before Accept wrote them, for Undo to put back. */
   before?: Record<string, unknown> | null
+  /** Applied Change: the proposed fields Accept left alone because Fable
+   *  had already changed them on the record from the chat; Undo leaves
+   *  them too. */
+  keptByFable?: string[] | null
   decidedAt: string | null
   appliedAt: string | null
   error: string | null
@@ -203,6 +207,11 @@ function asBox(v: unknown): boolean {
 /** The key in a row's saved edits (JSON) that keeps, once a Change is
  *  applied, what its extra fields held before; never a field name. */
 const BEFORE_KEY = '(before)'
+
+/** The key in a row's saved edits (JSON) that keeps, once a Change is
+ *  applied, the proposed fields Accept did not write because Fable had
+ *  changed them on the record already; never a field name. */
+const KEPT_KEY = '(kept by Fable)'
 
 /** Columns Airtable fills itself, and ones the page has no editor for
  *  (pictures, links to other records): never written as an extra field. */
@@ -509,10 +518,14 @@ function rowToItem(
   const saved = parseJson(f[F.edits])
   let edits: Record<string, unknown> | null = null
   let before: Record<string, unknown> | null = null
+  let keptByFable: string[] | null = null
   if (isRecord(saved)) {
-    const { [BEFORE_KEY]: was, ...rest } = saved
+    const { [BEFORE_KEY]: was, [KEPT_KEY]: kept, ...rest } = saved
     edits = rest
     before = isRecord(was) ? was : null
+    keptByFable = Array.isArray(kept)
+      ? kept.filter((k): k is string => typeof k === 'string')
+      : null
   }
   // The reply the page sent with Reject shows at once, before the Mac has
   // saved it (Undo clears it, so it always belongs to this decision).
@@ -561,6 +574,7 @@ function rowToItem(
     note: str(f[F.note]),
     edits,
     before,
+    keptByFable,
     decidedAt: str(f[F.decidedAt]),
     appliedAt: str(f[F.appliedAt]),
     error: str(f[F.error]),
@@ -1549,7 +1563,7 @@ export function extraEdits(
   const types = new Map(schema.map(f => [f.name, f.type]))
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(edits)) {
-    if (proposed.has(k) || k === BEFORE_KEY) continue
+    if (proposed.has(k) || k === BEFORE_KEY || k === KEPT_KEY) continue
     if (PROTECTED_FIELDS.has(k) || k.length > 100) continue
     if (UNWRITABLE_TYPES.has(types.get(k) ?? '')) continue
     out[k] = v
@@ -1586,11 +1600,12 @@ async function currentValues(
 export async function acceptItem(
   item: QueueItem,
   edits: Record<string, unknown>,
-  replyDraft: string | null = null
+  replyDraft: string | null = null,
+  keep: string[] = []
 ): Promise<void> {
   requireOpen(item)
   const stamp = now()
-  let editsJson = Object.keys(edits).length ? JSON.stringify(edits) : null
+  const saved: Record<string, unknown> = { ...edits }
   // The reply draft as it reads on the page goes on the row first, so the
   // Mac agent (or the worker) saves exactly what the admin approved.
   const draft =
@@ -1611,8 +1626,16 @@ export async function acceptItem(
     } else if (item.type === 'Change') {
       const t = target(item)
       const fields: Record<string, unknown> = {}
+      // A proposed field Fable has since changed on the record from the
+      // chat holds Fable's value, which the page shows in the proposal's
+      // place: Accept leaves it, so the older proposal never lands over it
+      // (Threading the Needle, 7 Oct 2026: Broom's raw logo and a "dark
+      // version of the same new mark" placeholder sat above Fable's
+      // finished logos, and Apply would have written them back).
+      const kept = item.changes.map(c => c.field).filter(k => keep.includes(k))
+      if (kept.length > 0) saved[KEPT_KEY] = kept
       for (const c of item.changes) {
-        if (c.field.length > 100) continue
+        if (c.field.length > 100 || kept.includes(c.field)) continue
         if (PROTECTED_FIELDS.has(c.field)) {
           fields[c.field] = asBox(c.to)
           continue
@@ -1631,7 +1654,7 @@ export async function acceptItem(
           Object.keys(extra)
         )
         Object.assign(fields, extra)
-        editsJson = JSON.stringify({ ...edits, [BEFORE_KEY]: before })
+        saved[BEFORE_KEY] = before
       }
       if (Object.keys(fields).length > 0) {
         await patchRecord(
@@ -1672,7 +1695,7 @@ export async function acceptItem(
     [F.status]: 'Applied',
     [F.decidedAt]: stamp,
     [F.appliedAt]: stamp,
-    [F.edits]: editsJson,
+    [F.edits]: Object.keys(saved).length ? JSON.stringify(saved) : null,
     [F.error]: null,
   })
   refreshCache()
@@ -1807,6 +1830,8 @@ export async function undoItem(item: QueueItem): Promise<void> {
     const t = target(item)
     const fields: Record<string, unknown> = {}
     for (const c of item.changes) {
+      // Accept did not write it (Fable had changed it), so it stays.
+      if (item.keptByFable?.includes(c.field)) continue
       fields[c.field] = PROTECTED_FIELDS.has(c.field)
         ? asBox(c.from)
         : (c.from ?? null)
@@ -1819,7 +1844,7 @@ export async function undoItem(item: QueueItem): Promise<void> {
     const back = await withAttachmentShapes(t.table, fields, 'skip')
     if (Object.keys(back).length) await patchRecord(t.table, t.record, back)
     // The edits stay as the page's draft; what they replaced is spent.
-    if (item.before) {
+    if (item.before || item.keptByFable) {
       const kept = item.edits ?? {}
       reopen[F.edits] = Object.keys(kept).length ? JSON.stringify(kept) : null
     }
