@@ -7,7 +7,8 @@
 
     accept  Add     → tick Publish? on the target record (plus any edits;
                       a Sort already taken moves the listings below down)
-            Change  → write the proposed field values, drop the Broom flag row
+            Change  → write the proposed field values (a proposed Publish? or
+                      Hide? box included), drop the Broom flag row
             Rule    → mark Accepted; the Mac worker patches the rulebook
     reject          → mark Rejected with the reason (the worker deletes a
                       rejected suggestion 24 hours later, so there is an undo)
@@ -188,6 +189,16 @@ export class QueueError extends Error {
 
 const TABLE_ID_RE = /^tbl[A-Za-z0-9]{14}$/
 const PROTECTED_FIELDS = new Set(['Publish?', 'Hide?'])
+
+/** A proposed Publish?/Hide? value as the box Airtable stores – ticked only
+ *  for a real yes. The two boxes stay out of hand edits, but a change that
+ *  proposes one is the reviewer's call: Accept writes it and Undo puts it
+ *  back (6 Oct 2026: The Big Tent's proposed Hide? was skipped while its row
+ *  went to Applied, so the postponed event stayed on /events). */
+function asBox(v: unknown): boolean {
+  if (v === true || v === 1) return true
+  return typeof v === 'string' && /^(true|yes|ticked|1)$/i.test(v.trim())
+}
 
 /** The key in a row's saved edits (JSON) that keeps, once a Change is
  *  applied, what its extra fields held before; never a field name. */
@@ -1601,7 +1612,11 @@ export async function acceptItem(
       const t = target(item)
       const fields: Record<string, unknown> = {}
       for (const c of item.changes) {
-        if (PROTECTED_FIELDS.has(c.field) || c.field.length > 100) continue
+        if (c.field.length > 100) continue
+        if (PROTECTED_FIELDS.has(c.field)) {
+          fields[c.field] = asBox(c.to)
+          continue
+        }
         // A proposed picture goes to Airtable as an attachment list.
         fields[c.field] =
           c.field in edits ? edits[c.field] : (asAttachments(c.to) ?? c.to)
@@ -1792,8 +1807,9 @@ export async function undoItem(item: QueueItem): Promise<void> {
     const t = target(item)
     const fields: Record<string, unknown> = {}
     for (const c of item.changes) {
-      if (PROTECTED_FIELDS.has(c.field)) continue
-      fields[c.field] = c.from ?? null
+      fields[c.field] = PROTECTED_FIELDS.has(c.field)
+        ? asBox(c.from)
+        : (c.from ?? null)
     }
     // The fields edited beyond the proposal, as they were before Accept.
     for (const [k, v] of Object.entries(item.before ?? {})) {

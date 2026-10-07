@@ -492,6 +492,42 @@ describe('fields edited beyond a change’s proposal', () => {
     ).toBe(true)
   })
 
+  it('writes a proposed Hide? or Publish? box, as a real true or false', async () => {
+    await acceptItem(
+      change({
+        changes: [
+          { field: 'Hide?', from: false, to: true },
+          { field: 'Publish?', from: 'true', to: 'false (untick it)' },
+        ],
+      }),
+      {}
+    )
+    expect(patches[0]).toEqual({
+      path: `${FUNDING}/${rid('fund')}`,
+      fields: { 'Hide?': true, 'Publish?': false },
+    })
+    expect(patches[1].fields[STATUS]).toBe('Applied')
+  })
+
+  it('still never writes Hide? or Publish? typed in beyond the proposal', async () => {
+    await acceptItem(change(), { 'Hide?': true, 'Publish?': false })
+    expect(patches[0].fields).toEqual({ Name: 'New name' })
+  })
+
+  it('on Undo, puts a proposed Hide? box back as it was', async () => {
+    await undoItem(
+      change({
+        status: 'Applied',
+        changes: [{ field: 'Hide?', from: null, to: true }],
+      })
+    )
+    expect(patches[0]).toEqual({
+      path: `${FUNDING}/${rid('fund')}`,
+      fields: { 'Hide?': false },
+    })
+    expect(patches[1].fields[STATUS]).toBe('Pending')
+  })
+
   it('on Undo, puts them back too and keeps the edits as the draft', async () => {
     await undoItem(
       change({
