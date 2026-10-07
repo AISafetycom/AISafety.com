@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SearchEntry, SearchType } from './data/search-index'
-import { typeForPath, withLiveEntries } from './search'
+import { search, typeForPath, withLiveEntries } from './search'
 
 function entry(type: SearchType, title: string): SearchEntry {
   return {
@@ -64,5 +64,30 @@ describe('withLiveEntries', () => {
     const before = titles(index)
     withLiveEntries(index, 'map', [entry('map', 'New')])
     expect(titles(index)).toEqual(before)
+  })
+})
+
+describe('search: name-only entries', () => {
+  const policy: SearchEntry = {
+    ...entry('page', 'Listing policy'),
+    description: 'How suggestions are decided.',
+    nameOnly: true,
+  }
+  const org = entry('map', 'Centre for AI Policy')
+  const index = [org, policy]
+  const titles = (query: string) => search(index, query, null).map(e => e.title)
+
+  it('shows up for its name, or its start from the first whole word', () => {
+    expect(titles('Listing policy')).toContain('Listing policy')
+    expect(titles('  listing   POLICY ')).toContain('Listing policy')
+    expect(titles('listing')).toContain('Listing policy')
+    expect(titles('listing pol')).toContain('Listing policy')
+  })
+
+  it('stays out of searches for one of its words or its description', () => {
+    expect(titles('policy')).toEqual(['Centre for AI Policy'])
+    expect(titles('list')).toEqual([])
+    expect(titles('policy listing')).toEqual([])
+    expect(titles('suggestions')).toEqual([])
   })
 })

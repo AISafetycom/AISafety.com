@@ -499,6 +499,8 @@ export interface DraftSummary {
   sendDelayMinutes: number
   /** Card edits may be saved into this draft from this copy of the site. */
   editable: boolean
+  /** The draft may be deleted from this copy of the site. */
+  deletable: boolean
   /** Why card edits are off just now (a wave of the issue is going out and
    *  shares this draft's email), or null. */
   editLock: string | null
@@ -1971,6 +1973,7 @@ export async function listDrafts(): Promise<DraftSummary[]> {
         listId != null &&
         (!isRealList(listId) || canWriteRealListsHere()) &&
         editLock == null,
+      deletable: deleteRefusal(listIds) == null,
       editLock,
       preview: previewText(msg.html ?? ''),
       cards: cardGroups(msg.html ?? ''),
@@ -2528,6 +2531,10 @@ function fieldLabel(name: string, icon: string | undefined, funding: boolean) {
   if (name === 'title') return 'Title'
   if (name === 'desc') return 'Description'
   if (icon === 'tag') return funding ? 'Type' : 'Cost'
+  // A timer line under an event's title is its time of day ("18:00 – 20:30",
+  // events/card.ts); a training program's timer rows sit at the bottom (b…).
+  if (name.startsWith('m') && (icon === 'timer' || icon === 'timer-half'))
+    return 'Time'
   return (icon && ICON_LABELS[icon]) || 'Detail'
 }
 
@@ -2555,20 +2562,42 @@ function cardFields(
 }
 
 /** The card's text segment with `old` swapped for `next` (both plain): a
- *  whole line first (after its "* " or "  " lead), else the first
- *  occurrence inside a line; unchanged when `old` isn't there. */
-function replacePlain(segment: string, old: string, next: string): string {
+ *  whole line first (after its "* " or "  " lead), then one whole
+ *  " · "-separated part of a detail line, else the first occurrence inside
+ *  a line; unchanged when `old` isn't there. Only the title itself may
+ *  change the "* " title line: a location edit used to rewrite "Hong Kong"
+ *  inside "ML4Good Governance: Hong Kong October 2026" (3 October 2026).
+ *  Mirrors render.py `_replace_plain()`. */
+function replacePlain(
+  segment: string,
+  old: string,
+  next: string,
+  isTitle = false
+): string {
   if (!old || old === next) return segment
   const lines = segment.split('\n')
+  const lockedTitle = (l: string) => !isTitle && l.startsWith('* ')
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i]
     const lead = l.startsWith('* ') || l.startsWith('  ') ? l.slice(0, 2) : ''
-    if (l.slice(lead.length) === old) {
+    if (l.slice(lead.length) === old && !lockedTitle(l)) {
       lines[i] = lead + next
       return lines.join('\n')
     }
   }
   for (let i = 0; i < lines.length; i++) {
+    const l = lines[i]
+    if (!l.startsWith('  ')) continue
+    const parts = l.slice(2).split(' · ')
+    const at = parts.indexOf(old)
+    if (at >= 0) {
+      parts[at] = next
+      lines[i] = '  ' + parts.join(' · ')
+      return lines.join('\n')
+    }
+  }
+  for (let i = 0; i < lines.length; i++) {
+    if (lockedTitle(lines[i])) continue
     const at = lines[i].indexOf(old)
     if (at >= 0) {
       lines[i] = lines[i].slice(0, at) + next + lines[i].slice(at + old.length)
@@ -2614,7 +2643,13 @@ export function setFieldsRaw(
       entry.o ??= {}
       if (!Object.prototype.hasOwnProperty.call(entry.o, name))
         entry.o[name] = old
-      if (seg) seg.t = replacePlain(seg.t, stripHtml(old), stripHtml(next))
+      if (seg)
+        seg.t = replacePlain(
+          seg.t,
+          stripHtml(old),
+          stripHtml(next),
+          name === 'title'
+        )
       if (name === 'title') entry.title = stripHtml(next)
       return `<!--f:${name}${icon ? `:${icon}` : ''}-->${next}<!--/f-->`
     }
@@ -2881,6 +2916,52 @@ export function sumIssues<
   return out.sort((a, b) => at(b.rows[0]).localeCompare(at(a.rows[0])))
 }
 
+/* ─── Web version (30 Sept 2026) ──────────────────────────────────────────
+   aisafety.com/newsletter/<key>/<issue> shows a sent issue on its own page
+   (src/lib/newsletter-web.ts), in place of ActiveCampaign's web copy. Only
+   an issue that has reached readers on its real list is shown there: never
+   a draft, a test-list send, or a send still waiting (it can be cancelled). */
+
+/** Pure: whether a campaign has reached anyone – sending, sent, or paused
+ *  or stopped part-way. */
+export function reachedReaders(c: {
+  status: string
+  send_amt?: string | null
+}): boolean {
+  if (c.status === '2' || c.status === '5') return true
+  if (c.status === '3' || c.status === '4') return Number(c.send_amt ?? 0) > 0
+  return false
+}
+
+/** The email of the issue named `name` as it went out on the real list
+ *  `listId` (any wave: they all send the one message), or null when none of
+ *  its campaigns there has reached anyone yet. Public pages call this, so
+ *  the campaign list is shared for half a minute, not the approval page's
+ *  few seconds: a burst of views, or of made-up issue addresses, costs one
+ *  ActiveCampaign read. */
+export async function sentIssueHtml(
+  name: string,
+  listId: string
+): Promise<string | null> {
+  if (!isRealList(listId) || !isNewsletterConfigured()) return null
+  const campaigns = await sharedRead('web-campaigns', 30_000, () =>
+    allCampaigns({ fresh: true })
+  )
+  const candidates = campaigns
+    .filter(c => baseIssueName(c.name) === name && reachedReaders(c))
+    .sort((a, b) => Number(b.id) - Number(a.id))
+  for (const c of candidates) {
+    const [lists, messages] = await Promise.all([
+      campaignListIds(c.id),
+      campaignMessageIds(c.id),
+    ])
+    if (!lists.includes(listId) || messages.length !== 1) continue
+    const html = (await message(messages[0])).html ?? ''
+    if (MARKER_RE.test(html)) return html
+  }
+  return null
+}
+
 /** The message HTML as a subscriber will see it, with AC's personalisation
  *  tags neutralised so the preview renders cleanly. */
 export async function previewHtml(
@@ -2984,6 +3065,87 @@ export async function sendTestCopy(
   return { to }
 }
 
+/** ActiveCampaign answered a draft delete with a refusal; `detail` carries
+ *  its reason. */
+export class DraftDeleteError extends Error {
+  readonly detail: string
+  constructor(detail: string) {
+    super(detail)
+    this.detail = detail
+  }
+}
+
+/** Why a draft on these lists can't be deleted from this copy of the site,
+ *  or null: the rule for editing it (a real list's drafts from production
+ *  only, and only newsletter lists). */
+function deleteRefusal(listIds: string[]): string | null {
+  for (const l of listIds) {
+    const r = listRefusal(l)
+    if (r) return r
+  }
+  return null
+}
+
+/** Delete a draft waiting for approval, with ~/Newsletter/ac.py
+ *  `delete_draft()`'s refusals: the campaign must still be a draft and every
+ *  message on it must carry the pipeline's marker, so a wrong id can never
+ *  take out a scheduled or sent campaign, or one built by hand. Refused
+ *  while an approval of the issue is running or has just scheduled it. Only
+ *  the campaign goes: a wave already sent was made from this same message.
+ *  The pipeline's next build of the issue finds the draft gone and makes a
+ *  new one. `deleted: false` = it was already gone. */
+export async function deleteDraft(
+  draftId: string,
+  by: string
+): Promise<{ deleted: boolean }> {
+  const id = acId(draftId)
+  const gone = (err: Error) => {
+    if (/: 404 /.test(err.message)) return null
+    throw err
+  }
+  const [campaign, listIds, messageIds] = await Promise.all([
+    v3<{ campaign?: RawCampaign }>(`campaigns/${id}`)
+      .then(d => d.campaign ?? null)
+      .catch(gone),
+    campaignListIds(id).catch(gone),
+    campaignMessageIds(id).catch(gone),
+  ])
+  if (!campaign || !listIds || !messageIds) {
+    forgetSharedCampaigns([id])
+    return { deleted: false }
+  }
+  if (campaign.status !== '0') {
+    throw new DraftProblemError([
+      `campaign ${id} is ${statusLabel(campaign.status)}, not a draft – only drafts are deleted from here`,
+    ])
+  }
+  const refusal = deleteRefusal(listIds)
+  if (refusal) throw new DraftProblemError([refusal])
+  const msgs = await Promise.all(messageIds.map(m => message(m)))
+  if (msgs.length === 0 || msgs.some(m => !MARKER_RE.test(m.html ?? ''))) {
+    throw new DraftProblemError([
+      'this draft wasn’t built by the pipeline (no content marker), so it isn’t deleted from here',
+    ])
+  }
+  for (const l of new Set(listIds)) {
+    const approving = await approvalEditLock(
+      l,
+      baseIssueName(campaign.name),
+      'delete'
+    )
+    if (approving) throw new DraftProblemError([approving])
+  }
+  const out = await v1answer('campaign_delete', { id })
+  forgetSharedCampaigns([id])
+  if (Number(out.result_code) !== 1) {
+    throw new DraftDeleteError(
+      `ActiveCampaign didn’t delete it: ${String(out.result_message ?? 'no reason given').slice(0, 300)}`
+    )
+  }
+  console.info(`[newsletter] draft ${id} (“${campaign.name}”) deleted by ${by}`)
+  return { deleted: true }
+}
+
 /* ─── Approval: the lock and the record (Upstash) ─────────────────────── */
 
 // The same Upstash database the analytics, the admin users and the click
@@ -3061,13 +3223,14 @@ async function releaseApproveLock(key: string): Promise<void> {
   else localLocks.delete(key)
 }
 
-/** Why card edits must wait for an approval of this issue on this list, or
- *  null: while one runs, or for the minutes after it scheduled a send, the
- *  message it checked (and may already be sending) is not to change under
- *  it. Refuses when the lock can't be read. */
+/** Why card edits (or deleting the draft) must wait for an approval of this
+ *  issue on this list, or null: while one runs, or for the minutes after it
+ *  scheduled a send, the draft it checked (and may already be sending) is
+ *  not to change under it. Refuses when the lock can't be read. */
 async function approvalEditLock(
   listId: string,
-  baseName: string
+  baseName: string,
+  what: 'edit' | 'delete' = 'edit'
 ): Promise<string | null> {
   const key = approveLockKey(listId, baseName)
   const redis = kv()
@@ -3079,14 +3242,14 @@ async function approvalEditLock(
       console.warn(
         `[newsletter] reading the approval lock before an edit failed: ${err instanceof Error ? err.message : String(err)}`
       )
-      return 'couldn’t check whether an approval of this issue is running, so the edit wasn’t saved – try again in a minute'
+      return `couldn’t check whether an approval of this issue is running, so the ${what === 'delete' ? 'draft wasn’t deleted' : 'edit wasn’t saved'} – try again in a minute`
     }
   } else {
     const hit = localLocks.get(key)
     holder = hit && hit.until > Date.now() ? hit.holder : null
   }
   if (!holder) return null
-  return `an approval of this issue (${holder.approver || 'someone'}) is running or has just scheduled it, so card edits wait – for up to 15 minutes, or until its send is canceled`
+  return `an approval of this issue (${holder.approver || 'someone'}) is running or has just scheduled it, so ${what === 'delete' ? 'deleting the draft waits' : 'card edits wait'} – for up to 15 minutes, or until its send is canceled`
 }
 
 /** What the send watcher knows about each real-list approval. */
@@ -3738,16 +3901,18 @@ async function deleteBadSend(
   )
 }
 
-/* ─── The owner hears about every real-list approval ───────────────────── */
+/* ─── The owner hears when a real-list approval may have gone out ─────── */
 
 /** Where the notice sends the owner (real lists are only ever approved on
  *  the production site). */
 const ADMIN_PAGE_URL = 'https://aisafety.com/admin/newsletter'
 
 /** Email the owner about a real-list approval, or one that may have gone
- *  out despite an error (`maybe`). The admin mail script only ever delivers
- *  "digest" mail to the owner's own address. Best effort and never throws:
- *  the route runs it after answering, so the approval never waits on it. */
+ *  out despite an error (`maybe`). The route sends only the `maybe` kind
+ *  since 2 Oct 2026 (Bryce: no email for an ordinary approval). The admin
+ *  mail script only ever delivers "digest" mail to the owner's own address.
+ *  Best effort and never throws: the route runs it after answering, so the
+ *  approval never waits on it. */
 export async function notifyApproval(
   f: ApprovalFacts & { campaignId: string | null; held?: boolean },
   maybe = false

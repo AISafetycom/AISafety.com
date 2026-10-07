@@ -75,6 +75,8 @@ interface Draft {
   /** Card edits can be saved into it from this copy of the site (real
    *  lists only from aisafety.com itself). */
   editable: boolean
+  /** It can be deleted from this copy of the site (the same rule). */
+  deletable: boolean
   /** Why card edits are off just now (a wave sharing its email is going
    *  out). */
   editLock: string | null
@@ -297,15 +299,13 @@ export default function NewsletterAdmin({
   const previewFrame = useRef<HTMLIFrameElement | null>(null)
   const [previewY, setPreviewY] = useState(0)
   const [busyId, setBusyId] = useState<string | null>(null)
-  /** The draft a test copy is on its way for, and how the last one went.
-   *  `edited` = the draft has changed since that copy went out. */
+  /** The draft a test copy is on its way for, and how the last copy of each
+   *  draft went, so testing one issue leaves the others' ticks alone (Bryce,
+   *  2 Oct 2026). `edited` = the draft has changed since that copy went out. */
   const [testingId, setTestingId] = useState<string | null>(null)
-  const [testResult, setTestResult] = useState<{
-    draftId: string
-    kind: 'ok' | 'error'
-    text: string
-    edited?: boolean
-  } | null>(null)
+  const [testResults, setTestResults] = useState<
+    Record<string, { kind: 'ok' | 'error'; text: string; edited?: boolean }>
+  >({})
   /** The draft with edits not yet written into it (typed text, a moved card,
    *  a save in flight): a test or an approval now would go without them. */
   const [unsavedId, setUnsavedId] = useState<string | null>(null)
@@ -325,6 +325,9 @@ export default function NewsletterAdmin({
     action: StopAction
   } | null>(null)
   const [stopBusyId, setStopBusyId] = useState<string | null>(null)
+  /** The draft whose Delete dialog is open, and the one being deleted. */
+  const [deleting, setDeleting] = useState<Draft | null>(null)
+  const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null)
   const [notice, setNotice] = useState<{
     kind: 'ok' | 'error'
     text: string
@@ -537,7 +540,11 @@ export default function NewsletterAdmin({
    *  send), so it can be read and clicked through in a real inbox first. */
   async function sendTest(draft: Draft) {
     setTestingId(draft.id)
-    setTestResult(null)
+    setTestResults(rs => {
+      const rest = { ...rs }
+      delete rest[draft.id]
+      return rest
+    })
     try {
       const res = await fetch('/api/admin/newsletter/test', {
         method: 'POST',
@@ -559,20 +566,66 @@ export default function NewsletterAdmin({
             : (body.error ?? `HTTP ${res.status}`)
         )
       }
-      setTestResult({
-        draftId: draft.id,
-        kind: 'ok',
-        text: `Test sent to ${body.to} only. It arrives in a minute or two as “TEST: ${draft.subject}”.`,
-      })
+      setTestResults(rs => ({
+        ...rs,
+        [draft.id]: {
+          kind: 'ok',
+          text: `Test sent to ${body.to} only. It arrives in a minute or two as “TEST: ${draft.subject}”.`,
+        },
+      }))
     } catch (err) {
-      setTestResult({
-        draftId: draft.id,
-        kind: 'error',
-        text: `Test not sent: ${err instanceof Error ? err.message : String(err)}`,
-      })
+      setTestResults(rs => ({
+        ...rs,
+        [draft.id]: {
+          kind: 'error',
+          text: `Test not sent: ${err instanceof Error ? err.message : String(err)}`,
+        },
+      }))
     } finally {
       setTestingId(null)
     }
+  }
+
+  /** Delete a draft (after the dialog). The lists are read again either
+   *  way, so the page shows whether it went. */
+  async function removeDraft(draft: Draft) {
+    setDeleting(null)
+    setDeleteBusyId(draft.id)
+    setNotice(null)
+    let res: Response | null = null
+    let body: { error?: string; problems?: string[]; deleted?: boolean } = {}
+    try {
+      res = await fetch('/api/admin/newsletter/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaign: draft.id }),
+      })
+      body = await res.json().catch(() => ({}))
+    } catch {
+      res = null
+    }
+    if (res?.ok) {
+      setNotice({
+        kind: 'ok',
+        text: body.deleted
+          ? `Deleted the draft “${draft.name}”.`
+          : `The draft “${draft.name}” was already gone.`,
+      })
+      if (previewId === draft.id) setPreviewId(null)
+    } else {
+      setNotice({
+        kind: 'error',
+        text: res
+          ? `Not deleted: ${
+              body.problems?.length
+                ? body.problems.join('; ')
+                : (body.error ?? `HTTP ${res.status}`)
+            }`
+          : 'No answer came back, so it may or may not have been deleted. The list above updates by itself.',
+      })
+    }
+    await load()
+    setDeleteBusyId(null)
   }
 
   /** Cancel, pause, stop or resume a send from Recent sends (after the
@@ -667,9 +720,12 @@ export default function NewsletterAdmin({
     )
     setPreviewY(previewScroll.current)
     setPreviewNonce(n => n + 1)
-    setTestResult(t =>
-      t && t.draftId === draftId && t.kind === 'ok' ? { ...t, edited: true } : t
-    )
+    setTestResults(rs => {
+      const t = rs[draftId]
+      return t?.kind === 'ok'
+        ? { ...rs, [draftId]: { ...t, edited: true } }
+        : rs
+    })
     if (text) setNotice({ kind: 'ok', text })
   }
 
@@ -799,7 +855,7 @@ export default function NewsletterAdmin({
             approvable &&
             holdsFor(draft, choice, Date.parse(data.fetchedAt)).length > 0
           const unsaved = unsavedId === draft.id
-          const result = testResult?.draftId === draft.id ? testResult : null
+          const result = testResults[draft.id] ?? null
           return (
             <div key={draft.id} className={adminStyles.editorBlock}>
               <div className={adminStyles.editorBlockHeader}>
@@ -928,7 +984,18 @@ export default function NewsletterAdmin({
                         : `Sends this issue to ${testTo} only`
                     }
                   >
-                    {testingId === draft.id ? 'Sending test…' : 'Send test'}
+                    {testingId === draft.id ? (
+                      'Sending test…'
+                    ) : (
+                      <>
+                        Send test
+                        {/* A test of the issue as it is now went out (Bryce,
+                            30 Sept 2026); an edit since takes the tick away. */}
+                        {result?.kind === 'ok' && !result.edited && (
+                          <span className={styles.sentTick}> ✓</span>
+                        )}
+                      </>
+                    )}
                   </button>
                 )}
                 {data.canSend && (
@@ -956,6 +1023,26 @@ export default function NewsletterAdmin({
                       : typeof choice === 'number'
                         ? `Approve wave ${choice}`
                         : 'Approve & send'}
+                  </button>
+                )}
+                {data.canSend && draft.deletable && (
+                  <button
+                    type="button"
+                    className={`${styles.rowButton} ${styles.deleteButton}`}
+                    onClick={() => setDeleting(draft)}
+                    disabled={
+                      busyId != null ||
+                      deleteBusyId != null ||
+                      testingId === draft.id ||
+                      unsaved
+                    }
+                    title={
+                      unsaved
+                        ? 'Waits for your edits to save'
+                        : 'Delete this draft'
+                    }
+                  >
+                    {deleteBusyId === draft.id ? 'Deleting…' : 'Delete'}
                   </button>
                 )}
               </div>
@@ -1076,6 +1163,13 @@ export default function NewsletterAdmin({
           onConfirm={(confirmed, override) =>
             void send(confirming.draft, confirming.choice, confirmed, override)
           }
+        />
+      )}
+      {deleting && (
+        <ConfirmDelete
+          draft={deleting}
+          onCancel={() => setDeleting(null)}
+          onConfirm={() => void removeDraft(deleting)}
         />
       )}
       {stopping && (
@@ -2286,6 +2380,67 @@ function Countdown({ to }: { to: string }) {
       {' '}
       · sends in {h > 0 ? `${h}:${two(m)}` : m}:{two(s)}
     </span>
+  )
+}
+
+/** Confirmation for a draft's Delete button. Focus starts on "Go back". */
+function ConfirmDelete({
+  draft,
+  onCancel,
+  onConfirm,
+}: {
+  draft: Draft
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const backRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    backRef.current?.focus()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel])
+  const midWaves =
+    !draft.alreadySent && (draft.waves?.waves.some(w => w.sent) ?? false)
+  return (
+    <div className={styles.overlay} onClick={onCancel}>
+      <div
+        className={styles.dialog}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-delete-title"
+        onClick={e => e.stopPropagation()}
+      >
+        <h2 id="confirm-delete-title" className={styles.dialogTitle}>
+          Delete “{draft.name}”?
+        </h2>
+        <p className={styles.dialogNote}>
+          The draft comes off this page and out of ActiveCampaign. Nothing is
+          sent. To get it back, have Pen build the issue again.
+          {midWaves &&
+            ' Waves already sent aren’t affected, but its remaining waves can’t be approved without it.'}
+        </p>
+        <div className={styles.dialogActions}>
+          <button
+            ref={backRef}
+            type="button"
+            className={styles.button}
+            onClick={onCancel}
+          >
+            Go back
+          </button>
+          <button
+            type="button"
+            className={styles.buttonPrimary}
+            onClick={onConfirm}
+          >
+            Delete draft
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 

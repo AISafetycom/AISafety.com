@@ -32,13 +32,16 @@ export interface SearchEntry {
   category: string
   url: string
   logo: string | null
+  /** Shown only for a search for its name (see search() in lib/search). */
+  nameOnly?: boolean
 }
 
 function page(
   title: string,
   url: string,
   icon: string | null,
-  description = ''
+  description = '',
+  nameOnly = false
 ): SearchEntry {
   return {
     type: 'page',
@@ -48,6 +51,7 @@ function page(
     category: '',
     url,
     logo: icon,
+    ...(nameOnly && { nameOnly }),
   }
 }
 
@@ -136,6 +140,14 @@ const STATIC_PAGES: SearchEntry[] = [
     '/about',
     '/images/icons/people.svg',
     'Mission, team, and how to contribute.'
+  ),
+  // Name-only: "policy" alone is a common search for governance orgs.
+  page(
+    'Listing policy',
+    '/listing-policy',
+    '/images/icons/document.svg',
+    'What AISafety.com lists on each resource page, and how suggestions are decided.',
+    true
   ),
 ]
 

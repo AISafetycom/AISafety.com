@@ -2,7 +2,8 @@
   Queue logos and links in bulk (sessions with the queue area only).
 
   POST /api/admin/queue/logos  body { targets: [{ table, record }] }
-    → { logos: { "<record id>": "<url>" }, links: { "<record id>": "<url>" } }
+    → { logos: { "<record id>": "<url>" }, links: { "<record id>": "<url>" },
+        dates: { "<record id>": { start, closes } } }
 
   The list (GET /api/admin/queue) arrives without logos, and a Change row
   without its listing's link, so it is quick; the page calls this the
@@ -11,7 +12,9 @@
   table, seconds when its cache is cold) plus one read per table for
   unpublished targets, which is why it is not on the list's critical path.
   Read-only. At most 400 targets a call; records without a picture, or
-  without a link, are left out of that map.
+  without a link, are left out of that map. `dates` covers published
+  events and training only: the list puts a Change on a listing that
+  starts or closes soon in its Urgent section.
 */
 
 import { NextRequest } from 'next/server'

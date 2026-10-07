@@ -154,6 +154,17 @@
   opacity: 0.75;
 }
 
+/* Beside a kind that is not on screen: how many of its items can't wait. */
+.segUrgent {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 6px;
+  color: var(--q-text);
+  font-weight: 600;
+  vertical-align: -2px;
+}
+
 .segmented .segOn {
   background: var(--q-panel);
   color: var(--q-text);
@@ -476,6 +487,50 @@
   border-left-color: var(--q-accent);
 }
 
+/* Fable is answering in this row's chat (the bar pulses), or has answered
+   since the row was last open: a short teal bar inside the right edge,
+   apart from the left one that marks the open row. */
+.rowFable {
+  position: relative;
+}
+
+.rowFable::after {
+  content: '';
+  position: absolute;
+  top: 9px;
+  right: 5px;
+  bottom: 9px;
+  width: 4px;
+  border-radius: 2px;
+  background: var(--q-accent);
+}
+
+.rowFableLive::after {
+  animation: chatPulse 1.2s ease-in-out infinite;
+}
+
+/* The same news on a folded heading, or on the other kinds' tabs. */
+.fableDot {
+  flex: none;
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 2px;
+  border-radius: 50%;
+  background: var(--q-accent);
+}
+
+.fableDotLive {
+  animation: chatPulse 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rowFableLive::after,
+  .fableDotLive {
+    animation: none;
+  }
+}
+
 .withIcon {
   display: inline-flex;
   align-items: center;
@@ -504,6 +559,13 @@
   flex-wrap: wrap;
   font-size: 12px;
   color: var(--q-muted);
+}
+
+/* Why an Urgent row can't wait: brighter than the rest of the line, but
+   not in a verdict's colour (colour in the list means the verdict). */
+.urgentTag {
+  color: var(--q-text);
+  font-weight: 600;
 }
 
 .yes {
@@ -571,6 +633,9 @@
   top: 0;
   display: grid;
   gap: 12px;
+  /* A long link in Fable's reasons wraps rather than widening the panel
+     past its column and cutting the text off (Bryce, 30 Sept 2026). */
+  overflow-wrap: anywhere;
   padding: 16px 18px;
   border: 1px solid var(--q-border);
   border-top: 5px solid var(--q-border-strong);
@@ -816,6 +881,9 @@
   background: var(--q-panel);
   color: var(--q-text-2);
   white-space: pre-wrap;
+  /* A long link (a WhatsApp invite) wraps instead of widening the box
+     under the reply beside it (Bryce, 5 Oct 2026). */
+  overflow-wrap: anywhere;
   border-radius: 0 6px 6px 0;
 }
 
@@ -885,6 +953,15 @@
 
 /* A request and its reply side by side, so the two read as one exchange
    (Bryce, 14 Sept 2026); one column when the detail column is narrow. */
+/* The accept reply and, under it, the rejection reply (Bryce, 5 Oct 2026:
+   both shown, both written in advance). */
+.replies {
+  min-width: 0;
+  display: grid;
+  gap: 22px;
+  align-content: start;
+}
+
 .exchange {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -1317,6 +1394,13 @@
   border-radius: 8px;
   background: var(--q-panel);
   border: 1px solid var(--q-border);
+}
+
+.thumbEmpty {
+  display: block;
+  box-sizing: border-box;
+  background: none;
+  border: 1px dashed var(--q-border-strong);
 }
 
 .imageSlot {
@@ -2461,4 +2545,82 @@ button.chatFileChip:hover {
   max-width: 100%;
   max-height: 220px;
   object-fit: contain;
+}
+
+/* A field Fable changed straight in Airtable from the chat (4 Oct 2026):
+   the "edited" mark's place, in its own words. */
+.byFable {
+  margin-left: 8px;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 400;
+  color: var(--q-accent);
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: help;
+}
+
+/* Done today: a decision opens on a click, like a row in the list
+   (Bryce, 4 Oct 2026: "Would be good if I could click on a listing in
+   Done somehow"). */
+.doneRowOpen {
+  cursor: pointer;
+}
+
+.doneRowOpen:hover {
+  border-color: var(--q-accent);
+}
+
+.backLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--q-accent);
+  cursor: pointer;
+}
+
+.backLink:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.backLink kbd {
+  margin-left: 2px;
+}
+
+.backArrow {
+  display: inline-flex;
+  transform: scaleX(-1);
+}
+
+/* A field edited beyond what a change proposes: the cross drops the edit,
+   shown on the row's hover like the pencil. */
+.dropEdit {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--q-muted);
+  vertical-align: middle;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+
+.diffRow:hover .dropEdit,
+.dropEdit:focus-visible {
+  opacity: 1;
+}
+
+.dropEdit:hover {
+  color: var(--q-danger);
 }

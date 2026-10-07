@@ -359,6 +359,16 @@
   cursor: default;
 }
 
+/* Send test after a test of the issue as it is now went out. */
+.sentTick {
+  color: var(--bright-teal-300);
+}
+
+/* A draft's Delete: small, at the far end of the row, away from Approve. */
+.deleteButton {
+  margin-left: auto;
+}
+
 .rowEdited {
   font-size: 11px;
   color: var(--bright-teal-300);

@@ -141,6 +141,7 @@ export function itemParts(
   }
   add('Rule', item.summary)
   add('Applies to', item.appliesTo)
+  add('Wording', item.ruleWording)
   if (item.saidBy) {
     add('From', item.saidBy.name)
     add('From', item.saidBy.handle)

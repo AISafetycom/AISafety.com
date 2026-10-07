@@ -10,8 +10,10 @@ import type {
   PreviousImage,
   PreviewKind,
   QueueItem,
+  RejectReply,
 } from '@/lib/admin/queue'
 import { missingFields } from '@/lib/admin/queue-needed'
+import { rejectReplyFor, shownDeclineChip } from '@/lib/admin/queue-decline'
 import {
   itemParts,
   markRanges,
@@ -35,6 +37,24 @@ import SitePreview, {
   seedPreviews,
 } from './SitePreview'
 import Chat, { CharCount, descriptionCap } from './Chat'
+import FieldPicker from './FieldPicker'
+import type { FableChange } from '@/lib/admin/queue-fable'
+import Position, { forgetOrder } from './Position'
+import { SORT_FIELD, sortValue } from '@/lib/admin/queue-place'
+import {
+  byUrgency,
+  urgencyOf,
+  type ListingDates,
+  type Urgency,
+} from '@/lib/admin/queue-urgent'
+import {
+  fileNameOf,
+  hasExpiredPicture,
+  isImageLink,
+  pictureOf,
+  touchesPicture,
+  type PictureSide,
+} from '@/lib/admin/queue-picture'
 import styles from './queue.module.css'
 
 // The Queue is a triage tool Bryce sits in for long stretches, so it has its
@@ -56,9 +76,21 @@ const REFRESH_MIN_GAP_MS = 5 * 1000
 // The list shows one kind of work at a time (additions to judge whole,
 // changes to judge as a diff, or rules for the bots), grouped by where each
 // item came from. Bryce, 11 Sept 2026: "to be in the headspace for one of
-// those all at once".
-type Section = 'requests' | 'broom' | 'rules' | 'comb'
-const SECTIONS: Section[] = ['requests', 'broom', 'rules', 'comb']
+// those all at once". Above the rest, whatever its source, sits what loses
+// its value by waiting (queue-urgent.ts; Bryce, 4 Oct 2026: "I tend to
+// have a huge backlog … a way of triaging"), and above that every item
+// Fable is answering or has answered unread, whatever its kind (Bryce,
+// 4 Oct 2026: "when Fable is responding to something it should go to the
+// top so I can see").
+type Section = 'fable' | 'urgent' | 'requests' | 'broom' | 'rules' | 'comb'
+const SECTIONS: Section[] = [
+  'fable',
+  'urgent',
+  'requests',
+  'broom',
+  'rules',
+  'comb',
+]
 type Kind = 'additions' | 'changes' | 'rules'
 const KINDS: { key: Kind; label: string; title: string }[] = [
   {
@@ -77,7 +109,16 @@ const KINDS: { key: Kind; label: string; title: string }[] = [
     title: 'Changes to the bots\u2019 rulebooks',
   },
 ]
+// The kind switch's tooltip on an urgent count (queue-urgent.ts).
+const URGENT_WHY: Record<Kind, string> = {
+  additions: 'starting or closing within four days',
+  changes:
+    'a live listing showing wrong information, or starting or closing within two weeks',
+  rules: '',
+}
 const SECTION_LABEL: Record<Section, string> = {
+  fable: 'Fable replying',
+  urgent: 'Urgent',
   requests: 'Requests',
   broom: 'Broom',
   rules: 'Rules',
@@ -178,12 +219,15 @@ const ICON = {
   pencil: '/images/icons/pencil-small.svg',
   chevron: '/images/icons/chevron-down.svg',
   search: '/images/icons/magnifying-glass.svg',
+  clock: '/images/icons/clock.svg',
 } as const
 
 // Each section's head carries its icon, in grey: colour in the list is kept
 // for the verdicts, and a teal Comb or amber Requests icon read as Publish
 // and Unsure (Bryce, 24 Sept 2026).
 const SECTION_ICON: Record<Section, string> = {
+  fable: ICON.stars,
+  urgent: ICON.clock,
   requests: ICON.requests,
   broom: ICON.broom,
   rules: ICON.rule,
@@ -242,6 +286,9 @@ const THEME_KEY = 'aisafety-admin-queue:theme'
 const COLLAPSED_KEY = 'aisafety-admin-queue:collapsed'
 const FOLDED_PAGES_KEY = 'aisafety-admin-queue:folded-pages'
 const KIND_KEY = 'aisafety-admin-queue:kind'
+// Per chat thread, the time of Fable's newest reply already seen here.
+const CHAT_SEEN_KEY = 'aisafety-admin-queue:chat-seen'
+const CHAT_STATUS_MS = 3000
 
 function sectionOf(item: QueueItem): Section {
   if (item.type === 'Rule' || item.source === 'Teach') return 'rules'
@@ -348,6 +395,13 @@ function startOfToday(): number {
   return d.getTime()
 }
 
+/** The viewer's calendar day at `ms`, as YYYY-MM-DD. */
+function isoDate(ms: number): string {
+  const d = new Date(ms)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
 /** Decided at or after the given moment. A row with no decision time
  *  (there should be none) is shown rather than lost. */
 function decidedSince(item: QueueItem, since: number): boolean {
@@ -388,58 +442,6 @@ function friendly(text: string): string {
   return text
 }
 
-/** An attachment value as the queue sees it: Airtable's own shape (an
- *  object or list with `url`), the site's snapshot (a list of URLs), or
- *  Broom's proposal (`{url, filename}`). The old side of a change often
- *  carries only `{id, filename}`, which is why `pictureOf` also takes the
- *  record's live field. */
-function pictureUrl(v: unknown): string | null {
-  if (Array.isArray(v)) return v.length ? pictureUrl(v[0]) : null
-  if (typeof v === 'string') return IMAGE_URL.test(v) ? v : null
-  if (v && typeof v === 'object' && 'url' in v) {
-    const url = (v as { url: unknown }).url
-    return typeof url === 'string' ? url : null
-  }
-  return null
-}
-
-function looksLikeAttachment(v: unknown): boolean {
-  if (Array.isArray(v)) return v.length > 0 && v.every(looksLikeAttachment)
-  return Boolean(
-    v && typeof v === 'object' && ('url' in v || 'filename' in v || 'id' in v)
-  )
-}
-
-function fileNameOf(v: unknown): string | null {
-  if (Array.isArray(v)) return v.length ? fileNameOf(v[0]) : null
-  if (v && typeof v === 'object' && 'filename' in v) {
-    const f = (v as { filename: unknown }).filename
-    return typeof f === 'string' ? f : null
-  }
-  if (typeof v === 'string') {
-    try {
-      return decodeURIComponent(new URL(v).pathname.split('/').pop() ?? '')
-    } catch {
-      return null
-    }
-  }
-  return null
-}
-
-/** The picture behind one side of a change to a logo or image field: the
- *  value's own URL, else (for the old side, whose snapshot has none) the
- *  record's live field. Null when the value is not a picture at all. */
-function pictureOf(
-  v: unknown,
-  liveValue: unknown
-): { url: string | null; name: string | null } | null {
-  if (!looksLikeAttachment(v) && !pictureUrl(v)) return null
-  return {
-    url: pictureUrl(v) ?? pictureUrl(liveValue),
-    name: fileNameOf(v) ?? fileNameOf(liveValue),
-  }
-}
-
 /** Saves a picture under its file name. A host that refuses a cross-site
  *  read cannot be fetched from here, so the picture opens in a tab instead
  *  (a plain download link is ignored by browsers for another site). */
@@ -467,16 +469,19 @@ function fileSize(bytes: number): string {
 
 /** One side of a change to an image field: the picture with a download
  *  button on hover, then its file name, then its size in pixels and bytes
- *  (the bytes only when the host lets the page read the file). A missing
- *  picture (an expired link) shows the name only. */
-function Picture({ url, name }: { url: string | null; name: string | null }) {
+ *  (the bytes only when the host lets the page read the file). A link that
+ *  does not load gives way to the fallback (the record's own picture),
+ *  then to the plain box with the name: never a broken picture. */
+function Picture({ url, fallback, name }: PictureSide) {
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
   const [bytes, setBytes] = useState<number | null>(null)
   // Keyed by URL where it is used, so a new picture is a fresh component.
+  const [failed, setFailed] = useState<string[]>([])
+  const src = [url, fallback].find(u => u && !failed.includes(u)) ?? null
   useEffect(() => {
-    if (!url) return
+    if (!src) return
     let cancelled = false
-    fetch(url, { mode: 'cors' })
+    fetch(src, { mode: 'cors' })
       .then(r => (r.ok ? r.blob() : null))
       .then(b => {
         if (!cancelled && b) setBytes(b.size)
@@ -487,7 +492,7 @@ function Picture({ url, name }: { url: string | null; name: string | null }) {
     return () => {
       cancelled = true
     }
-  }, [url])
+  }, [src])
   const meta = [
     dims ? `${dims.w} × ${dims.h}` : null,
     bytes !== null ? fileSize(bytes) : null,
@@ -495,11 +500,12 @@ function Picture({ url, name }: { url: string | null; name: string | null }) {
   return (
     <span className={styles.picture}>
       <span className={styles.pictureFrame}>
-        {url ? (
+        {src ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
+            key={src}
             className={styles.pictureImg}
-            src={url}
+            src={src}
             alt=""
             onLoad={e => {
               const el = e.currentTarget
@@ -507,17 +513,21 @@ function Picture({ url, name }: { url: string | null; name: string | null }) {
                 setDims({ w: el.naturalWidth, h: el.naturalHeight })
               }
             }}
+            onError={() => {
+              setBytes(null)
+              setFailed(prev => [...prev, src])
+            }}
           />
         ) : (
           <span className={`${styles.pictureImg} ${styles.pictureEmpty}`} />
         )}
-        {url && (
+        {src && (
           <button
             type="button"
             className={styles.pictureDownload}
             title={`Download ${name ?? 'the picture'}`}
             aria-label={`Download ${name ?? 'the picture'}`}
-            onClick={() => void downloadPicture(url, name)}
+            onClick={() => void downloadPicture(src, name)}
           >
             <Icon src={ICON.download} size={12} />
           </button>
@@ -528,6 +538,26 @@ function Picture({ url, name }: { url: string | null; name: string | null }) {
         <span className={styles.pictureMeta}>{meta.join(' · ')}</span>
       )}
     </span>
+  )
+}
+
+/** A picture that turns into its plain box when its link does not load
+ *  (an Airtable link that has run out), instead of the browser's broken
+ *  picture. */
+function SafeImg({
+  src,
+  className,
+  empty,
+}: {
+  src: string | null | undefined
+  className: string
+  empty: React.ReactNode
+}) {
+  const [dead, setDead] = useState<string | null>(null)
+  if (!src || dead === src) return <>{empty}</>
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img className={className} src={src} alt="" onError={() => setDead(src)} />
   )
 }
 
@@ -646,6 +676,9 @@ function isEditable(v: unknown): boolean {
   )
 }
 
+/** Field types Airtable stores as a number. */
+const NUMERIC_TYPES = new Set(['number', 'currency', 'percent', 'rating'])
+
 /** Turn what was typed back into the shape Airtable expects for that field:
  *  a list stays a list, a number stays a number, empty clears the field. */
 function coerceEdits(
@@ -666,7 +699,7 @@ function coerceEdits(
         .map(x => x.trim())
         .filter(Boolean)
     } else if (
-      (type === 'number' || typeof was === 'number') &&
+      (NUMERIC_TYPES.has(type ?? '') || typeof was === 'number') &&
       !Number.isNaN(Number(t))
     ) {
       out[k] = Number(t)
@@ -726,13 +759,15 @@ function proposedEdits(item: QueueItem): Record<string, unknown> {
     : {}
 }
 
-/** What the lookup answers: a logo and the listing's own link, each by
- *  target record, for the records that have one. */
+/** What the lookup answers: a logo, the listing's own link and (published
+ *  events and training) its dates, each by target record, for the records
+ *  that have one. */
 interface TargetLookup {
   logos: Record<string, string>
   links: Record<string, string>
+  dates: Record<string, ListingDates>
 }
-const NO_TARGETS: TargetLookup = { logos: {}, links: {} }
+const NO_TARGETS: TargetLookup = { logos: {}, links: {}, dates: {} }
 
 /** The list arrives without most logos, and a Change row without its
  *  listing's link (its proposal names only the fields it edits), so it
@@ -760,8 +795,12 @@ async function loadTargets(items: QueueItem[]): Promise<TargetLookup> {
       body: JSON.stringify({ targets }),
     })
     const data = (await res.json()) as Partial<TargetLookup>
-    if (res.ok && (data.logos || data.links)) {
-      return { logos: data.logos ?? {}, links: data.links ?? {} }
+    if (res.ok && (data.logos || data.links || data.dates)) {
+      return {
+        logos: data.logos ?? {},
+        links: data.links ?? {},
+        dates: data.dates ?? {},
+      }
     }
   } catch {
     // not answered: asked again below
@@ -854,10 +893,16 @@ function copyListingName(item: QueueItem): void {
     .catch(() => {})
 }
 
-function acceptLabel(item: QueueItem): string {
+function acceptLabel(
+  item: QueueItem,
+  edits: Record<string, string> = {}
+): string {
   if (item.type === 'Add') return 'Publish'
   if (item.type === 'Change') {
-    return item.changes.length ? 'Apply change' : 'Accept flag'
+    // a field edited beyond the (empty) proposal makes it a change too
+    return item.changes.length || Object.keys(edits).length
+      ? 'Apply change'
+      : 'Accept flag'
   }
   return 'Apply rule'
 }
@@ -881,7 +926,46 @@ function wantsDraft(item: QueueItem): boolean {
   )
 }
 
+// Rejections from this time on get a reply drafted in Gmail (the Mac's
+// worker keeps to the same start); older ones never had one promised.
+const REJECT_REPLIES_SINCE = Date.parse('2026-10-04T11:50:00Z')
+
+/** A rejected emailed or form suggestion whose reply is not in Gmail yet
+ *  (Bryce, 4 Oct 2026: a rejection gets an email response too), or a
+ *  rejected Discord request whose decline is not written yet (5 Oct 2026). */
+function wantsRejectReply(item: QueueItem): boolean {
+  return (
+    item.status === 'Rejected' &&
+    (item.source === 'Email' ||
+      item.source === 'Form' ||
+      item.source === 'Discord') &&
+    Boolean(item.replyTo) &&
+    item.rejectReply?.state !== 'saved' &&
+    item.rejectReply?.state !== 'ready' &&
+    Date.parse(item.decidedAt ?? '') >= REJECT_REPLIES_SINCE
+  )
+}
+
+/** A rejected Discord request's decline, ready to copy. */
+function discordRejectText(item: QueueItem): string | null {
+  return item.source === 'Discord' &&
+    item.status === 'Rejected' &&
+    item.rejectReply?.state === 'ready'
+    ? item.rejectReply.text
+    : null
+}
+
 function replyLabel(item: QueueItem): string {
+  if (item.status === 'Rejected') {
+    if (item.source === 'Discord') {
+      // A ready decline shows as Copy reply / Open on Discord instead.
+      if (item.rejectReply?.state === 'failed') return 'Reply failed'
+      return wantsRejectReply(item) ? 'Fable is writing the reply' : ''
+    }
+    if (item.rejectReply?.state === 'saved') return 'Reply draft saved in Gmail'
+    if (item.rejectReply?.state === 'failed') return 'Reply draft failed'
+    return wantsRejectReply(item) ? 'Reply on its way to Gmail' : ''
+  }
   if (!item.replyDraft) return ''
   // A Discord reply is copied and sent by hand: nothing to report here.
   if (item.source === 'Discord') return ''
@@ -924,6 +1008,13 @@ interface Draft {
   /** The reply draft as edited on the page (null = as written at intake). */
   reply: string | null
   editingReply: boolean
+  /** The rejection reply as retyped on the page (null = Fable's, written
+   *  in advance for each reason); an edit is sent whatever the reason. */
+  decline: string | null
+  editingDecline: boolean
+  /** The reason the pointer or keyboard is on while the reasons are open:
+   *  the rejection reply follows it, so what is shown is what is sent. */
+  focusChip: string | null
   busy: boolean
   error: string | null
 }
@@ -936,6 +1027,9 @@ const FRESH: Draft = {
   other: '',
   reply: null,
   editingReply: false,
+  decline: null,
+  editingDecline: false,
+  focusChip: null,
   busy: false,
   error: null,
 }
@@ -955,8 +1049,9 @@ interface Toast {
   retry?: { action: Decision; extra: Record<string, unknown> }
 }
 
-/** What the page tells the Mac agent to do after an accept. */
-type AgentAction = 'gmail_draft'
+/** What the page tells the Mac agent to do after a decision: save the
+ *  accept's reply draft, or write and save a rejection's. */
+type AgentAction = 'gmail_draft' | 'reject_draft'
 
 interface AgentResult {
   ok: boolean
@@ -966,9 +1061,14 @@ interface AgentResult {
   detail: string
   /** /ping: the agent can hold a conversation about an item (chat.py). */
   chat: boolean
+  /** reject_draft: the words saved in Gmail. */
+  rejectText?: string
 }
 
 const AGENT_TIMEOUT_MS = 15000
+// Fable writes a rejection's reply before it is saved: a few seconds, up
+// to a minute or two on a slow day.
+const REJECT_REPLY_TIMEOUT_MS = 180000
 
 /** Call the local agent on the owner's Mac (~/Queue/agent.py). It listens
  *  on loopback only and checks the token the site minted, so the call is
@@ -976,10 +1076,11 @@ const AGENT_TIMEOUT_MS = 15000
 async function callAgent(
   agent: AgentInfo,
   path: '/ping' | '/act',
-  body?: { id: string; action: AgentAction }
+  body?: { id: string; action: AgentAction },
+  timeoutMs = AGENT_TIMEOUT_MS
 ): Promise<AgentResult> {
   const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), AGENT_TIMEOUT_MS)
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
     const res = await fetch(`http://127.0.0.1:${agent.port}${path}`, {
       method: body ? 'POST' : 'GET',
@@ -994,6 +1095,7 @@ async function callAgent(
       detail?: string
       error?: string
       chat?: boolean
+      rejectText?: string
     }
     return {
       ok: Boolean(data.ok),
@@ -1001,6 +1103,7 @@ async function callAgent(
       replyStatus: data.replyStatus ?? null,
       detail: data.detail ?? data.error ?? '',
       chat: Boolean(data.chat),
+      rejectText: data.rejectText,
     }
   } catch {
     return {
@@ -1015,6 +1118,43 @@ async function callAgent(
   }
 }
 
+/** The chat threads on the Mac, by row: when Fable last replied there, and
+ *  whether Fable is answering there now. */
+type ChatRows = Record<string, { last?: string; answering?: boolean }>
+
+/** A row's teal bar: Fable is answering, or has answered since the row was
+ *  last open (Bryce, 1 Oct 2026: "I'll often write to Fable on a listing
+ *  then switch to other listings and forget which one I was on"). */
+type FableMark = 'answering' | 'new'
+
+const FABLE_MARK_TITLE: Record<FableMark, string> = {
+  answering: 'Fable is answering',
+  new: 'Fable has answered since you last looked',
+}
+
+/** Every chat thread's state on the Mac; null when the agent did not say
+ *  (offline, or a version without /chat/status). */
+async function fetchChatRows(agent: AgentInfo): Promise<ChatRows | null> {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), AGENT_TIMEOUT_MS)
+  try {
+    const res = await fetch(`http://127.0.0.1:${agent.port}/chat/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: agent.token }),
+      cache: 'no-store',
+      signal: ctrl.signal,
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as { rows?: ChatRows }
+    return data.rows ?? null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 const WORKER_NOTE = 'the Mac saves the reply draft within five minutes'
 const OFFLINE_SUB = `Mac agent not reachable · ${WORKER_NOTE}`
 
@@ -1023,10 +1163,13 @@ type Action = Decision | 'undo'
 
 export default function QueueAdmin({
   canEdit,
+  airtableBase,
 }: {
   /** False for a view-only grant: the same queue with nothing to click that
    *  would decide anything. The API refuses those writes regardless. */
   canEdit: boolean
+  /** The base the listings live in, for Q's link to a record. */
+  airtableBase: string | null
 }) {
   const [items, setItems] = useState<QueueItem[] | null>(null)
   // The list as it is now, for callbacks that must not go stale.
@@ -1076,15 +1219,32 @@ export default function QueueAdmin({
   const [agentOnline, setAgentOnline] = useState<boolean | null>(null)
   // The agent answered the ping and can chat: the conversation panel shows.
   const [agentChat, setAgentChat] = useState(false)
+  // The chat threads on the Mac, and per row the newest reply already seen
+  // in this browser (null until read), for the rows' teal bars.
+  const [chatRows, setChatRows] = useState<ChatRows>({})
+  const [chatSeen, setChatSeen] = useState<Record<string, string> | null>(null)
   // Bumped by the F key so the chat box takes focus.
   const [chatFocus, setChatFocus] = useState(0)
+  const [placeFocus, setPlaceFocus] = useState(0)
+  const [fieldFocus, setFieldFocus] = useState(0)
   const wantedRef = useRef<string | null>(null)
   // The focused item's record as it is in Airtable now, plus the table's
   // field list, so empty fields (a missing logo) show as empty. By item id.
   const [live, setLive] = useState<
     Record<string, { fields: Record<string, unknown>; schema: FieldInfo[] }>
   >({})
+  // A published event's or training's start date and deadline, by record,
+  // so a Change on one that is about to happen counts as urgent.
+  const [listingDates, setListingDates] = useState<
+    Record<string, ListingDates>
+  >({})
   const [showDone, setShowDone] = useState(false)
+  // A decision opened from Done today: the item itself in place of the
+  // list, with a way back (Bryce, 4 Oct 2026).
+  const [doneOpen, setDoneOpen] = useState(false)
+  // Items whose chat shows Fable changed the listing: read it live, so the
+  // changed fields can show its pictures and skip computed fields.
+  const [fableIds, setFableIds] = useState<Record<string, true>>({})
   // "Done today" is the viewer's own calendar day, not the last 24 hours:
   // the server sends a day's worth, the browser keeps what was decided
   // since its local midnight, and moves on when the next one passes.
@@ -1102,6 +1262,8 @@ export default function QueueAdmin({
   const [theme, setTheme] = useState<Theme>('light')
   const [kind, setKind] = useState<Kind>('additions')
   const [collapsed, setCollapsed] = useState<Record<Section, boolean>>({
+    fable: false,
+    urgent: false,
     requests: false,
     broom: false,
     rules: false,
@@ -1278,6 +1440,9 @@ export default function QueueAdmin({
       // follow in the background, each filled in as it arrives. A refresh
       // asks only for what is new to it.
       void loadTargets(next).then(found => {
+        if (Object.keys(found.dates).length) {
+          setListingDates(prev => ({ ...prev, ...found.dates }))
+        }
         if (
           !Object.keys(found.logos).length &&
           !Object.keys(found.links).length
@@ -1385,10 +1550,117 @@ export default function QueueAdmin({
     }
   }, [agent])
 
-  // One flat, ordered list of open items: requests, Broom, rules, then Comb
-  // with Fable's Publish verdicts first, each section split by resource
-  // page. W/Q and auto-advance walk it, opening a folded page as they
-  // reach it; a folded section is passed over.
+  // Which rows Fable is answering, or has answered since they were last
+  // open: asked of the Mac every few seconds while the tab is in view.
+  const chatOn = canEdit && agentChat && agent !== null
+  useEffect(() => {
+    if (!chatOn || !agent) return
+    let alive = true
+    const poll = async () => {
+      if (document.visibilityState !== 'visible') return
+      const rows = await fetchChatRows(agent)
+      if (!alive || !rows) return
+      setChatRows(rows)
+      setChatSeen(prev => {
+        if (prev) return prev
+        let saved: unknown = null
+        try {
+          saved = JSON.parse(localStorage.getItem(CHAT_SEEN_KEY) ?? 'null')
+        } catch {
+          // storage refused: start from what is there now
+        }
+        const seen: Record<string, string> = {}
+        if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+          // Threads that have gone (cleared) drop out.
+          for (const [id, at] of Object.entries(saved)) {
+            if (rows[id] && typeof at === 'string') seen[id] = at
+          }
+          return seen
+        }
+        // The first time in this browser, every reply so far counts as
+        // seen: only what comes from now on gets a bar.
+        for (const [id, r] of Object.entries(rows)) {
+          if (r.last) seen[id] = r.last
+        }
+        return seen
+      })
+    }
+    void poll()
+    const t = setInterval(() => void poll(), CHAT_STATUS_MS)
+    document.addEventListener('visibilitychange', poll)
+    return () => {
+      alive = false
+      clearInterval(t)
+      document.removeEventListener('visibilitychange', poll)
+    }
+  }, [chatOn, agent])
+
+  // The open item's replies are in front of Bryce: seen.
+  const openId = selectedId && !showDone ? selectedId : null
+  useEffect(() => {
+    if (!openId || !chatSeen) return
+    const last = chatRows[openId]?.last
+    if (!last || (chatSeen[openId] ?? '') >= last) return
+    setChatSeen({ ...chatSeen, [openId]: last })
+  }, [openId, chatRows, chatSeen])
+
+  useEffect(() => {
+    if (!chatSeen) return
+    try {
+      localStorage.setItem(CHAT_SEEN_KEY, JSON.stringify(chatSeen))
+    } catch {
+      // ignore
+    }
+  }, [chatSeen])
+
+  const fableMarks = useMemo(() => {
+    const marks: Record<string, FableMark> = {}
+    if (!chatOn || !chatSeen) return marks
+    for (const [id, r] of Object.entries(chatRows)) {
+      if (r.answering) marks[id] = 'answering'
+      else if (r.last && id !== openId && r.last > (chatSeen[id] ?? '')) {
+        marks[id] = 'new'
+      }
+    }
+    return marks
+  }, [chatOn, chatRows, chatSeen, openId])
+
+  // The items in the "Fable replying" section, newest arrival first. One joins when
+  // Fable is answering it or has answered unread while it is not the open
+  // one (so a row never moves from under the item being chatted on), and
+  // stays while it is open (so clicking it there does not send it back
+  // down); it goes back to its place once it is left with nothing unread.
+  const [fableTop, setFableTop] = useState<string[]>([])
+  useEffect(() => {
+    setFableTop(prev => {
+      const next = prev.filter(id => id === openId || fableMarks[id])
+      for (const id of Object.keys(fableMarks)) {
+        if (id !== openId && !next.includes(id)) next.unshift(id)
+      }
+      return next.length === prev.length &&
+        next.every((id, i) => id === prev[i])
+        ? prev
+        : next
+    })
+  }, [fableMarks, openId])
+
+  /** The strongest mark among `list`, for a folded heading's dot. */
+  const markAmong = (list: QueueItem[]): FableMark | null => {
+    let mark: FableMark | null = null
+    for (const item of list) {
+      const m = fableMarks[item.id]
+      if (m === 'new') return m
+      if (m) mark = m
+    }
+    return mark
+  }
+
+  // One flat, ordered list of open items: what can't wait, requests, Broom,
+  // rules, then Comb with Fable's Publish verdicts first, each section
+  // (Urgent aside) split by resource page and oldest first within it, so
+  // the old pile rises instead of sinking under each day's new finds. W/Q
+  // and auto-advance walk it, opening a folded page as they reach it; a
+  // folded section is passed over.
   // What search looks through, per item. Built again only when the list
   // changes, so each key typed just runs the words over it.
   const searchDocs = useMemo(() => {
@@ -1416,6 +1688,8 @@ export default function QueueAdmin({
 
   const ordered = useMemo(() => {
     const groups: Record<Section, QueueItem[]> = {
+      fable: [],
+      urgent: [],
       requests: [],
       broom: [],
       rules: [],
@@ -1427,6 +1701,14 @@ export default function QueueAdmin({
       changes: 0,
       rules: 0,
     }
+    // How many of each kind can't wait, for the switch.
+    const urgentPerKind: Record<Kind, number> = {
+      additions: 0,
+      changes: 0,
+      rules: 0,
+    }
+    const urgencies = new Map<string, Urgency>()
+    const today = isoDate(dayStart)
     let open = 0
     // During a search: what each matching item matched, for its row.
     const hits = new Map<string, SearchHit>()
@@ -1452,27 +1734,49 @@ export default function QueueAdmin({
         continue
       }
       perKind[k]++
-      if (k === kind) groups[sectionOf(item)].push(item)
+      const urgency = urgencyOf(
+        item,
+        item.targetRecord ? listingDates[item.targetRecord] : undefined,
+        today
+      )
+      if (urgency) {
+        urgencies.set(item.id, urgency)
+        urgentPerKind[k]++
+      }
+      if (fableTop.includes(item.id)) groups.fable.push(item)
+      else if (k === kind) {
+        groups[urgency ? 'urgent' : sectionOf(item)].push(item)
+      }
     }
-    const newest = (a: QueueItem, b: QueueItem) =>
-      a.createdAt < b.createdAt ? 1 : -1
+    const oldest = (a: QueueItem, b: QueueItem) =>
+      a.createdAt < b.createdAt ? -1 : 1
     const byVerdict = (a: QueueItem, b: QueueItem) =>
-      verdictRank(a.verdict) - verdictRank(b.verdict) || newest(a, b)
-    groups.requests.sort(newest)
+      verdictRank(a.verdict) - verdictRank(b.verdict) || oldest(a, b)
+    const urgentAt = (i: QueueItem) => ({
+      urgency: urgencies.get(i.id) ?? { days: null, label: '' },
+      createdAt: i.createdAt,
+    })
+    groups.urgent.sort((a, b) => byUrgency(urgentAt(a), urgentAt(b)))
+    groups.fable.sort((a, b) => fableTop.indexOf(a.id) - fableTop.indexOf(b.id))
+    groups.requests.sort(oldest)
     groups.broom.sort(byVerdict)
-    groups.rules.sort(newest)
+    groups.rules.sort(oldest)
     groups.comb.sort(byVerdict)
     done.sort((a, b) => ((a.decidedAt ?? '') < (b.decidedAt ?? '') ? 1 : -1))
     const doneHits = search ? done.filter(i => hits.has(i.id)) : done
     // Sub-heads only where a section spans more than one page; a section on
     // a single page lists its items as they are.
     const pages: Record<Section, PageGroup[]> = {
+      fable: [],
+      urgent: [],
       requests: [],
       broom: [],
       rules: [],
       comb: [],
     }
     for (const s of SECTIONS) {
+      // Fable and Urgent keep their own order; their rows name their page.
+      if (s === 'fable' || s === 'urgent') continue
       const split = splitByPage(groups[s])
       pages[s] = split.length > 1 ? split : []
     }
@@ -1531,6 +1835,8 @@ export default function QueueAdmin({
       foldOf,
       open,
       perKind,
+      urgentPerKind,
+      urgencies,
     }
   }, [
     items,
@@ -1541,6 +1847,8 @@ export default function QueueAdmin({
     selectedId,
     search,
     searchDocs,
+    listingDates,
+    fableTop,
   ])
 
   const selected = useMemo(() => {
@@ -1598,15 +1906,16 @@ export default function QueueAdmin({
 
   useEffect(() => {
     if (!selected) return
-    // Additions always; a Change only when it swaps a picture, whose old
-    // side is snapshotted without a link (the live read supplies one).
-    const wantsLive =
-      selected.type === 'Add' ||
-      (selected.type === 'Change' &&
-        selected.changes.some(c => looksLikeAttachment(c.from)))
+    // Additions and changes: a change's old picture is snapshotted without
+    // a working link (the live read supplies one), and its other fields
+    // can be edited too, from what the record holds now.
+    const wantsLive = selected.type === 'Add' || selected.type === 'Change'
     if (!wantsLive) return
     if (!selected.targetTable || !selected.targetRecord) return
-    if (live[selected.id]) return
+    // A read whose picture links have run out (the page was left open for
+    // hours) is made again, or its pictures could not show.
+    const had = live[selected.id]
+    if (had && !hasExpiredPicture(had.fields)) return
     const id = selected.id
     const target = `${selected.targetTable}/${selected.targetRecord}`
     let cancelled = false
@@ -1633,7 +1942,7 @@ export default function QueueAdmin({
     return () => {
       cancelled = true
     }
-  }, [selected, live])
+  }, [selected, live, fableIds])
 
   const setLiveField = useCallback(
     (id: string, field: string, value: unknown) => {
@@ -1785,6 +2094,7 @@ export default function QueueAdmin({
   const select = useCallback((id: string) => {
     setSelectedId(id)
     setShowDone(false)
+    setDoneOpen(false)
     if (detailRef.current) detailRef.current.scrollTop = 0
     // After the render, so a row inside a page just unfolded is there too.
     requestAnimationFrame(() => {
@@ -1794,12 +2104,15 @@ export default function QueueAdmin({
     })
   }, [])
 
-  /** Put one of today's decisions in focus: the done list opens with it
-   *  marked, where it can be undone. A and R pass it by, as it is no
-   *  longer open; S and D still open its link and its card. */
+  /** Put one of today's decisions in focus, opened: the item as it was
+   *  decided, with Undo, and Esc or the link above it back to the done
+   *  list. A and R pass it by, as it is no longer open; S and D still open
+   *  its link and its card. */
   const showDecided = useCallback((id: string) => {
     setSelectedId(id)
     setShowDone(true)
+    setDoneOpen(true)
+    if (detailRef.current) detailRef.current.scrollTop = 0
   }, [])
 
   /** Put an item in focus, opening the page it sits under if that is
@@ -1873,6 +2186,69 @@ export default function QueueAdmin({
     [agent]
   )
 
+  // After a reject: the Mac agent has Fable write the reply from the reason
+  // and saves it in Gmail as a draft; the toast and the row say how it
+  // went. If the agent is not reachable the worker does it within minutes.
+  const saveRejectReply = useCallback(
+    async (item: QueueItem) => {
+      const res: AgentResult = agent
+        ? await callAgent(
+            agent,
+            '/act',
+            { id: item.id, action: 'reject_draft' },
+            REJECT_REPLY_TIMEOUT_MS
+          )
+        : {
+            ok: false,
+            offline: true,
+            replyStatus: null,
+            detail: '',
+            chat: false,
+          }
+      if (agent) setAgentOnline(!res.offline)
+      const discord = item.source === 'Discord'
+      const sub = res.ok
+        ? res.detail ||
+          (discord
+            ? 'Reply ready · copy it and send it yourself on Discord'
+            : 'Reply draft saved in Gmail')
+        : res.offline
+          ? `Mac agent not reachable · the Mac writes the reply within five minutes`
+          : `${discord ? 'Reply' : 'Reply draft'} failed: ${res.detail}`
+      const reply: RejectReply | null = res.offline
+        ? null
+        : res.ok
+          ? {
+              text: res.rejectText ?? null,
+              state: discord ? 'ready' : 'saved',
+              error: null,
+            }
+          : { text: null, state: 'failed', error: res.detail }
+      if (reply) {
+        setItems(prev =>
+          prev
+            ? prev.map(i =>
+                i.id === item.id && i.status === 'Rejected'
+                  ? { ...i, rejectReply: reply }
+                  : i
+              )
+            : prev
+        )
+      }
+      // The toast's item too, so a Discord decline gets its Copy button.
+      setToast(prev =>
+        prev && prev.item.id === item.id
+          ? {
+              ...prev,
+              sub,
+              item: reply ? { ...prev.item, rejectReply: reply } : prev.item,
+            }
+          : prev
+      )
+    },
+    [agent]
+  )
+
   const act = useCallback(
     async (
       item: QueueItem,
@@ -1940,8 +2316,10 @@ export default function QueueAdmin({
         // picture already on the page stays.
         const updated = { ...data.item, logo: data.item.logo ?? item.logo }
         // Accept wrote the edits and the flag, undo took them back: the
-        // card built before either is out of date.
+        // card built before either is out of date, and so is the page's
+        // order the Position picker read.
         forgetCard(updated)
+        if (updated.type === 'Add') forgetOrder(updated.targetTable)
         setItems(prev =>
           prev ? prev.map(i => (i.id === updated.id ? updated : i)) : prev
         )
@@ -1953,6 +2331,8 @@ export default function QueueAdmin({
         if (decision) {
           forget()
           const draftPending = action === 'accept' && wantsDraft(updated)
+          const rejectReplyPending =
+            action === 'reject' && wantsRejectReply(updated)
           const text =
             action === 'reject'
               ? updated.rejectReason
@@ -1989,15 +2369,37 @@ export default function QueueAdmin({
                     ? agent
                       ? 'Saving the reply draft in Gmail…'
                       : `Reply draft: ${WORKER_NOTE}`
-                    : updated.source === 'Discord' && updated.replyDraft
-                      ? 'Reply drafted · copy it and send it yourself on Discord'
-                      : undefined,
+                    : rejectReplyPending
+                      ? agent
+                        ? updated.source === 'Discord'
+                          ? updated.rejectReply?.text
+                            ? 'Getting the reply ready to copy…'
+                            : 'Fable is writing the reply…'
+                          : updated.rejectReply?.text
+                            ? 'Saving the reply draft in Gmail…'
+                            : 'Fable is writing the reply for Gmail…'
+                        : 'Reply: the Mac saves it within five minutes'
+                      : updated.source === 'Discord' && updated.replyDraft
+                        ? 'Reply drafted · copy it and send it yourself on Discord'
+                        : undefined,
                 }
               : prev
           )
           if (draftPending) void saveReply(updated)
+          if (rejectReplyPending) void saveRejectReply(updated)
         } else if (action === 'undo') {
-          setToast(null)
+          // A rejection's reply already in Gmail stays there: say so.
+          setToast(
+            item.status === 'Rejected' && item.rejectReply?.state === 'saved'
+              ? {
+                  item: updated,
+                  no: false,
+                  state: 'done',
+                  text: 'Back in the queue',
+                  sub: 'The rejection reply is still in Gmail as a draft – delete it there',
+                }
+              : null
+          )
           setUndoable(null)
           select(updated.id)
         }
@@ -2021,7 +2423,17 @@ export default function QueueAdmin({
         }
       }
     },
-    [ordered.walk, reveal, select, setDraft, drafts, agent, saveReply, canEdit]
+    [
+      ordered.walk,
+      reveal,
+      select,
+      setDraft,
+      drafts,
+      agent,
+      saveReply,
+      saveRejectReply,
+      canEdit,
+    ]
   )
   actRef.current = act
 
@@ -2169,7 +2581,12 @@ export default function QueueAdmin({
               edits: coerceEdits(
                 d.edits,
                 item.type === 'Change'
-                  ? Object.fromEntries(item.changes.map(c => [c.field, c.to]))
+                  ? {
+                      ...live[item.id]?.fields,
+                      ...Object.fromEntries(
+                        item.changes.map(c => [c.field, c.to])
+                      ),
+                    }
                   : (live[item.id]?.fields ?? item.fields ?? {}),
                 new Map((live[item.id]?.schema ?? []).map(f => [f.name, f]))
               ),
@@ -2181,7 +2598,16 @@ export default function QueueAdmin({
             !d.busy
           ) {
             e.preventDefault()
-            void act(item, 'reject', { reason: d.chip ?? d.other.trim() })
+            void act(item, 'reject', {
+              reason: d.chip ?? d.other.trim(),
+              rejectReply: rejectReplyFor({
+                chips: item.rejectChips,
+                drafts: item.rejectDrafts,
+                edited: d.decline,
+                chip: d.chip,
+                typed: d.other,
+              }),
+            })
           }
           break
         case 'r':
@@ -2202,6 +2628,25 @@ export default function QueueAdmin({
             setChatFocus(n => n + 1)
           }
           break
+        case 'p':
+          // Where the addition goes on its page (Bryce, 30 Sept 2026).
+          if (canEdit && item?.type === 'Add' && isOpen(item)) {
+            e.preventDefault()
+            setPlaceFocus(n => n + 1)
+          }
+          break
+        case 'e':
+          // A field the change does not touch (Bryce, 5 Oct 2026).
+          if (
+            canEdit &&
+            item?.type === 'Change' &&
+            isOpen(item) &&
+            item.status !== 'Revising'
+          ) {
+            e.preventDefault()
+            setFieldFocus(n => n + 1)
+          }
+          break
         case '1':
         case '2':
         case '3':
@@ -2211,7 +2656,16 @@ export default function QueueAdmin({
               // the number picks the reason and rejects in one go
               e.preventDefault()
               setDraft(item.id, { chip })
-              void act(item, 'reject', { reason: chip })
+              void act(item, 'reject', {
+                reason: chip,
+                rejectReply: rejectReplyFor({
+                  chips: item.rejectChips,
+                  drafts: item.rejectDrafts,
+                  edited: d.decline,
+                  chip,
+                  typed: '',
+                }),
+              })
             }
           }
           break
@@ -2239,6 +2693,18 @@ export default function QueueAdmin({
           }
           break
         }
+        case 'q':
+          // The listing's record in Airtable, in a new tab (Bryce, 5 Oct
+          // 2026: "make Q open the listing in airtable").
+          if (airtableBase && item?.targetTable && item.targetRecord) {
+            e.preventDefault()
+            window.open(
+              `https://airtable.com/${airtableBase}/${item.targetTable}/${item.targetRecord}`,
+              '_blank',
+              'noopener'
+            )
+          }
+          break
         case 'd':
           // The page tag's link: the live page at this record's card, the
           // name copied on the way, as a click on the tag does (Bryce, 19
@@ -2262,7 +2728,8 @@ export default function QueueAdmin({
           if (showHelp) setShowHelp(false)
           else if (item && d.mode !== 'idle') {
             setDraft(item.id, { mode: 'idle', chip: null, other: '' })
-          } else if (searching) clearSearch()
+          } else if (showDone && doneOpen) setDoneOpen(false)
+          else if (searching) clearSearch()
           break
       }
     }
@@ -2271,6 +2738,8 @@ export default function QueueAdmin({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     selected,
+    showDone,
+    doneOpen,
     drafts,
     move,
     act,
@@ -2285,6 +2754,7 @@ export default function QueueAdmin({
     select,
     searching,
     clearSearch,
+    airtableBase,
   ])
 
   // Enter or the down arrow in the search box goes to the first match, so
@@ -2320,7 +2790,10 @@ export default function QueueAdmin({
                 {' · '}
                 <button
                   className={`${styles.linkButton} ${showDone ? styles.linkButtonOn : ''}`}
-                  onClick={() => setShowDone(v => !v)}
+                  onClick={() => {
+                    setShowDone(v => !v)
+                    setDoneOpen(false)
+                  }}
                 >
                   {doneToday} done today
                 </button>
@@ -2347,6 +2820,31 @@ export default function QueueAdmin({
                 <span className={styles.segCount}>
                   {ordered.perKind[k.key]}
                 </span>
+                {/* How many of each kind are urgent, the open one included
+                    (Bryce, 4 Oct 2026: "Keep the urgent number there"). */}
+                {!searching && ordered.urgentPerKind[k.key] > 0 && (
+                  <span
+                    className={styles.segUrgent}
+                    title={`${ordered.urgentPerKind[k.key]} urgent: ${URGENT_WHY[k.key]}`}
+                  >
+                    <Icon src={ICON.clock} size={12} />
+                    {ordered.urgentPerKind[k.key]}
+                  </span>
+                )}
+                {/* Items already in "Fable replying" at the top are not
+                    counted again here. */}
+                {!searching && kind !== k.key && (
+                  <FableDot
+                    mark={markAmong(
+                      (items ?? []).filter(
+                        i =>
+                          isOpen(i) &&
+                          kindOf(i) === k.key &&
+                          !fableTop.includes(i.id)
+                      )
+                    )}
+                  />
+                )}
               </button>
             ))}
           </span>
@@ -2461,7 +2959,10 @@ export default function QueueAdmin({
                       {' · '}
                       <button
                         className={`${styles.linkButton} ${showDone ? styles.linkButtonOn : ''}`}
-                        onClick={() => setShowDone(v => !v)}
+                        onClick={() => {
+                          setShowDone(v => !v)
+                          setDoneOpen(false)
+                        }}
                       >
                         {ordered.doneHits.length} done today
                       </button>
@@ -2505,6 +3006,7 @@ export default function QueueAdmin({
                           failed={
                             !pending[item.id] && Boolean(draft(item.id).error)
                           }
+                          fable={fableMarks[item.id]}
                           showKind
                           search={search}
                           hit={ordered.hits.get(item.id)}
@@ -2537,6 +3039,9 @@ export default function QueueAdmin({
                         </span>
                         {SECTION_LABEL[section]}
                         <span className={styles.groupCount}>{list.length}</span>
+                        {collapsed[section] && (
+                          <FableDot mark={markAmong(list)} />
+                        )}
                         <span
                           className={`${styles.groupChevron} ${collapsed[section] ? styles.groupChevronClosed : ''}`}
                         >
@@ -2565,6 +3070,9 @@ export default function QueueAdmin({
                                 <span className={styles.pageCount}>
                                   {page.items.length}
                                 </span>
+                                {folded && (
+                                  <FableDot mark={markAmong(page.items)} />
+                                )}
                               </button>
                               {folded
                                 ? null
@@ -2580,6 +3088,7 @@ export default function QueueAdmin({
                                         !pending[item.id] &&
                                         Boolean(draft(item.id).error)
                                       }
+                                      fable={fableMarks[item.id]}
                                       showPage={false}
                                       onClick={() => select(item.id)}
                                       onLogoError={() => logoDied(item)}
@@ -2598,6 +3107,15 @@ export default function QueueAdmin({
                             failed={
                               !pending[item.id] && Boolean(draft(item.id).error)
                             }
+                            fable={fableMarks[item.id]}
+                            showKind={
+                              section === 'fable' && kindOf(item) !== kind
+                            }
+                            urgency={
+                              section === 'fable' || section === 'urgent'
+                                ? ordered.urgencies.get(item.id)
+                                : undefined
+                            }
                             onClick={() => select(item.id)}
                             onLogoError={() => logoDied(item)}
                           />
@@ -2610,8 +3128,9 @@ export default function QueueAdmin({
           </div>
 
           <div className={styles.detail} ref={detailRef}>
-            {showDone ||
-            (searching && !ordered.flat.length && ordered.doneHits.length) ? (
+            {(showDone ||
+              (searching && !ordered.flat.length && ordered.doneHits.length)) &&
+            !(doneOpen && selected && !isOpen(selected)) ? (
               // A search that matches only decisions shows them here.
               <DoneList
                 items={ordered.doneHits}
@@ -2620,9 +3139,23 @@ export default function QueueAdmin({
                 busyFor={id => draft(id).busy}
                 errorFor={id => draft(id).error}
                 onUndo={canEdit ? item => void act(item, 'undo') : null}
+                onOpen={showDecided}
               />
             ) : selected ? (
               <Detail
+                onFable={() => {
+                  const id = selected.id
+                  setFableIds(prev =>
+                    prev[id] ? prev : { ...prev, [id]: true }
+                  )
+                }}
+                {...(!isOpen(selected)
+                  ? {
+                      onBack: () => setDoneOpen(false),
+                      onUndo: canEdit ? () => void act(selected, 'undo') : null,
+                      undoing: draft(selected.id).busy,
+                    }
+                  : {})}
                 item={selected}
                 live={live[selected.id] ?? null}
                 onImage={(field, urls) => {
@@ -2638,7 +3171,9 @@ export default function QueueAdmin({
                 act={(action, extra) => void act(selected, action, extra)}
                 chatAgent={canEdit && agentChat ? agent : null}
                 chatFocus={chatFocus}
-                readOnly={!canEdit}
+                placeFocus={placeFocus}
+                fieldFocus={fieldFocus}
+                readOnly={!canEdit || !isOpen(selected)}
               />
             ) : (
               <div className={styles.emptyDetail}>
@@ -2673,12 +3208,13 @@ export default function QueueAdmin({
               <Icon src={toast.no ? ICON.x : ICON.check} size={16} />
             ) : null}
           </span>
-          {toast.item.logo ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img className={styles.rowLogo} src={toast.item.logo} alt="" />
-          ) : (
-            <span className={`${styles.rowLogo} ${styles.rowLogoEmpty}`} />
-          )}
+          <SafeImg
+            src={toast.item.logo}
+            className={styles.rowLogo}
+            empty={
+              <span className={`${styles.rowLogo} ${styles.rowLogoEmpty}`} />
+            }
+          />
           <span className={styles.toastBody}>
             <span className={styles.rowTitle}>
               {splitTitle(toast.item).name ?? toast.item.title}
@@ -2691,11 +3227,16 @@ export default function QueueAdmin({
           </span>
           {toast.state === 'done' &&
             toast.item.source === 'Discord' &&
-            toast.item.replyDraft &&
-            !toast.no && (
+            (toast.no
+              ? discordRejectText(toast.item)
+              : toast.item.replyDraft) && (
               <>
                 <CopyReply
-                  text={toast.item.replyDraft}
+                  text={
+                    (toast.no
+                      ? discordRejectText(toast.item)
+                      : toast.item.replyDraft) ?? ''
+                  }
                   className={styles.toastUndo}
                 />
                 {toast.item.sourceLink && (
@@ -2784,9 +3325,28 @@ export default function QueueAdmin({
               </dt>
               <dd>talk to Fable about the item, or tell it what to change</dd>
               <dt>
+                <kbd>P</kbd>
+              </dt>
+              <dd>
+                on an addition, choose where it goes on its page: type to find a
+                listing, <kbd>↑</kbd> <kbd>↓</kbd> and <kbd>Enter</kbd> puts it
+                after that one
+              </dd>
+              <dt>
+                <kbd>E</kbd>
+              </dt>
+              <dd>
+                on a change, edit a field it does not touch: type to find the
+                field, <kbd>↑</kbd> <kbd>↓</kbd> and <kbd>Enter</kbd> opens it
+              </dd>
+              <dt>
                 <kbd>S</kbd>
               </dt>
               <dd>open the listing&apos;s link in a new tab</dd>
+              <dt>
+                <kbd>Q</kbd>
+              </dt>
+              <dd>open the listing in Airtable</dd>
               <dt>
                 <kbd>D</kbd>
               </dt>
@@ -2825,15 +3385,28 @@ export default function QueueAdmin({
   )
 }
 
+/** A folded heading (or another kind's tab) holds a row with a teal bar. */
+function FableDot({ mark }: { mark: FableMark | null }) {
+  if (!mark) return null
+  return (
+    <span
+      className={`${styles.fableDot} ${mark === 'answering' ? styles.fableDotLive : ''}`}
+      title={FABLE_MARK_TITLE[mark]}
+    />
+  )
+}
+
 function Row({
   item,
   active,
   working,
   failed,
+  fable = null,
   showPage = true,
   showKind = false,
   search = null,
   hit,
+  urgency,
   onClick,
   onLogoError,
 }: {
@@ -2843,6 +3416,8 @@ function Row({
   working: Decision | null
   /** The last decision on it did not land; the error is on the detail. */
   failed: boolean
+  /** Fable is answering in its chat, or answered since it was last open. */
+  fable?: FableMark | null
   /** Off under a page sub-head, which already names the page. */
   showPage?: boolean
   /** On in search results, which mix additions, changes and rules. */
@@ -2851,6 +3426,8 @@ function Row({
   search?: SearchQuery | null
   /** What the search matched here: an excerpt when it is off the row. */
   hit?: SearchHit
+  /** In the Urgent section: why it can't wait ("Closes 10 Oct"). */
+  urgency?: Urgency
   onClick: () => void
   /** The picture's link has stopped working. */
   onLogoError: () => void
@@ -2858,7 +3435,7 @@ function Row({
   return (
     <button
       data-id={item.id}
-      className={`${styles.row} ${active ? styles.rowActive : ''} ${working ? styles.rowBusy : ''}`}
+      className={`${styles.row} ${active ? styles.rowActive : ''} ${working ? styles.rowBusy : ''} ${fable ? styles.rowFable : ''} ${fable === 'answering' ? styles.rowFableLive : ''}`}
       onClick={onClick}
     >
       {item.logo ? (
@@ -2881,6 +3458,12 @@ function Row({
           <Marked text={splitTitle(item).name ?? item.title} search={search} />
         </span>
         <span className={styles.rowMeta}>
+          {urgency && (
+            <span className={`${styles.withIcon} ${styles.urgentTag}`}>
+              <Icon src={ICON.clock} size={12} />
+              {urgency.label}
+            </span>
+          )}
           {showKind && <span>{KIND_WORD[item.type]}</span>}
           {item.source !== 'Comb' && <span>{item.source}</span>}
           {showPage && item.page && <span>{pageLabel(item)}</span>}
@@ -2981,19 +3564,36 @@ function Detail({
   act,
   chatAgent,
   chatFocus,
+  placeFocus,
+  fieldFocus,
   readOnly,
+  onFable,
+  onBack,
+  onUndo,
+  undoing = false,
 }: {
   item: QueueItem
   live: { fields: Record<string, unknown>; schema: FieldInfo[] } | null
   onImage: (field: string, urls: string[]) => void
   /** Fable changed the record from the chat: re-read it. */
   onWrote: () => void
+  /** The chat shows Fable changed the listing: the page reads it live. */
+  onFable?: () => void
+  /** A decision opened from Done today: back to that list. */
+  onBack?: () => void
+  /** A decision opened from Done today: take it back (null: view only). */
+  onUndo?: (() => void) | null
+  undoing?: boolean
   d: Draft
   setD: (patch: Partial<Draft>) => void
   act: (action: Action, extra?: Record<string, unknown>) => void
   /** The Mac agent, when it is up and can chat; null hides the panel. */
   chatAgent: AgentInfo | null
   chatFocus: number
+  /** Bumped by P: open the Position list on an addition. */
+  placeFocus: number
+  /** Bumped by E: open the field list on a change. */
+  fieldFocus: number
   /** A view-only session: no editing, no deciding. */
   readOnly: boolean
 }) {
@@ -3002,13 +3602,125 @@ function Detail({
   const revising = item.status === 'Revising' || readOnly
   const nothingToApply = item.type === 'Change' && item.changes.length === 0
   const reason = d.chip ?? d.other.trim()
+  // The reasons open in the bar at the bottom, which then grows over the
+  // rejection reply; bring the reply up above it, so the reply each reason
+  // would send can be read before picking one.
+  const declineRef = useRef<HTMLElement>(null)
+  const actionsRef = useRef<HTMLDivElement>(null)
+  const rejecting = d.mode === 'reject'
+  useEffect(() => {
+    if (!rejecting) return
+    const frame = requestAnimationFrame(() => {
+      const el = declineRef.current
+      const bar = actionsRef.current
+      if (!el || !bar) return
+      el.style.scrollMarginBottom = `${bar.offsetHeight + 16}px`
+      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [rejecting, item.id])
+  // Reject sends the rejection reply as the page shows it for that reason.
+  const rejectWith = (chip: string | null) =>
+    act('reject', {
+      reason: chip ?? reason,
+      rejectReply: rejectReplyFor({
+        chips: item.rejectChips,
+        drafts: item.rejectDrafts,
+        edited: d.decline,
+        chip: chip ?? d.chip,
+        typed: d.other,
+      }),
+    })
   const editCount = Object.keys(d.edits).length
   const original: Record<string, unknown> =
     item.type === 'Change'
-      ? Object.fromEntries(item.changes.map(c => [c.field, c.to]))
+      ? {
+          ...live?.fields,
+          ...Object.fromEntries(item.changes.map(c => [c.field, c.to])),
+        }
       : (live?.fields ?? item.fields ?? {})
   const types = new Map((live?.schema ?? []).map(f => [f.name, f]))
   const editsToSave = () => coerceEdits(d.edits, original, types)
+  // What Fable changed on the listing straight in Airtable from the chat
+  // (its replies carry it): listed with a change's fields, marked on an
+  // addition's (Bryce, 4 Oct 2026).
+  const [fable, setFable] = useState<{ id: string; list: FableChange[] }>({
+    id: '',
+    list: [],
+  })
+  const fableChanges = (fable.id === item.id ? fable.list : []).filter(
+    c =>
+      !HOUSEKEEPING.test(c.field) &&
+      !COMPUTED_TYPES.has(types.get(c.field)?.type ?? '')
+  )
+  const fableFields = new Map(fableChanges.map(c => [c.field, c]))
+
+  // Fields edited beyond what a change proposes (Bryce, 5 Oct 2026: "I
+  // want a way of editing other random fields too"), each a row under the
+  // proposed ones, from what the record holds now. A decided change shows
+  // the ones that went with it, from what they held before.
+  const proposedFields = new Set(item.changes.map(c => c.field))
+  const extraEdits: Record<string, string> =
+    item.type !== 'Change'
+      ? {}
+      : isOpen(item)
+        ? d.edits
+        : item.status === 'Applied' && item.before
+          ? Object.fromEntries(
+              Object.entries(editsAsText(item.edits ?? {})).filter(
+                ([k]) => k in item.before!
+              )
+            )
+          : {}
+  const extraFields =
+    item.type !== 'Change'
+      ? []
+      : [
+          ...Object.keys(extraEdits),
+          ...(d.editing && !(d.editing in extraEdits) ? [d.editing] : []),
+        ].filter(
+          k =>
+            !proposedFields.has(k) &&
+            !UNPICKABLE_TYPES.has(types.get(k)?.type ?? '')
+        )
+  const extraWas = (k: string): unknown =>
+    isOpen(item) ? live?.fields[k] : item.before?.[k]
+  // What the picker offers: the record's other fields that can be typed
+  // into, in the table's order.
+  const pickable =
+    item.type !== 'Change' || !live
+      ? null
+      : live.schema
+          .filter(
+            f =>
+              !HOUSEKEEPING.test(f.name) &&
+              !COMPUTED_TYPES.has(f.type) &&
+              !UNPICKABLE_TYPES.has(f.type) &&
+              !proposedFields.has(f.name) &&
+              !fableFields.has(f.name) &&
+              !extraFields.includes(f.name)
+          )
+          .map(f => ({
+            name: f.name,
+            value: friendly(show(live.fields[f.name])),
+          }))
+  const pickField = (name: string) => {
+    // A box is ticked or unticked at once; anything else opens its editor.
+    if (types.get(name)?.type === 'checkbox') {
+      const was = live?.fields[name] === true
+      setD({ edits: { ...d.edits, [name]: was ? 'false' : 'true' } })
+    } else {
+      setD({ editing: name })
+    }
+  }
+  const cap = descriptionCap(item)
+
+  // An addition to a page kept in a manual order gets the Position
+  // picker, which stands in for its Sort field.
+  const placeable =
+    item.type === 'Add' &&
+    (live?.schema ?? []).some(f => f.name === SORT_FIELD && f.type === 'number')
+  const sortWas = (live?.fields ?? item.fields ?? {})[SORT_FIELD]
 
   const hasCard =
     item.type === 'Change' && Boolean(item.targetTable && item.targetRecord)
@@ -3048,54 +3760,50 @@ function Detail({
 
   // The reply draft sits beside what they wrote (an exchange), or under the
   // card row when a Change shows its card.
-  const replyBlock = item.replyDraft ? (
-    <section className={styles.block}>
-      <h3 className={styles.h3}>
-        Reply draft{item.replyTo ? ` to ${item.replyTo}` : ''}
-        {item.source === 'Discord' &&
-          d.reply !== null &&
-          d.reply !== item.replyDraft && (
-            <em className={styles.edited}>edited</em>
-          )}
-      </h3>
-      {item.source === 'Discord' ? (
-        // A Discord reply is not typed over here: one click puts it on the
-        // clipboard, and Bryce pastes it in Discord (14 Sept 2026). The
-        // chat can rewrite it, though.
-        <CopyBox text={d.reply ?? item.replyDraft} />
-      ) : d.editingReply ? (
-        <textarea
-          ref={fitToText}
-          onInput={e => fitToText(e.currentTarget)}
-          className={`${styles.input} ${styles.replyInput}`}
-          rows={Math.min(
-            14,
-            Math.max(4, item.replyDraft.split('\n').length + 1)
-          )}
-          autoFocus
-          defaultValue={d.reply ?? item.replyDraft}
-          onKeyDown={e => {
-            if (e.key === 'Escape') {
-              e.preventDefault()
-              setD({ editingReply: false })
-            } else if (isDoneKey(e)) {
-              e.preventDefault()
-              e.currentTarget.blur()
-            }
-          }}
-          onBlur={e => setD({ editingReply: false, reply: e.target.value })}
-        />
-      ) : (
-        <ReplyDraft
-          text={d.reply ?? item.replyDraft}
-          edited={d.reply !== null && d.reply !== item.replyDraft}
-          canEdit={!revising && isOpen(item)}
-          onEdit={() => setD({ editingReply: true })}
-        />
-      )}
-      {item.source !== 'Discord' && (
+  // A rejected item's reply is the one written for the rejection; the
+  // accept's draft no longer applies.
+  const rejectReplyBlock =
+    item.rejectReply || wantsRejectReply(item) ? (
+      <section className={styles.block}>
+        <h3 className={styles.h3}>
+          Reply{item.replyTo ? ` to ${item.replyTo}` : ''}
+        </h3>
+        {item.rejectReply?.text &&
+          (item.source === 'Discord' ? (
+            <CopyBox text={item.rejectReply.text} />
+          ) : (
+            <ReplyDraft
+              text={item.rejectReply.text}
+              edited={false}
+              canEdit={false}
+              onEdit={() => {}}
+            />
+          ))}
         <p className={styles.note}>
-          {item.replyStatus === 'Saved' ? (
+          {item.source === 'Discord' ? (
+            item.rejectReply?.state === 'ready' ? (
+              <>
+                Click it to copy, then send it yourself
+                {item.sourceLink ? (
+                  <>
+                    {' '}
+                    <a href={item.sourceLink} target="_blank" rel="noreferrer">
+                      on Discord
+                    </a>
+                  </>
+                ) : (
+                  ' on Discord'
+                )}
+                . Nothing was sent.
+              </>
+            ) : item.rejectReply?.state === 'failed' ? (
+              `The reply could not be written${item.rejectReply.error ? `: ${item.rejectReply.error}` : '.'}`
+            ) : item.rejectReply?.text ? (
+              'Getting it ready to copy. Nothing is sent.'
+            ) : (
+              'Fable is writing it from your reason. Nothing is sent.'
+            )
+          ) : item.rejectReply?.state === 'saved' ? (
             <>
               Saved in Gmail as a draft
               {item.sourceLink && (
@@ -3108,17 +3816,175 @@ function Detail({
               )}
               . Nothing was sent.
             </>
-          ) : item.replyStatus === 'Failed' ? (
-            `The draft could not be saved${item.error ? `: ${item.error}` : '.'}`
-          ) : isOpen(item) ? (
-            `${acceptLabel(item)} saves this as a Gmail draft. Nothing is sent.`
+          ) : item.rejectReply?.state === 'failed' ? (
+            `The draft could not be saved${item.rejectReply.error ? `: ${item.rejectReply.error}` : '.'}`
+          ) : item.rejectReply?.text ? (
+            'Saving it in Gmail as a draft. Nothing is sent.'
           ) : (
-            replyLabel(item)
+            'Fable is writing it from your reason; it goes into Gmail as a draft. Nothing is sent.'
           )}
+        </p>
+      </section>
+    ) : null
+  // The rejection reply, written in advance for each reason (Bryce, 5 Oct
+  // 2026: "in the same way as the accept reply"): shown under the accept
+  // reply, following the reason in focus while the reasons are open, and
+  // sent with Reject exactly as it reads. A typed reason has Fable write it
+  // from that reason instead, unless the reply was edited.
+  const declineChip = shownDeclineChip(
+    item.rejectChips,
+    item.rejectDrafts,
+    d.mode === 'reject' ? d.focusChip : null
+  )
+  const showDecline =
+    isOpen(item) &&
+    Boolean(item.replyTo) &&
+    (declineChip !== null || d.decline !== null)
+  const declineFromReason =
+    d.mode === 'reject' && d.other.trim() !== '' && d.decline === null
+  const declineText =
+    d.decline ?? (declineChip ? item.rejectDrafts[declineChip] : '')
+  const declineBlock = showDecline ? (
+    <section className={styles.block} ref={declineRef}>
+      <h3 className={styles.h3}>Reply if you reject</h3>
+      {declineFromReason ? (
+        <p className={styles.note}>
+          Fable writes this one from your reason when you reject.
+        </p>
+      ) : d.editingDecline ? (
+        <textarea
+          ref={fitToText}
+          onInput={e => fitToText(e.currentTarget)}
+          className={`${styles.input} ${styles.replyInput}`}
+          rows={Math.min(14, Math.max(4, declineText.split('\n').length + 1))}
+          autoFocus
+          defaultValue={declineText}
+          onKeyDown={e => {
+            if (e.key === 'Escape') {
+              e.preventDefault()
+              setD({ editingDecline: false })
+            } else if (isDoneKey(e)) {
+              e.preventDefault()
+              e.currentTarget.blur()
+            }
+          }}
+          onBlur={e => {
+            const text = e.target.value
+            setD({
+              editingDecline: false,
+              decline:
+                declineChip && text === item.rejectDrafts[declineChip]
+                  ? null
+                  : text,
+            })
+          }}
+        />
+      ) : (
+        <ReplyDraft
+          text={declineText}
+          edited={d.decline !== null}
+          canEdit={!revising}
+          onEdit={() => setD({ editingDecline: true })}
+        />
+      )}
+      {!declineFromReason && (
+        <p className={styles.note}>
+          {d.decline !== null || !declineChip
+            ? 'Reject saves this'
+            : `Reject for “${declineChip}” saves this`}
+          {item.source === 'Discord'
+            ? ' here to copy into Discord. Nothing is sent.'
+            : ' as a Gmail draft. Nothing is sent.'}
         </p>
       )}
     </section>
   ) : null
+
+  const acceptBlock =
+    item.status === 'Rejected' ? null : item.replyDraft ? (
+      <section className={styles.block}>
+        <h3 className={styles.h3}>
+          {showDecline
+            ? `Reply if you ${item.type === 'Add' ? 'publish' : 'accept'}`
+            : 'Reply draft'}
+          {item.replyTo ? `${showDecline ? ' ·' : ''} to ${item.replyTo}` : ''}
+          {item.source === 'Discord' &&
+            d.reply !== null &&
+            d.reply !== item.replyDraft && (
+              <em className={styles.edited}>edited</em>
+            )}
+        </h3>
+        {item.source === 'Discord' ? (
+          // A Discord reply is not typed over here: one click puts it on the
+          // clipboard, and Bryce pastes it in Discord (14 Sept 2026). The
+          // chat can rewrite it, though.
+          <CopyBox text={d.reply ?? item.replyDraft} />
+        ) : d.editingReply ? (
+          <textarea
+            ref={fitToText}
+            onInput={e => fitToText(e.currentTarget)}
+            className={`${styles.input} ${styles.replyInput}`}
+            rows={Math.min(
+              14,
+              Math.max(4, item.replyDraft.split('\n').length + 1)
+            )}
+            autoFocus
+            defaultValue={d.reply ?? item.replyDraft}
+            onKeyDown={e => {
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                setD({ editingReply: false })
+              } else if (isDoneKey(e)) {
+                e.preventDefault()
+                e.currentTarget.blur()
+              }
+            }}
+            onBlur={e => setD({ editingReply: false, reply: e.target.value })}
+          />
+        ) : (
+          <ReplyDraft
+            text={d.reply ?? item.replyDraft}
+            edited={d.reply !== null && d.reply !== item.replyDraft}
+            canEdit={!revising && isOpen(item)}
+            onEdit={() => setD({ editingReply: true })}
+          />
+        )}
+        {item.source !== 'Discord' && (
+          <p className={styles.note}>
+            {item.replyStatus === 'Saved' ? (
+              <>
+                Saved in Gmail as a draft
+                {item.sourceLink && (
+                  <>
+                    {' · '}
+                    <a href={item.sourceLink} target="_blank" rel="noreferrer">
+                      open the thread
+                    </a>
+                  </>
+                )}
+                . Nothing was sent.
+              </>
+            ) : item.replyStatus === 'Failed' ? (
+              `The draft could not be saved${item.error ? `: ${item.error}` : '.'}`
+            ) : isOpen(item) ? (
+              `${acceptLabel(item)} saves this as a Gmail draft. Nothing is sent.`
+            ) : (
+              replyLabel(item)
+            )}
+          </p>
+        )}
+      </section>
+    ) : null
+
+  const replyBlock =
+    item.status === 'Rejected' ? (
+      rejectReplyBlock
+    ) : acceptBlock || declineBlock ? (
+      <div className={styles.replies}>
+        {acceptBlock}
+        {declineBlock}
+      </div>
+    ) : null
 
   // The side panel: the verdict with its reasons, and under it the chat
   // with Fable (when the Mac agent is up), which is there for every item.
@@ -3136,6 +4002,14 @@ function Detail({
       className={`${styles.detailInner} ${showAside ? styles.detailTwoCol : ''}`}
     >
       <div className={styles.detailMain}>
+        {onBack && (
+          <button className={styles.backLink} onClick={onBack}>
+            <span className={styles.backArrow}>
+              <Icon src={ICON.arrow} size={12} />
+            </span>
+            Done today <kbd>Esc</kbd>
+          </button>
+        )}
         <div className={styles.detailHead}>
           <div className={styles.pills}>
             <span className={styles.pill}>
@@ -3235,17 +4109,39 @@ function Detail({
                   item={item}
                   fields={live?.fields ?? item.fields ?? {}}
                   schema={live?.schema ?? []}
+                  fable={fableFields}
                   onImage={onImage}
                   d={d}
                   setD={setD}
                   readOnly={readOnly}
                 />
               </div>
+              {placeable && (
+                <Position
+                  key={item.id}
+                  table={item.targetTable}
+                  record={item.targetRecord}
+                  name={splitTitle(item).name ?? item.title}
+                  value={SORT_FIELD in d.edits ? d.edits[SORT_FIELD] : sortWas}
+                  edited={SORT_FIELD in d.edits}
+                  canEdit={!revising && isOpen(item)}
+                  focusTick={placeFocus}
+                  onChange={sort => {
+                    // Back where the record has it is not an edit.
+                    const edits = { ...d.edits }
+                    if (sort === sortValue(sortWas)) delete edits[SORT_FIELD]
+                    else edits[SORT_FIELD] = String(sort)
+                    setD({ edits })
+                  }}
+                />
+              )}
               <Fields
                 part="rest"
                 item={item}
                 fields={live?.fields ?? item.fields ?? {}}
                 schema={live?.schema ?? []}
+                fable={fableFields}
+                omit={placeable ? SORT_FIELD : undefined}
                 onImage={onImage}
                 d={d}
                 setD={setD}
@@ -3255,11 +4151,13 @@ function Detail({
           )}
 
         {item.type === 'Change' &&
-          (nothingToApply ? (
+          (nothingToApply &&
+          fableChanges.length === 0 &&
+          extraFields.length === 0 ? (
             <p className={styles.note}>
               No field change proposed. Accept says the flag was right and you
               have dealt with it, and clears it in Airtable; Reject clears it as
-              wrong; or ask Fable for a change.
+              wrong; edit a field yourself; or ask Fable for a change.
             </p>
           ) : (
             <div className={styles.diff}>
@@ -3276,7 +4174,10 @@ function Detail({
                   </span>
                   <span className={styles.from}>
                     {(() => {
-                      const pic = pictureOf(c.from, live?.fields[c.field])
+                      const pic = pictureOf(c.from, live?.fields[c.field], {
+                        pictureField: touchesPicture(c),
+                        open: isOpen(item),
+                      })
                       return pic ? (
                         <Picture key={pic.url ?? ''} {...pic} />
                       ) : (
@@ -3294,32 +4195,21 @@ function Detail({
                       if (c.field in d.edits || d.editing === c.field) {
                         return null
                       }
-                      const pic = pictureOf(c.to, null)
+                      const pic = pictureOf(c.to, null, {
+                        pictureField: touchesPicture(c),
+                      })
                       return pic ? (
                         <Picture key={pic.url ?? ''} {...pic} />
                       ) : null
                     })() ??
                       (d.editing === c.field ? (
-                        <textarea
-                          ref={fitToText}
-                          onInput={e => fitToText(e.currentTarget)}
-                          className={styles.input}
-                          rows={2}
-                          autoFocus
-                          defaultValue={d.edits[c.field] ?? show(c.to)}
-                          onKeyDown={e => {
-                            if (e.key === 'Escape') {
-                              e.preventDefault()
-                              setD({ editing: null })
-                            } else if (isDoneKey(e)) {
-                              e.preventDefault()
-                              e.currentTarget.blur()
-                            }
-                          }}
-                          onBlur={e => {
+                        <ProposedEditor
+                          value={d.edits[c.field] ?? show(c.to)}
+                          cap={c.field === cap.field ? cap.cap : undefined}
+                          onCancel={() => setD({ editing: null })}
+                          onSave={text => {
                             // Closing the box without changing anything is
                             // not an edit.
-                            const text = e.target.value
                             const edits = { ...d.edits }
                             if (text === show(c.to)) delete edits[c.field]
                             else edits[c.field] = text
@@ -3327,20 +4217,71 @@ function Detail({
                           }}
                         />
                       ) : (
-                        <EditableValue
-                          text={friendly(
-                            c.field in d.edits ? d.edits[c.field] : show(c.to)
+                        <>
+                          <EditableValue
+                            text={friendly(
+                              c.field in d.edits ? d.edits[c.field] : show(c.to)
+                            )}
+                            edited={c.field in d.edits}
+                            canEdit={!revising}
+                            onEdit={() => setD({ editing: c.field })}
+                          />
+                          {c.field === cap.field && (
+                            <Counted
+                              text={
+                                c.field in d.edits
+                                  ? d.edits[c.field]
+                                  : show(c.to)
+                              }
+                              cap={cap.cap}
+                            />
                           )}
-                          edited={c.field in d.edits}
-                          canEdit={!revising}
-                          onEdit={() => setD({ editing: c.field })}
-                        />
+                        </>
                       ))}
                   </span>
                 </div>
               ))}
+              {fableChanges.map(c => (
+                <FableChangeRow
+                  key={`fable:${c.field}`}
+                  change={c}
+                  page={item.page}
+                  live={live?.fields[c.field]}
+                  cap={c.field === cap.field ? cap.cap : undefined}
+                />
+              ))}
+              {extraFields.map(k => (
+                <ExtraChangeRow
+                  key={`extra:${k}`}
+                  field={k}
+                  page={item.page}
+                  info={types.get(k)}
+                  was={extraWas(k)}
+                  edit={extraEdits[k]}
+                  editing={d.editing === k}
+                  canEdit={!revising}
+                  cap={k === cap.field ? cap.cap : undefined}
+                  onEditing={on => setD({ editing: on ? k : null })}
+                  onEdit={text => {
+                    const edits = { ...d.edits }
+                    if (text === null) delete edits[k]
+                    else edits[k] = text
+                    setD({ editing: null, edits })
+                  }}
+                />
+              ))}
             </div>
           ))}
+
+        {item.type === 'Change' && (
+          <FieldPicker
+            key={item.id}
+            fields={pickable}
+            canEdit={!revising}
+            focusTick={fieldFocus}
+            onPick={pickField}
+          />
+        )}
 
         {item.type === 'Rule' && (
           <section className={styles.block}>
@@ -3352,6 +4293,27 @@ function Detail({
               <p className={styles.note}>Applies to: {item.appliesTo}</p>
             )}
           </section>
+        )}
+        {item.type === 'Rule' && item.ruleWording && (
+          // The rule as it will read, folded away: the summary is what gets
+          // read (9 Sept 2026: no diffs on the card); the words are there on
+          // a click for a rule worth checking closely (5 Oct 2026).
+          <details className={styles.findingMore}>
+            <summary>Exact wording</summary>
+            <div className={styles.block}>
+              <blockquote className={styles.quote}>
+                {item.ruleWording}
+              </blockquote>
+              {item.ruleWas && (
+                <>
+                  <h3 className={styles.h3}>Replaces</h3>
+                  <blockquote className={`${styles.quote} ${styles.from}`}>
+                    {item.ruleWas}
+                  </blockquote>
+                </>
+              )}
+            </div>
+          </details>
         )}
 
         {(hasCard || !excerptBlock) && replyBlock}
@@ -3396,20 +4358,59 @@ function Detail({
               edits={d.edits}
               reply={d.reply ?? item.replyDraft}
               canEditField={k =>
+                isOpen(item) &&
                 !HOUSEKEEPING.test(k) &&
                 !COMPUTED_TYPES.has(types.get(k)?.type ?? '')
               }
-              onSetEdits={edits => setD({ edits })}
-              onSetReply={text => setD({ reply: text })}
+              onSetEdits={edits => {
+                if (isOpen(item)) setD({ edits })
+              }}
+              onSetReply={text => {
+                if (isOpen(item)) setD({ reply: text })
+              }}
               onWrote={onWrote}
+              onFableChanges={list => {
+                setFable({ id: item.id, list })
+                if (list.length) onFable?.()
+              }}
               focusTick={chatFocus}
             />
           )}
         </aside>
       )}
 
-      <div className={styles.actions}>
-        {readOnly ? (
+      <div className={styles.actions} ref={actionsRef}>
+        {!isOpen(item) ? (
+          // A decision opened from Done today: what was decided, and Undo.
+          <div className={styles.buttons}>
+            <span
+              className={`${styles.withIcon} ${item.status === 'Rejected' ? styles.no : styles.yes}`}
+            >
+              <Icon
+                src={item.status === 'Rejected' ? ICON.x : ICON.check}
+                size={12}
+              />
+              {doneLabel(item)}
+            </span>
+            {item.rejectReason && (
+              <span className={styles.note}>{item.rejectReason}</span>
+            )}
+            {replyLabel(item) && (
+              <span className={styles.note}>{replyLabel(item)}</span>
+            )}
+            <span className={styles.note}>{ago(item.decidedAt)}</span>
+            {onUndo && (
+              <button
+                className={styles.ghost}
+                disabled={undoing}
+                onClick={onUndo}
+              >
+                <Icon src={ICON.undo} size={12} />
+                {undoing ? 'Undoing…' : 'Undo'}
+              </button>
+            )}
+          </div>
+        ) : readOnly ? (
           <p className={styles.note}>
             View only: accepting, rejecting and editing stay with people who can
             edit the Queue.
@@ -3430,9 +4431,13 @@ function Detail({
                   key={chip}
                   className={`${styles.chip} ${d.chip === chip ? styles.chipOn : ''}`}
                   disabled={d.busy}
+                  onMouseEnter={() => setD({ focusChip: chip })}
+                  onMouseLeave={() => setD({ focusChip: null })}
+                  onFocus={() => setD({ focusChip: chip })}
+                  onBlur={() => setD({ focusChip: null })}
                   onClick={() => {
                     setD({ chip })
-                    act('reject', { reason: chip })
+                    rejectWith(chip)
                   }}
                 >
                   <kbd>{i + 1}</kbd>
@@ -3457,10 +4462,10 @@ function Detail({
                   if (/^[1-9]$/.test(e.key) && chip && !d.busy) {
                     e.preventDefault()
                     setD({ chip })
-                    act('reject', { reason: chip })
+                    rejectWith(chip)
                   } else if (e.key === 'Enter' && !d.busy) {
                     e.preventDefault()
-                    act('reject', { reason })
+                    rejectWith(null)
                   } else if (e.key === 'Escape' && !d.busy) {
                     e.stopPropagation()
                     setD({ mode: 'idle', chip: null, other: '' })
@@ -3472,7 +4477,7 @@ function Detail({
               <button
                 className={`${styles.button} ${styles.danger}`}
                 disabled={d.busy}
-                onClick={() => act('reject', { reason })}
+                onClick={() => rejectWith(null)}
               >
                 <Icon src={ICON.x} size={12} />
                 {d.busy ? 'Rejecting…' : 'Confirm reject'} <kbd>↵</kbd>
@@ -3497,7 +4502,7 @@ function Detail({
                 src={item.type === 'Add' ? ICON.plus : ICON.check}
                 size={12}
               />
-              {d.busy ? 'Applying…' : acceptLabel(item)} <kbd>A</kbd>
+              {d.busy ? 'Applying…' : acceptLabel(item, d.edits)} <kbd>A</kbd>
             </button>
             <button
               className={`${styles.button} ${styles.danger}`}
@@ -3520,9 +4525,6 @@ function Detail({
   )
 }
 
-const IMAGE_URL =
-  /\.(png|jpe?g|webp|gif|svg)(\?|$)|airtableusercontent\.com|blob\.vercel-storage\.com/i
-
 /** The picture links in an edit's text – one, or several separated by
  *  commas – or null when it names no link (a note about the old file). */
 function imageLinks(text: string): string[] | null {
@@ -3537,7 +4539,7 @@ function isImageList(v: unknown): v is string[] {
   return (
     Array.isArray(v) &&
     v.length > 0 &&
-    v.every(x => typeof x === 'string' && IMAGE_URL.test(x))
+    v.every(x => typeof x === 'string' && isImageLink(x))
   )
 }
 
@@ -3715,11 +4717,196 @@ function isBlank(v: unknown): boolean {
   )
 }
 
+/** The mark on a field Fable changed straight in Airtable from the chat;
+ *  hovering it shows what the field held before. */
+function ByFable({ change }: { change?: FableChange }) {
+  if (!change) return null
+  return (
+    <em
+      className={styles.byFable}
+      title={`Fable changed this in Airtable from the chat. Before: ${
+        touchesPicture(change) ? 'another picture' : friendly(show(change.from))
+      }`}
+    >
+      by Fable
+    </em>
+  )
+}
+
+/** A field Fable changed on the listing from the chat, among a change's
+ *  fields: it is on the record already, so it is shown, not edited, and
+ *  Accept does not write it again. */
+function FableChangeRow({
+  change,
+  page,
+  live,
+  cap,
+}: {
+  change: FableChange
+  page: string | null
+  /** The record's field now, for a fresh link to the new picture. */
+  live: unknown
+  cap?: number
+}) {
+  const pictureField = touchesPicture(change)
+  const side = (v: unknown, open: boolean) => {
+    const pic = pictureOf(v, live, { pictureField, open })
+    return pic ? <Picture key={pic.url ?? ''} {...pic} /> : friendly(show(v))
+  }
+  return (
+    <div className={styles.diffRow}>
+      <span className={styles.label}>
+        <FieldIcon
+          page={page}
+          name={change.field}
+          value={show(change.to)}
+          size={12}
+        />
+        {change.field}
+      </span>
+      <span className={styles.from}>{side(change.from, false)}</span>
+      <span className={styles.arrow}>
+        <Icon src={ICON.arrow} size={12} />
+      </span>
+      <span className={styles.to}>
+        {side(change.to, true)}
+        <em
+          className={styles.byFable}
+          title="Fable changed this in Airtable from the chat, so it is on the record already."
+        >
+          by Fable
+        </em>
+        {cap !== undefined && <Counted text={show(change.to)} cap={cap} />}
+      </span>
+    </div>
+  )
+}
+
+/** Field types the change view does not offer to edit: pictures upload
+ *  straight onto the record (an addition's slot does that), links to other
+ *  records and people are ids, not text. */
+const UNPICKABLE_TYPES = new Set([
+  'multipleAttachments',
+  'multipleRecordLinks',
+  'singleCollaborator',
+  'multipleCollaborators',
+])
+
+/** A field's value as its editor holds it: text, empty for nothing. */
+function editText(v: unknown): string {
+  if (v === null || v === undefined || v === '') return ''
+  if (v === true) return 'true'
+  if (v === false) return 'false'
+  return show(v)
+}
+
+/** A field edited beyond what a change proposes: what the record holds,
+ *  the arrow, and the edit, which opens its field's own editor on a click
+ *  and can be dropped again with the cross. */
+function ExtraChangeRow({
+  field,
+  page,
+  info,
+  was,
+  edit,
+  editing,
+  canEdit,
+  cap,
+  onEditing,
+  onEdit,
+}: {
+  field: string
+  page: string | null
+  info: FieldInfo | undefined
+  /** The record's value now (before Accept, on a decided change). */
+  was: unknown
+  /** The edit as text; undefined while the field is only open. */
+  edit: string | undefined
+  editing: boolean
+  canEdit: boolean
+  cap?: number
+  onEditing: (on: boolean) => void
+  /** The new text, or null to drop the edit (also when it is back to
+   *  what the record holds). */
+  onEdit: (text: string | null) => void
+}) {
+  const box = info?.type === 'checkbox'
+  const base = box ? (was === true ? 'true' : 'false') : editText(was)
+  const value = edit ?? base
+  // Back to what the record holds is not an edit.
+  const save = (text: string) => onEdit(text === base ? null : text)
+  let to: React.ReactNode
+  if (editing && !box) {
+    to = (
+      <FieldEditor
+        info={info}
+        value={value}
+        cap={cap}
+        onSave={save}
+        onCancel={() => onEditing(false)}
+      />
+    )
+  } else if (box) {
+    to = (
+      <label className={styles.check}>
+        <input
+          type="checkbox"
+          checked={value === 'true'}
+          disabled={!canEdit}
+          onChange={e => save(e.target.checked ? 'true' : 'false')}
+        />
+        {value === 'true' ? 'Yes' : 'No'}
+      </label>
+    )
+  } else {
+    to = (
+      <EditableValue
+        text={value === '' ? '—' : friendly(value)}
+        muted={value === ''}
+        edited={edit !== undefined}
+        canEdit={canEdit}
+        onEdit={() => onEditing(true)}
+      />
+    )
+  }
+  return (
+    <div className={styles.diffRow}>
+      <span className={styles.label}>
+        <FieldIcon page={page} name={field} value={value} size={12} />
+        {field}
+      </span>
+      <span className={styles.from}>
+        {box ? (was === true ? 'Yes' : 'No') : friendly(show(was))}
+      </span>
+      <span className={styles.arrow}>
+        <Icon src={ICON.arrow} size={12} />
+      </span>
+      <span className={styles.to}>
+        {to}
+        {cap !== undefined && !editing && <Counted text={value} cap={cap} />}
+        {canEdit && edit !== undefined && !editing && (
+          <button
+            type="button"
+            className={styles.dropEdit}
+            title={`Leave ${field} as it is`}
+            aria-label={`Leave ${field} as it is`}
+            onClick={() => onEdit(null)}
+          >
+            <Icon src="/images/icons/x-small.svg" size={12} />
+          </button>
+        )}
+      </span>
+    </div>
+  )
+}
+
 function Fields({
   part,
   item,
   fields,
   schema,
+  omit,
+  fable,
   onImage,
   d,
   setD,
@@ -3731,6 +4918,10 @@ function Fields({
   item: QueueItem
   fields: Record<string, unknown>
   schema: FieldInfo[]
+  /** A field shown elsewhere on the item (Sort, by the Position picker). */
+  omit?: string
+  /** Fields Fable changed on the record from the chat: marked "by Fable". */
+  fable?: Map<string, FableChange>
   onImage: (field: string, urls: string[]) => void
   d: Draft
   setD: (patch: Partial<Draft>) => void
@@ -3765,7 +4956,9 @@ function Fields({
   const seen = new Set(main.map(([k]) => k))
   const editable = ([k]: [string, unknown]) =>
     !HOUSEKEEPING.test(k) && !COMPUTED_TYPES.has(types.get(k) ?? '')
-  const rest = entries.filter(e => !seen.has(e[0]) && editable(e))
+  const rest = entries.filter(
+    e => !seen.has(e[0]) && e[0] !== omit && editable(e)
+  )
   const revising = item.status === 'Revising' || readOnly
   // The description's length against its page's cap, as the chat's edit
   // card counts it (Bryce, 24 Sept 2026).
@@ -3886,6 +5079,7 @@ function Fields({
         className={`${styles.label} ${missingSet.has(e[0]) ? styles.labelMissing : ''}`}
       >
         {e[0]}
+        <ByFable change={fable?.get(e[0])} />
       </span>
       <span className={styles.value}>
         {valueOf(e)}
@@ -3917,7 +5111,10 @@ function Fields({
         key={k}
         className={`${styles.fieldCell} ${wide ? styles.fieldWide : ''}`}
       >
-        <span className={styles.label}>{k}</span>
+        <span className={styles.label}>
+          {k}
+          <ByFable change={fable?.get(k)} />
+        </span>
         <span className={styles.value}>{valueOf(e, icon)}</span>
       </div>
     )
@@ -3987,6 +5184,8 @@ function ImageSlot({
   onDone: (urls: string[]) => void
 }) {
   const [over, setOver] = useState(false)
+  // Pictures whose links did not load.
+  const [deadThumbs, setDeadThumbs] = useState<string[]>([])
   // What is on its way: a drop, or an undo/redo of one.
   const [busy, setBusy] = useState<'upload' | 'undo' | 'redo' | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -4108,14 +5307,21 @@ function ImageSlot({
         return (
           <span key={src} className={styles.thumbItem}>
             <span className={styles.thumbWrap}>
-              <Image
-                src={src}
-                alt=""
-                width={56}
-                height={56}
-                unoptimized
-                className={styles.thumb}
-              />
+              {deadThumbs.includes(src) ? (
+                <span className={`${styles.thumb} ${styles.thumbEmpty}`} />
+              ) : (
+                <Image
+                  src={src}
+                  alt=""
+                  width={56}
+                  height={56}
+                  unoptimized
+                  className={styles.thumb}
+                  // An expired link shows the plain box, not a broken
+                  // picture; the next live read brings a fresh one.
+                  onError={() => setDeadThumbs(prev => [...prev, src])}
+                />
+              )}
               {over && <span className={styles.thumbOverlay}>Replace</span>}
             </span>
             {meta && (meta.filename || line) && (
@@ -4205,6 +5411,49 @@ function ImageSlot({
 function Counted({ text, cap }: { text: string; cap: number }) {
   const n = text.trim().length
   return n ? <CharCount n={n} cap={cap} /> : null
+}
+
+/** The box a proposed change's new value is typed over in, with a capped
+ *  field's count kept live while typing (Bryce, 5 Oct 2026: "Editing a
+ *  field that has a character limit should always show it"). */
+function ProposedEditor({
+  value,
+  cap,
+  onSave,
+  onCancel,
+}: {
+  value: string
+  cap?: number
+  onSave: (text: string) => void
+  onCancel: () => void
+}) {
+  const [typed, setTyped] = useState(value)
+  return (
+    <>
+      <textarea
+        ref={fitToText}
+        onInput={e => {
+          fitToText(e.currentTarget)
+          setTyped(e.currentTarget.value)
+        }}
+        className={styles.input}
+        rows={2}
+        autoFocus
+        defaultValue={value}
+        onKeyDown={e => {
+          if (e.key === 'Escape') {
+            e.preventDefault()
+            onCancel()
+          } else if (isDoneKey(e)) {
+            e.preventDefault()
+            e.currentTarget.blur()
+          }
+        }}
+        onBlur={e => onSave(e.target.value)}
+      />
+      {cap !== undefined && <Counted text={typed} cap={cap} />}
+    </>
+  )
 }
 
 function FieldEditor({
@@ -4619,6 +5868,7 @@ function DoneList({
   busyFor,
   errorFor,
   onUndo,
+  onOpen,
 }: {
   items: QueueItem[]
   /** The decision picked in the search results: marked and scrolled to. */
@@ -4629,6 +5879,8 @@ function DoneList({
   errorFor: (id: string) => string | null
   /** Null for a view-only session: decisions are shown, not undone. */
   onUndo: ((item: QueueItem) => void) | null
+  /** Open a decision: the item as it was decided. */
+  onOpen: (id: string) => void
 }) {
   const listRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -4661,7 +5913,17 @@ function DoneList({
           <div
             key={item.id}
             data-id={item.id}
-            className={`${styles.doneRow} ${item.id === activeId ? styles.doneRowActive : ''}`}
+            className={`${styles.doneRow} ${styles.doneRowOpen} ${item.id === activeId ? styles.doneRowActive : ''}`}
+            role="button"
+            tabIndex={0}
+            title="Open it"
+            onClick={() => onOpen(item.id)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && e.target === e.currentTarget) {
+                e.preventDefault()
+                onOpen(item.id)
+              }
+            }}
           >
             {item.logo ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -4691,21 +5953,30 @@ function DoneList({
                   {doneLabel(item)}
                 </span>
                 {item.rejectReason && <span>{item.rejectReason}</span>}
-                {item.status !== 'Rejected' && replyLabel(item) && (
-                  <span>{replyLabel(item)}</span>
-                )}
+                {replyLabel(item) && <span>{replyLabel(item)}</span>}
                 <span>{ago(item.decidedAt)}</span>
               </span>
             </span>
-            <span className={styles.doneActions}>
+            {/* The buttons act on their own, without opening the item. */}
+            <span
+              className={styles.doneActions}
+              onClick={e => e.stopPropagation()}
+            >
               {errorFor(item.id) && (
                 <span className={styles.error}>{errorFor(item.id)}</span>
               )}
               {item.source === 'Discord' &&
-                item.replyDraft &&
-                item.status !== 'Rejected' && (
+                (item.status === 'Rejected'
+                  ? discordRejectText(item)
+                  : item.replyDraft) && (
                   <>
-                    <CopyReply text={item.replyDraft} />
+                    <CopyReply
+                      text={
+                        (item.status === 'Rejected'
+                          ? discordRejectText(item)
+                          : item.replyDraft) ?? ''
+                      }
+                    />
                     {item.sourceLink && (
                       <OpenOnDiscord href={item.sourceLink} />
                     )}

@@ -196,7 +196,8 @@ function utcTime(iso: string): string {
 /** To the owner: an issue, or one wave of it, was approved for a real
  *  newsletter list on /admin/newsletter — or an approval ran into an error
  *  after ActiveCampaign was asked to schedule it, so it may be going out
- *  (`maybe`). Every real-list approval sends one, whoever pressed it. */
+ *  (`maybe`). Only the `maybe` kind is sent since 2 Oct 2026 (Bryce: no
+ *  email for an ordinary approval). */
 export function newsletterApprovalMail(p: {
   /** The sending campaign's name ("Events · Week 41, 2026 · wave 2/4"). */
   name: string
@@ -257,13 +258,13 @@ export function newsletterApprovalMail(p: {
     '',
     `${action}: ${p.adminUrl}`,
     '',
-    'This email was sent by the admin itself, once for every approval of a real newsletter list.',
+    'This email was sent by the admin itself, about an approval of a real newsletter list.',
   ].join('\n')
   const html = wrap(
     `<p>${esc(lead)}</p>` +
       `<ul>${rows.map(([k, v]) => `<li><strong>${esc(k)}:</strong> ${esc(v)}</li>`).join('')}</ul>` +
       `<p><strong>${esc(action)}:</strong> <a href="${esc(p.adminUrl)}">${esc(p.adminUrl)}</a></p>` +
-      `<p style="color:#666;font-size:13px">This email was sent by the admin itself, once for every approval of a real newsletter list.</p>`
+      `<p style="color:#666;font-size:13px">This email was sent by the admin itself, about an approval of a real newsletter list.</p>`
   )
   return { subject, text, html }
 }
