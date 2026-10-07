@@ -770,7 +770,7 @@ export default function NewsletterAdmin({
       {canSend && (
         <div className={`${adminStyles.notice} ${styles.liveWarning}`}>
           <strong>This sends real emails.</strong> Approving schedules an issue,
-          or one wave of it, to go out ten minutes later (two on the test
+          or one wave of it, to go out five minutes later (two on the test
           lists). Until then you can cancel it under Recent sends; while it’s
           sending you can pause or stop it there. Emails already delivered can’t
           be recalled. Use with caution.
