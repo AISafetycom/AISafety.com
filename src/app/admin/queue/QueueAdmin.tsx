@@ -4370,7 +4370,14 @@ function Detail({
               }}
               onWrote={onWrote}
               onFableChanges={list => {
-                setFable({ id: item.id, list })
+                // The same list again (every history load sends one) keeps
+                // the state as it is, so the page does not re-render for it.
+                setFable(prev =>
+                  prev.id === item.id &&
+                  JSON.stringify(prev.list) === JSON.stringify(list)
+                    ? prev
+                    : { id: item.id, list }
+                )
                 if (list.length) onFable?.()
               }}
               focusTick={chatFocus}
