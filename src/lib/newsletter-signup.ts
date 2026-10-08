@@ -109,6 +109,10 @@ export function normalizeEmail(raw: unknown): string | null {
 
 /** What ActiveCampaign's answer means.
  *  - subscribed: a clear thank-you; the confirmation email is on its way.
+ *  - already:    the address is already confirmed on the list, so the form
+ *                skips the confirmation and sends the reader straight to its
+ *                "you're subscribed" page (checked live, 8 October 2026);
+ *                nothing is emailed and the subscription stays active.
  *  - rejected:   it answered with an error message (`message`, possibly
  *                quoting the address: never log it unredacted).
  *  - blocked:    turned away before the form saw it (HTTP 4xx, or a
@@ -116,6 +120,7 @@ export function normalizeEmail(raw: unknown): string | null {
  *  - unknown:    anything else; it may or may not have been processed. */
 export type AcAnswer =
   | { kind: 'subscribed' }
+  | { kind: 'already' }
   | { kind: 'rejected'; message: string; invalidEmail: boolean }
   | { kind: 'blocked' }
   | { kind: 'unknown' }
@@ -131,6 +136,11 @@ const ERROR_CALL = new RegExp(
   String.raw`(?:^|[^\w$])_show_error\s*\(\s*${LITERAL_ARG}\s*,\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')`
 )
 const HTML_PAGE = /<(?:!doctype|html|head|body)\b/i
+/** The jump to the form's confirmation page that ActiveCampaign answers for an
+ *  address already confirmed on the list:
+ *  `window.top.location.href = "https://aisafety.com/subscribed/events";` */
+const ALREADY_REDIRECT =
+  /location\.href\s*=\s*["']https:\/\/(?:www\.)?aisafety\.com\/subscribed\/(?:events|training)\/?["']/
 const CLOUDFLARE =
   /cf-chl|challenge-platform|cf_chl_opt|cdn-cgi\/challenge|Just a moment\.\.\.|Attention Required! \| Cloudflare/i
 
@@ -173,6 +183,7 @@ export function readAcAnswer(status: number, text: string): AcAnswer {
       }
     }
     if (THANK_YOU_CALL.test(text)) return { kind: 'subscribed' }
+    if (ALREADY_REDIRECT.test(text)) return { kind: 'already' }
   }
   if (status >= 400 && status < 500) return { kind: 'blocked' }
   return { kind: 'unknown' }
@@ -209,12 +220,15 @@ export function logSnippet(text: string, email: string, max = 200): string {
 
 /** How one signup went.
  *  - subscribed:    ActiveCampaign took it; the confirmation email is sent.
+ *  - already_subscribed: the address is already confirmed on the list;
+ *                   nothing was sent and nothing changed.
  *  - invalid_email: ActiveCampaign said the address isn't valid.
  *  - failed:        anything else. `mayHaveSent` is true when the request
  *                   could still have reached the form (a timeout, an unclear
  *                   answer), so a confirmation email may be on its way. */
 export type SignupResult =
   | { outcome: 'subscribed' }
+  | { outcome: 'already_subscribed' }
   | { outcome: 'invalid_email' }
   | { outcome: 'failed'; mayHaveSent: boolean }
 
@@ -284,6 +298,9 @@ export async function postSignup(
     case 'subscribed':
       console.log(`${tag} ActiveCampaign took the signup (HTTP ${status})`)
       return { outcome: 'subscribed' }
+    case 'already':
+      console.log(`${tag} already subscribed; nothing sent (HTTP ${status})`)
+      return { outcome: 'already_subscribed' }
     case 'rejected':
       console.warn(
         `${tag} ActiveCampaign refused the signup (HTTP ${status}): "${logSnippet(answer.message, email)}"`

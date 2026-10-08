@@ -9,7 +9,8 @@
   real person's way: no puzzles, generous limits, and every limit is skipped
   when Upstash is unavailable.
 
-  Answers { ok: true }, or { ok: false, error, reason } where `error` is a
+  Answers { ok: true } (plus `already: true` when the address was already
+  subscribed), or { ok: false, error, reason } where `error` is a
   plain-English line for the reader and `reason` a short code for the
   dashboard and the logs. The address itself is never logged.
 */
@@ -149,6 +150,11 @@ export async function POST(req: NextRequest) {
     await recordAddressSend(newsletter, email)
   }
   if (result.outcome === 'subscribed') return succeed()
+  // Already confirmed on the list: say so, so the box doesn't promise an
+  // email that isn't coming.
+  if (result.outcome === 'already_subscribed') {
+    return Response.json({ ok: true, already: true })
+  }
   if (result.outcome === 'invalid_email') {
     return fail(400, 'invalid_email', MESSAGES.invalidEmail)
   }

@@ -60,6 +60,7 @@ export default function NewsletterSignup({
 }
 
 const SUCCESS = 'Check your inbox to confirm your subscription.'
+const ALREADY = "You're already subscribed."
 const SOMETHING_WRONG =
   'Something went wrong. Please try again in a few minutes.'
 const OFFLINE =
@@ -81,6 +82,8 @@ function ActiveCampaignSignup({
   const [hp, setHp] = useState('')
   const [state, setState] = useState<'idle' | 'sending' | 'done'>('idle')
   const [error, setError] = useState('')
+  // Set when the address was already confirmed on the list: no email comes.
+  const [already, setAlready] = useState(false)
   const statusId = useId()
   const sending = state === 'sending'
 
@@ -92,6 +95,7 @@ function ActiveCampaignSignup({
     setState('sending')
     setError('')
     let failure: { message: string; reason: string } | null = null
+    let wasAlready = false
     try {
       const res = await fetch('/api/subscribe', {
         method: 'POST',
@@ -101,9 +105,11 @@ function ActiveCampaignSignup({
       const body: unknown = await res.json().catch(() => null)
       const answer = (body ?? {}) as {
         ok?: unknown
+        already?: unknown
         error?: unknown
         reason?: unknown
       }
+      wasAlready = answer.already === true
       if (!res.ok || answer.ok !== true) {
         failure = {
           message:
@@ -123,12 +129,19 @@ function ActiveCampaignSignup({
       setError(failure.message)
       if (trackingPage) trackNewsletterSignupError(trackingPage, failure.reason)
     } else {
+      setAlready(wasAlready)
       setState('done')
-      if (trackingPage) trackNewsletterSignupSuccess(trackingPage)
+      // An address already on the list isn't a new signup: it's counted
+      // under its own reason on the dashboard, not as a success.
+      if (trackingPage) {
+        if (wasAlready) {
+          trackNewsletterSignupError(trackingPage, 'already_subscribed')
+        } else trackNewsletterSignupSuccess(trackingPage)
+      }
     }
   }
 
-  const status = state === 'done' ? SUCCESS : error
+  const status = state === 'done' ? (already ? ALREADY : SUCCESS) : error
   const statusStyle =
     state === 'done'
       ? 'paragraph-small color-light-teal'

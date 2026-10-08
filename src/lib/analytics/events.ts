@@ -154,6 +154,7 @@ const NEWSLETTER_BOX_PAGES = ['Events', 'Training', 'Funding']
 
 /** Dashboard labels for newsletter_signup_error's reason (`source`). */
 const NEWSLETTER_ERROR_LABEL: Record<string, string> = {
+  already_subscribed: 'Already subscribed (nothing sent)',
   invalid_email: 'Email address not accepted',
   upstream: 'ActiveCampaign problem',
   rate_limited: 'Too many signups from one network',

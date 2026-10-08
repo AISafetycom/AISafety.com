@@ -144,6 +144,35 @@ describe('normalizeEmail', () => {
 })
 
 describe('readAcAnswer', () => {
+  it('reads the jump to the confirmation page as already subscribed', () => {
+    // ActiveCampaign's live answer (8 October 2026) for an address already
+    // confirmed on the list: no email, straight to the form's redirect.
+    expect(
+      readAcAnswer(
+        200,
+        'window.top.location.href = "https://aisafety.com/subscribed/events";'
+      )
+    ).toEqual({ kind: 'already' })
+    expect(
+      readAcAnswer(
+        200,
+        "window.top.location.href = 'https://www.aisafety.com/subscribed/training';"
+      )
+    ).toEqual({ kind: 'already' })
+  })
+
+  it('treats a jump anywhere else as unclear', () => {
+    expect(
+      readAcAnswer(200, 'window.top.location.href = "https://example.com/";')
+    ).toEqual({ kind: 'unknown' })
+    expect(
+      readAcAnswer(
+        403,
+        'window.top.location.href = "https://aisafety.com/subscribed/events";'
+      )
+    ).toEqual({ kind: 'blocked' })
+  })
+
   it('counts a clear thank-you as subscribed', () => {
     expect(readAcAnswer(200, THANK_YOU)).toEqual({ kind: 'subscribed' })
     expect(

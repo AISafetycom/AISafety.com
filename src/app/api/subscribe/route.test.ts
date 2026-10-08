@@ -114,6 +114,19 @@ afterEach(() => {
 })
 
 describe('POST /api/subscribe', () => {
+  it('says so when the address is already subscribed, and counts no send', async () => {
+    acAnswer = async () =>
+      new Response(
+        'window.top.location.href = "https://aisafety.com/subscribed/events";',
+        { status: 200 }
+      )
+    const res = await post({ email: EMAIL, newsletter: 'events' })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true, already: true })
+    expect(acCalls).toHaveLength(1)
+    expect(h.recordAddressSend).not.toHaveBeenCalled()
+  })
+
   it('signs a reader up through the Events form', async () => {
     const res = await post({
       email: ` ${EMAIL} `,
