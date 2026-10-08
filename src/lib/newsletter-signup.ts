@@ -166,8 +166,10 @@ export function readAcAnswer(status: number, text: string): AcAnswer {
         message,
         // ActiveCampaign's wording for a bad address mentions the email
         // ("Please enter a valid email address."); any other error (a
-        // captcha, a closed form) is ours to fix, not the reader's.
-        invalidEmail: /e-?mail/i.test(message),
+        // captcha, a closed form, an address already on the list) isn't
+        // the reader's typing to fix.
+        invalidEmail:
+          /e-?mail/i.test(message) && !/already|subscribed/i.test(message),
       }
     }
     if (THANK_YOU_CALL.test(text)) return { kind: 'subscribed' }

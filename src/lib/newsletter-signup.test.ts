@@ -171,6 +171,19 @@ describe('readAcAnswer', () => {
     })
   })
 
+  it("doesn't call an address already on the list invalid", () => {
+    expect(
+      readAcAnswer(
+        200,
+        '_show_error("12", "This email address is already subscribed.", "");'
+      )
+    ).toEqual({
+      kind: 'rejected',
+      message: 'This email address is already subscribed.',
+      invalidEmail: false,
+    })
+  })
+
   it('never counts a thank-you that also carries an error', () => {
     expect(readAcAnswer(200, `${INVALID}${THANK_YOU}`).kind).toBe('rejected')
   })
