@@ -48,3 +48,41 @@ export function fableChangesOf(
   }
   return [...out.values()].filter(c => !sameValue(c.from, c.to))
 }
+
+/** On a decided item, the fields of a reply's ```edits block whose value is
+ *  the one the row saved, and the decision wrote to the listing. Values are
+ *  compared as the page's editors hold them (text, a list as one
+ *  comma-separated string), ignoring spaces at the ends and around commas. */
+export function wentOut(
+  proposed: Record<string, string>,
+  sent: Record<string, string>
+): string[] {
+  const norm = (s: string) => s.trim().replace(/\s*,\s*/g, ', ')
+  return Object.keys(proposed).filter(
+    k => k in sent && norm(sent[k]) === norm(proposed[k])
+  )
+}
+
+/** What became of an edits card on a decided item, in one line: it went
+ *  out with the decision ("Publish"), it was not applied, or some of each
+ *  (8 Oct 2026: a decided item's cards all said "The suggested edits name
+ *  fields the page cannot change", though Fable's Description had gone out
+ *  with Publish). */
+export function wentOutNote(
+  fields: string[],
+  went: string[],
+  label: string
+): string {
+  const left = fields.filter(k => !went.includes(k))
+  if (left.length === 0) return `Went out with ${label}`
+  if (went.length === 0) return 'Not applied'
+  return `${listed(went)} went out with ${label}; ${listed(left)} ${
+    left.length === 1 ? 'was' : 'were'
+  } not applied`
+}
+
+/** "A", "A and B", "A, B, and C". */
+function listed(names: string[]): string {
+  if (names.length < 3) return names.join(' and ')
+  return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`
+}

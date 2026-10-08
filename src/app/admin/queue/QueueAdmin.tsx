@@ -36,7 +36,7 @@ import SitePreview, {
   prefetchPreview,
   seedPreviews,
 } from './SitePreview'
-import Chat, { CharCount, descriptionCap } from './Chat'
+import Chat, { CharCount, descriptionCap, type Decided } from './Chat'
 import FieldPicker from './FieldPicker'
 import type { FableChange } from '@/lib/admin/queue-fable'
 import Position, { forgetOrder } from './Position'
@@ -988,6 +988,23 @@ function doneLabel(item: QueueItem): string {
     return `Changed ${n} field${n === 1 ? '' : 's'}`
   }
   return 'Applied'
+}
+
+/** A decided item's chat cards: the decision's button, and what it wrote
+ *  to the listing. Null while the item is open. Only an applied decision
+ *  wrote the row's edits; a rejection keeps them on the row but writes
+ *  nothing. */
+function decidedOf(item: QueueItem): Decided | null {
+  if (isOpen(item)) return null
+  const edits = editsAsText(item.edits ?? {})
+  return {
+    label: acceptLabel(item, edits),
+    sent: item.status === 'Applied' ? edits : {},
+    reply:
+      item.status === 'Applied' || item.status === 'Accepted'
+        ? item.replyDraft
+        : null,
+  }
 }
 
 /** The toast and the row while a decision is on its way to Airtable. */
@@ -2323,6 +2340,9 @@ export default function QueueAdmin({
         // order the Position picker read.
         forgetCard(updated)
         if (updated.type === 'Add') forgetOrder(updated.targetTable)
+        // So is the record as the page read it: read again when the item
+        // is next opened (from Done today, or back in the queue).
+        forgetLive(updated.id)
         setItems(prev =>
           prev ? prev.map(i => (i.id === updated.id ? updated : i)) : prev
         )
@@ -2436,6 +2456,7 @@ export default function QueueAdmin({
       saveReply,
       saveRejectReply,
       canEdit,
+      forgetLive,
     ]
   )
   actRef.current = act
@@ -3648,6 +3669,15 @@ function Detail({
       : (live?.fields ?? item.fields ?? {})
   const types = new Map((live?.schema ?? []).map(f => [f.name, f]))
   const editsToSave = () => coerceEdits(d.edits, original, types)
+  // An addition's fields as its field list shows them. An applied one
+  // shows what its decision wrote, over the record as read: a read made
+  // before the decision (or Comb's snapshot, until a fresh read lands)
+  // holds the old values (8 Oct 2026: a published event's list showed the
+  // submitted 209-character Description, not Fable's that went out).
+  const shownFields: Record<string, unknown> = {
+    ...(live?.fields ?? item.fields ?? {}),
+    ...(item.status === 'Applied' ? (item.edits ?? {}) : {}),
+  }
   // What Fable changed on the listing straight in Airtable from the chat
   // (its replies carry it): listed with a change's fields, marked on an
   // addition's (Bryce, 4 Oct 2026).
@@ -3732,7 +3762,7 @@ function Detail({
   const placeable =
     item.type === 'Add' &&
     (live?.schema ?? []).some(f => f.name === SORT_FIELD && f.type === 'number')
-  const sortWas = (live?.fields ?? item.fields ?? {})[SORT_FIELD]
+  const sortWas = shownFields[SORT_FIELD]
 
   const hasCard =
     item.type === 'Change' && Boolean(item.targetTable && item.targetRecord)
@@ -4119,7 +4149,7 @@ function Detail({
                 <Fields
                   part="main"
                   item={item}
-                  fields={live?.fields ?? item.fields ?? {}}
+                  fields={shownFields}
                   schema={live?.schema ?? []}
                   fable={fableFields}
                   onImage={onImage}
@@ -4150,7 +4180,7 @@ function Detail({
               <Fields
                 part="rest"
                 item={item}
-                fields={live?.fields ?? item.fields ?? {}}
+                fields={shownFields}
                 schema={live?.schema ?? []}
                 fable={fableFields}
                 omit={placeable ? SORT_FIELD : undefined}
@@ -4386,11 +4416,13 @@ function Detail({
               agent={chatAgent}
               edits={d.edits}
               reply={d.reply ?? item.replyDraft}
+              // Whether a field can be edited at all, open or not: a
+              // decided item's cards stay, read-only (`decided`).
               canEditField={k =>
-                isOpen(item) &&
                 !HOUSEKEEPING.test(k) &&
                 !COMPUTED_TYPES.has(types.get(k)?.type ?? '')
               }
+              decided={decidedOf(item)}
               onSetEdits={edits => {
                 if (isOpen(item)) setD({ edits })
               }}
