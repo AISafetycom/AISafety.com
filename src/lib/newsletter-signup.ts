@@ -26,14 +26,14 @@ export function isSignupNewsletter(v: unknown): v is SignupNewsletter {
 export interface AcForm {
   /** The form's number: the `f` hidden input on its hosted page. */
   formId: number
-  /** The `or` hidden input on its hosted page (a long hex string). */
+  /** The `or` hidden input on its hosted page (a UUID). */
   orKey: string
   /** The `u` hidden input, only if it isn't the same number as `f`. */
   u?: number
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  THE TWO ACTIVECAMPAIGN FORMS: fill these in.
+//  THE TWO ACTIVECAMPAIGN FORMS (made 8 October 2026).
 //
 //  One double opt-in form per list, made in ActiveCampaign (Website → Forms).
 //  Open the form's hosted page, https://alignment23684.activehosted.com/f/<id>,
@@ -46,10 +46,10 @@ export interface AcForm {
 //  /api/subscribe answers 503 for it and never contacts ActiveCampaign.
 // ═══════════════════════════════════════════════════════════════════════════
 export const AC_FORMS: Record<SignupNewsletter, AcForm> = {
-  // AI Safety Events (list 6). TODO: fill in from the hosted form.
-  events: { formId: 0, orKey: '' },
-  // AI Safety Training (list 7). TODO: fill in from the hosted form.
-  training: { formId: 0, orKey: '' },
+  // AI Safety Events (list 6): form 4, "AI Safety Events signup (aisafety.com)".
+  events: { formId: 4, orKey: '6a982046-09ff-443b-9e8a-2f5d5dde2ae6' },
+  // AI Safety Training (list 7): form 6, "AI Safety Training signup (aisafety.com)".
+  training: { formId: 6, orKey: 'baffe016-955b-42bc-be9e-711a2d0d44bf' },
 }
 
 /** The account's form endpoint. `jsonp=true` asks for the short JavaScript
