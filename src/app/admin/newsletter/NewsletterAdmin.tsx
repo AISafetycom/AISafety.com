@@ -401,6 +401,24 @@ function holdsFor(d: Draft, choice: Choice | null): string[] {
   return d.waves && typeof choice === 'number' ? d.waves.holds : []
 }
 
+/** How an issue stands on the page: what may be approved now, and whether
+ *  its waves are already on their way (shown as "Scheduled", with nothing
+ *  to press). */
+function approvalState(d: Draft, picked: Choice | undefined) {
+  const ok = d.problems.length === 0 && d.listId != null
+  const clean = ok && d.blocks.length === 0 && !d.alreadySent
+  // A pick that no longer fits (its wave went out) gives way to the
+  // default: the waves still to go.
+  const choice =
+    picked != null && choiceAllowed(d, picked) ? picked : defaultChoice(d)
+  const approvable = clean && choiceAllowed(d, choice)
+  // Waves on their way: the issue shows its schedule, not Approve.
+  const going = !approvable && d.waves?.going === true
+  const waiting = clean && !approvable && d.waves?.wait != null
+  const held = approvable && holdsFor(d, choice).length > 0
+  return { ok, clean, choice, approvable, going, waiting, held }
+}
+
 /** When each wave of the approval would start if it were pressed at `now`
  *  (the server's clock): waveSchedule, the rule the server uses too. */
 function scheduleFor(d: Draft, from: number, now: number): WaveSlot[] {
@@ -1078,7 +1096,17 @@ export default function NewsletterAdmin({
       <div className={adminStyles.editorBlock}>
         <div className={adminStyles.editorBlockHeader}>
           <h2 className={adminStyles.editorBlockTitle}>
-            Waiting for approval{data ? ` · ${data.drafts.length}` : ''}
+            {/* Counts only issues that need a press: one whose waves are all
+                scheduled, or that already went out, is left out. */}
+            Waiting for approval
+            {data
+              ? ` · ${
+                  data.drafts.filter(
+                    d =>
+                      !d.alreadySent && !approvalState(d, choices[d.id]).going
+                  ).length
+                }`
+              : ''}
           </h2>
         </div>
         <p className={adminStyles.sectionHint}>
@@ -1112,20 +1140,8 @@ export default function NewsletterAdmin({
           </p>
         )}
         {data?.drafts.map(draft => {
-          const ok = draft.problems.length === 0 && draft.listId != null
-          const clean = ok && draft.blocks.length === 0 && !draft.alreadySent
-          // A pick that no longer fits (its wave went out) gives way to the
-          // default: the waves still to go.
-          const picked = choices[draft.id]
-          const choice =
-            picked != null && choiceAllowed(draft, picked)
-              ? picked
-              : defaultChoice(draft)
-          const approvable = clean && choiceAllowed(draft, choice)
-          // Waves on their way: the issue shows its schedule, not Approve.
-          const going = !approvable && draft.waves?.going === true
-          const waiting = clean && !approvable && draft.waves?.wait != null
-          const held = approvable && holdsFor(draft, choice).length > 0
+          const { ok, clean, choice, approvable, going, waiting, held } =
+            approvalState(draft, choices[draft.id])
           const last = draft.waves?.waves.length ?? 0
           const unsaved = unsavedId === draft.id
           const result = testResults[draft.id] ?? null
