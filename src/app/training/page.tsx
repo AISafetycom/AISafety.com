@@ -21,6 +21,8 @@ export default async function TrainingPage() {
         title="Training programs"
         lastUpdatedIso={lastUpdated.lastUpdated}
         newsletter
+        newsletterKey="training"
+        newsletterHeading="Get a weekly summary of all new training programs"
         newsletterTrackingPage="Training"
         description={
           <>

@@ -20,6 +20,8 @@ export default async function EventsPage() {
         title="Events"
         lastUpdatedIso={lastUpdated.lastUpdated}
         newsletter
+        newsletterKey="events"
+        newsletterHeading="Get a weekly summary of all new events"
         newsletterTrackingPage="Events"
         description={
           <>

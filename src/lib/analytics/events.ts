@@ -94,16 +94,24 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   // the upper half of the screen, however they got there.
   'cards_button_click',
   'cards_view',
-  // A submit of the newsletter signup box (Events/Training). Counts the
-  // attempt — the submit opens Substack's subscribe page, so completion
-  // happens off-site. Never carries the email address.
+  // A submit of the newsletter signup box (Events, Training, Funding).
+  // Counts the attempt. Never carries the email address.
   'newsletter_signup',
-  // A click on the newsletter signup box outside the email pill — the card
-  // doubles as a link to the newsletter's own page, so visitors can read it
-  // before subscribing.
+  // How a submit on Events or Training ended: those boxes sign the reader up
+  // on the site, through ActiveCampaign (from 8 October 2026). Success = the
+  // confirmation email went out; error = the visitor saw an error, `source`
+  // saying which (/api/subscribe's reason code, 'network', or
+  // 'http_<status>'). Funding's box still opens Substack, so its signups
+  // finish off-site and record neither. Never carry the email address.
+  'newsletter_signup_success',
+  'newsletter_signup_error',
+  // A click on the newsletter signup box outside the email pill — in the
+  // Substack mode (Funding) the card doubles as a link to the newsletter's
+  // own page, so visitors can read it before subscribing.
   'newsletter_view',
-  // A click on one of the footer's external links ("Help us out" /
-  // "Newsletters" columns) — outbound, so nothing else records them.
+  // A click on one of the footer's links ("Help us out" / "Newsletters" /
+  // "For press and developers" columns) — mostly outbound, so nothing else
+  // records them.
   // `source` is the column heading, `label` the link text, `page` the path
   // the footer was on.
   'footer_click',
@@ -140,6 +148,22 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   // `page` the path it happened on. One per closed→open transition.
   'nav_overflow_open',
 ])
+
+/** The pages whose header carries the newsletter signup box. */
+const NEWSLETTER_BOX_PAGES = ['Events', 'Training', 'Funding']
+
+/** Dashboard labels for newsletter_signup_error's reason (`source`). */
+const NEWSLETTER_ERROR_LABEL: Record<string, string> = {
+  already_subscribed: 'Already subscribed (nothing sent)',
+  invalid_email: 'Email address not accepted',
+  upstream: 'ActiveCampaign problem',
+  rate_limited: 'Too many signups from one network',
+  daily_cap: 'Daily signup limit reached',
+  not_configured: 'Signup not set up yet',
+  network: "Couldn't reach the site",
+  unknown_newsletter: 'Unknown newsletter',
+  bad_request: 'Malformed request',
+}
 
 /** Dashboard labels for how the +N menu was opened (nav_overflow_open.source). */
 const NAV_OVERFLOW_OPEN_LABEL: Record<string, string> = {
@@ -646,8 +670,8 @@ export interface DashboardData {
   cardsViewShare: VisitorShare | null
   cardsButtonClicks: number
   cardsButtonShare: VisitorShare | null
-  /** Newsletter signup-box submits per page (the box lives on Events and
-   *  Training). Submits, not confirmed Substack subscriptions. */
+  /** Newsletter signup-box submits per page (the box lives on Events,
+   *  Training, and Funding). Submits, not completed signups. */
   newsletterByPage: Counted[]
   /** Distinct visitors who submitted the newsletter box on each page vs the
    *  page's distinct visitors. */
@@ -660,8 +684,12 @@ export interface DashboardData {
   siteContributeShare: VisitorShare | null
   siteAirtableShare: VisitorShare | null
   /** Same for the newsletter box, but divided by visitors to the pages that
-   *  have it (Events and Training) rather than the whole site. */
+   *  have it (Events, Training, and Funding) rather than the whole site. */
   siteNewsletterShare: VisitorShare | null
+  /** How the boxes' signups through the site ended (Events and Training,
+   *  through ActiveCampaign, from 8 October 2026), per page, and what went
+   *  wrong when they didn't. */
+  newsletterResults: NewsletterSignupResults
   /** For `selectedPage`'s own tables: distinct visitors per listing / slot /
    *  filter group / filter value / contribute button / hovered listing,
    *  each against the page's distinct visitors. Keyed by the same row names
@@ -789,6 +817,7 @@ const EMPTY: Omit<DashboardData, 'source'> = {
   siteContributeShare: null,
   siteAirtableShare: null,
   siteNewsletterShare: null,
+  newsletterResults: { byPage: [], errors: [] },
   listingShare: [],
   anyListingShare: null,
   positionShare: [],
@@ -1317,11 +1346,11 @@ function aggregate(
   const siteClickShare = anyOnSite(pageHits, 'Any listing')
   const siteContributeShare = anyOnSite(contributeHits, 'Any button')
   const siteAirtableShare = anyOnSite(airtableHits, 'Any card')
-  // The newsletter box only renders on Events and Training, so its Total row
-  // divides by those pages' visitors — a site-wide denominator would count
-  // visitors who never saw the box.
+  // The newsletter box only renders on Events, Training, and Funding, so its
+  // Total row divides by those pages' visitors — a site-wide denominator
+  // would count visitors who never saw the box.
   const newsletterVisitors = new Set<string>()
-  for (const p of ['Events', 'Training'])
+  for (const p of NEWSLETTER_BOX_PAGES)
     for (const v of viewVidsByPage.get(p) ?? []) newsletterVisitors.add(v)
   const siteNewsletterShare: VisitorShare = {
     name: 'Any submit',
@@ -1439,6 +1468,7 @@ function aggregate(
     siteContributeShare,
     siteAirtableShare,
     siteNewsletterShare,
+    newsletterResults: newsletterSignupResults(inRange, unique),
     listingShare,
     anyListingShare,
     positionShare,
@@ -1478,6 +1508,78 @@ function aggregate(
       )
       .slice(0, 50),
   }
+}
+
+export interface NewsletterResultRow {
+  /** The page the box was on ('Events', 'Training'). */
+  name: string
+  /** Signups ActiveCampaign took: the confirmation email went out. */
+  succeeded: number
+  /** Submits that showed the visitor an error instead. */
+  failed: number
+}
+
+export interface NewsletterSignupResults {
+  /** Busiest page first. */
+  byPage: NewsletterResultRow[]
+  /** The errors by what went wrong, most common first. */
+  errors: Counted[]
+}
+
+/** How the signup boxes' signups through the site ended, per page, and what
+ *  went wrong when they didn't. Follows the count mode: unique = one success
+ *  per visitor per page per day, and one error per visitor per page per kind
+ *  of error per day. Exported for the unit test. */
+export function newsletterSignupResults(
+  inRange: AnalyticsEvent[],
+  unique: boolean
+): NewsletterSignupResults {
+  const onePerDay = (
+    type: string,
+    keyOf: (e: AnalyticsEvent) => string
+  ): AnalyticsEvent[] => {
+    const hits = inRange.filter(e => e.type === type && e.page)
+    if (!unique) return hits
+    const seen = new Set<string>()
+    return hits.filter(e => {
+      if (!e.vid) return true
+      const t = Date.parse(e.ts)
+      const day = Number.isNaN(t) ? '' : dashboardDay(t)
+      const key = `${e.vid}\x00${day}\x00${e.page}\x00${keyOf(e)}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }
+  const succeeded = onePerDay('newsletter_signup_success', () => '')
+  const failed = onePerDay('newsletter_signup_error', e => e.source ?? '')
+  const rows = new Map<string, NewsletterResultRow>()
+  const rowFor = (page: string) => {
+    let row = rows.get(page)
+    if (!row) {
+      row = { name: page, succeeded: 0, failed: 0 }
+      rows.set(page, row)
+    }
+    return row
+  }
+  for (const e of succeeded) rowFor(e.page as string).succeeded++
+  for (const e of failed) rowFor(e.page as string).failed++
+  return {
+    byPage: [...rows.values()].sort(
+      (a, b) => b.succeeded + b.failed - (a.succeeded + a.failed)
+    ),
+    errors: tally(failed.map(e => newsletterErrorLabel(e.source))),
+  }
+}
+
+/** What a newsletter_signup_error's reason (`source`) means, in words. */
+export function newsletterErrorLabel(reason: string | undefined): string {
+  if (!reason) return 'Unknown'
+  const http = /^http_(\d{3})$/.exec(reason)
+  return (
+    NEWSLETTER_ERROR_LABEL[reason] ??
+    (http ? `Site error (HTTP ${http[1]})` : reason)
+  )
 }
 
 /** Page paths as their resource-page analytics names, so page views line up

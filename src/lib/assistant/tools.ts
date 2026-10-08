@@ -246,7 +246,7 @@ function eventApplicationStatus(
     return {
       applicationsStatus: 'recurring',
       applicationsNote:
-        "An evergreen program that runs repeatedly — no dates for the next round are listed here. Fine to recommend the program itself. If the user asks when it runs, how often, or whether there'll be another round, call get_program_history with this listing's id first — the site usually has its earlier rounds on file, and their pattern is the honest answer. For the current round's dates and deadline, point the user to the program's own page, and suggest the AI Safety Events & Training newsletter to catch new rounds as they are announced.",
+        "An evergreen program that runs repeatedly — no dates for the next round are listed here. Fine to recommend the program itself. If the user asks when it runs, how often, or whether there'll be another round, call get_program_history with this listing's id first — the site usually has its earlier rounds on file, and their pattern is the honest answer. For the current round's dates and deadline, point the user to the program's own page, and suggest the AI Safety Training newsletter (signed up for on /training) to catch new rounds as they are announced.",
     }
   }
   const close =

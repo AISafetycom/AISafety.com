@@ -70,10 +70,18 @@ export default function Footer() {
               <div
                 className={`paragraph-small flex flex-col gap-8px opacity-80 ${styles.links}`}
               >
+                {/* Events and Training sign up through the box at the top
+                    of their pages; Funding and Updates are still on
+                    Substack. */}
                 <FooterLink
-                  href="https://aisafetyeventsandtraining.substack.com/"
+                  href="/events"
                   section="Newsletters"
-                  label="AI Safety Events & Training"
+                  label="AI Safety Events"
+                />
+                <FooterLink
+                  href="/training"
+                  section="Newsletters"
+                  label="AI Safety Training"
                 />
                 <FooterLink
                   href="https://aisafetyfunding.substack.com/"

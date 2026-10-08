@@ -5,6 +5,7 @@ import Icon from '@/components/Icon'
 import {
   readDashboard,
   sourceSlug,
+  newsletterErrorLabel,
   PAGE_NAME_BY_PATH,
   type Counted,
   type DateRange,
@@ -16,6 +17,7 @@ import {
   type OverallListingRow,
   type SearchPanelData,
   type MapSearchPanelData,
+  type NewsletterSignupResults,
   type VisitorShare,
   DASHBOARD_TZ,
   dashboardDay,
@@ -441,6 +443,9 @@ function labelFor(e: {
     const value = e.label ?? '?'
     return `Filtered by ${displayFilterGroup(page, group)}: ${displayFilterValue(page, group, value)}`
   }
+  // A newsletter signup error's reason is a short code; spell it out.
+  if (e.type === 'newsletter_signup_error')
+    return `Newsletter signup error: ${newsletterErrorLabel(e.source)}`
   // A rating's label is the bare value ('up' | 'down' | 'removed'), so spell
   // it out.
   if (e.type === 'chatbot_rating') {
@@ -807,25 +812,33 @@ export default async function AnalyticsPage({
             <NewsletterView
               sends={sendStats}
               signups={
-                <Panel title="Signup box on the site">
-                  <CountTable
-                    rows={data.newsletterByPage.map(r => ({
-                      ...r,
-                      name: labelByPage.get(r.name) ?? r.name,
-                    }))}
-                    labelHead="Page"
-                    countHead="Submits"
-                    total={newsletterTotalByPage}
-                    shareFor={name => newsletterShare.get(name)}
-                    totalShare={data.siteNewsletterShare ?? undefined}
+                <>
+                  <Panel title="Signup box on the site">
+                    <CountTable
+                      rows={data.newsletterByPage.map(r => ({
+                        ...r,
+                        name: labelByPage.get(r.name) ?? r.name,
+                      }))}
+                      labelHead="Page"
+                      countHead="Submits"
+                      total={newsletterTotalByPage}
+                      shareFor={name => newsletterShare.get(name)}
+                      totalShare={data.siteNewsletterShare ?? undefined}
+                    />
+                    <p className={styles.caption}>
+                      Submits of the newsletter email box on /events, /training,
+                      and /funding – not every submit ends in a signup (how the
+                      /events and /training ones ended is below). % of visitors
+                      = the share of the page&apos;s visitors who submitted it;
+                      the Total row divides by visitors to those three pages
+                      combined. Recording since 29 July 2026.
+                    </p>
+                  </Panel>
+                  <SignupResultsPanel
+                    results={data.newsletterResults}
+                    labelFor={name => labelByPage.get(name) ?? name}
                   />
-                  <p className={styles.caption}>
-                    Submits of the newsletter email box on the resource pages –
-                    may not all be successful signups. % of visitors = the share
-                    of the page&apos;s visitors who submitted it. Recording
-                    since 29 July 2026.
-                  </p>
-                </Panel>
+                </>
               }
             />
           )}
@@ -1307,11 +1320,13 @@ export default async function AnalyticsPage({
                   totalShare={data.siteNewsletterShare ?? undefined}
                 />
                 <p className={styles.caption}>
-                  Submits of the weekly-summary email box on /events and
-                  /training – may not all be successful signups. % of visitors =
-                  the share of the page&apos;s visitors who submitted it; the
-                  Total row divides by visitors to those two pages combined,
-                  since only they have the box. Recording since 29 July 2026.
+                  Submits of the newsletter email box on /events, /training, and
+                  /funding – not every submit ends in a signup (the Newsletters
+                  tab shows how the /events and /training ones ended). % of
+                  visitors = the share of the page&apos;s visitors who submitted
+                  it; the Total row divides by visitors to those three pages
+                  combined, since only they have the box. Recording since 29
+                  July 2026.
                 </p>
               </Panel>
               <Panel title="Footer clicks">
@@ -1321,9 +1336,9 @@ export default async function AnalyticsPage({
                   total={footerTotal}
                 />
                 <p className={styles.caption}>
-                  The footer&apos;s external links – the &quot;Help us out&quot;
-                  and &quot;Newsletters&quot; columns. Recording since 29 July
-                  2026.
+                  The footer&apos;s link columns – &quot;Help us out&quot;,
+                  &quot;Newsletters&quot;, and &quot;For press and
+                  developers&quot;. Recording since 29 July 2026.
                 </p>
               </Panel>
               <Panel title="+N menu opens">
@@ -1587,6 +1602,72 @@ function DashboardTabs({
         ))}
       </div>
     </div>
+  )
+}
+
+/** The Newsletters tab's results of the signups made on the site: the
+ *  /events and /training boxes sign people up through ActiveCampaign (from 8
+ *  October 2026). Per page, how many went through and how many showed the
+ *  visitor an error, then what the errors were. */
+function SignupResultsPanel({
+  results,
+  labelFor,
+}: {
+  results: NewsletterSignupResults
+  labelFor: (name: string) => string
+}) {
+  const succeeded = results.byPage.reduce((n, r) => n + r.succeeded, 0)
+  const failed = results.byPage.reduce((n, r) => n + r.failed, 0)
+  return (
+    <Panel title="Signups through the site">
+      {results.byPage.length === 0 ? (
+        <p className={styles.dim}>No signups through the site in this range.</p>
+      ) : (
+        <SortableTable
+          columns={[
+            { label: 'Page', sort: 'text' },
+            { label: 'Signed up', className: styles.numCol, sort: 'number' },
+            { label: 'Errors', className: styles.numCol, sort: 'number' },
+          ]}
+          values={results.byPage.map(r => [
+            labelFor(r.name),
+            r.succeeded,
+            r.failed,
+          ])}
+          foot={
+            <tr className={styles.totalRow}>
+              <td className={styles.totalLabel}>Total</td>
+              <td className={styles.numCol}>{succeeded.toLocaleString()}</td>
+              <td className={styles.numCol}>{failed.toLocaleString()}</td>
+            </tr>
+          }
+        >
+          {results.byPage.map(r => (
+            <tr key={r.name}>
+              <td>{labelFor(r.name)}</td>
+              <td className={styles.numCol}>{r.succeeded.toLocaleString()}</td>
+              <td className={styles.numCol}>{r.failed.toLocaleString()}</td>
+            </tr>
+          ))}
+        </SortableTable>
+      )}
+      {results.errors.length > 0 && (
+        <CountTable
+          rows={results.errors}
+          labelHead="What went wrong"
+          countHead="Errors"
+          total={failed}
+        />
+      )}
+      <p className={styles.caption}>
+        Since 8 October 2026 the boxes on /events and /training sign people up
+        on the site, through ActiveCampaign. Signed up = ActiveCampaign took the
+        address and emailed a link to confirm it (whether the reader confirmed
+        shows in ActiveCampaign, not here). Errors = the visitor saw an error
+        message instead. /funding&apos;s box still opens Substack, so its
+        signups finish there and don&apos;t show here.
+      </p>
+    </Panel>
   )
 }
 

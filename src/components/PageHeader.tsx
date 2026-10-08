@@ -1,4 +1,5 @@
 import { ReactNode } from 'react'
+import type { SignupNewsletter } from '@/lib/newsletter-signup'
 import NewsletterSignup from './NewsletterSignup'
 import RelativeDate from './RelativeDate'
 import styles from './PageHeader.module.css'
@@ -10,11 +11,15 @@ interface PageHeaderProps {
   description: ReactNode
   id?: string
   topPadding?: string
-  /** Show the newsletter signup beside the header (stacked below on mobile). */
+  /** Show the newsletter signup beside the header (stacked below on mobile).
+   *  Needs a heading and either `newsletterKey` or `newsletterSubscribeUrl`. */
   newsletter?: boolean
-  /** Heading for the signup box (defaults to the events & training one). */
+  /** Heading for the signup box. */
   newsletterHeading?: string
-  /** Substack subscribe page the signup box opens. */
+  /** The newsletter the box signs people up to on the site, through
+   *  ActiveCampaign (/events, /training). */
+  newsletterKey?: SignupNewsletter
+  /** Or: the Substack subscribe page the box opens (/funding). */
   newsletterSubscribeUrl?: string
   /** Analytics page name for the signup box's submits (e.g. 'Events'). */
   newsletterTrackingPage?: string
@@ -30,6 +35,7 @@ export default function PageHeader({
   topPadding = 'padding-top-56px',
   newsletter,
   newsletterHeading,
+  newsletterKey,
   newsletterSubscribeUrl,
   newsletterTrackingPage,
   children,
@@ -58,6 +64,7 @@ export default function PageHeader({
       <div className={styles.newsletterSlot}>
         <NewsletterSignup
           heading={newsletterHeading}
+          newsletter={newsletterKey}
           subscribeUrl={newsletterSubscribeUrl}
           trackingPage={newsletterTrackingPage}
         />

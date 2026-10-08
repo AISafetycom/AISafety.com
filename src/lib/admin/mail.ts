@@ -1,7 +1,9 @@
 // Email for the admin: the owner hears when someone requests access, a
 // person hears when they have been approved, the owner hears (at most
-// once a day) when someone else publishes the donation guide, and the owner
-// hears about every approval of a real newsletter list (kind "digest").
+// once a day) when someone else publishes the donation guide, the owner
+// hears about every approval of a real newsletter list (kind "digest"), and
+// the owner hears (at most once a day) when the newsletter signup boxes pass
+// their daily alert line (kind "digest").
 //
 // Sent the same way the hackathon forms send their confirmations: a small
 // Google Apps Script web app in the owner's Google account (source mirrored
@@ -328,6 +330,45 @@ export function digestMail(p: {
       `<p><strong>Live page:</strong> <a href="${esc(p.pageUrl)}">${esc(p.pageUrl)}</a><br>` +
       `<strong>History and restore:</strong> <a href="${esc(p.adminUrl)}">${esc(p.adminUrl)}</a></p>` +
       `<p style="color:#666;font-size:13px">This email was sent by the admin itself, at most once a day.</p>`
+  )
+  return { subject, text, html }
+}
+
+/** To the owner: the newsletter signup boxes on /events and /training passed
+ *  their daily alert line (`alertAfter` signups sent to ActiveCampaign in one
+ *  UTC day). Sent once a day at most, as kind "digest". */
+export function signupAlertMail(p: {
+  /** 'YYYY-MM-DD', UTC. */
+  day: string
+  alertAfter: number
+  /** Above this many in a day the boxes turn signups away. */
+  cap: number
+  analyticsUrl: string
+}): Mail {
+  const date = new Date(`${p.day}T00:00:00Z`).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  })
+  const n = (x: number) => x.toLocaleString('en-US')
+  const subject = `Newsletter signups passed ${n(p.alertAfter)} today`
+  const lines = [
+    `More than ${n(p.alertAfter)} signups have come through the newsletter boxes on /events and /training today (${date}, UTC).`,
+    'That can be real interest, such as a mention somewhere popular, or a bot. A bot’s addresses never confirm, so a pile of unconfirmed contacts in ActiveCampaign points to a bot.',
+    `Above ${n(p.cap)} signups in a day, the boxes stop taking signups until midnight UTC.`,
+  ]
+  const footer = 'This email was sent by the site itself, at most once a day.'
+  const text = [
+    ...lines.flatMap(l => [l, '']),
+    `Signup numbers: ${p.analyticsUrl}`,
+    '',
+    footer,
+  ].join('\n')
+  const html = wrap(
+    lines.map(l => `<p>${esc(l)}</p>`).join('') +
+      `<p><strong>Signup numbers:</strong> <a href="${esc(p.analyticsUrl)}">${esc(p.analyticsUrl)}</a></p>` +
+      `<p style="color:#666;font-size:13px">${esc(footer)}</p>`
   )
   return { subject, text, html }
 }

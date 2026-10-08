@@ -4,6 +4,7 @@ import {
   newsletterApprovalMail,
   requestMail,
   sendAdminMail,
+  signupAlertMail,
 } from './mail'
 
 describe('requestMail', () => {
@@ -185,5 +186,27 @@ describe('newsletterApprovalMail', () => {
     expect(maybe.text).toContain('Campaign: unknown')
     expect(maybe.text).toContain('an unknown number of people')
     expect(maybe.text).toContain('Check Recent sends, and cancel it there')
+  })
+})
+
+describe('signupAlertMail', () => {
+  it('says what happened, what it may mean, and where to look, in both bodies', () => {
+    const m = signupAlertMail({
+      day: '2026-10-08',
+      alertAfter: 100,
+      cap: 1000,
+      analyticsUrl: 'https://aisafety.com/admin/analytics?tab=newsletters',
+    })
+    expect(m.subject).toBe('Newsletter signups passed 100 today')
+    for (const body of [m.text, m.html]) {
+      expect(body).toContain('More than 100 signups')
+      expect(body).toContain('8 October 2026, UTC')
+      expect(body).toContain('/events and /training')
+      expect(body).toContain('Above 1,000 signups in a day')
+      expect(body).toContain(
+        'https://aisafety.com/admin/analytics?tab=newsletters'
+      )
+      expect(body).toContain('at most once a day')
+    }
   })
 })

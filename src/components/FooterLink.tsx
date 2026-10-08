@@ -4,8 +4,9 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { trackFooterClick } from '@/lib/analytics'
 
-/** An external footer link that records its clicks — outbound, so nothing
- *  else would. The tiny client wrapper keeps Footer itself server-rendered. */
+/** A footer link that records its clicks — the outbound ones especially,
+ *  which nothing else would. The tiny client wrapper keeps Footer itself
+ *  server-rendered. */
 export default function FooterLink({
   href,
   section,
