@@ -46,6 +46,7 @@ vi.mock('@/lib/newsletter-signup', async importOriginal => ({
   },
 }))
 
+import { DAILY_CAP } from '@/lib/newsletter-signup-limits'
 import { POST } from './route'
 
 const EMAIL = 'Ada.Lovelace@Example.ORG'
@@ -221,10 +222,10 @@ describe('POST /api/subscribe', () => {
     expect(h.recordAddressSend).not.toHaveBeenCalled()
   })
 
-  it('turns signups away above 1,000 in a day', async () => {
+  it('turns signups away above the daily cap', async () => {
     h.countSignupToday.mockResolvedValue({
       day: '2026-10-08',
-      count: 1001,
+      count: DAILY_CAP + 1,
       alert: false,
     })
     const res = await post({ email: EMAIL, newsletter: 'events' })
@@ -237,10 +238,10 @@ describe('POST /api/subscribe', () => {
     expect(acCalls).toHaveLength(0)
   })
 
-  it('still signs up the 1,000th of the day', async () => {
+  it('still signs up the last one the daily cap allows', async () => {
     h.countSignupToday.mockResolvedValue({
       day: '2026-10-08',
-      count: 1000,
+      count: DAILY_CAP,
       alert: false,
     })
     const res = await post({ email: EMAIL, newsletter: 'events' })

@@ -267,7 +267,7 @@ describe('per day', () => {
     expect(to).toBe('bryceerobertson@gmail.com')
     expect(mail.subject).toBe('Newsletter signups passed 100 today')
     expect(mail.text).toContain('8 October 2026')
-    expect(mail.text).toContain('1,000')
+    expect(mail.text).toContain('500')
     expect(mail.text).toContain(
       'https://aisafety.com/admin/analytics?tab=newsletters'
     )
