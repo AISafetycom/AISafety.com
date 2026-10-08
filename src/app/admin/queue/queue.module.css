@@ -2443,6 +2443,11 @@ select.input {
   content: '✓';
 }
 
+/* A decided item's card whose values did not go with the decision. */
+.chatCardFoot .chatTool.chatNotApplied::before {
+  content: '·';
+}
+
 /* Files in the chat (20 Sept 2026): the dashed frame while one is dragged
    over the panel, the clip in the box, the chips waiting to go, and the
    pictures and files shown under a sent message. */
