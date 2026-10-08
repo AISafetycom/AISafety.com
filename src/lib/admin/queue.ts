@@ -14,7 +14,11 @@
                       rejected suggestion 24 hours later, so there is an undo)
     revise          → mark Revising with a note; the worker asks Claude to
                       rewrite the proposal and puts it back as Pending
-    undo            → reverse an accept or reject made in the last day
+    later           → set Review again on a week ahead: the page sets the
+                      item aside until then, and the Mac worker has Fable
+                      review it again when it is due (queue-later.ts)
+    undo            → reverse an accept or reject made in the last day, or
+                      bring back an item set aside
 
   Writes to the resource tables go through the raw admin client (no cache);
   after a publish or a field change the public cache tag is revalidated so
@@ -36,6 +40,7 @@ import { parseRejectDrafts } from './queue-decline'
 import { isExpiredAttachment } from './attachment-url'
 import { roomFor, SORT_FIELD, type Placed } from './queue-place'
 import type { ListingDates } from './queue-urgent'
+import { reviewAgainAt } from './queue-later'
 
 export const QUEUE_TABLE_ID = 'tblonlKwIFJ7Aa8QN'
 const BROOM_ISSUES_TABLE_ID = 'tblntD3WITPEgjHRK'
@@ -69,6 +74,8 @@ const F = {
   // Mac saves exactly that (Bryce, 5 Oct 2026).
   rejectDrafts: 'fldPusDzL9nnzibyt',
   rejectReply: 'fldUQqwJn7btv6EBP',
+  // "Review again in a week": when the item comes back (queue-later.ts).
+  reviewAgainOn: 'fldm9eFBj0iWuN23P',
 } as const
 
 export type QueueType = 'Add' | 'Change' | 'Rule'
@@ -169,6 +176,9 @@ export interface QueueItem {
   decidedAt: string | null
   appliedAt: string | null
   error: string | null
+  /** Set aside with "Review again in a week": when it comes back. The Mac
+   *  worker clears it once Fable has looked again. */
+  reviewAgainOn: string | null
 }
 
 export type NoReply = 'no email' | 'no notification'
@@ -600,6 +610,7 @@ function rowToItem(
     decidedAt: str(f[F.decidedAt]),
     appliedAt: str(f[F.appliedAt]),
     error: str(f[F.error]),
+    reviewAgainOn: str(f[F.reviewAgainOn]),
   }
 }
 
@@ -1784,6 +1795,14 @@ export async function rejectItem(
   await patchQueueRow(item.id, fields)
 }
 
+/** "Review again in a week": the item leaves the list until then, and the
+ *  Mac worker has Fable review it again when it is due. Nothing else on the
+ *  row changes, so its edits and chat are there when it comes back. */
+export async function laterItem(item: QueueItem): Promise<void> {
+  requireOpen(item)
+  await patchQueueRow(item.id, { [F.reviewAgainOn]: reviewAgainAt(Date.now()) })
+}
+
 /** What one save changes on the row: with `keys` (the fields the page
  *  touched since its last save), only those keys move – set to the page's
  *  value, or dropped when the page no longer edits them – and every other
@@ -1833,6 +1852,14 @@ export async function saveEdits(
 }
 
 export async function undoItem(item: QueueItem): Promise<void> {
+  // An item set aside: back in the list now.
+  if (
+    (item.status === 'Pending' || item.status === 'Failed') &&
+    item.reviewAgainOn
+  ) {
+    await patchQueueRow(item.id, { [F.reviewAgainOn]: null })
+    return
+  }
   const reopen: Record<string, unknown> = {
     [F.status]: 'Pending',
     [F.decidedAt]: null,
