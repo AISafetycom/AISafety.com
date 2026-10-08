@@ -140,6 +140,11 @@ export interface QueueItem {
   /** Email/Discord: who the reply draft goes to (from the proposal's
    *  `reply` block, written at intake by the Secretary). */
   replyTo: string | null
+  /** Form: why the Mac wrote no reply draft – the form came in without an
+   *  email, or its Airtable notification isn't in Gmail to reply in. From
+   *  the proposal's `no_reply` (worker duty f); shown where the draft would
+   *  be (Bryce, 8 Oct 2026). Null once a `reply` block is there. */
+  noReply: NoReply | null
   /** Rejected Email/Form: the reply the Mac wrote for this rejection and
    *  saved as a Gmail draft (Bryce, 4 Oct 2026: "when I reject something
    *  which was suggested, it should have an email response like when I
@@ -165,6 +170,9 @@ export interface QueueItem {
   appliedAt: string | null
   error: string | null
 }
+
+export type NoReply = 'no email' | 'no notification'
+const NO_REPLY: readonly string[] = ['no email', 'no notification']
 
 export interface RejectReply {
   /** The words saved in Gmail (or, for Discord, to copy); null until they
@@ -453,6 +461,17 @@ export function rejectReplyOf(
   return null
 }
 
+/** Why a Form row has no reply draft (the proposal's `no_reply`, written by
+ *  the Mac's forms duty), or null: none given, or a `reply` block is there. */
+export function noReplyOf(proposal: Record<string, unknown>): NoReply | null {
+  if (isRecord(proposal.reply)) return null
+  const why = str(proposal.no_reply)
+  if (!why) return null
+  if (NO_REPLY.includes(why)) return why as NoReply
+  console.warn(`Queue: unknown no_reply "${why}"`)
+  return null
+}
+
 function rowToItem(
   row: {
     id: string
@@ -473,6 +492,7 @@ function rowToItem(
   let ruleWording: string | null = null
   let ruleWas: string | null = null
   let replyTo: string | null = null
+  let noReply: NoReply | null = null
   let rejectReply: RejectReply | null = null
   let saidBy: SaidBy | null = null
   if (isRecord(proposal)) {
@@ -505,12 +525,13 @@ function rowToItem(
         }
       }
     }
+    noReply = noReplyOf(proposal)
     if (isRecord(proposal.fields)) {
       fields = proposal.fields
     } else if (changes.length === 0 && !diff) {
       const rest: Record<string, unknown> = {}
       for (const [k, v] of Object.entries(proposal)) {
-        if (k !== 'name' && k !== 'url') rest[k] = v
+        if (k !== 'name' && k !== 'url' && k !== 'no_reply') rest[k] = v
       }
       fields = rest
     }
@@ -567,6 +588,7 @@ function rowToItem(
     replyDraft: str(f[F.replyDraft]),
     replyStatus: str(f[F.replyStatus]),
     replyTo,
+    noReply,
     rejectReply,
     rejectDrafts: parseRejectDrafts(f[F.rejectDrafts]),
     saidBy,
