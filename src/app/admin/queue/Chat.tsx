@@ -704,12 +704,57 @@ export default function Chat({
   // a reload).
   const deliverRef = useRef(deliver)
   deliverRef.current = deliver
+  const queuedRef = useRef(queued)
+  queuedRef.current = queued
   useEffect(() => {
     if (busy || pending || queued.length === 0) return
     const [next, ...rest] = queued
+    queuedRef.current = rest
     setQueued(rest)
     void deliverRef.current(next.text, next.files)
   }, [busy, pending, queued])
+
+  // Messages still waiting when the panel closes – Bryce moved to another
+  // item before the stopped reply ended – go anyway, as one message. The Mac
+  // answers in the background and the item shows under "Fable replying".
+  // Before, they were thrown away, and the reply they had stopped was never
+  // answered (8 Oct 2026, Mexico Tech Policy Panel).
+  const callRef = useRef(call)
+  callRef.current = call
+  useEffect(
+    () => () => {
+      const waiting = queuedRef.current
+      if (waiting.length === 0) return
+      const msg = waiting
+        .map(q => q.text)
+        .filter(Boolean)
+        .join('\n\n')
+      const going = waiting.flatMap(q => q.files)
+      void (async () => {
+        const attachments = await Promise.all(
+          going.map(async f => ({
+            name: f.name,
+            type: f.type,
+            data: await base64Of(f.file),
+          }))
+        )
+        const res = await callRef.current(
+          '/chat',
+          attachments.length ? { message: msg, attachments } : { message: msg }
+        )
+        if (!res.ok) {
+          console.warn(
+            `Queue chat: a waiting message was not taken (HTTP ${res.status})`
+          )
+        }
+        // The Mac keeps answering after the page lets go of the stream.
+        await res.body?.cancel()
+      })().catch(e => {
+        console.warn('Queue chat: a waiting message did not reach the Mac', e)
+      })
+    },
+    []
+  )
 
   const startOver = async () => {
     if (busy || pending) return
