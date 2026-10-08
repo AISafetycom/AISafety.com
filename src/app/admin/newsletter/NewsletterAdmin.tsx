@@ -244,6 +244,52 @@ function when(iso: string | null): string {
   })
 }
 
+/** Recent sends' date: "Today at 14:42", "Yesterday at 13:57", "2 October
+ *  at 12:42" (the year only when it isn't this one). `when` gives the full
+ *  date for the tooltip. */
+function whenShort(iso: string | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const time = d.toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+  const now = new Date()
+  const midnight = (x: Date) =>
+    new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const days = Math.round((midnight(now) - midnight(d)) / 86_400_000)
+  if (days === 0) return `Today at ${time}`
+  if (days === 1) return `Yesterday at ${time}`
+  if (days === -1) return `Tomorrow at ${time}`
+  const date = d.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    ...(d.getFullYear() !== now.getFullYear() && { year: 'numeric' }),
+  })
+  return `${date} at ${time}`
+}
+
+/** "Funding · Issue #22, 2026" → Funding, "Issue #22" (the Sent column
+ *  carries the year). A name without " · " (a one-off test) stays whole. */
+function splitIssueName(name: string): {
+  newsletter: string | null
+  issue: string
+} {
+  const at = name.indexOf(' · ')
+  if (at < 0) return { newsletter: null, issue: name }
+  return {
+    newsletter: name.slice(0, at),
+    issue: name.slice(at + 3).replace(/,\s*\d{4}$/, ''),
+  }
+}
+
+const NEWSLETTER_DOTS: Record<string, string> = {
+  Events: styles.dotEvents,
+  Training: styles.dotTraining,
+  Funding: styles.dotFunding,
+}
+
 /** "986 people", "1 person". */
 function people(n: number | null): string {
   if (n == null) return 'an unknown number of people'
@@ -796,8 +842,7 @@ export default function NewsletterAdmin({
           <strong>This sends real emails.</strong> Approving schedules an issue,
           or one wave of it, to go out five minutes later (two on the test
           lists). Until then you can cancel it under Recent sends; while it’s
-          sending you can pause or stop it there. Emails already delivered can’t
-          be recalled. Use with caution.
+          sending you can pause or stop it there. Use with caution.
         </div>
       )}
       {!canSend && (
@@ -863,15 +908,6 @@ export default function NewsletterAdmin({
           big list goes out in waves, one at a time, at least 18 hours apart:
           the draft stays here until its last wave.
         </p>
-        {testTo && (
-          <p className={adminStyles.sectionHint}>
-            Send test emails an issue to you alone ({testTo}), exactly as
-            subscribers will get it but with “TEST:” in front of the subject, so
-            you can read it and try the links first. Clicks from this browser
-            aren’t counted while you’re signed in. Don’t use the unsubscribe
-            links in a test copy.
-          </p>
-        )}
         {/* The first read takes several seconds; say so where the drafts
             will appear, not only in the small line at the top (Bryce, 16
             Sept 2026: "make this more obvious"). */}
@@ -1171,35 +1207,36 @@ export default function NewsletterAdmin({
           <p className={styles.notice}>No sends yet.</p>
         )}
         {data && data.recent.length > 0 && (
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th>Campaign</th>
-                <th>List</th>
-                <th>Status</th>
-                <th>Sent</th>
-                <th>To</th>
-                <th>Opens</th>
-                <th>Clicks</th>
-                <th>Unsubs</th>
-              </tr>
-            </thead>
-            <tbody>
+          <div className={styles.tableScroll}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>Issue</th>
+                  <th>Sent</th>
+                  <th className={styles.num}>Sent to</th>
+                  <th className={styles.num}>Opened</th>
+                  <th className={styles.num}>Clicks</th>
+                  <th className={styles.num}>Unsubscribed</th>
+                </tr>
+              </thead>
+              {/* One body per issue, so the alternating shade covers an
+                  issue's waves and its clicks list together. */}
               {groupRecent(data.recent).map(rows => (
-                <SendRows
-                  key={rows[0].group}
-                  rows={rows}
-                  canSend={data.canSend}
-                  openClicks={openClicks}
-                  onToggleClicks={key =>
-                    setOpenClicks(openClicks === key ? null : key)
-                  }
-                  stopBusyId={stopBusyId}
-                  onStop={(row, action) => setStopping({ row, action })}
-                />
+                <tbody key={rows[0].group}>
+                  <SendRows
+                    rows={rows}
+                    canSend={data.canSend}
+                    openClicks={openClicks}
+                    onToggleClicks={key =>
+                      setOpenClicks(openClicks === key ? null : key)
+                    }
+                    stopBusyId={stopBusyId}
+                    onStop={(row, action) => setStopping({ row, action })}
+                  />
+                </tbody>
               ))}
-            </tbody>
-          </table>
+            </table>
+          </div>
         )}
       </div>
 
@@ -2303,7 +2340,8 @@ function LineupCounts({
 
 /** One issue's rows in Recent sends. A single whole-list send is one row; an
  *  issue sent in waves gets a row with its totals (and its clicks, which
- *  are counted per issue), then a row per wave. */
+ *  are counted per issue), then a row per wave. Sends to a test list are
+ *  dimmed and tagged, so the real ones stand out. */
 function SendRows({
   rows,
   canSend,
@@ -2321,27 +2359,88 @@ function SendRows({
 }) {
   const first = rows[0]
   const waved = rows.length > 1 || rows.some(r => r.wave)
-  const lists = first.listNames.join(', ') || '—'
+  const { newsletter, issue } = splitIssueName(first.baseName)
+  const isTest = first.listNames.some(n => /\btest\b/i.test(n))
+  // The list only when it isn't the newsletter's own ("AISafety.com
+  // Funding"); a test list's name is in the Test tag's tooltip.
+  const otherList =
+    first.listNames.length === 0
+      ? 'no list'
+      : isTest ||
+          (first.listNames.length === 1 &&
+            first.listNames[0] === `AISafety.com ${newsletter}`)
+        ? null
+        : first.listNames.join(', ')
 
-  const status = (r: Recent) => (
-    <>
-      {r.status === 'sent' ? (
-        <span className={styles.statusOk}>sent</span>
-      ) : r.status === 'stopped' || r.status === 'disabled' ? (
-        <span className={styles.statusBad}>{r.status}</span>
-      ) : r.status === 'held' ? (
-        <span title="ActiveCampaign is reviewing this send; it goes out once they approve it">
-          held for review
+  const issueCell = (sub: string | null) => (
+    <td>
+      <span className={styles.issueName}>
+        {newsletter && (
+          <>
+            <span
+              className={`${styles.dot} ${NEWSLETTER_DOTS[newsletter] ?? ''}`}
+              aria-hidden="true"
+            />
+            <span className={styles.newsletterName}>{newsletter}</span>
+          </>
+        )}
+        <span>{issue}</span>
+        {isTest && (
+          <span
+            className={styles.tag}
+            title={`Sent to the test list ${first.listNames.join(', ')}`}
+          >
+            Test
+          </span>
+        )}
+      </span>
+      {(otherList || sub) && (
+        <span className={styles.subline}>
+          {[otherList && `to ${otherList}`, sub].filter(Boolean).join(' · ')}
         </span>
-      ) : (
-        r.status
       )}
+    </td>
+  )
+
+  // "sent" needs no word: the date says it. Anything else gets a label.
+  const statusLabel = (r: Recent) =>
+    r.status === 'sent' ? null : r.status === 'stopped' ||
+      r.status === 'disabled' ? (
+      <span className={`${styles.pill} ${styles.pillBad}`}>
+        {r.status === 'stopped' ? 'Stopped' : 'Disabled'}
+      </span>
+    ) : r.status === 'held' ? (
+      <span
+        className={`${styles.pill} ${styles.pillWait}`}
+        title="ActiveCampaign is reviewing this send; it goes out once they approve it"
+      >
+        Held for review
+      </span>
+    ) : (
+      <span
+        className={`${styles.pill} ${r.status === 'sending' ? styles.pillOk : styles.pillWait}`}
+      >
+        {r.status[0].toUpperCase() + r.status.slice(1)}
+      </span>
+    )
+  const sentCell = (r: Recent) => (
+    <td>
+      <span className={styles.sentLine}>
+        {statusLabel(r)}
+        {r.status === 'scheduled' ? (
+          <span title={when(r.scheduledAt ?? r.scheduledFor)}>
+            {whenShort(r.scheduledAt ?? r.scheduledFor)}
+            {r.scheduledAt && <Countdown to={r.scheduledAt} />}
+          </span>
+        ) : (
+          r.sentAt && <span title={when(r.sentAt)}>{whenShort(r.sentAt)}</span>
+        )}
+      </span>
       {r.segmentLost && (
         // A wave's name, but no segment in ActiveCampaign: the approval
         // deletes such a send at once, unless it was cut off first.
-        <span className={styles.statusBad}>
-          {' '}
-          · no wave segment:{' '}
+        <span className={`${styles.subline} ${styles.statusBad}`}>
+          No wave segment:{' '}
           {['sent', 'stopped', 'disabled'].includes(r.status)
             ? 'it went'
             : 'it goes'}{' '}
@@ -2363,35 +2462,44 @@ function SendRows({
           ))}
         </span>
       )}
+    </td>
+  )
+  /** A count, its zero dimmed so the numbers that matter stand out. */
+  const count = (n: number | null) =>
+    n == null ? (
+      <span className={styles.muted}>—</span>
+    ) : n === 0 ? (
+      <span className={styles.muted}>0</span>
+    ) : (
+      n.toLocaleString('en-US')
+    )
+  const opened = (opens: number | null, to: number | null) => (
+    <>
+      {count(opens)}
+      {opens != null && to != null && to > 0 && (
+        <span className={styles.rate}>{Math.round((opens / to) * 100)}%</span>
+      )}
     </>
   )
-  const sentCell = (r: Recent) =>
-    r.status === 'scheduled' ? (
-      <>
-        due {when(r.scheduledAt ?? r.scheduledFor)}
-        {r.scheduledAt && <Countdown to={r.scheduledAt} />}
-      </>
-    ) : (
-      when(r.sentAt)
-    )
   const clicksButton = (r: Recent, key: string) =>
     r.clicks.total > 0 ? (
       <button
         type="button"
-        className={styles.rowButton}
+        className={styles.clicksButton}
         aria-expanded={openClicks === key}
         title="Which links were clicked"
         onClick={() => onToggleClicks(key)}
       >
-        {r.clicks.total}
+        {r.clicks.total.toLocaleString('en-US')}
+        <span aria-hidden="true">{openClicks === key ? ' ▴' : ' ▾'}</span>
       </button>
     ) : (
       <span className={styles.muted}>0</span>
     )
   const clicksRow = (r: Recent, key: string) =>
     openClicks === key && (
-      <tr>
-        <td colSpan={8} className={styles.clicksCell}>
+      <tr className={styles.clicksTr}>
+        <td colSpan={6} className={styles.clicksCell}>
           <ol className={styles.clicksList}>
             {r.clicks.links.map(l => (
               <li key={l.url} className={styles.clicksRow}>
@@ -2411,19 +2519,21 @@ function SendRows({
         </td>
       </tr>
     )
+  const rowClass = (extra?: string) =>
+    [isTest && styles.testRow, extra].filter(Boolean).join(' ') || undefined
 
   if (!waved) {
     return (
       <>
-        <tr>
-          <td>{first.name}</td>
-          <td className={styles.muted}>{lists}</td>
-          <td>{status(first)}</td>
-          <td className={styles.muted}>{sentCell(first)}</td>
-          <td>{first.sentTo}</td>
-          <td className={styles.muted}>{first.uniqueOpens ?? '—'}</td>
-          <td>{clicksButton(first, first.id)}</td>
-          <td className={styles.muted}>{first.unsubscribes ?? '—'}</td>
+        <tr className={rowClass()}>
+          {issueCell(null)}
+          {sentCell(first)}
+          <td className={styles.num}>{count(first.sentTo)}</td>
+          <td className={styles.num}>
+            {opened(first.uniqueOpens, first.sentTo)}
+          </td>
+          <td className={styles.num}>{clicksButton(first, first.id)}</td>
+          <td className={styles.num}>{count(first.unsubscribes)}</td>
         </tr>
         {clicksRow(first, first.id)}
       </>
@@ -2440,36 +2550,42 @@ function SendRows({
     .sort()
     .pop()
   const waves = first.wave?.waves
+  const sentTo = sum(r => r.sentTo)
   return (
     <>
-      <tr className={styles.groupRow}>
-        <td>{first.baseName}</td>
-        <td className={styles.muted}>{lists}</td>
-        <td className={styles.muted}>
-          {rows.length} {rows.length === 1 ? 'send' : 'sends'}
-          {waves ? ` of ${waves} waves` : ''}
+      <tr className={rowClass(styles.groupRow)}>
+        {issueCell(
+          `${rows.length} ${rows.length === 1 ? 'send' : 'sends'}${waves ? ` of ${waves} waves` : ''}`
+        )}
+        <td>
+          {newestSent && (
+            <span title={when(newestSent)}>{whenShort(newestSent)}</span>
+          )}
         </td>
-        <td className={styles.muted}>{when(newestSent ?? null)}</td>
-        <td>{sum(r => r.sentTo)}</td>
-        <td className={styles.muted}>{sum(r => r.uniqueOpens) ?? '—'}</td>
-        <td>{clicksButton(first, groupKey)}</td>
-        <td className={styles.muted}>{sum(r => r.unsubscribes) ?? '—'}</td>
+        <td className={styles.num}>{count(sentTo)}</td>
+        <td className={styles.num}>
+          {opened(
+            sum(r => r.uniqueOpens),
+            sentTo
+          )}
+        </td>
+        <td className={styles.num}>{clicksButton(first, groupKey)}</td>
+        <td className={styles.num}>{count(sum(r => r.unsubscribes))}</td>
       </tr>
       {clicksRow(first, groupKey)}
       {rows.map(r => (
-        <tr key={r.id} className={styles.waveSubRow}>
+        <tr key={r.id} className={rowClass(styles.waveSubRow)}>
           <td>
-            {r.wave ? `wave ${r.wave.wave} of ${r.wave.waves}` : 'whole list'}
+            {r.wave ? `Wave ${r.wave.wave} of ${r.wave.waves}` : 'Whole list'}
+            <span className={styles.subline}>campaign {r.id}</span>
           </td>
-          <td className={styles.muted}>campaign {r.id}</td>
-          <td>{status(r)}</td>
-          <td className={styles.muted}>{sentCell(r)}</td>
-          <td>{r.sentTo}</td>
-          <td className={styles.muted}>{r.uniqueOpens ?? '—'}</td>
-          <td className={styles.muted} title="Clicks are counted per issue">
-            –
+          {sentCell(r)}
+          <td className={styles.num}>{count(r.sentTo)}</td>
+          <td className={styles.num}>{opened(r.uniqueOpens, r.sentTo)}</td>
+          <td className={styles.num} title="Clicks are counted per issue">
+            <span className={styles.muted}>–</span>
           </td>
-          <td className={styles.muted}>{r.unsubscribes ?? '—'}</td>
+          <td className={styles.num}>{count(r.unsubscribes)}</td>
         </tr>
       ))}
     </>

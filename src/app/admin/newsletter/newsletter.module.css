@@ -140,31 +140,187 @@
   background: var(--teal-900);
 }
 
+/* Recent sends (made easier to read 8 Oct 2026): numbers right-aligned so
+   they line up, zeros dimmed, the status only when it isn't plain "sent". */
+.tableScroll {
+  overflow-x: auto;
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .table th,
 .table td {
   text-align: left;
-  padding: 7px 10px 7px 0;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--teal-800);
   vertical-align: top;
 }
 
+.table th:first-child,
+.table td:first-child {
+  min-width: 190px;
+  padding-left: 4px;
+}
+
 .table th {
+  padding-top: 0;
+  border-bottom-color: var(--teal-700);
   color: var(--teal-400);
+  font-size: 12px;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .table td {
   color: var(--white);
 }
 
+.table tbody:last-child tr:last-child td {
+  border-bottom: none;
+}
+
+/* Every other issue a shade lighter (Bryce, 8 Oct 2026). On the row, not
+   the cells, so a faded test send keeps the same shade. */
+.table tbody:nth-of-type(even) tr {
+  background: color-mix(in srgb, var(--teal-800) 45%, transparent);
+}
+
+.table tbody tr:not(.clicksTr):hover td {
+  background: var(--teal-800);
+}
+
+/* Every column but the first is only as wide as its contents, so the
+   numbers sit together and the issue name gets the room. */
+.table th:not(:first-child),
+.table td:not(:first-child) {
+  width: 1%;
+  padding-left: 28px;
+}
+
+.table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .muted {
   color: var(--teal-400);
+}
+
+.issueName {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--teal-500);
+}
+
+.dotEvents {
+  background: var(--blue);
+}
+
+.dotTraining {
+  background: var(--purple);
+}
+
+.dotFunding {
+  background: var(--orange);
+}
+
+.newsletterName {
+  font-weight: 600;
+}
+
+.subline {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--teal-400);
+}
+
+.tag {
+  padding: 1px 6px;
+  border: 1px solid var(--teal-600);
+  border-radius: 4px;
+  color: var(--teal-300);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+/* Test sends step back; hovering brings one up to full strength. */
+.testRow td {
+  opacity: 0.55;
+}
+
+.testRow:hover td {
+  opacity: 1;
+}
+
+.sentLine {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.pill {
+  padding: 1px 7px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.pillOk {
+  color: var(--bright-teal-300);
+}
+
+.pillWait {
+  color: #f5b942;
+}
+
+.pillBad {
+  color: #ff6b6b;
+}
+
+/* The open rate beside the opens count. */
+.rate {
+  display: inline-block;
+  min-width: 3.4em;
+  margin-left: 6px;
+  color: var(--teal-400);
+  font-size: 12px;
+}
+
+.clicksButton {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--bright-teal-300);
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.clicksButton:hover {
+  text-decoration: underline;
 }
 
 /* ─── Send confirmation ───────────────────────────────────────────────── */
@@ -574,8 +730,8 @@
 
 /* Per-link clicks under a Recent sends row (counted on aisafety.com since
    28 Sept 2026). */
-.clicksCell {
-  padding: 4px 0 14px;
+.table .clicksCell {
+  padding: 4px 4px 14px;
 }
 
 .clicksList {
@@ -727,13 +883,13 @@
 }
 
 /* Recent sends: an issue sent in waves gets a totals row, then a row per
-   wave; stop buttons sit under the status. */
+   wave; stop buttons sit under the date. */
 .groupRow td {
   font-weight: 600;
 }
 
 .waveSubRow td:first-child {
-  padding-left: 18px;
+  padding-left: 22px;
   color: var(--teal-200);
 }
 
