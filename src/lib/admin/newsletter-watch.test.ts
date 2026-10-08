@@ -3,6 +3,7 @@ import type { Mail } from './mail'
 import {
   ALERTS_KEY,
   APPROVED_PREFIX,
+  CANCELED_KEY,
   type ApprovedRecord,
   cronAuthorized,
   HEALTH_PREFIX,
@@ -61,6 +62,13 @@ interface Fake {
   >
   /** Answer every request with this status (ActiveCampaign down). */
   down: number | null
+  /** Deletes ActiveCampaign refuses (v3 and v1), by campaign id. */
+  deleteRefuses: Set<string>
+  /** The next v3 DELETE of this campaign answers 502, having deleted it
+   *  ('gone') or not ('kept'). */
+  deleteNoAnswer: Map<string, 'gone' | 'kept'>
+  /** These start sending just as the delete comes (it is refused). */
+  startsOnDelete: Set<string>
 }
 
 let ac: Fake
@@ -119,6 +127,39 @@ async function approve(
   await store.set(APPROVED_PREFIX + id, approval(id, over))
 }
 
+/** A verdict the watcher gave on an earlier run (already emailed). */
+async function judged(
+  store: WatchStore,
+  id: string,
+  verdict: HealthRecord['verdict'],
+  over: Partial<HealthRecord> = {}
+) {
+  await store.set(HEALTH_PREFIX + id, {
+    campaignId: id,
+    listId: '6',
+    name: 'Events · Week 41, 2026 · wave 1/4',
+    baseName: 'Events · Week 41, 2026',
+    wave: 1,
+    waves: 4,
+    verdict,
+    reasons: verdict === 'red' ? ['hard bounces 2.5% (red at 2%)'] : [],
+    numbers: {
+      sendAmt: 1000,
+      hardBounces: verdict === 'red' ? 25 : 0,
+      softBounces: 0,
+      unsubscribes: 0,
+      spamComplaints: 0,
+      verifiedOpens: 400,
+    },
+    expected: 1000,
+    finishedAt: NOW.toISOString(),
+    checkedAt: NOW.toISOString(),
+    smallSample: false,
+    emailedAt: NOW.toISOString(),
+    ...over,
+  } satisfies HealthRecord)
+}
+
 beforeEach(() => {
   process.env.ACTIVECAMPAIGN_URL = 'https://alignment23684.api-us1.com'
   process.env.ACTIVECAMPAIGN_KEY = KEY
@@ -135,11 +176,21 @@ beforeEach(() => {
     },
     unsubTotals: {},
     down: null,
+    deleteRefuses: new Set(),
+    deleteNoAnswer: new Map(),
+    startsOnDelete: new Set(),
   }
   calls = []
+  const find = (id: string) => ac.campaigns.find(c => String(c.id) === id)
+  const remove = (id: string) =>
+    ac.campaigns.splice(
+      ac.campaigns.findIndex(c => String(c.id) === id),
+      1
+    )
   vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
     const url = new URL(String(input))
-    calls.push({ method: init?.method ?? 'GET', url })
+    const method = init?.method ?? 'GET'
+    calls.push({ method, url })
     if (ac.down) return new Response('<html>502</html>', { status: ac.down })
     if (url.pathname === '/admin/api.php') {
       const action = url.searchParams.get('api_action')
@@ -154,17 +205,61 @@ beforeEach(() => {
           result_code: 1,
         })
       }
+      if (action === 'campaign_delete' && method === 'POST') {
+        const id = new URLSearchParams(String(init?.body)).get('id') ?? ''
+        const c = find(id)
+        if (
+          !c ||
+          ac.deleteRefuses.has(id) ||
+          !['0', '1', '7'].includes(c.status)
+        )
+          return Response.json({ result_code: 0, result_message: 'refused' })
+        remove(id)
+        return Response.json({ result_code: 1 })
+      }
       return Response.json({ result_code: 0, result_message: 'unexpected' })
     }
     const path = url.pathname.replace('/api/3/', '')
     if (path === 'campaigns') return Response.json({ campaigns: ac.campaigns })
-    let m = /^campaigns\/(\d+)\/campaignLists$/.exec(path)
+    let m = /^campaigns\/(\d+)\/delete$/.exec(path)
+    if (m && method === 'DELETE') {
+      const id = m[1]
+      const c = find(id)
+      const noAnswer = ac.deleteNoAnswer.get(id)
+      if (noAnswer) {
+        ac.deleteNoAnswer.delete(id)
+        if (noAnswer === 'gone' && c) remove(id)
+        return new Response('<html>502</html>', { status: 502 })
+      }
+      if (!c) return Response.json({ succeeded: 0, message: 'not found' })
+      if (ac.startsOnDelete.has(id)) {
+        c.status = '2'
+        return Response.json({ succeeded: 0, message: 'Campaign is sending.' })
+      }
+      if (ac.deleteRefuses.has(id) || !['0', '1', '7'].includes(c.status))
+        return Response.json({ succeeded: 0, message: 'Not allowed.' })
+      remove(id)
+      return Response.json({ succeeded: 1 })
+    }
+    m = /^campaigns\/(\d+)$/.exec(path)
+    if (m) {
+      const c = find(m[1])
+      return c
+        ? Response.json({ campaign: c })
+        : new Response('not found', { status: 404 })
+    }
+    m = /^campaigns\/(\d+)\/campaignLists$/.exec(path)
     if (m)
       return Response.json({
         campaignLists: (ac.lists[m[1]] ?? []).map(list => ({ list })),
       })
     m = /^campaigns\/(\d+)\/campaignMessages$/.exec(path)
-    if (m) return Response.json({ campaignMessages: [] })
+    if (m) {
+      const msg = find(m[1])?.message_id
+      return Response.json({
+        campaignMessages: msg ? [{ messageid: msg }] : [],
+      })
+    }
     m = /^messages\/(\d+)$/.exec(path)
     if (m) return Response.json({ message: { html: ac.messages[m[1]] ?? '' } })
     if (path === 'contacts') {
@@ -286,23 +381,25 @@ describe('healthVerdict', () => {
 describe('runWatch: campaign status', () => {
   it('alerts once when a wave is held for review for over 20 minutes', async () => {
     const { store, sent, run } = setup()
+    // Wave 1: a later wave held without a wave before it would also be one
+    // to cancel (the approve-once tests below).
     ac.campaigns = [
       campaign({
         id: '201',
-        name: 'Events · Week 41, 2026 · wave 2/4',
+        name: 'Events · Week 41, 2026 · wave 1/4',
         status: '7',
         cdate: acDate(5 * MIN),
       }),
     ]
     ac.lists['201'] = ['6']
-    await approve(store, '201', { wave: 2 })
+    await approve(store, '201', { wave: 1 })
 
     expect((await run()).alerts).toEqual([])
 
     let s = await run(later(20 * MIN))
     expect(ids(s)).toEqual(['held:201'])
     expect(sent.map(m => m.subject)).toEqual([
-      'Newsletter: Events · Week 41 wave 2/4 is held for review by ActiveCampaign',
+      'Newsletter: Events · Week 41 wave 1/4 is held for review by ActiveCampaign',
     ])
     expect(sent[0].text).toContain('https://aisafety.com/admin/newsletter')
     expect(sent[0].text).toContain('https://alignment23684.activehosted.com')
@@ -638,8 +735,8 @@ describe('runWatch: drafts left on the real lists', () => {
     expect(calls.some(c => c.url.pathname.includes('/231/'))).toBe(false)
   })
 
-  it('leaves a draft alone while its waves are going out, not after the last', async () => {
-    const { store, run } = setup()
+  it('leaves a draft alone while its waves are going out, and deletes it once every wave has gone', async () => {
+    const { store, sent, run } = setup()
     ac.campaigns = [
       draft(),
       campaign({
@@ -649,28 +746,394 @@ describe('runWatch: drafts left on the real lists', () => {
         cdate: acDate(DAY),
         ldate: acDate(DAY),
       }),
-    ]
-    ac.lists = { '230': ['6'], '240': ['6'] }
-    ac.messages['900'] = MARKER
-    await approve(store, '240', { waves: 2, expected: null })
-    expect((await run()).alerts).toEqual([])
-
-    ac.campaigns.push(
+      // Approve once: wave 2 was scheduled with wave 1.
       campaign({
         id: '241',
         name: 'Events · Week 41, 2026 · wave 2/2',
-        status: '5',
-        cdate: acDate(HOUR),
-        ldate: acDate(HOUR),
-      })
-    )
-    ac.lists['241'] = ['6']
+        status: '1',
+        cdate: acDate(DAY),
+        sdate: acDate(-HOUR),
+      }),
+    ]
+    ac.lists = { '230': ['6'], '240': ['6'], '241': ['6'] }
+    ac.messages['900'] = MARKER
+    await approve(store, '240', { waves: 2, expected: null })
     await approve(store, '241', { wave: 2, waves: 2, expected: null })
-    const s = await run(later(10 * MIN))
+    await judged(store, '240', 'green')
+    let s = await run()
+    expect(s.alerts).toEqual([])
+    expect(s.draftsDeleted).toEqual([])
+    expect(ac.campaigns.some(c => c.id === '230')).toBe(true)
+
+    // The last wave goes out: the draft has done its job and is deleted
+    // (only the campaign: the waves sent its message).
+    const last = ac.campaigns.find(c => c.id === '241')!
+    last.status = '5'
+    last.ldate = acDate(MIN, later(2 * HOUR))
+    s = await run(later(2 * HOUR))
+    expect(s.draftsDeleted).toEqual([
+      { campaignId: '230', name: 'Events · Week 41, 2026', outcome: 'deleted' },
+    ])
+    expect(s.alerts).toEqual([])
+    expect(sent).toEqual([])
+    expect(ac.campaigns.some(c => c.id === '230')).toBe(false)
+    expect(
+      calls.filter(
+        c => c.url.searchParams.get('api_action') === 'campaign_delete'
+      )
+    ).toHaveLength(1)
+  })
+
+  it('a finished issue’s draft it can’t delete is still flagged, to delete by hand', async () => {
+    const { store, run } = setup()
+    ac.campaigns = [
+      draft(),
+      ...[1, 2].map(k =>
+        campaign({
+          id: String(239 + k),
+          name: `Events · Week 41, 2026 · wave ${k}/2`,
+          status: '5',
+          cdate: acDate(DAY),
+          ldate: acDate(k === 1 ? DAY : HOUR),
+        })
+      ),
+    ]
+    ac.lists = { '230': ['6'], '240': ['6'], '241': ['6'] }
+    ac.messages['900'] = MARKER
+    ac.deleteRefuses.add('230')
+    await approve(store, '240', { waves: 2 })
+    await approve(store, '241', { wave: 2, waves: 2 })
+    await judged(store, '240', 'green')
+    const s = await run()
+    expect(s.draftsDeleted[0].outcome).toMatch(
+      /^refused: ActiveCampaign didn’t delete it/
+    )
     expect(ids(s)).toEqual(['draft:230'])
     expect(s.alerts[0].detail[0]).toContain(
       'every wave of it has already gone out'
     )
+  })
+})
+
+/* ─── Approve once: waves still to go (8 Oct 2026) ─────────────────────── */
+
+describe('runWatch: waves still to go (approve once)', () => {
+  const ISSUE = 'Events · Week 41, 2026'
+  /** Waves 1–4 of the issue on list 6, made by one approval 20 hours ago:
+   *  wave 1 sent (finished 19 hours ago), 2–4 scheduled a day apart from
+   *  its start (in 4, 28 and 52 hours). `over` changes a wave. */
+  async function issue(
+    store: WatchStore,
+    over: Record<number, Partial<FakeCampaign>> = {},
+    approvedAt = later(-20 * HOUR).toISOString()
+  ) {
+    ac.campaigns = [1, 2, 3, 4].map(k =>
+      campaign({
+        id: String(400 + k),
+        name: `${ISSUE} · wave ${k}/4`,
+        status: k === 1 ? '5' : '1',
+        segmentid: String(10 + k),
+        cdate: acDate(20 * HOUR),
+        sdate: acDate(20 * HOUR - (k - 1) * DAY),
+        ldate: k === 1 ? acDate(19 * HOUR) : null,
+        send_amt: k === 1 ? '1000' : '0',
+        total_amt: k === 1 ? '1000' : '0',
+        verified_unique_opens: k === 1 ? '400' : '0',
+        ...over[k],
+      })
+    )
+    for (const c of ac.campaigns) {
+      ac.lists[c.id] = ['6']
+      const k = Number(c.id) - 400
+      await approve(store, c.id, {
+        name: c.name,
+        wave: k,
+        waves: 4,
+        segmentId: `uuid-${k}`,
+        expected: 1000,
+        approvedAt,
+      })
+    }
+  }
+  const writes = () =>
+    calls
+      .filter(c => c.method !== 'GET')
+      .map(c => `${c.method} ${c.url.pathname.replace('/api/3/', '')}`)
+  const canceled = (ids: string[]) =>
+    ids.map(id => ({
+      campaignId: id,
+      name: `${ISSUE} · wave ${Number(id) - 400}/4`,
+      outcome: 'canceled',
+    }))
+
+  it('a red verdict cancels every later wave still scheduled, says so once, and touches nothing else', async () => {
+    const { store, sent, run } = setup()
+    await issue(store, { 1: { hardbounces: '25' } })
+    const s = await run()
+    expect(s.health).toEqual([{ campaignId: '401', verdict: 'red' }])
+    expect(s.canceled).toEqual(canceled(['402', '403', '404']))
+    expect(ac.campaigns.map(c => c.id)).toEqual(['401'])
+    expect(writes()).toEqual([
+      'DELETE campaigns/402/delete',
+      'DELETE campaigns/403/delete',
+      'DELETE campaigns/404/delete',
+    ])
+    expect(ids(s)).toEqual([`canceled:6:${ISSUE}:1`, 'health:401'])
+    const alert = s.alerts.find(a => a.id.startsWith('canceled:'))!
+    expect(alert.severity).toBe('red')
+    expect(alert.title).toBe(
+      'Events · Week 41: waves 2–4 canceled – wave 1 came back red'
+    )
+    expect(alert.detail).toEqual([
+      'The send watcher canceled waves 2–4 (campaigns 402, 403, 404) before they went out, because wave 1’s 18-hour check came back red: hard bounces 2.5% (red at 2%). Nobody got them.',
+      'Look at wave 1’s numbers on the newsletter page. To send the rest anyway, approve them again there and say why; otherwise leave them.',
+    ])
+    expect(sent.map(m => m.subject)).toEqual([
+      'Newsletter: Events · Week 41: waves 2–4 canceled – wave 1 came back red',
+      'Newsletter: Events · Week 41 wave 1/4 health check: red – hold the next wave',
+    ])
+    expect(sent[1].text).toContain(
+      'The send watcher cancels the waves of it still scheduled.'
+    )
+    // Kept for the banner, and nothing more to do or say on the next run.
+    expect(
+      Object.keys(
+        (await store.get<{ events: object }>(CANCELED_KEY))?.events ?? {}
+      )
+    ).toEqual(['402', '403', '404'])
+    const again = await run(later(10 * MIN))
+    expect(again.canceled).toEqual([])
+    expect(ids(again)).toContain(`canceled:6:${ISSUE}:1`)
+    expect(sent).toHaveLength(2)
+    // Three days on, it rests.
+    expect(ids(await run(later(3 * DAY + HOUR)))).not.toContain(
+      `canceled:6:${ISSUE}:1`
+    )
+  })
+
+  it('leaves waves approved after the red verdict alone: that approval took a typed reason', async () => {
+    const { store, run } = setup()
+    await judged(store, '401', 'red', {
+      checkedAt: later(-2 * HOUR).toISOString(),
+    })
+    await issue(store, {}, later(-HOUR).toISOString())
+    await approve(store, '402', {
+      name: `${ISSUE} · wave 2/4`,
+      wave: 2,
+      approvedAt: later(-HOUR).toISOString(),
+      override: 'One bad domain bounced; fixed on the list',
+    })
+    const s = await run()
+    expect(s.canceled).toEqual([])
+    expect(writes()).toEqual([])
+  })
+
+  it('cancels nothing on amber', async () => {
+    const { store, run } = setup()
+    await issue(store, { 1: { verified_unique_opens: '200' } })
+    const s = await run()
+    expect(s.health).toEqual([{ campaignId: '401', verdict: 'amber' }])
+    expect(s.canceled).toEqual([])
+    expect(writes()).toEqual([])
+    expect(ac.campaigns).toHaveLength(4)
+  })
+
+  it('fail closed: a wave starting within the hour without a verdict on the one before is canceled, with every later one', async () => {
+    const { store, sent, run } = setup()
+    // Wave 1 was held for review for 13 hours and finished 10 hours ago:
+    // its verdict isn't due, and wave 2 starts in 50 minutes.
+    await issue(store, {
+      1: { sdate: acDate(23 * HOUR + 10 * MIN), ldate: acDate(10 * HOUR) },
+      2: { sdate: acDate(-50 * MIN) },
+    })
+    const s = await run()
+    expect(s.health).toEqual([])
+    expect(s.canceled).toEqual(canceled(['402', '403', '404']))
+    const alert = s.alerts.find(a => a.id.startsWith('canceled:'))!
+    expect(alert.title).toBe(
+      'Events · Week 41: waves 2–4 canceled – wave 1 has no health check'
+    )
+    expect(alert.detail[0]).toMatch(
+      /^Wave 2 was due to start 8 October 2026.*, but wave 1 has no 18-hour check yet, so the send watcher canceled waves 2–4 \(campaigns 402, 403, 404\) rather than send them unchecked\. Nobody got them\.$/
+    )
+    expect(sent.map(m => m.subject)).toEqual([
+      'Newsletter: Events · Week 41: waves 2–4 canceled – wave 1 has no health check',
+    ])
+  })
+
+  it('…not while the wave is more than an hour away', async () => {
+    const { store, run } = setup()
+    await issue(store, {
+      1: { sdate: acDate(22 * HOUR), ldate: acDate(10 * HOUR) },
+      2: { sdate: acDate(-2 * HOUR) },
+    })
+    const s = await run()
+    expect(s.canceled).toEqual([])
+    expect(writes()).toEqual([])
+  })
+
+  it('fail closed when ActiveCampaign doesn’t say when the wave before finished, or it is still going', async () => {
+    const { store, run } = setup()
+    await issue(store, {
+      1: { ldate: null },
+      2: { sdate: acDate(-30 * MIN) },
+    })
+    let s = await run()
+    expect(s.canceled.map(c => c.campaignId)).toEqual(['402', '403', '404'])
+    expect(
+      s.alerts.find(a => a.id.startsWith('canceled:'))!.detail[0]
+    ).toContain('ActiveCampaign doesn’t say when wave 1 finished')
+
+    const next = setup()
+    await issue(next.store, {
+      1: { status: '2', ldate: null },
+      2: { sdate: acDate(-30 * MIN) },
+    })
+    s = await next.run()
+    expect(s.canceled.map(c => c.campaignId)).toEqual(['402', '403', '404'])
+    expect(
+      s.alerts.find(a => a.id.startsWith('canceled:'))!.detail[0]
+    ).toContain('wave 1 is sending, not finished')
+  })
+
+  it('a wave sent anyway with a typed reason isn’t canceled for a missing verdict', async () => {
+    const { store, run } = setup()
+    await issue(store, {
+      1: { ldate: acDate(10 * HOUR) },
+      2: { sdate: acDate(-30 * MIN) },
+    })
+    await approve(store, '402', {
+      name: `${ISSUE} · wave 2/4`,
+      wave: 2,
+      approvedAt: later(-20 * HOUR).toISOString(),
+      override: 'The watcher was down; numbers checked by hand',
+    })
+    const s = await run()
+    expect(s.canceled).toEqual([])
+    expect(writes()).toEqual([])
+  })
+
+  it('never touches a wave that has started; one that starts as the cancel comes is said', async () => {
+    const { store, sent, run } = setup()
+    await issue(store, {
+      1: { hardbounces: '25' },
+      2: { status: '2', sdate: acDate(MIN), send_amt: '30' },
+    })
+    ac.startsOnDelete.add('403')
+    const s = await run()
+    expect(s.canceled).toEqual([
+      { campaignId: '403', name: `${ISSUE} · wave 3/4`, outcome: 'started' },
+      { campaignId: '404', name: `${ISSUE} · wave 4/4`, outcome: 'canceled' },
+    ])
+    expect(writes()).toEqual([
+      'DELETE campaigns/403/delete',
+      'DELETE campaigns/404/delete',
+    ])
+    expect(ac.campaigns.find(c => c.id === '402')?.status).toBe('2')
+    expect(ids(s)).toEqual([
+      'cancel-started:403',
+      `canceled:6:${ISSUE}:1`,
+      'health:401',
+    ])
+    expect(sent.map(m => m.subject)).toEqual(
+      expect.arrayContaining([
+        'Newsletter: Events · Week 41 wave 3 started before it could be canceled',
+        'Newsletter: Events · Week 41: wave 4 canceled – wave 1 came back red',
+      ])
+    )
+  })
+
+  it('a held later wave is never deleted: the alert says to cancel it on the page', async () => {
+    const { store, run } = setup()
+    await issue(store, { 1: { hardbounces: '25' }, 3: { status: '7' } })
+    const s = await run()
+    expect(s.canceled.map(c => c.campaignId)).toEqual(['402', '404'])
+    expect(writes()).not.toContain('DELETE campaigns/403/delete')
+    const held = s.alerts.find(a => a.id === 'cancel-held:403')!
+    expect(held.title).toBe(
+      'Events · Week 41 wave 3 is held for review and shouldn’t go out'
+    )
+    expect(held.detail[0]).toMatch(
+      /^Wave 1’s 18-hour check came back red: .*, so wave 3 shouldn’t go out, but it is held for ActiveCampaign’s review \(campaign 403\)/
+    )
+  })
+
+  it('a dry run cancels nothing and says what it would', async () => {
+    const { store, run } = setup()
+    await issue(store, { 1: { hardbounces: '25' } })
+    const before = JSON.stringify(store.dump())
+    const s = await run(NOW, { dry: true })
+    expect(s.canceled.map(c => [c.campaignId, c.outcome])).toEqual([
+      ['402', 'dry'],
+      ['403', 'dry'],
+      ['404', 'dry'],
+    ])
+    expect(writes()).toEqual([])
+    expect(JSON.stringify(store.dump())).toBe(before)
+  })
+
+  it('a cancel with no clear answer is tried again on the next run, and the alert says so meanwhile', async () => {
+    const { store, run } = setup()
+    await issue(store, { 1: { hardbounces: '25' } })
+    ac.deleteNoAnswer.set('402', 'kept')
+    let s = await run()
+    expect(s.canceled.map(c => [c.campaignId, c.outcome])).toEqual([
+      ['402', 'unclear'],
+      ['403', 'canceled'],
+      ['404', 'canceled'],
+    ])
+    expect(ids(s)).toEqual([
+      'cancel-failed:402',
+      `canceled:6:${ISSUE}:1`,
+      'health:401',
+    ])
+    expect(s.alerts.find(a => a.id === 'cancel-failed:402')!.title).toBe(
+      'The send watcher couldn’t cancel Events · Week 41 wave 2'
+    )
+    s = await run(later(10 * MIN))
+    expect(s.canceled).toEqual(canceled(['402']))
+    expect(ids(s)).toEqual([`canceled:6:${ISSUE}:1`, 'health:401'])
+    expect(s.alerts[0].title).toBe(
+      'Events · Week 41: waves 2–4 canceled – wave 1 came back red'
+    )
+
+    // When the unclear delete did land, the next run sees it gone.
+    const other = setup()
+    await issue(other.store, { 1: { hardbounces: '25' } })
+    ac.deleteNoAnswer.set('402', 'gone')
+    await other.run()
+    s = await other.run(later(10 * MIN))
+    expect(s.canceled).toEqual([])
+    expect(ids(s)).toEqual([`canceled:6:${ISSUE}:1`, 'health:401'])
+    expect(
+      (
+        await other.store.get<{ events: Record<string, { outcome: string }> }>(
+          CANCELED_KEY
+        )
+      )?.events['402'].outcome
+    ).toBe('canceled')
+  })
+
+  it('a wave made a moment ago whose approval record isn’t written yet is left for the next run', async () => {
+    const { store, run } = setup()
+    await issue(store, {
+      1: { hardbounces: '25' },
+      2: { cdate: acDate(MIN) },
+    })
+    await store.set(APPROVED_PREFIX + '402', null)
+    let s = await run()
+    expect(s.canceled.map(c => c.campaignId)).toEqual(['403', '404'])
+    s = await run(later(10 * MIN))
+    expect(s.canceled.map(c => c.campaignId)).toEqual(['402'])
+  })
+
+  it('leaves test lists and Funding alone', async () => {
+    const { store, run } = setup()
+    await issue(store, { 1: { hardbounces: '25' } })
+    for (const c of ac.campaigns) ac.lists[c.id] = ['8']
+    const s = await run()
+    expect(s.canceled).toEqual([])
+    expect(writes()).toEqual([])
   })
 })
 

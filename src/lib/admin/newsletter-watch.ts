@@ -7,10 +7,22 @@
   problems show as a red banner on /admin/newsletter (NewsletterAlerts.tsx,
   via GET /api/admin/newsletter/alerts).
 
-  Read-only on ActiveCampaign: v3 GETs and two v1 read actions, nothing else
-  (`V1_READS`). It never pauses, stops or deletes a campaign — automatic
-  stopping was rejected until the stop call is proven; the alert says what to
-  do and the page's Stop button does it.
+  It reads ActiveCampaign (v3 GETs and two v1 read actions, `V1_READS`) and,
+  since approve once (8 October 2026), makes two kinds of write, both
+  through newsletter.ts and nothing else:
+  - it cancels (deletes) a wave that is still scheduled (status 1) when it
+    must not go out: a wave before it came back red after it was approved,
+    or it starts within FAIL_CLOSED_MINUTES and the wave before it has no
+    verdict (none yet, it hasn't finished, or ActiveCampaign doesn't say when
+    it did) — unless its approval carries a typed reason to send it anyway.
+    Every later wave of the issue still scheduled goes with it. Same delete
+    and stop lock as the page's Cancel (cancelScheduledWave). A wave that has
+    started (status 2 or later) or is held for review (7) is never touched:
+    the alert says to pause or cancel it on the page;
+  - it deletes an issue's pipeline draft once every wave of it has been sent
+    (deleteFinishedIssueDraft): the waves kept it for re-approval.
+  It never pauses or stops a send. Outside production a run is dry: it
+  reports what it would cancel and changes nothing.
 
   Each run looks at campaigns on the real lists (6 Events, 7 Training,
   8 Funding) and raises an alert when one:
@@ -34,11 +46,14 @@
 
   Once per sent issue or wave on 6/7, 18 hours after it finished: a health
   check (bounces, unsubscribes, spam complaints, verified opens) with a
-  green/amber/red verdict, emailed and stored for the page.
+  green/amber/red verdict, emailed and stored for the page. A red one cancels
+  the waves of that issue still scheduled (above); amber cancels nothing.
 
   Upstash keys (the site's analytics database; no expiry on any of them):
     aisafety:newsletter:watch:state    { lastRunAt, campaigns, api, account }
     aisafety:newsletter:watch:alerts   { updatedAt, alerts: { <id>: WatchAlert } }
+    aisafety:newsletter:watch:canceled { events: { <id>: CancelEvent } }, the
+                                       waves it canceled or tried to (3 days)
     aisafety:newsletter:watch:lock     one run at a time (expires by itself)
     aisafety:newsletter:health:<id>    HealthRecord, written once per campaign
   and it reads what the approval step writes on every real-list approval:
@@ -54,8 +69,16 @@
 import { timingSafeEqual } from 'node:crypto'
 import { Redis } from '@upstash/redis'
 import { longDate, type Mail, sendAdminMail } from '@/lib/admin/mail'
+import {
+  type CallLimits,
+  cancelScheduledWave,
+  deleteFinishedIssueDraft,
+  type WatcherCancel,
+} from '@/lib/admin/newsletter'
 import { ROOT_ADMINS } from '@/lib/admin/users'
 import {
+  FAIL_CLOSED_MINUTES,
+  HEALTH_CHECK_LISTS,
   MAX_UNSEGMENTED_SEND,
   NEWSLETTER_WARMUP,
 } from '@/lib/admin/newsletter-warmup'
@@ -68,8 +91,9 @@ export { MAX_UNSEGMENTED_SEND, NEWSLETTER_WARMUP }
 /** Lists real subscribers are on. */
 const REAL_LISTS = ['6', '7', '8']
 /** Lists whose sends get the 18-hour health check and whose drafts must not
- *  sit around (the lists the ~2,889 imported readers are on). */
-const ISSUE_LISTS = ['6', '7']
+ *  sit around (the lists the ~2,889 imported readers are on). Their waves
+ *  are the ones canceled after a red or missing verdict. */
+const ISSUE_LISTS: readonly string[] = HEALTH_CHECK_LISTS
 const LIST_LABELS: Record<string, string> = {
   '6': 'Events',
   '7': 'Training',
@@ -128,15 +152,27 @@ const MAX_EMAILS_PER_DAY = 20
  *  of last being open isn't emailed again (the banner still shows it). */
 const REALERT_AFTER = 6 * HOUR
 /** No new email is started this far into a run: each can take up to 20 s
- *  and the function stops at 60 s. The rest go on the next run. */
-const MAIL_START_BY_MS = 38_000
+ *  and the function stops at 120 s. The rest go on the next run. */
+const MAIL_START_BY_MS = 95_000
 
 const LOCK_SECONDS = 300
 /** Time a run may spend reading ActiveCampaign before it stops, saves what
- *  it has and records the rest as a failure. The function allows 60 s; the
- *  rest is for the saves and the emails. */
+ *  it has and records the rest as a failure. The function allows 120 s;
+ *  the rest is for canceling waves, the saves and the emails. */
 const RUN_BUDGET_MS = 35_000
 const REQUEST_TIMEOUT_MS = 15_000
+/** No cancel (or draft delete) is started this far into a run; one takes at
+ *  most five calls of WRITE_LIMITS. What's left goes on the next run, ten
+ *  minutes later, still inside the hour before the wave. */
+const CANCEL_START_BY_MS = 50_000
+/** Limits on the calls of a cancel or draft delete. */
+const WRITE_LIMITS: CallLimits = {
+  readMs: 10_000,
+  writeMs: 10_000,
+  retry: false,
+}
+/** Who the logs and alerts say canceled a wave. */
+const WATCHER = 'the send watcher'
 
 /** Where the emails link to. Cron requests arrive on whatever host Vercel
  *  uses; sign-in only works on the real one. */
@@ -148,6 +184,7 @@ export const APPROVED_PREFIX = 'aisafety:newsletter:approved:'
 export const HEALTH_PREFIX = 'aisafety:newsletter:health:'
 export const STATE_KEY = 'aisafety:newsletter:watch:state'
 export const ALERTS_KEY = 'aisafety:newsletter:watch:alerts'
+export const CANCELED_KEY = 'aisafety:newsletter:watch:canceled'
 export const LOCK_KEY = 'aisafety:newsletter:watch:lock'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -166,6 +203,61 @@ export interface ApprovedRecord {
   expected: number | null
   approvedAt: string
   approver: string
+  /** The reason typed to send a held wave anyway (the first wave of an
+   *  approval only): such a wave isn't canceled for a missing verdict. */
+  override?: string
+}
+
+/** A wave the watcher must cancel, and why (wavesToCancel). */
+export interface CancelNeed {
+  campaignId: string
+  /** Its name ("Events · Week 41, 2026 · wave 3/4"). */
+  name: string
+  /** '1' scheduled, '7' held for review (alerted, never deleted). */
+  status: string
+  listId: string
+  baseName: string
+  wave: number
+  waves: number
+  /** red: a wave before it came back red after it was approved; verdict: it
+   *  starts within FAIL_CLOSED_MINUTES and the wave before it has no
+   *  verdict. */
+  cause: 'red' | 'verdict'
+  /** The wave whose verdict (or lack of one) it is canceled over. */
+  after: number
+  /** Plain words: why ("hard bounces 3.1% (red at 2%)", "wave 2 has no
+   *  18-hour check yet"). */
+  why: string
+  /** When it was due to start (epoch ms), if known. */
+  startsAt: number | null
+}
+
+/** A wave the watcher canceled, or tried to: kept for EVENT_ALERT_FOR so
+ *  the alert stays up, and so a try with no clear answer is resolved on the
+ *  next run. */
+export interface CancelEvent {
+  campaignId: string
+  name: string
+  listId: string
+  baseName: string
+  wave: number
+  waves: number
+  cause: CancelNeed['cause']
+  after: number
+  why: string
+  /** ISO, if known. */
+  startsAt: string | null
+  /** canceled: gone (nobody gets it); started: it started sending before the
+   *  cancel; pending: not done yet (no clear answer, or refused). */
+  outcome: 'canceled' | 'started' | 'pending'
+  /** For a pending one: what went wrong. */
+  detail?: string
+  /** When the outcome was set (ISO). */
+  at: string
+}
+
+interface CancelDoc {
+  events: Record<string, CancelEvent>
 }
 
 export type AlertSeverity = 'red' | 'amber'
@@ -771,7 +863,7 @@ export function healthMail(r: HealthRecord, origin: string): Mail {
       ? `${label} looks healthy 18 hours after it finished sending. Fine to go ahead with the next wave.`
       : r.verdict === 'amber'
         ? `${label} needs a look before the next wave: ${r.reasons.join('; ')}.`
-        : `Hold the next wave of ${r.baseName.replace(/, \d{4}$/, '')}: ${r.reasons.join('; ')}.`
+        : `Hold the next wave of ${r.baseName.replace(/, \d{4}$/, '')}: ${r.reasons.join('; ')}.${r.wave != null && r.waves != null && r.wave < r.waves ? ' The send watcher cancels the waves of it still scheduled.' : ''}`
   const note =
     'Verified opens leave out Apple’s automatic opens. Red: hard bounces at 2%, complaints above 0.1% or verified opens under 15%. Amber: bounces at 1%, unsubscribes above 5% or verified opens under 25%.'
   const links = linksBlock(origin)
@@ -852,6 +944,14 @@ export interface WatchSummary {
    *  them. */
   deferred: string[]
   health: Array<{ campaignId: string; verdict: HealthVerdict }>
+  /** Waves it canceled or tried to (a dry run: would have, `dry`). */
+  canceled: Array<{
+    campaignId: string
+    name: string
+    outcome: WatcherCancel['outcome'] | 'dry' | 'later'
+  }>
+  /** Drafts of finished issues it deleted or tried to. */
+  draftsDeleted: Array<{ campaignId: string; name: string; outcome: string }>
   errors: string[]
 }
 
@@ -899,6 +999,8 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
     emails: [],
     deferred: [],
     health: [],
+    canceled: [],
+    draftsDeleted: [],
     errors: [],
   }
   if (!isWatchConfigured()) {
@@ -943,6 +1045,7 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
     }
     const prevDoc = await store.get<AlertsDoc>(ALERTS_KEY)
     const previous = prevDoc?.alerts ?? {}
+    const prevCancels = await store.get<CancelDoc>(CANCELED_KEY)
     const ac = acReader(
       Date.now() + (opts.budgetMs ?? RUN_BUDGET_MS),
       opts.retryDelayMs ?? 1000
@@ -957,13 +1060,17 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
     // ── Campaigns ──
     const relevant: Array<{ c: RawCampaign; lists: string[] }> = []
     const approved = new Map<string, ApprovedRecord>()
+    /** Every campaign the listing returned (for the cancels). */
+    let campaigns: RawCampaign[] = []
+    /** The verdicts known this run, by campaign. */
+    const healthById = new Map<string, HealthRecord>()
     try {
       const listing = await ac.v3<{ campaigns?: RawCampaign[] }>(
         // AC ignores orders[cdate] (oldest first); newest by id instead.
         'campaigns?limit=100&orders[id]=DESC'
       )
       // Ids and statuses compared as the strings the v3 API sends.
-      const campaigns = (listing.campaigns ?? []).map(c => ({
+      campaigns = (listing.campaigns ?? []).map(c => ({
         ...c,
         id: String(c.id),
         status: String(c.status),
@@ -998,6 +1105,17 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
         }
       }
 
+      // Issues with a wave still to go: their sent waves stay in view
+      // however old, for the verdict a later wave needs.
+      const stillToGo = new Set(
+        campaigns
+          .filter(
+            c =>
+              (c.status === '1' || c.status === '7') &&
+              waveOf(c.name).wave != null
+          )
+          .map(c => waveOf(c.name).baseName)
+      )
       // Only what a rule could fire on needs its lists read.
       const matters = (c: RawCampaign): boolean => {
         const created = timeOf(c.cdate)
@@ -1008,7 +1126,10 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
             return age > DRAFT_STALE_AFTER
           case '5':
             return (
-              age <= RECENT || (finished != null && nowMs - finished <= RECENT)
+              age <= RECENT ||
+              (finished != null && nowMs - finished <= RECENT) ||
+              (waveOf(c.name).wave != null &&
+                stillToGo.has(waveOf(c.name).baseName))
             )
           case '4':
           case '6':
@@ -1238,6 +1359,7 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
             continue
           }
         }
+        healthById.set(c.id, record)
         // Stored before its email, so it's worked out and read only once.
         if (!dry && stored[i] == null)
           await store.set(HEALTH_PREFIX + c.id, record)
@@ -1266,6 +1388,190 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
         })
       }
     }
+
+    // ── Waves still to go that must not go out (approve once) ──
+    // Canceled through the page's own delete (cancelScheduledWave), the
+    // soonest first. Each try is written down before it's made, so a run cut
+    // short knows on the next one what it was doing.
+    const cancelDoc: CancelDoc = { events: { ...(prevCancels?.events ?? {}) } }
+    const held: CancelNeed[] = []
+    if (campaignsOk) {
+      try {
+        // The verdicts on every sent wave on 6/7 (one read; most are known).
+        const sentWaves = relevant
+          .filter(
+            ({ c, lists }) =>
+              c.status === '5' &&
+              waveOf(c.name).wave != null &&
+              lists.some(l => ISSUE_LISTS.includes(l)) &&
+              !healthById.has(c.id)
+          )
+          .map(({ c }) => c.id)
+        const got = await store.mget<HealthRecord>(
+          sentWaves.map(id => HEALTH_PREFIX + id)
+        )
+        sentWaves.forEach((id, i) => {
+          const h = got[i]
+          if (h) healthById.set(id, h)
+        })
+        const needs = wavesToCancel({
+          nowMs,
+          relevant,
+          approved,
+          health: healthById,
+        })
+        const listed = new Map(campaigns.map(c => [c.id, c]))
+        const needed = new Set(needs.map(n => n.campaignId))
+        // Earlier tries without a clear answer: gone now is canceled; started
+        // is said; still scheduled is tried again below while it's needed.
+        for (const e of Object.values(cancelDoc.events)) {
+          if (e.outcome !== 'pending') continue
+          const c = listed.get(e.campaignId)
+          if (!c)
+            cancelDoc.events[e.campaignId] = {
+              ...e,
+              outcome: 'canceled',
+              detail: undefined,
+              at: nowIso,
+            }
+          else if (c.status !== '1' && c.status !== '7')
+            cancelDoc.events[e.campaignId] = {
+              ...e,
+              outcome: 'started',
+              at: nowIso,
+            }
+          else if (!needed.has(e.campaignId))
+            delete cancelDoc.events[e.campaignId]
+        }
+        for (const n of needs) {
+          if (n.status !== '1') {
+            held.push(n)
+            continue
+          }
+          if (dry) {
+            summary.canceled.push({
+              campaignId: n.campaignId,
+              name: n.name,
+              outcome: 'dry',
+            })
+            continue
+          }
+          if (Date.now() - startedMs > CANCEL_START_BY_MS) {
+            summary.canceled.push({
+              campaignId: n.campaignId,
+              name: n.name,
+              outcome: 'later',
+            })
+            continue
+          }
+          const event: Omit<CancelEvent, 'outcome' | 'at'> = {
+            campaignId: n.campaignId,
+            name: n.name,
+            listId: n.listId,
+            baseName: n.baseName,
+            wave: n.wave,
+            waves: n.waves,
+            cause: n.cause,
+            after: n.after,
+            why: n.why,
+            startsAt:
+              n.startsAt == null ? null : new Date(n.startsAt).toISOString(),
+          }
+          cancelDoc.events[n.campaignId] = {
+            ...event,
+            outcome: 'pending',
+            detail: 'a cancel was started, but no answer had come back',
+            at: nowIso,
+          }
+          await store.set(CANCELED_KEY, cancelDoc)
+          const r = await cancelScheduledWave(
+            n.campaignId,
+            { listId: n.listId, name: n.name },
+            { by: WATCHER, limits: WRITE_LIMITS }
+          )
+          console.warn(
+            `[newsletter-watch] canceling “${n.name}” (campaign ${n.campaignId}): ${n.cause === 'red' ? `wave ${n.after} came back red (${n.why})` : n.why}: ${r.outcome}`
+          )
+          summary.canceled.push({
+            campaignId: n.campaignId,
+            name: n.name,
+            outcome: r.outcome,
+          })
+          cancelDoc.events[n.campaignId] =
+            r.outcome === 'canceled' || r.outcome === 'gone'
+              ? { ...event, outcome: 'canceled', at: nowIso }
+              : r.outcome === 'started'
+                ? { ...event, outcome: 'started', at: nowIso }
+                : {
+                    ...event,
+                    outcome: 'pending',
+                    detail:
+                      r.outcome === 'busy'
+                        ? 'a cancel or pause of it from the page was running at the same moment'
+                        : r.detail,
+                    at: nowIso,
+                  }
+          await store.set(CANCELED_KEY, cancelDoc)
+        }
+      } catch (err) {
+        summary.errors.push(`cancels: ${errorText(err)}`)
+      }
+    }
+    // Three days on, a cancel is history.
+    for (const [id, e] of Object.entries(cancelDoc.events))
+      if (nowMs - Date.parse(e.at) > EVENT_ALERT_FOR)
+        delete cancelDoc.events[id]
+    raised.push(...cancelAlerts(cancelDoc, held, nowMs))
+
+    // ── Drafts of issues whose every wave has gone ──
+    // The waves kept the draft for re-approval; nothing can be approved from
+    // it now, and an older draft left on the list blocks the next issue.
+    const draftsGone = new Set<string>()
+    if (campaignsOk) {
+      try {
+        for (const { c, lists } of relevant) {
+          if (
+            c.status !== '0' ||
+            lists.length !== 1 ||
+            !ISSUE_LISTS.includes(lists[0]) ||
+            nextCampaigns[c.id]?.pipeline !== true ||
+            waveOf(c.name).wave != null ||
+            !everyWaveSent(c.name, lists[0], relevant)
+          )
+            continue
+          if (dry) {
+            summary.draftsDeleted.push({
+              campaignId: c.id,
+              name: c.name,
+              outcome: 'dry',
+            })
+            continue
+          }
+          if (Date.now() - startedMs > CANCEL_START_BY_MS) continue
+          const r = await deleteFinishedIssueDraft(
+            c.id,
+            { listId: lists[0], issue: c.name },
+            WRITE_LIMITS
+          )
+          summary.draftsDeleted.push({
+            campaignId: c.id,
+            name: c.name,
+            outcome:
+              r.outcome === 'refused' ? `refused: ${r.detail}` : r.outcome,
+          })
+          if (r.outcome !== 'refused') draftsGone.add(c.id)
+        }
+      } catch (err) {
+        summary.errors.push(`drafts: ${errorText(err)}`)
+      }
+    }
+    // A draft deleted just now isn't left waiting.
+    for (let i = raised.length - 1; i >= 0; i--)
+      if (
+        raised[i].id.startsWith('draft:') &&
+        draftsGone.has(raised[i].campaignId ?? '')
+      )
+        raised.splice(i, 1)
 
     // ── ActiveCampaign unreachable ──
     const acFailed = !campaignsOk || !accountOk || !healthOk
@@ -1355,6 +1661,11 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
         lastRunAt: nowIso,
       } satisfies WatchState)
       await saveAlerts()
+      if (
+        JSON.stringify(cancelDoc.events) !==
+        JSON.stringify(prevCancels?.events ?? {})
+      )
+        await store.set(CANCELED_KEY, cancelDoc)
     }
 
     const room = () =>
@@ -1662,11 +1973,14 @@ function campaignAlerts(p: {
         const t = timeOf(o.c.cdate)
         return t != null && nowMs - t <= WAVE_SEQUENCE_WINDOW
       })
+      // A wave still to go keeps the draft: a canceled one is approved
+      // again from it (approve once schedules them all at once).
+      const going = waves.some(o => o.c.status !== '5')
       const lastWaveOut = waves.some(o => {
         const w = waveOf(o.c.name)
-        return w.wave != null && w.wave === w.waves
+        return w.wave != null && w.wave === w.waves && o.c.status === '5'
       })
-      if (draftLists.length && (!recentWave || lastWaveOut)) {
+      if (draftLists.length && !going && (!recentWave || lastWaveOut)) {
         out.push({
           ...base,
           id: `draft:${c.id}`,
@@ -1680,6 +1994,293 @@ function campaignAlerts(p: {
         })
       }
     }
+  }
+  return out
+}
+
+// ─── Waves still to go (approve once, 8 October 2026) ─────────────────────
+
+/** Has gone, is going, or could still go out to anyone: everything but a
+ *  draft, and a stop or disable that provably reached nobody (newsletter.ts
+ *  isLiveCampaign). */
+function isLive(c: RawCampaign): boolean {
+  if (c.status === '0') return false
+  if (c.status === '4' || c.status === '6') {
+    const sent = String(c.send_amt ?? '').trim()
+    return !(sent !== '' && Number(sent) === 0)
+  }
+  return true
+}
+
+/** "waves 3–4", "wave 4", or "waves 2, 4". */
+function waveList(numbers: number[]): string {
+  const n = [...numbers].sort((a, b) => a - b)
+  if (n.length === 1) return `wave ${n[0]}`
+  const run = n.every((x, i) => i === 0 || x === n[i - 1] + 1)
+  return run ? `waves ${n[0]}–${n[n.length - 1]}` : `waves ${n.join(', ')}`
+}
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+/** Pure: the waves on the lists the watcher judges (6/7) that must not go
+ *  out, soonest first:
+ *  - every wave still to go (scheduled or held) after a wave whose 18-hour
+ *    verdict came back red (not on a small sample) since it was approved.
+ *    One approved after the verdict was given took a typed reason for it,
+ *    and stays;
+ *  - a wave that starts within FAIL_CLOSED_MINUTES (or whose start time
+ *    can't be read) while the wave before it has no verdict — none yet, not
+ *    finished, a finish time ActiveCampaign doesn't give, or never sent —
+ *    and every wave still to go after it, unless its approval carries a
+ *    typed reason to send it anyway.
+ *  A wave made less than UNAPPROVED_GRACE ago with no record yet is left
+ *  for the next run: its approval may still be writing it. */
+function wavesToCancel(p: {
+  nowMs: number
+  relevant: Array<{ c: RawCampaign; lists: string[] }>
+  approved: Map<string, ApprovedRecord>
+  health: Map<string, HealthRecord>
+}): CancelNeed[] {
+  const { nowMs, approved, health } = p
+  type W = {
+    c: RawCampaign
+    listId: string
+    baseName: string
+    wave: number
+    waves: number
+  }
+  const issues = new Map<string, W[]>()
+  for (const { c, lists } of p.relevant) {
+    const w = waveOf(c.name)
+    if (w.wave == null || w.waves == null || !oneOff(c) || !isLive(c)) continue
+    if (lists.length !== 1 || !ISSUE_LISTS.includes(lists[0])) continue
+    const key = `${lists[0]}|${w.waves}|${w.baseName}`
+    const one: W = {
+      c,
+      listId: lists[0],
+      baseName: w.baseName,
+      wave: w.wave,
+      waves: w.waves,
+    }
+    const had = issues.get(key)
+    if (had) had.push(one)
+    else issues.set(key, [one])
+  }
+  const out = new Map<string, CancelNeed>()
+  const add = (
+    x: W,
+    cause: CancelNeed['cause'],
+    after: number,
+    why: string
+  ) => {
+    if (out.get(x.c.id)?.cause === 'red') return
+    out.set(x.c.id, {
+      campaignId: x.c.id,
+      name: x.c.name,
+      status: x.c.status,
+      listId: x.listId,
+      baseName: x.baseName,
+      wave: x.wave,
+      waves: x.waves,
+      cause,
+      after,
+      why,
+      startsAt: timeOf(x.c.sdate),
+    })
+  }
+  const recordPending = (c: RawCampaign) => {
+    const made = timeOf(c.cdate)
+    return (
+      !approved.has(c.id) && made != null && nowMs - made < UNAPPROVED_GRACE
+    )
+  }
+  for (const run of issues.values()) {
+    const toGo = run
+      .filter(x => x.c.status === '1' || x.c.status === '7')
+      .sort((a, b) => a.wave - b.wave)
+    if (toGo.length === 0) continue
+    // A red verdict: every later wave approved before it.
+    for (const x of run) {
+      const h = health.get(x.c.id)
+      if (!h || h.verdict !== 'red' || h.smallSample) continue
+      for (const y of toGo) {
+        if (y.wave <= x.wave || recordPending(y.c)) continue
+        const r = approved.get(y.c.id)
+        if (r && Date.parse(r.approvedAt) >= Date.parse(h.checkedAt)) continue
+        add(
+          y,
+          'red',
+          x.wave,
+          h.reasons.join('; ') || 'its health check came back red'
+        )
+      }
+    }
+    // No verdict on the wave before one that is about to start.
+    for (const y of toGo) {
+      if (y.wave < 2 || recordPending(y.c)) continue
+      const start = timeOf(y.c.sdate)
+      if (start != null && start - nowMs > FAIL_CLOSED_MINUTES * MINUTE)
+        continue
+      if (approved.get(y.c.id)?.override) continue
+      const n = y.wave - 1
+      const before = run.filter(x => x.wave === n)
+      const prev = before.length === 1 ? before[0] : null
+      const why =
+        before.length > 1
+          ? `wave ${n} went out twice`
+          : !prev
+            ? `wave ${n} never went out`
+            : prev.c.status !== '5'
+              ? `wave ${n} is ${STATUS_WORDS[prev.c.status] ?? `in status ${prev.c.status}`}, not finished`
+              : timeOf(prev.c.ldate) == null
+                ? `ActiveCampaign doesn’t say when wave ${n} finished`
+                : !health.has(prev.c.id)
+                  ? `wave ${n} has no 18-hour check yet`
+                  : null
+      if (!why) continue
+      for (const z of toGo) if (z.wave >= y.wave) add(z, 'verdict', n, why)
+      break
+    }
+  }
+  return [...out.values()].sort(
+    (a, b) => (a.startsAt ?? -Infinity) - (b.startsAt ?? -Infinity)
+  )
+}
+
+/** Pure: every wave of `issue` on `listId` has been sent (status 5), once
+ *  each, numbered 1…N. */
+function everyWaveSent(
+  issue: string,
+  listId: string,
+  relevant: Array<{ c: RawCampaign; lists: string[] }>
+): boolean {
+  const waves = relevant.filter(({ c, lists }) => {
+    const w = waveOf(c.name)
+    return (
+      w.wave != null &&
+      w.baseName === issue &&
+      lists.length === 1 &&
+      lists[0] === listId &&
+      isLive(c)
+    )
+  })
+  if (waves.length === 0) return false
+  const n = waveOf(waves[0].c.name).waves
+  const seen = new Set(waves.map(({ c }) => waveOf(c.name).wave))
+  return (
+    n != null &&
+    waves.length === n &&
+    seen.size === n &&
+    waves.every(
+      ({ c }) =>
+        c.status === '5' &&
+        waveOf(c.name).waves === n &&
+        (waveOf(c.name).wave ?? 0) >= 1 &&
+        (waveOf(c.name).wave ?? 0) <= n
+    )
+  )
+}
+
+/** Pure: the alerts about canceling waves: one per issue, list and cause
+ *  for the waves canceled in the last EVENT_ALERT_FOR, one per wave that
+ *  started before it could be canceled, couldn't be canceled yet, or is
+ *  held for review when it shouldn't go out. */
+function cancelAlerts(
+  doc: CancelDoc,
+  held: CancelNeed[],
+  nowMs: number
+): Raised[] {
+  const out: Raised[] = []
+  const recent = Object.values(doc.events).filter(
+    e => nowMs - Date.parse(e.at) <= EVENT_ALERT_FOR
+  )
+  const short = (baseName: string, id: string) =>
+    shortLabel(baseName, id).replace(/ wave \d+\/\d+$/, '')
+  const because = (e: Pick<CancelEvent, 'cause' | 'after' | 'why'>) =>
+    e.cause === 'red'
+      ? `wave ${e.after}’s 18-hour check came back red: ${e.why}`
+      : e.why
+  const groups = new Map<string, CancelEvent[]>()
+  for (const e of recent) {
+    if (e.outcome !== 'canceled') continue
+    const key = `${e.listId}|${e.baseName}|${e.cause}|${e.after}`
+    const g = groups.get(key)
+    if (g) g.push(e)
+    else groups.set(key, [e])
+  }
+  for (const g of groups.values()) {
+    g.sort((a, b) => a.wave - b.wave)
+    const e = g[0]
+    const label = waveList(g.map(x => x.wave))
+    const them = g.length === 1 ? 'it' : 'them'
+    const ids = `campaign${g.length === 1 ? '' : 's'} ${g.map(x => x.campaignId).join(', ')}`
+    const name = short(e.baseName, e.campaignId)
+    out.push({
+      id: `canceled:${e.listId}:${e.baseName}:${e.after}`,
+      sig: `${e.cause}:${g.map(x => x.wave).join(',')}`,
+      severity: 'red',
+      title:
+        e.cause === 'red'
+          ? `${name}: ${label} canceled – wave ${e.after} came back red`
+          : `${name}: ${label} canceled – wave ${e.after} has no health check`,
+      detail:
+        e.cause === 'red'
+          ? [
+              `The send watcher canceled ${label} (${ids}) before ${g.length === 1 ? 'it' : 'they'} went out, because ${because(e)}. Nobody got ${them}.`,
+              `Look at wave ${e.after}’s numbers on the newsletter page. To send the rest anyway, approve ${them} again there and say why; otherwise leave ${them}.`,
+            ]
+          : [
+              `Wave ${e.wave} was due to start ${e.startsAt ? longDate(e.startsAt) : 'within the hour'}, but ${e.why}, so the send watcher canceled ${label} (${ids}) rather than send ${them} unchecked. Nobody got ${them}.`,
+              `This only happens when something is wrong, such as a wave still sending or a check that couldn’t run. Look at the newsletter page; once wave ${e.after} has its check, approve the rest again.`,
+            ],
+      campaignId: e.campaignId,
+      source: 'campaigns',
+    })
+  }
+  for (const e of recent) {
+    const name = short(e.baseName, e.campaignId)
+    if (e.outcome === 'started')
+      out.push({
+        id: `cancel-started:${e.campaignId}`,
+        sig: 'started',
+        severity: 'red',
+        title: `${name} wave ${e.wave} started before it could be canceled`,
+        detail: [
+          `It should have been canceled (${because(e)}), but ActiveCampaign had already started sending it (campaign ${e.campaignId}).`,
+          'Pause it under Recent sends on the newsletter page if it shouldn’t go on; stopping it after that is final.',
+        ],
+        campaignId: e.campaignId,
+        source: 'campaigns',
+      })
+    else if (e.outcome === 'pending')
+      out.push({
+        id: `cancel-failed:${e.campaignId}`,
+        sig: 'pending',
+        severity: 'red',
+        title: `The send watcher couldn’t cancel ${name} wave ${e.wave}`,
+        detail: [
+          `It should be canceled (${because(e)}), but ${e.detail ?? 'ActiveCampaign gave no clear answer'}.${e.startsAt ? ` It starts ${longDate(e.startsAt)}.` : ''}`,
+          `Cancel it under Recent sends on the newsletter page now, or in ActiveCampaign (Campaigns → ${e.campaignId}). The watcher tries again every 10 minutes.`,
+        ],
+        campaignId: e.campaignId,
+        source: 'campaigns',
+      })
+  }
+  for (const n of held) {
+    out.push({
+      id: `cancel-held:${n.campaignId}`,
+      sig: 'held',
+      severity: 'red',
+      title: `${short(n.baseName, n.campaignId)} wave ${n.wave} is held for review and shouldn’t go out`,
+      detail: [
+        `${capitalize(because(n))}, so wave ${n.wave} shouldn’t go out, but it is held for ActiveCampaign’s review (campaign ${n.campaignId}) and the watcher only cancels scheduled waves.`,
+        'Cancel it under Recent sends on the newsletter page.',
+      ],
+      campaignId: n.campaignId,
+      source: 'campaigns',
+    })
   }
   return out
 }
