@@ -857,12 +857,19 @@
   gap: 2px;
 }
 
-.waveChoice {
+/* A wave's line on an issue (approve once): its time, people and state,
+   with Cancel while it hasn't started. The radios above it (waves or the
+   whole list, small lists only) are the clickable kind. */
+.waveChoice,
+.waveLine {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
   gap: 0 6px;
   color: var(--white);
+}
+
+.waveChoice {
   cursor: pointer;
 }
 

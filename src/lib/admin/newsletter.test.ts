@@ -20,14 +20,19 @@ import {
   groupSends,
   holdsAt,
   parseWaveSegments,
+  scheduleWaves,
   sdateInstant,
   sendDelayMinutes,
   stopActionsFor,
   sumIssues,
   waveCampaignName,
+  waveList,
   waveOf,
   waveProgress,
+  waveSchedule,
+  wavesStillToGo,
   waveTags,
+  waveTiming,
 } from './newsletter'
 import { createHash } from 'node:crypto'
 import cardEdit from './__fixtures__/newsletter-card-edit.json'
@@ -835,17 +840,57 @@ describe('waveProgress', () => {
     expect(p.byWave.map(c => c?.id ?? null)).toEqual(['1', '2', null, null])
   })
 
-  it('waits while the previous wave is scheduled, sending, paused or held', () => {
-    for (const s of ['1', '2', '3', '7'])
-      expect(waveProgress(4, [w('1', 1, s, { ldate: null })]).wait).toMatch(
-        /^wave 2 can go once wave 1 has finished sending/
+  it('waits while an earlier wave is scheduled, sending, paused or held', () => {
+    for (const s of ['1', '2', '3', '7']) {
+      const p = waveProgress(4, [w('1', 1, s, { ldate: null })])
+      expect(p.wait).toMatch(
+        /^waves 2–4 can go once wave 1 has finished sending/
       )
+      expect(p.going).toBe(true)
+    }
+    // The one to wait for is the last unfinished one before the next wave.
+    expect(
+      waveProgress(4, [
+        w('1', 1, '5'),
+        w('2', 2, '1', { ldate: null }),
+        w('3', 3, '1', { ldate: null }),
+      ]).wait
+    ).toBe(
+      'wave 4 can go once wave 3 has finished sending (it is scheduled now)'
+    )
+  })
+
+  it('every wave scheduled at once (approve once): going, nothing next, not done', () => {
+    const p = waveProgress(4, [
+      w('1', 1, '5'),
+      w('2', 2, '1', { ldate: null }),
+      w('3', 3, '1', { ldate: null }),
+      w('4', 4, '7', { ldate: null }),
+    ])
+    expect(p).toMatchObject({
+      next: null,
+      going: true,
+      done: false,
+      wait: null,
+      blocked: null,
+    })
   })
 
   it('a wave stopped after reaching people ends the run', () => {
     const p = waveProgress(4, [w('1', 1, '4', { send_amt: '300' })])
     expect(p.next).toBeNull()
     expect(p.blocked).toMatch(/wave 1 was stopped after reaching 300 people/)
+    // …whatever was scheduled after it, which should be canceled.
+    const later = waveProgress(4, [
+      w('1', 1, '5'),
+      w('2', 2, '4', { send_amt: '120' }),
+      w('3', 3, '1', { ldate: null }),
+      w('4', 4, '1', { ldate: null }),
+    ])
+    expect(later.next).toBeNull()
+    expect(later.blocked).toMatch(
+      /wave 2 was stopped after reaching 120 people.* – cancel the waves still scheduled$/
+    )
   })
 
   it('is done after the last wave, or after a whole-list send', () => {
@@ -889,12 +934,167 @@ describe('waveProgress', () => {
     )
   })
 
-  it('holdsAt adds the 18-hour gap until it has passed', () => {
+  it('the 18-hour gap sets when the next wave starts, plus room for the verdict until it is in', () => {
+    // Wave 1 finished 8 October, 14:30 UTC.
+    const pending = waveProgress(4, [w('1', 1, '5')])
+    expect(pending.notBefore).toBe(Date.parse('2026-10-09T08:30:00Z'))
+    expect(pending.verdictPending).toBe(true)
+    expect(pending.startFrom).toBe(Date.parse('2026-10-09T10:00:00Z'))
+    const judged = waveProgress(
+      4,
+      [w('1', 1, '5')],
+      new Map([['1', { verdict: 'green', reasons: [] }]])
+    )
+    expect(judged.verdictPending).toBe(false)
+    expect(judged.startFrom).toBe(Date.parse('2026-10-09T08:30:00Z'))
+    // Funding isn't judged by the watcher: no room kept for a verdict.
+    const funding = waveProgress(
+      4,
+      [w('1', 1, '5')],
+      new Map(),
+      '-05:00',
+      waveTiming('8')
+    )
+    expect(funding.verdictPending).toBe(false)
+    expect(funding.startFrom).toBe(Date.parse('2026-10-09T08:30:00Z'))
+    // A test list waits ten minutes after the wave before it finished.
+    const test = waveProgress(
+      4,
+      [w('1', 1, '5')],
+      new Map(),
+      '-05:00',
+      waveTiming('5')
+    )
+    expect(test.startFrom).toBe(Date.parse('2026-10-08T14:40:00Z'))
+  })
+
+  it('holdsAt: the gap holds nothing; a verdict that should be in but isn’t does', () => {
     const p = waveProgress(4, [w('1', 1, '5')])
-    expect(holdsAt(p, new Date('2026-10-09T08:29:00Z'))).toEqual([
-      'wave 1 finished less than 18 hours ago; wave 2 is due from 9 October 2026, 08:30 UTC',
+    // Before the 18 hours, and while there is still room for the verdict.
+    expect(holdsAt(p, new Date('2026-10-09T08:29:00Z'))).toEqual([])
+    expect(holdsAt(p, new Date('2026-10-09T08:49:00Z'))).toEqual([])
+    // Once wave 2 would start inside the watcher's hour with no verdict.
+    expect(holdsAt(p, new Date('2026-10-09T08:50:00Z'))).toEqual([
+      'the send watcher hasn’t checked wave 1 yet (it was due 9 October 2026, 08:30 UTC), so it would cancel wave 2 before it starts',
     ])
-    expect(holdsAt(p, new Date('2026-10-09T08:30:00Z'))).toEqual([])
+    const judged = waveProgress(
+      4,
+      [w('1', 1, '5')],
+      new Map([['1', { verdict: 'amber', reasons: ['x'] }]])
+    )
+    expect(holdsAt(judged, new Date('2026-10-10T08:00:00Z'))).toEqual([])
+  })
+})
+
+/* ─── Approve once: when the waves start (8 Oct 2026) ─────────────────── */
+
+describe('waveSchedule: when each wave of one approval starts', () => {
+  const at = (iso: string) => Date.parse(iso)
+  const times = (slots: Array<{ wave: number; startsAt: number }>) =>
+    slots.map(s => [s.wave, new Date(s.startsAt).toISOString()])
+
+  it('nothing sent yet: wave 1 five minutes out, then a day apart', () => {
+    expect(
+      times(scheduleWaves('6', 1, 4, at('2026-10-08T21:00:00Z'), null))
+    ).toEqual([
+      [1, '2026-10-08T21:05:00.000Z'],
+      [2, '2026-10-09T21:05:00.000Z'],
+      [3, '2026-10-10T21:05:00.000Z'],
+      [4, '2026-10-11T21:05:00.000Z'],
+    ])
+  })
+
+  it('wave 1 already sent tonight: waves 2–4 from the 18-hour gap, plus room for the verdict', () => {
+    // Wave 1 (the old one-press flow) finished 8 October, 21:40 UTC; Bryce
+    // approves the rest the next morning, before its verdict is in.
+    const p = waveProgress(4, [
+      {
+        id: '180',
+        name: 'Events · Week 41, 2026 · wave 1/4',
+        status: '5',
+        send_amt: '541',
+        ldate: '2026-10-08T16:40:00-05:00',
+      },
+    ])
+    expect(new Date(p.startFrom!).toISOString()).toBe(
+      '2026-10-09T17:10:00.000Z'
+    )
+    expect(
+      times(scheduleWaves('6', 2, 4, at('2026-10-09T09:00:00Z'), p.startFrom))
+    ).toEqual([
+      [2, '2026-10-09T17:10:00.000Z'],
+      [3, '2026-10-10T17:10:00.000Z'],
+      [4, '2026-10-11T17:10:00.000Z'],
+    ])
+    // Pressed later than that: five minutes from the press.
+    expect(
+      times(scheduleWaves('6', 2, 4, at('2026-10-09T18:00:00Z'), p.startFrom))
+    ).toEqual([
+      [2, '2026-10-09T18:05:00.000Z'],
+      [3, '2026-10-10T18:05:00.000Z'],
+      [4, '2026-10-11T18:05:00.000Z'],
+    ])
+  })
+
+  it('one wave left: just that one', () => {
+    expect(
+      times(scheduleWaves('7', 4, 4, at('2026-10-11T12:00:00Z'), null))
+    ).toEqual([[4, '2026-10-11T12:05:00.000Z']])
+  })
+
+  it('test lists: two minutes out, then ten minutes apart', () => {
+    for (const list of ['4', '5'])
+      expect(
+        times(scheduleWaves(list, 1, 3, at('2026-10-08T21:00:00Z'), null))
+      ).toEqual([
+        [1, '2026-10-08T21:02:00.000Z'],
+        [2, '2026-10-08T21:12:00.000Z'],
+        [3, '2026-10-08T21:22:00.000Z'],
+      ])
+  })
+
+  it('is the plain rule underneath: the later of now + delay and notBefore, then the spacing', () => {
+    expect(
+      waveSchedule({
+        from: 2,
+        waves: 3,
+        now: 1000,
+        notBefore: 5000,
+        delayMs: 100,
+        spacingMs: 10,
+      })
+    ).toEqual([
+      { wave: 2, startsAt: 5000 },
+      { wave: 3, startsAt: 5010 },
+    ])
+    expect(
+      waveSchedule({
+        from: 1,
+        waves: 1,
+        now: 1000,
+        notBefore: 500,
+        delayMs: 100,
+        spacingMs: 10,
+      })
+    ).toEqual([{ wave: 1, startsAt: 1100 }])
+  })
+
+  it('timing per list: real lists 18 hours + verdict room on Events and Training', () => {
+    expect(waveTiming('6')).toEqual({
+      gapMs: 18 * 3_600_000,
+      leadMs: 90 * 60_000,
+      judged: true,
+      delayMs: 5 * 60_000,
+      spacingMs: 24 * 3_600_000,
+    })
+    expect(waveTiming('8')).toMatchObject({ judged: false, leadMs: 0 })
+    expect(waveTiming('5')).toEqual({
+      gapMs: 10 * 60_000,
+      leadMs: 0,
+      judged: false,
+      delayMs: 2 * 60_000,
+      spacingMs: 10 * 60_000,
+    })
   })
 })
 
@@ -933,6 +1133,55 @@ describe('editLockFor', () => {
       /^This issue \(campaign 5\) is scheduled/
     )
     expect(editLockFor([])).toBeNull()
+  })
+
+  it('locks them from the approval until the last wave has gone (approve once)', () => {
+    const wave = (id: string, k: number, status: string) => ({
+      id,
+      name: `Events · Week 41, 2026 · wave ${k}/4`,
+      status,
+      send_amt: status === '5' ? '500' : '0',
+    })
+    expect(
+      editLockFor([
+        wave('1', 1, '5'),
+        wave('2', 2, '1'),
+        wave('3', 3, '1'),
+        wave('4', 4, '1'),
+      ])
+    ).toBe(
+      'Waves 2–4 of this issue are scheduled or going out and send this draft’s email as it was approved, so card edits are off until the last of them has gone (or the rest are canceled)'
+    )
+    expect(
+      editLockFor([1, 2, 3, 4].map(k => wave(String(k), k, '5')))
+    ).toBeNull()
+  })
+})
+
+describe('wavesStillToGo', () => {
+  it('keeps the draft while a wave of the issue is still to go, not after', () => {
+    const wave = (k: number, status: string) => ({
+      id: String(k),
+      name: `Events · Week 41, 2026 · wave ${k}/4`,
+      status,
+      send_amt: '10',
+    })
+    expect(wavesStillToGo([wave(1, '5'), wave(2, '1'), wave(3, '7')])).toMatch(
+      /^Waves 2–3 of this issue are still to go out/
+    )
+    expect(wavesStillToGo([wave(1, '5'), wave(2, '5')])).toBeNull()
+    // A whole-list send isn't a wave: the draft isn't needed after it.
+    expect(
+      wavesStillToGo([
+        { id: '9', name: 'Events · Week 41, 2026', status: '1', send_amt: '0' },
+      ])
+    ).toBeNull()
+  })
+
+  it('waveList names a run, a gap or one', () => {
+    expect(waveList([4, 2, 3])).toBe('waves 2–4')
+    expect(waveList([2, 4])).toBe('waves 2, 4')
+    expect(waveList([3])).toBe('wave 3')
   })
 })
 

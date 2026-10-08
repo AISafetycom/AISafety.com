@@ -47,8 +47,9 @@ const ENV = { ...process.env }
 const WHO = { approver: 'Bryce Robertson' }
 const ISSUE = 'Events · Week 41, 2026'
 
-function wave(k: number, n = 4) {
-  return { segmentId: WAVE_IDS[k - 1], wave: k, waves: n }
+/** The page's choice: wave k and every one after it, of n. */
+function waves(k: number, n = 4) {
+  return { from: k, waves: n, segmentIds: WAVE_IDS.slice(k - 1, n) }
 }
 
 /** List 6 with 2,889 active and the four waves. */
@@ -77,7 +78,7 @@ afterEach(() => {
 })
 
 describe('one approval of an issue at a time, whatever it sends', () => {
-  it('the whole list and wave 1 pressed at once (a small list offers both): only one goes', async () => {
+  it('the whole list and the waves pressed at once (a small list offers both): only one goes', async () => {
     const ac = makeAC({
       segments: waveSegments(),
       tagCounts: { '6': { '101': 10, '102': 10, '103': 10 } },
@@ -98,9 +99,12 @@ describe('one approval of an issue at a time, whatever it sends', () => {
     const nl = await freshModule()
     const r = await Promise.allSettled([
       nl.approveAndSend('200', '6', WHO),
-      nl.approveAndSend('200', '6', { approver: 'plex', wave: wave(1) }),
+      nl.approveAndSend('200', '6', { approver: 'plex', waves: waves(1) }),
     ])
-    expect(ac.creates).toHaveLength(1)
+    // Whichever took the lock made its campaigns: the whole list's one, or
+    // the four waves; never both.
+    expect(r.filter(x => x.status === 'fulfilled')).toHaveLength(1)
+    expect([1, 4]).toContain(ac.creates.length)
     const refused = r.find(
       x => x.status === 'rejected'
     ) as PromiseRejectedResult
@@ -195,7 +199,7 @@ describe('a wave that can’t be read back is never left to go out unchecked', (
     vi.stubGlobal('fetch', ac.fetchMock)
     const nl = await freshModule()
     const r = await outcome(
-      nl.approveAndSend('200', '6', { ...WHO, wave: wave(1) })
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
     )
     expect(r.err).toBeInstanceOf(nl.SendDeletedError)
     expect(r.err).not.toBeInstanceOf(nl.MaybeScheduledError)
@@ -213,7 +217,7 @@ describe('a wave that can’t be read back is never left to go out unchecked', (
     vi.stubGlobal('fetch', ac.fetchMock)
     const nl = await freshModule()
     const r = await outcome(
-      nl.approveAndSend('200', '6', { ...WHO, wave: wave(1) })
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
     )
     expect(r.err).toBeInstanceOf(nl.MaybeScheduledError)
     expect((r.err as InstanceType<NL['MaybeScheduledError']>).campaignId).toBe(
@@ -246,7 +250,7 @@ describe('the 18-hour gap is measured in ActiveCampaign’s own time', () => {
     expect(p.notBefore).toBe(Date.parse('2026-10-09T08:30:00Z'))
   })
 
-  it('so wave 2 fifteen hours after a zone-less finish is still held', async () => {
+  it('so waves 2–4 approved fifteen hours after a zone-less finish start from the 18 hours in the account’s zone', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-10-09T05:30:00Z'))
     const ac = makeAC(
@@ -265,11 +269,19 @@ describe('the 18-hour gap is measured in ActiveCampaign’s own time', () => {
     )
     vi.stubGlobal('fetch', ac.fetchMock)
     const nl = await freshModule()
-    const r = await outcome(
-      nl.approveAndSend('200', '6', { ...WHO, wave: wave(2) })
-    )
-    expect(r.err).toBeInstanceOf(nl.NeedsOverrideError)
-    expect(ac.creates).toEqual([])
+    const r = await nl.approveAndSend('200', '6', { ...WHO, waves: waves(2) })
+    // 09:30 in Colombia is 14:30 UTC; 18 hours on, and 90 minutes for the
+    // watcher's verdict: 10:00 UTC, 05:00 in the account's time.
+    expect(r.sendAt).toBe('2026-10-09T10:00:00.000Z')
+    expect(
+      ac.calls
+        .filter(c => c.action === 'campaign_create')
+        .map(c => c.form!.get('sdate'))
+    ).toEqual([
+      '2026-10-11 05:00:00',
+      '2026-10-10 05:00:00',
+      '2026-10-09 05:00:00',
+    ])
   })
 })
 
