@@ -3988,15 +3988,32 @@ function Detail({
       </section>
     ) : null
 
+  // A Form row the Mac could write no reply for says why, where the draft
+  // would be, instead of leaving the spot empty (Bryce, 8 Oct 2026: "please
+  // tell me in the listing (same place)").
+  const noReplyBlock =
+    item.noReply && !item.replyDraft ? (
+      <section className={styles.block}>
+        <h3 className={styles.h3}>No reply draft</h3>
+        <p className={styles.note}>
+          {item.noReply === 'no email'
+            ? 'The form came in without an email address, so there’s no one to reply to.'
+            : 'The form left an email address, but its Airtable notification isn’t in Gmail, so there’s no thread to reply in yet. The Mac looks again every 6 hours.'}
+        </p>
+      </section>
+    ) : null
+
   const replyBlock =
     item.status === 'Rejected' ? (
-      rejectReplyBlock
+      (rejectReplyBlock ?? noReplyBlock)
     ) : acceptBlock || declineBlock ? (
       <div className={styles.replies}>
         {acceptBlock}
         {declineBlock}
       </div>
-    ) : null
+    ) : (
+      noReplyBlock
+    )
 
   // The side panel: the verdict with its reasons, and under it the chat
   // with Fable (when the Mac agent is up), which is there for every item.
