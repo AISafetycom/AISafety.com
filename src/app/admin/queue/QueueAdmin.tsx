@@ -2691,7 +2691,7 @@ export default function QueueAdmin({
             })
           }
           break
-        case 'l':
+        case 'w':
           if (
             canEdit &&
             item &&
@@ -3420,7 +3420,7 @@ export default function QueueAdmin({
                 <kbd>Enter</kbd>
               </dd>
               <dt>
-                <kbd>L</kbd>
+                <kbd>W</kbd>
               </dt>
               <dd>
                 review again in a week: out of the list until then, and Fable
@@ -4682,7 +4682,7 @@ function Detail({
               onClick={() => act('later')}
             >
               <Icon src={ICON.clock} size={12} />
-              Review again in a week <kbd>L</kbd>
+              Review again in a week <kbd>W</kbd>
             </button>
             {editCount > 0 && (
               <span className={styles.note}>
