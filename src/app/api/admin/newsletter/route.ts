@@ -4,11 +4,14 @@
   approver (canSendNewsletter) with a Google session under
   NEWSLETTER_FRESH_SECONDS old.
 
-  GET  /api/admin/newsletter   → { fetchedAt, canSend, drafts, recent }
+  GET  /api/admin/newsletter   → { fetchedAt, canSend, drafts, recent,
+                                  lineup }
                                   canSend = this session may approve;
                                   drafts = pipeline-made draft campaigns with
                                   their verification result; recent = latest
-                                  sends/scheduled campaigns
+                                  sends/scheduled campaigns; lineup = the
+                                  listings each newsletter's next issue would
+                                  pick up (newsletter-lineup.ts)
   POST /api/admin/newsletter   → body { campaign, list, confirmed?: [ids],
                                   wave?: { segment, k, n }, override? }
                                   re-verifies the draft under a lock and
@@ -55,6 +58,7 @@ import { isSameOriginRequest } from '@/lib/admin/origin'
 import {
   ApprovalLockedError,
   approveAndSend,
+  baseIssueName,
   DraftProblemError,
   isNewsletterConfigured,
   isRealList,
@@ -68,6 +72,12 @@ import {
   SendDeletedError,
   type WaveChoice,
 } from '@/lib/admin/newsletter'
+import {
+  FUNDING_LIST_ID,
+  readLineup,
+  saveFundingBaseline,
+  withoutWaiting,
+} from '@/lib/admin/newsletter-lineup'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -109,16 +119,26 @@ export async function GET() {
   const auth = await ensureAuth()
   if (auth) return auth
   try {
-    const [drafts, recent, canSend] = await Promise.all([
+    const [drafts, recent, canSend, lineup] = await Promise.all([
       listDrafts(),
       listRecent(),
       canSendNewsletter(),
+      readLineup(),
     ])
     return json({
       fetchedAt: new Date().toISOString(),
       canSend,
       drafts,
       recent,
+      // The cards of the drafts waiting here are in an issue already.
+      lineup: withoutWaiting(
+        lineup,
+        new Set(
+          drafts
+            .flatMap(d => d.cards ?? [])
+            .flatMap(g => g.cards.map(c => c.key))
+        )
+      ),
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -186,6 +206,16 @@ export async function POST(req: NextRequest) {
       wave: choice,
       override: typeof override === 'string' ? override : null,
     })
+    // Funding's lined-up count runs from the listings accepting
+    // applications as an issue goes out (newsletter-lineup.ts).
+    if (listId === FUNDING_LIST_ID)
+      after(() =>
+        saveFundingBaseline(baseIssueName(result.name)).catch(err =>
+          console.error(
+            `[newsletter] noting the open Funding listings failed: ${err instanceof Error ? err.message : String(err)}`
+          )
+        )
+      )
     // No email for an ordinary approval (Bryce, 2 Oct 2026: "Let's not do
     // these emails"); the owner still hears about a 202 below.
     return json(result)
