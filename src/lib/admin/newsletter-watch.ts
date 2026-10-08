@@ -403,7 +403,8 @@ const V1_READS = [
 ] as const
 type V1Read = (typeof V1_READS)[number]
 
-const TRANSIENT_STATUSES = new Set([429, 502, 503, 504])
+// Same set as newsletter.ts: 511 is Cloudflare's empty reply to a burst.
+const TRANSIENT_STATUSES = new Set([429, 502, 503, 504, 511])
 
 function acBase(): string {
   return (process.env.ACTIVECAMPAIGN_URL ?? '').replace(/\/+$/, '')

@@ -1109,3 +1109,21 @@ describe('older issues on the same list', () => {
     ])
   })
 })
+
+describe('reading the page through a burst', () => {
+  it('rides out the empty 511 Cloudflare gives a burst of reads (8 Oct 2026)', async () => {
+    const ac = makeAC()
+    let refused = 0
+    vi.stubGlobal('fetch', async (input: string | URL, init?: RequestInit) => {
+      if (/\/campaignLists$/.test(String(input)) && refused === 0) {
+        refused++
+        return new Response(null, { status: 511 })
+      }
+      return ac.fetchMock(input, init)
+    })
+    const nl = await freshModule()
+    const drafts = await nl.listDrafts()
+    expect(refused).toBe(1)
+    expect(drafts.map(d => d.id)).toEqual(['200'])
+  })
+})

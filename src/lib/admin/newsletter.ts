@@ -235,10 +235,11 @@ function segmentId(id: string): string {
 }
 
 /** Gateway errors ActiveCampaign's edge returns for a few seconds at a time
- *  (a 502 page from Cloudflare, 25 Sept 2026), and its rate limit (429, five
- *  requests a second). Reads retry them; writes never retry, because a write
- *  may have landed before the error came back. */
-const TRANSIENT_STATUSES = new Set([429, 502, 503, 504])
+ *  (a 502 page from Cloudflare, 25 Sept 2026; an empty 511 from Cloudflare
+ *  when several reads arrive at once, 8 Oct 2026), and its rate limit (429,
+ *  five requests a second). Reads retry them; writes never retry, because a
+ *  write may have landed before the error came back. */
+const TRANSIENT_STATUSES = new Set([429, 502, 503, 504, 511])
 const READ_RETRY_DELAYS_MS = [1000, 3000]
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
