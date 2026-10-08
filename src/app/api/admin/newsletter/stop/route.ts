@@ -1,8 +1,12 @@
 /*
   POST /api/admin/newsletter/stop   body { campaign, action }
 
-  The Stop buttons on Recent sends. `action` is one of
-    cancel  a scheduled or held send: ActiveCampaign deletes it, nobody gets it
+  The Stop buttons on Recent sends (and Cancel on an issue's scheduled
+  waves). `action` is one of
+    cancel  a scheduled or held send: ActiveCampaign deletes it, nobody gets
+            it. A wave takes the later waves of its issue that haven't
+            started with it (waves go in order), and the issue can be
+            approved again from that wave
     pause   a send that is going out: it stops partway, and can be resumed
     stop    a sending or paused send, for good
     resume  a paused send carries on
@@ -10,7 +14,8 @@
   Google session under NEWSLETTER_FRESH_SECONDS old; the page confirms first.
   The campaign is read fresh and must be a newsletter send (lists 5–8) in a
   state that allows the action.
-  → 200 StopResult
+  → 200 StopResult (alsoCanceled: the later waves canceled with it;
+        laterProblem: any that may still go out, and what to do)
     409 { refused } the action doesn't fit the send as it is now, or another
         press on it is still being carried out (nothing changed)
     502 { failed, uncertain } ActiveCampaign refused, or no clear answer came

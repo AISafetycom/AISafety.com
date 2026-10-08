@@ -13,33 +13,47 @@
                                   listings each newsletter's next issue would
                                   pick up (newsletter-lineup.ts)
   POST /api/admin/newsletter   → body { campaign, list, confirmed?: [ids],
-                                  wave?: { segment, k, n }, override? }
+                                  waves?: { from, n, segments: [ids] },
+                                  override? }
                                   re-verifies the draft under a lock and
-                                  schedules it — to the whole list, or to
-                                  wave k of n (the saved segment `segment`)
-                                  — to send in 5 minutes (2 on the test
+                                  schedules it: to the whole list in 5
+                                  minutes (2 on the test lists), or — approve
+                                  once — every wave still to go, wave `from`
+                                  to n (`segments` = their saved segments, as
+                                  the page listed them), the first in 5
+                                  minutes or once the gap after the previous
+                                  wave is up, each later one 24 hours after
+                                  the one before (10 minutes on the test
                                   lists). The draft shell is deleted after a
-                                  whole-list send or the last wave, and kept
-                                  for the next wave otherwise. `confirmed` =
-                                  the ids of the warnings ticked in the
-                                  dialog; `override` = the reason typed to
-                                  send a held wave anyway.
+                                  whole-list send; waves keep it until the
+                                  last one has gone. `confirmed` = the ids of
+                                  the warnings ticked in the dialog;
+                                  `override` = the reason typed to send held
+                                  waves anyway. The old one-wave body
+                                  ({ wave: { segment, k, n } }, from a page
+                                  loaded before approve once) is refused:
+                                  reload.
                                → 200 ScheduledSend (campaignId, sdate, name,
-                                  wave, waves, expected, draftKept, notes…)
+                                  wave, waves, expected, draftKept,
+                                  scheduled: every wave with its time,
+                                  notes…)
                                   409 { problems } refused (nothing sent)
                                   409 { needsConfirmation, warnings } tick
                                       these first (nothing sent)
-                                  409 { needsOverride, holds } the wave is
-                                      held: type a reason (nothing sent)
+                                  409 { needsOverride, holds } the first
+                                      wave is held: type a reason (nothing
+                                      sent)
                                   409 { locked } another approval of the
-                                      issue (whole list or any wave) holds
-                                      the lock
+                                      issue (whole list or waves) holds the
+                                      lock
                                   202 { maybeScheduled } an error at or after
-                                      the create: it may be scheduled, so
+                                      a create that can't be confirmed either
+                                      way: something may be scheduled, so
                                       don't press again
                                   502 { notSent } failed before the create,
-                                      or the new campaign came back wrong
-                                      and was deleted at once
+                                      or every campaign made was deleted
+                                      again (one came back wrong, or
+                                      ActiveCampaign was too slow)
                                   403 not posted from this page (another
                                       site or subdomain; nothing sent)
   A 202 on a real list emails the owner, after the answer has gone
@@ -62,15 +76,15 @@ import {
   DraftProblemError,
   isNewsletterConfigured,
   isRealList,
+  isWaveRange,
   listDrafts,
   listRecent,
   MaybeScheduledError,
   NeedsConfirmationError,
   NeedsOverrideError,
   notifyApproval,
-  SEGMENT_ID_RE,
   SendDeletedError,
-  type WaveChoice,
+  type WaveRange,
 } from '@/lib/admin/newsletter'
 import {
   FUNDING_LIST_ID,
@@ -81,6 +95,11 @@ import {
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+// Approving every wave still to go makes a campaign per wave, each read back
+// (ActiveCampaign can take 10+ seconds a request); the approval stops
+// making them after two minutes and takes them back instead (newsletter.ts
+// PRESS_CREATE_BY_MS), which needs the rest of this.
+export const maxDuration = 300
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -164,13 +183,26 @@ export async function POST(req: NextRequest) {
   } catch {
     return json({ error: 'body must be JSON' }, 400)
   }
-  const { campaign, list, confirmed, wave, override } = (body ?? {}) as {
+  const { campaign, list, confirmed, wave, waves, override } = (body ?? {}) as {
     campaign?: unknown
     list?: unknown
     confirmed?: unknown
     wave?: unknown
+    waves?: unknown
     override?: unknown
   }
+  // A page loaded before approve once asks for one wave: what its dialog
+  // showed is no longer what an approval does.
+  if (wave !== undefined && wave !== null)
+    return json(
+      {
+        error: 'this page is out of date',
+        problems: [
+          'this page is out of date – reload it, then approve the waves again',
+        ],
+      },
+      409
+    )
   const campaignId = String(campaign ?? '')
   const listId = String(list ?? '')
   const ticks =
@@ -181,12 +213,12 @@ export async function POST(req: NextRequest) {
           confirmed.every(c => typeof c === 'string' && c.length <= 200)
         ? (confirmed as string[])
         : null
-  const choice = parseWave(wave)
+  const range = parseWaves(waves)
   if (
     !/^\d+$/.test(campaignId) ||
     !/^\d+$/.test(listId) ||
     ticks === null ||
-    choice === undefined ||
+    range === undefined ||
     (override !== undefined &&
       override !== null &&
       !(typeof override === 'string' && override.length <= 1000))
@@ -194,7 +226,7 @@ export async function POST(req: NextRequest) {
     return json(
       {
         error:
-          'body must be { campaign: id, list: id, confirmed?: [ids], wave?: { segment, k, n }, override?: text }',
+          'body must be { campaign: id, list: id, confirmed?: [ids], waves?: { from, n, segments: [ids] }, override?: text }',
       },
       400
     )
@@ -203,7 +235,7 @@ export async function POST(req: NextRequest) {
     const result = await approveAndSend(campaignId, listId, {
       approver: admin.name || admin.email,
       confirmed: ticks,
-      wave: choice,
+      waves: range,
       override: typeof override === 'string' ? override : null,
     })
     // Funding's lined-up count runs from the listings accepting
@@ -278,17 +310,16 @@ export async function POST(req: NextRequest) {
   }
 }
 
-/** The wave in a request: undefined when malformed, null when none. */
-function parseWave(wave: unknown): WaveChoice | null | undefined {
-  if (wave === undefined || wave === null) return null
-  const w = wave as { segment?: unknown; k?: unknown; n?: unknown }
-  if (
-    typeof w !== 'object' ||
-    typeof w.segment !== 'string' ||
-    !SEGMENT_ID_RE.test(w.segment) ||
-    !Number.isInteger(w.k) ||
-    !Number.isInteger(w.n)
-  )
-    return undefined
-  return { segmentId: w.segment, wave: w.k as number, waves: w.n as number }
+/** The waves in a request: undefined when malformed, null when none (the
+ *  whole list). approveAndSend checks the range against the list's waves. */
+function parseWaves(waves: unknown): WaveRange | null | undefined {
+  if (waves === undefined || waves === null) return null
+  if (typeof waves !== 'object') return undefined
+  const w = waves as { from?: unknown; n?: unknown; segments?: unknown }
+  const range = {
+    from: w.from,
+    waves: w.n,
+    segmentIds: w.segments,
+  } as WaveRange
+  return isWaveRange(range) ? range : undefined
 }

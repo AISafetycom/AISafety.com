@@ -19,7 +19,8 @@
   Sending: AC's v1 API has no "send now" for an existing draft, so approval
   creates the sending campaign from the verified message (status 1, sdate
   sendDelayMinutes out, in the account's local time) and deletes the draft
-  shell (after the last wave, when it goes out in waves). Reads use the v3
+  shell — straight away for a whole-list send; an issue sent in waves keeps
+  it until its last wave has gone (see "Approve once"). Reads use the v3
   API; the writes use v1, the only API that can schedule a send (unlocked on
   the paid plan, 30 Aug 2026), except the stop calls (v3).
 
@@ -44,17 +45,18 @@
   clicked through in a real inbox before it goes to the list.
 
   Send safety (29 Sept 2026, before ~2,900 real readers join lists 6/7):
-  - one approval at a time per list + issue, whole list or any wave: an
+  - one approval at a time per list + issue, whole list or waves: an
     Upstash SET NX lock, held 15 minutes and released only when the approval
-    fails before `campaign_create`, so two tabs, a reload or two approvers
-    can't both send; card edits to the issue wait while it is held;
+    fails before `campaign_create` (or every campaign it made is known to be
+    deleted again), so two tabs, a reload or two approvers can't both send;
+    card edits to the issue wait while it is held;
   - the campaigns are read again, uncached, right before the create, and any
     campaign of the same issue on the list counts as "already sent" unless
     it is a draft or was stopped/disabled before reaching anyone; the email
     is read again too, and must be the one the checks passed;
-  - once `campaign_create` has been called, every error says "may have been
-    scheduled – don't press again": the create may have landed even when the
-    answer didn't;
+  - once `campaign_create` has been called, every error that can't be
+    confirmed says "may have been scheduled – don't press again": the create
+    may have landed even when the answer didn't;
   - `sendChecks()` refuses emails with missing footer tags, the wrong sender
     for the list, broken click-counter links, oversized HTML or an older issue
     still waiting, and asks the approver to tick leftover words (TEST,
@@ -71,14 +73,37 @@
     campaign carries the segment (`segmentid`), is named
     "<issue> · wave k/N", and is read back and deleted at once if AC didn't
     keep the segment (or can't be read back to show it did); Recent sends
-    flags a wave-named send without one. Waves go in order, one at a time,
-    each once the one before has finished and WAVE_MIN_GAP_HOURS have passed
-    (or the watcher's verdict on it isn't red) unless the approver types a
-    reason; the draft stays until the last wave, and card edits wait while a
-    wave is going out;
+    flags a wave-named send without one;
   - a real-list send goes out SEND_DELAY_MINUTES_REAL after approval, and
-    Recent sends can cancel it until then, then pause, stop or resume it
-    (stopSend); the owner is emailed about every real-list approval.
+    the page can cancel it until then, then pause, stop or resume it
+    (stopSend). The owner is emailed only when an approval may have gone out
+    despite an error (notifyApproval).
+
+  Approve once (8 Oct 2026): one press schedules every wave still to go,
+  k…N, instead of one press per wave (approveAndSend with `waves`):
+  - wave k starts at the later of sendDelayMinutes from now and the 18-hour
+    gap after wave k−1 finished (plus VERDICT_LEAD_MINUTES while the send
+    watcher's verdict on wave k−1 isn't in); each later wave starts
+    WAVE_SPACING_HOURS after the one before (WAVE_SPACING_MINUTES_TEST on
+    test lists 4/5). waveSchedule() in newsletter-warmup.ts is the rule,
+    shared with the page's confirm dialog;
+  - every wave's campaign is made exactly as one wave was before (name,
+    segment read back, tracklinks none, status 1), the soonest last, and
+    recorded for the watcher as it is made. All or nothing: when one fails,
+    every campaign the press made is deleted again, and only what can't be
+    confirmed gone answers "may have been scheduled";
+  - holds that need a typed reason: a red verdict on wave k−1, a finish
+    time AC doesn't give, and a verdict that should be in but isn't (the
+    watcher would cancel the wave); the 18-hour gap itself only sets the
+    time;
+  - the draft stays until the last wave has gone (the send watcher deletes
+    it then): a canceled wave is approved again from it. Card edits and the
+    draft's Delete wait while any wave of the issue is still to go out;
+  - canceling a wave (page) cancels the later scheduled waves of the issue
+    too, and the issue offers "Approve waves j–N" again. The send watcher
+    cancels the waves still scheduled after a red verdict, or when a wave
+    is about to start without a verdict on the one before (newsletter-
+    watch.ts), through cancelScheduledWave.
 */
 
 import { createHash } from 'node:crypto'
@@ -86,8 +111,16 @@ import { Redis } from '@upstash/redis'
 import { newsletterApprovalMail, sendAdminMail } from '@/lib/admin/mail'
 import { ROOT_ADMINS } from '@/lib/admin/users'
 import {
+  FAIL_CLOSED_MINUTES,
+  HEALTH_CHECK_LISTS,
   MAX_UNSEGMENTED_SEND,
   NEWSLETTER_WARMUP,
+  VERDICT_LEAD_MINUTES,
+  WAVE_SPACING_HOURS,
+  WAVE_SPACING_MINUTES_TEST,
+  waveSchedule,
+  type WaveSlot,
+  wavesLabel,
 } from '@/lib/admin/newsletter-warmup'
 import {
   type CampaignClicks,
@@ -99,7 +132,15 @@ import {
 } from '@/lib/newsletter-clicks'
 
 /** Re-exported for callers that already import them from here. */
-export { MAX_UNSEGMENTED_SEND, NEWSLETTER_WARMUP }
+export {
+  MAX_UNSEGMENTED_SEND,
+  NEWSLETTER_WARMUP,
+  VERDICT_LEAD_MINUTES,
+  WAVE_SPACING_HOURS,
+  WAVE_SPACING_MINUTES_TEST,
+  waveSchedule,
+  type WaveSlot,
+}
 
 const MARKER_RE = /<!--aisafety-issue:([0-9a-f]{16})-->/
 /** Minutes between approval and the send. On the real lists that is time to
@@ -119,12 +160,67 @@ const FALLBACK_UTC_OFFSET = '-05:00'
 const SENDER_INFO =
   'AISafety.com, 2810 N Church St PMB 49028, Wilmington, DE 19802-4447, US'
 
-/** Wave k+1 waits this long after wave k finished sending: the send watcher
- *  judges each wave 18 hours after it ends, and a red verdict holds the next
- *  one. Sending sooner takes a typed reason, which is logged. */
+/** Wave k+1 starts no sooner than this after wave k finished sending: the
+ *  send watcher judges each wave 18 hours after it ends, and a red verdict
+ *  holds the next one (real lists; WAVE_SPACING_MINUTES_TEST on the test
+ *  lists, which the watcher never judges). */
 export const WAVE_MIN_GAP_HOURS = 18
 /** The shortest reason accepted for sending a held wave anyway. */
 const OVERRIDE_MIN_CHARS = 10
+const MINUTE_MS = 60_000
+const HOUR_MS = 60 * MINUTE_MS
+
+/** How one list's waves are timed. */
+export interface WaveTiming {
+  /** A wave starts no sooner than this after the one before it finished… */
+  gapMs: number
+  /** …plus this while the watcher's verdict on that wave isn't in. */
+  leadMs: number
+  /** The send watcher judges this list's waves (HEALTH_CHECK_LISTS), and
+   *  cancels the ones after a red or missing verdict. */
+  judged: boolean
+  /** From approval to the first send (sendDelayMinutes). */
+  delayMs: number
+  /** From one wave's start to the next one's. */
+  spacingMs: number
+}
+
+export function waveTiming(listId: string): WaveTiming {
+  const real = isRealList(listId)
+  const judged = HEALTH_CHECK_LISTS.includes(listId)
+  return {
+    gapMs: real
+      ? WAVE_MIN_GAP_HOURS * HOUR_MS
+      : WAVE_SPACING_MINUTES_TEST * MINUTE_MS,
+    leadMs: judged ? VERDICT_LEAD_MINUTES * MINUTE_MS : 0,
+    judged,
+    delayMs: sendDelayMinutes(listId) * MINUTE_MS,
+    spacingMs: real
+      ? WAVE_SPACING_HOURS * HOUR_MS
+      : WAVE_SPACING_MINUTES_TEST * MINUTE_MS,
+  }
+}
+
+/** Pure: when waves `from`…`waves` of an approval on `listId` start, at
+ *  `now` (epoch ms), given the earliest the first may start (`notBefore`,
+ *  WaveProgress.startFrom). */
+export function scheduleWaves(
+  listId: string,
+  from: number,
+  waves: number,
+  now: number,
+  notBefore: number | null
+): WaveSlot[] {
+  const t = waveTiming(listId)
+  return waveSchedule({
+    from,
+    waves,
+    now,
+    notBefore,
+    delayMs: t.delayMs,
+    spacingMs: t.spacingMs,
+  })
+}
 /** The saved segments that are waves, by name (~/Newsletter/waves.py makes
  *  them): "Newsletter wave 1" … "Newsletter wave N (everyone else)" for the
  *  real lists, and the test run's "SWEEP TEST wave …" for test lists 4/5. */
@@ -172,9 +268,13 @@ function listRefusal(listId: string): string | null {
     : `list ${listId} isn’t a newsletter list (Events 6, Training 7, Funding 8, or test lists 4/5)`
 }
 
-/** One approval per list + issue + wave at a time; long enough to cover the
+/** One approval per list + issue at a time; long enough to cover the
  *  slowest approval and to make a second press soon after a sent one fail. */
 const APPROVE_LOCK_SECONDS = 15 * 60
+/** An approval of several waves makes no new campaign this long after it
+ *  began (the route allows 300 seconds): it takes back the ones it made
+ *  instead, leaving the rest of the time for that. */
+const PRESS_CREATE_BY_MS = 120_000
 /** Writes give up after this and are never retried (the write may have
  *  landed); reads give up after READ_TIMEOUT_MS per attempt. */
 const WRITE_TIMEOUT_MS = 25_000
@@ -247,16 +347,27 @@ function segmentId(id: string): string {
 const TRANSIENT_STATUSES = new Set([429, 502, 503, 504, 511])
 const READ_RETRY_DELAYS_MS = [1000, 3000]
 
+/** Tighter limits for a caller with less time than a page request (the send
+ *  watcher, which runs inside a two-minute function): `readMs` and
+ *  `writeMs` replace READ_TIMEOUT_MS and WRITE_TIMEOUT_MS, and `retry:
+ *  false` skips the read retries. */
+export interface CallLimits {
+  readMs?: number
+  writeMs?: number
+  retry?: boolean
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function v3<T = any>(path: string): Promise<T> {
+async function v3<T = any>(path: string, limits: CallLimits = {}): Promise<T> {
+  const retryDelays = limits.retry === false ? [] : READ_RETRY_DELAYS_MS
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(v3url(path), {
       headers: { 'Api-Token': apiKey() },
       cache: 'no-store',
-      signal: AbortSignal.timeout(READ_TIMEOUT_MS),
+      signal: AbortSignal.timeout(limits.readMs ?? READ_TIMEOUT_MS),
     })
     if (res.ok) return res.json() as Promise<T>
-    const delay = READ_RETRY_DELAYS_MS[attempt]
+    const delay = retryDelays[attempt]
     if (TRANSIENT_STATUSES.has(res.status) && delay !== undefined) {
       console.warn(
         `[newsletter] ActiveCampaign ${path.split('?')[0]}: ${res.status}, retrying in ${delay} ms`
@@ -295,12 +406,15 @@ async function v3put<T = any>(path: string, body: unknown): Promise<T> {
 
 /** DELETE through the v3 API (never retried, like every write). AC answers
  *  `{ succeeded: 1 }` or `{ succeeded: 0, message }` with a 200 either way. */
-async function v3delete(path: string): Promise<Record<string, unknown>> {
+async function v3delete(
+  path: string,
+  limits: CallLimits = {}
+): Promise<Record<string, unknown>> {
   const res = await fetch(v3url(path), {
     method: 'DELETE',
     headers: { 'Api-Token': apiKey() },
     cache: 'no-store',
-    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+    signal: AbortSignal.timeout(limits.writeMs ?? WRITE_TIMEOUT_MS),
   })
   if (!res.ok) {
     throw new Error(
@@ -368,7 +482,8 @@ const sentListIds = new Map<string, string[]>()
  *  write: one attempt, WRITE_TIMEOUT_MS, never retried. */
 async function v1answer(
   action: string,
-  fields: Record<string, string | number>
+  fields: Record<string, string | number>,
+  limits: CallLimits = {}
 ): Promise<Record<string, unknown>> {
   const qs = new URLSearchParams({
     api_action: action,
@@ -381,7 +496,7 @@ async function v1answer(
     method: 'POST',
     body,
     cache: 'no-store',
-    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+    signal: AbortSignal.timeout(limits.writeMs ?? WRITE_TIMEOUT_MS),
   })
   if (!res.ok) {
     // AC's gateway errors are whole HTML pages; the status says enough.
@@ -496,9 +611,9 @@ export interface DraftSummary {
   blocks: string[]
   /** What the approver must tick in the confirm dialog before it sends. */
   warnings: SendWarning[]
-  /** This issue already went (or is going) to this list as another
-   *  campaign — the whole list, or every one of its waves: Approve stays
-   *  off. */
+  /** This issue already went to this list as another campaign — the whole
+   *  list (sent or still to go), or every one of its waves, all finished:
+   *  Approve stays off. Waves still to go show under `waves` instead. */
   alreadySent: { campaignId: string; status: string } | null
   /** The list's warm-up waves and how far this issue has got through them;
    *  null when the list has none (then it can only go out whole). */
@@ -507,10 +622,12 @@ export interface DraftSummary {
   sendDelayMinutes: number
   /** Card edits may be saved into this draft from this copy of the site. */
   editable: boolean
-  /** The draft may be deleted from this copy of the site. */
+  /** The draft may be deleted from this copy of the site, now: not while a
+   *  send of the issue is still to go out (a canceled wave is approved
+   *  again from the draft). */
   deletable: boolean
-  /** Why card edits are off just now (a wave of the issue is going out and
-   *  shares this draft's email), or null. */
+  /** Why card edits are off just now (a send of the issue is scheduled or
+   *  going out and shares this draft's email), or null. */
   editLock: string | null
   /** The inbox preview line (the email's hidden preheader), as Gmail shows it
    *  after the subject. Null when the email has none. */
@@ -568,7 +685,7 @@ export interface SentSummary {
  *  paused one. */
 export type StopAction = 'cancel' | 'pause' | 'stop' | 'resume'
 
-/** One wave of the list, and this issue's send of it if it has gone. */
+/** One wave of the list, and this issue's campaign of it, if it has one. */
 export interface WaveInfo {
   wave: number
   waves: number
@@ -577,13 +694,19 @@ export interface WaveInfo {
   segmentId: string
   /** Active contacts on this list in the wave right now; null if unread. */
   count: number | null
+  /** This issue's campaign of the wave: sent, sending, or still to go. */
   sent: WaveSent | null
 }
 
-/** A wave this issue has sent (or is sending), with its numbers. */
+/** This issue's campaign of a wave — sent, going out, or scheduled — with
+ *  its numbers. */
 export interface WaveSent {
   campaignId: string
   status: string
+  /** When it starts (ISO), while it is scheduled or held. */
+  scheduledAt: string | null
+  /** It hasn't started, and an approver may cancel it from the page. */
+  canCancel: boolean
   /** When it finished sending (ISO), once it has. */
   finishedAt: string | null
   sent: number
@@ -608,15 +731,21 @@ export interface WavePlan {
    *  (send_amt over its waves): the rest are still to get it. */
   active: number | null
   reached: number
-  /** The wave that may go next, or null. */
+  /** The first wave the next approval schedules (it schedules that one and
+   *  every one after it), or null when none may be approved now. */
   next: number | null
-  /** The 18-hour gap after the previous wave ends at this instant (ISO);
-   *  sending sooner needs a typed reason. */
+  /** The gap after the previous wave ends at this instant (ISO). */
   notBefore: string | null
-  /** Other reasons the next wave is held that a typed reason can override
-   *  (the watcher flagged the previous wave red, say). */
+  /** The earliest the next wave may start (ISO): the gap, plus room for the
+   *  send watcher's verdict while it isn't in; null = as soon as approved.
+   *  The page's confirm dialog times the waves from it (waveSchedule). */
+  startFrom: string | null
+  /** Minutes from one wave's start to the next one's. */
+  spacingMinutes: number
+  /** Reasons the next wave is held that a typed reason can override (the
+   *  watcher flagged the previous wave red, say), as of the read. */
   holds: string[]
-  /** Why the next wave has to wait (the previous one is still sending). */
+  /** Why the next waves have to wait (one before them is still to go). */
   wait: string | null
   /** Why no further wave of this issue can go (a wave was stopped, the
    *  waves changed, it already went to the whole list). */
@@ -624,6 +753,9 @@ export interface WavePlan {
   /** It may still go to the whole list at once instead (small lists only
    *  while the warm-up is on). */
   wholeList: boolean
+  /** A wave of this issue is scheduled, sending, paused or held: the page
+   *  shows the schedule. */
+  going: boolean
 }
 
 // ActiveCampaign's campaign statuses (0 = draft is handled separately). 6 and
@@ -823,38 +955,62 @@ export interface WaveHealth {
 }
 
 export interface WaveProgress {
+  /** The first wave the next approval schedules (it schedules every wave
+   *  from there to the last), or null when none may be approved now. */
   next: number | null
   /** Epoch ms when the gap after the previous wave ends. */
   notBefore: number | null
+  /** Epoch ms: the earliest the next wave may start — notBefore, plus the
+   *  timing's lead while the watcher's verdict on the previous wave isn't
+   *  in (waveSchedule's `notBefore`). Null: as soon as it is approved. */
+  startFrom: number | null
+  /** The watcher judges this list, and hasn't judged the previous wave yet
+   *  (holdsAt holds the next one once that is overdue). */
+  verdictPending: boolean
   holds: string[]
   wait: string | null
   blocked: string | null
-  /** Every wave went (or the issue went to the whole list). */
+  /** Every wave has gone and finished (or the issue went to the whole
+   *  list): there is nothing left to approve or to wait for. */
   done: boolean
+  /** A campaign of this issue hasn't finished: scheduled, sending, paused,
+   *  held, or a status this file doesn't know. */
+  going: boolean
   /** This issue's live campaign for each wave (index = wave − 1). */
   byWave: Array<IssueSend | null>
 }
 
-/** Pure: which wave of `waves` may go next, given this issue's live
+/** Sent, stopped or disabled: nothing more happens to it. */
+const FINISHED = new Set(['4', '5', '6'])
+/** The send watcher runs this often (vercel.json). */
+const WATCHER_EVERY_MINUTES = 10
+
+/** Pure: where this issue stands in the list's `waves` waves, given its live
  *  campaigns on the list (`live`, as sentOnList returns them) and the
- *  watcher's verdicts. Waves go in order; wave k+1 needs wave k finished
- *  (status 5) and WAVE_MIN_GAP_HOURS since then (see holdsAt). A wave that
- *  was stopped after reaching people ends the issue's run. `offset` is the
- *  account's UTC offset: a finish time written without a zone is read in
- *  it, never in the server's own zone. */
+ *  watcher's verdicts. An approval schedules every wave from `next` on;
+ *  `next` needs every wave before it finished sending (status 5), and the
+ *  first of them starts no sooner than `startFrom` (the timing's gap after
+ *  the previous wave finished, plus room for the watcher's verdict while
+ *  it isn't in). A wave that was stopped after reaching people ends the
+ *  issue's run. `offset` is the account's UTC offset: a finish time written
+ *  without a zone is read in it, never in the server's own zone. */
 export function waveProgress(
   waves: number,
   live: IssueSend[],
   health: Map<string, WaveHealth> = new Map(),
-  offset: string = FALLBACK_UTC_OFFSET
+  offset: string = FALLBACK_UTC_OFFSET,
+  timing: WaveTiming = waveTiming('6')
 ): WaveProgress {
   const out: WaveProgress = {
     next: null,
     notBefore: null,
+    startFrom: null,
+    verdictPending: false,
     holds: [],
     wait: null,
     blocked: null,
     done: false,
+    going: live.some(c => !FINISHED.has(c.status)),
     byWave: Array.from({ length: waves }, () => null),
   }
   const whole = live.find(c => waveOf(c.name) == null)
@@ -889,46 +1045,72 @@ export function waveProgress(
     out.blocked = `wave ${missing + 1} of this issue never went out, but wave ${highest} did – ask Claude before sending more`
     return out
   }
+  // A wave stopped (or disabled) after reaching people ends the run, whatever
+  // came after it.
+  const ended = out.byWave.findIndex(
+    c => c != null && (c.status === '4' || c.status === '6')
+  )
+  if (ended >= 0) {
+    const c = out.byWave[ended]!
+    out.blocked = `wave ${ended + 1} was ${statusLabel(c.status)} after reaching ${Number(c.send_amt ?? 0) || 'some'} people, so no further wave of this issue goes out (see ~/Newsletter/ROLLBACK.md)${out.going ? ' – cancel the waves still scheduled' : ''}`
+    return out
+  }
   if (highest === waves) {
-    out.done = true
+    // Every wave has its campaign: done once they have all finished.
+    out.done = !out.going
     return out
   }
   out.next = highest + 1
   if (highest === 0) return out
+  // Every wave before the next one has to have finished: the last of them
+  // that hasn't is the one to wait for.
+  const pending = out.byWave
+    .slice(0, highest)
+    .reverse()
+    .find(c => c != null && !FINISHED.has(c.status))
+  if (pending) {
+    out.wait = `${wavesLabel(out.next, waves)} can go once wave ${waveOf(pending.name)!.wave} has finished sending (it is ${statusLabel(pending.status)} now)`
+    return out
+  }
   const prev = out.byWave[highest - 1]!
-  if (prev.status === '4' || prev.status === '6') {
-    out.blocked = `wave ${highest} was ${statusLabel(prev.status)} after reaching ${Number(prev.send_amt ?? 0) || 'some'} people, so no further wave of this issue goes out (see ~/Newsletter/ROLLBACK.md)`
-    out.next = null
-    return out
-  }
-  if (prev.status !== '5') {
-    out.wait = `wave ${out.next} can go once wave ${highest} has finished sending (it is ${statusLabel(prev.status)} now)`
-    return out
-  }
   const finished = instantMs(prev.ldate ?? null, offset)
   if (Number.isNaN(finished))
     out.holds.push(
-      `ActiveCampaign doesn’t say when wave ${highest} finished, so the ${WAVE_MIN_GAP_HOURS}-hour gap can’t be checked`
+      `ActiveCampaign doesn’t say when wave ${highest} finished, so the gap after it can’t be checked`
     )
-  else out.notBefore = finished + WAVE_MIN_GAP_HOURS * 3_600_000
+  else out.notBefore = finished + timing.gapMs
   const h = health.get(prev.id)
+  out.verdictPending = timing.judged && h == null
   if (h?.verdict === 'red' && !h.smallSample)
     out.holds.push(
       `the send watcher flagged wave ${highest} red${h.reasons?.length ? `: ${h.reasons.join('; ')}` : ''}`
     )
+  out.startFrom =
+    out.notBefore == null
+      ? null
+      : out.notBefore + (out.verdictPending ? timing.leadMs : 0)
   return out
 }
 
-/** Pure: the holds on the next wave at `now`: the gap, if it hasn't passed,
- *  then the others. */
+/** Pure: what holds the next wave at `now` (a typed reason sends it
+ *  anyway): the progress's own holds, and a verdict on the previous wave
+ *  that the watcher should have given by now — without it the watcher would
+ *  cancel the wave before it starts (FAIL_CLOSED_MINUTES). The gap after
+ *  the previous wave holds nothing: it only sets the time (startFrom). */
 export function holdsAt(p: WaveProgress, now: Date): string[] {
-  const gap =
-    p.notBefore != null && now.getTime() < p.notBefore
-      ? [
-          `wave ${(p.next ?? 1) - 1} finished less than ${WAVE_MIN_GAP_HOURS} hours ago; wave ${p.next} is due from ${formatUtc(new Date(p.notBefore))}`,
-        ]
-      : []
-  return [...gap, ...p.holds]
+  const overdue =
+    p.verdictPending &&
+    p.next != null &&
+    p.notBefore != null &&
+    p.startFrom != null &&
+    p.startFrom - now.getTime() <=
+      (FAIL_CLOSED_MINUTES + WATCHER_EVERY_MINUTES) * MINUTE_MS
+  return overdue
+    ? [
+        ...p.holds,
+        `the send watcher hasn’t checked wave ${p.next! - 1} yet (it was due ${formatUtc(new Date(p.notBefore!))}), so it would cancel wave ${p.next} before it starts`,
+      ]
+    : p.holds
 }
 
 /** "8 October 2026, 14:32 UTC". */
@@ -986,22 +1168,36 @@ function statusLabel(status: string): string {
     : (STATUS_NAMES[status] ?? `status ${status}`)
 }
 
-async function campaignListIds(campaignId: string): Promise<string[]> {
+async function campaignListIds(
+  campaignId: string,
+  limits: CallLimits = {}
+): Promise<string[]> {
   const data = await v3<{ campaignLists: Array<{ list: string }> }>(
-    `campaigns/${acId(campaignId)}/campaignLists`
+    `campaigns/${acId(campaignId)}/campaignLists`,
+    limits
   )
   return (data.campaignLists ?? []).map(l => String(l.list))
 }
 
-async function campaignMessageIds(campaignId: string): Promise<string[]> {
+async function campaignMessageIds(
+  campaignId: string,
+  limits: CallLimits = {}
+): Promise<string[]> {
   const data = await v3<{ campaignMessages: Array<{ messageid: string }> }>(
-    `campaigns/${acId(campaignId)}/campaignMessages`
+    `campaigns/${acId(campaignId)}/campaignMessages`,
+    limits
   )
   return (data.campaignMessages ?? []).map(m => String(m.messageid))
 }
 
-async function message(messageId: string): Promise<RawMessage> {
-  const data = await v3<{ message: RawMessage }>(`messages/${acId(messageId)}`)
+async function message(
+  messageId: string,
+  limits: CallLimits = {}
+): Promise<RawMessage> {
+  const data = await v3<{ message: RawMessage }>(
+    `messages/${acId(messageId)}`,
+    limits
+  )
   return data.message
 }
 
@@ -1198,7 +1394,8 @@ async function readHealth(ids: string[]): Promise<Map<string, WaveHealth>> {
 async function waveSentInfo(
   c: RawCampaign,
   health: WaveHealth | undefined,
-  offset: string
+  offset: string,
+  listId: string
 ): Promise<WaveSent> {
   const [full, totals] = await Promise.all([
     sharedRead(`campaign:${c.id}`, 60_000, () =>
@@ -1227,6 +1424,11 @@ async function waveSentInfo(
   return {
     campaignId: c.id,
     status: statusLabel(full.status),
+    scheduledAt:
+      full.status === '1' || full.status === '7'
+        ? sdateInstant(full.sdate ?? null, offset)
+        : null,
+    canCancel: stopActionsFor(full.status, [listId]).includes('cancel'),
     finishedAt: Number.isNaN(finished)
       ? null
       : new Date(finished).toISOString(),
@@ -1245,27 +1447,64 @@ async function waveSentInfo(
 /** Pure: why card edits must wait, or null: a send of this issue that shares
  *  the draft's email (every wave is made from the draft's message) is still
  *  scheduled, sending, paused or held, and an edit would change what it
- *  sends after the checks were ticked. */
+ *  sends after the checks were ticked. With approve once that is from the
+ *  approval until the last wave has gone: the email is frozen as approved. */
 export function editLockFor(live: IssueSend[]): string | null {
-  const going = live.find(
-    c => isLiveCampaign(c) && !['4', '5', '6'].includes(c.status)
-  )
-  if (!going) return null
-  const w = waveOf(going.name)
-  return `${w ? `Wave ${w.wave} of this issue` : 'This issue'} (campaign ${going.id}) is ${statusLabel(going.status)} and uses this draft’s email, so card edits are off until it has finished sending`
+  const going = live
+    .filter(c => isLiveCampaign(c) && !FINISHED.has(c.status))
+    .sort((a, b) => (waveOf(a.name)?.wave ?? 0) - (waveOf(b.name)?.wave ?? 0))
+  if (going.length === 0) return null
+  if (going.length === 1) {
+    const [c] = going
+    const w = waveOf(c.name)
+    return `${w ? `Wave ${w.wave} of this issue` : 'This issue'} (campaign ${c.id}) is ${statusLabel(c.status)} and uses this draft’s email, so card edits are off until it has finished sending`
+  }
+  return `${capitalize(waveList(going.map(c => waveOf(c.name)?.wave ?? 0)))} of this issue are scheduled or going out and send this draft’s email as it was approved, so card edits are off until the last of them has gone (or the rest are canceled)`
+}
+
+/** Pure: why the issue's draft must stay, or null: waves of the issue are
+ *  still to go out (scheduled, sending, paused or held), and a canceled one
+ *  is approved again from the draft. Deleting it wouldn't stop them either:
+ *  they send the draft's message, which stays. */
+export function wavesStillToGo(live: IssueSend[]): string | null {
+  const going = live
+    .filter(
+      c =>
+        waveOf(c.name) != null && isLiveCampaign(c) && !FINISHED.has(c.status)
+    )
+    .map(c => waveOf(c.name)!.wave)
+  if (going.length === 0) return null
+  return `${capitalize(waveList(going))} of this issue ${going.length === 1 ? 'is' : 'are'} still to go out, and a canceled wave is approved again from this draft. Deleting it wouldn’t stop them: to stop the issue, cancel its waves (under Recent sends)`
+}
+
+/** Pure: "waves 2–4" for a run of numbers, "waves 2, 4" otherwise, "wave 3"
+ *  for one. */
+export function waveList(numbers: number[]): string {
+  const n = [...numbers].sort((a, b) => a - b)
+  if (n.length === 1) return `wave ${n[0]}`
+  const run = n.every((x, i) => i === 0 || x === n[i - 1] + 1)
+  return run ? wavesLabel(n[0], n[n.length - 1]) : `waves ${n.join(', ')}`
+}
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
 /** The list's waves and where this issue stands in them, for the page:
  *  null when the list has no waves. `live` = this issue's live campaigns on
  *  the list; `active` = the list's active contacts; `offset` = the
- *  account's UTC offset (accountUtcOffset). */
+ *  account's UTC offset (accountUtcOffset); `now` = the read's time, for
+ *  the holds. */
 async function wavePlanFor(
   listId: string,
   live: RawCampaign[],
   active: number | null,
-  offset: string
+  offset: string,
+  now: Date
 ): Promise<{ plan: WavePlan; progress: WaveProgress | null } | null> {
   const wholeList = warmupRefusal(listId, active, null) == null && !live.length
+  const timing = waveTiming(listId)
+  const spacingMinutes = Math.round(timing.spacingMs / MINUTE_MS)
   const empty = (error: string): { plan: WavePlan; progress: null } => ({
     plan: {
       error,
@@ -1274,10 +1513,13 @@ async function wavePlanFor(
       reached: 0,
       next: null,
       notBefore: null,
+      startFrom: null,
+      spacingMinutes,
       holds: [],
       wait: null,
       blocked: null,
       wholeList,
+      going: live.some(c => !FINISHED.has(c.status)),
     },
     progress: null,
   })
@@ -1296,21 +1538,29 @@ async function wavePlanFor(
   if ('error' in segs) return empty(segs.error)
   const waves = segs
   const waveIds = live.filter(c => waveOf(c.name)).map(c => c.id)
+  let healthUnread = false
   const [counts, health] = await Promise.all([
     waveCounts(listId, waves, active),
     readHealth(waveIds).catch(err => {
       console.warn(
         `[newsletter] reading the watcher's verdicts failed: ${err instanceof Error ? err.message : String(err)}`
       )
+      healthUnread = true
       return new Map<string, WaveHealth>()
     }),
   ])
-  const progress = waveProgress(waves.length, live, health, offset)
+  const progress = waveProgress(waves.length, live, health, offset, timing)
   const sent = await mapLimit(progress.byWave, 3, c =>
     c
-      ? waveSentInfo(c as RawCampaign, health.get(c.id), offset)
+      ? waveSentInfo(c as RawCampaign, health.get(c.id), offset, listId)
       : Promise.resolve(null)
   )
+  const iso = (ms: number | null) =>
+    ms == null ? null : new Date(ms).toISOString()
+  // Without the verdicts nothing tells a missing one from an unread one, and
+  // the approval would fail on the same read: wait rather than call the
+  // watcher late.
+  const unread = healthUnread && progress.next != null && progress.next > 1
   return {
     plan: {
       error: null,
@@ -1325,14 +1575,16 @@ async function wavePlanFor(
       active,
       reached: sent.reduce((n, s) => n + (s?.sent ?? 0), 0),
       next: progress.next,
-      notBefore:
-        progress.notBefore == null
-          ? null
-          : new Date(progress.notBefore).toISOString(),
-      holds: progress.holds,
-      wait: progress.wait,
+      notBefore: iso(progress.notBefore),
+      startFrom: iso(progress.startFrom),
+      spacingMinutes,
+      holds: unread ? progress.holds : holdsAt(progress, now),
+      wait: unread
+        ? 'the send watcher’s verdicts couldn’t be read just now – reload the page in a minute'
+        : progress.wait,
       blocked: progress.blocked,
       wholeList,
+      going: progress.going,
     },
     progress,
   }
@@ -1902,7 +2154,7 @@ export async function listDrafts(): Promise<DraftSummary[]> {
       : [null, { blocks: [], warnings: [] }, []]
     const refusal = listId ? listRefusal(listId) : null
     const waved = listId
-      ? await wavePlanFor(listId, sent, activeContacts, offset)
+      ? await wavePlanFor(listId, sent, activeContacts, offset, now)
       : null
     const plan = waved?.plan ?? null
     // With usable waves the warm-up only rules out the whole list (the page
@@ -1912,8 +2164,9 @@ export async function listDrafts(): Promise<DraftSummary[]> {
       listId && !usableWaves
         ? warmupRefusal(listId, activeContacts, null)
         : null
-    // "Already sent": the whole list got it, or every wave did. With waves
-    // still to go, Approve stays on for the next one.
+    // "Already sent": the whole list got it, or every wave did and they have
+    // all finished. Waves still to go show as the issue's schedule instead,
+    // and Approve comes back for any that are canceled.
     const done =
       waved?.progress?.done === true
         ? (sent.find(s => waveOf(s.name) == null) ?? sent[0] ?? null)
@@ -1957,7 +2210,9 @@ export async function listDrafts(): Promise<DraftSummary[]> {
         listId != null &&
         (!isRealList(listId) || canWriteRealListsHere()) &&
         editLock == null,
-      deletable: deleteRefusal(listIds) == null,
+      // Not while a wave of the issue is still to go: a canceled wave is
+      // approved again from this draft (deleteDraft refuses then too).
+      deletable: deleteRefusal(listIds) == null && wavesStillToGo(sent) == null,
       editLock,
       preview: previewText(msg.html ?? ''),
       cards: cardGroups(msg.html ?? ''),
@@ -3087,10 +3342,12 @@ function deleteRefusal(listIds: string[]): string | null {
  *  `delete_draft()`'s refusals: the campaign must still be a draft and every
  *  message on it must carry the pipeline's marker, so a wrong id can never
  *  take out a scheduled or sent campaign, or one built by hand. Refused
- *  while an approval of the issue is running or has just scheduled it. Only
- *  the campaign goes: a wave already sent was made from this same message.
- *  The pipeline's next build of the issue finds the draft gone and makes a
- *  new one. `deleted: false` = it was already gone. */
+ *  while an approval of the issue is running or has just scheduled it, and
+ *  while a wave of the issue is still to go out (a canceled wave is
+ *  approved again from the draft). Only the campaign goes: every wave is
+ *  made from this same message. The pipeline's next build of the issue
+ *  finds the draft gone and makes a new one. `deleted: false` = it was
+ *  already gone. */
 export async function deleteDraft(
   draftId: string,
   by: string
@@ -3124,6 +3381,13 @@ export async function deleteDraft(
       'this draft wasn’t built by the pipeline (no content marker), so it isn’t deleted from here',
     ])
   }
+  const campaigns = await allCampaigns({ fresh: true })
+  for (const l of new Set(listIds)) {
+    const why = wavesStillToGo(
+      await sentOnList(campaigns, id, campaign.name, l, null)
+    )
+    if (why) throw new DraftProblemError([why])
+  }
   for (const l of new Set(listIds)) {
     const approving = await approvalEditLock(
       l,
@@ -3141,6 +3405,61 @@ export async function deleteDraft(
   }
   console.info(`[newsletter] draft ${id} (“${campaign.name}”) deleted by ${by}`)
   return { deleted: true }
+}
+
+/** Delete an issue's draft once every wave of it has gone (the send watcher
+ *  calls this; it has checked the waves). deleteDraft's checks, read again
+ *  here — still a draft, on `listId` alone, named `issue`, every message
+ *  carrying the pipeline's marker — and the same call, inside the
+ *  watcher's limits. Only the campaign goes: the waves sent its message.
+ *  'gone' = it wasn't there any more. */
+export async function deleteFinishedIssueDraft(
+  draftId: string,
+  expect: { listId: string; issue: string },
+  limits: CallLimits
+): Promise<
+  { outcome: 'deleted' | 'gone' } | { outcome: 'refused'; detail: string }
+> {
+  const id = acId(draftId)
+  const gone = (err: Error) => {
+    if (/: 404 /.test(err.message)) return null
+    throw err
+  }
+  const [campaign, listIds, messageIds] = await Promise.all([
+    v3<{ campaign?: RawCampaign }>(`campaigns/${id}`, limits)
+      .then(d => d.campaign ?? null)
+      .catch(gone),
+    campaignListIds(id, limits).catch(gone),
+    campaignMessageIds(id, limits).catch(gone),
+  ])
+  if (!campaign || !listIds || !messageIds) return { outcome: 'gone' }
+  if (
+    String(campaign.status) !== '0' ||
+    campaign.name !== expect.issue ||
+    listIds.length !== 1 ||
+    listIds[0] !== expect.listId
+  )
+    return {
+      outcome: 'refused',
+      detail: `campaign ${id} isn’t that issue’s draft on list ${expect.listId} any more`,
+    }
+  const msgs = await Promise.all(messageIds.map(m => message(m, limits)))
+  if (msgs.length === 0 || msgs.some(m => !MARKER_RE.test(m.html ?? '')))
+    return {
+      outcome: 'refused',
+      detail: 'it wasn’t built by the pipeline (no content marker)',
+    }
+  const out = await v1answer('campaign_delete', { id }, limits)
+  forgetSharedCampaigns([id])
+  if (Number(out.result_code) !== 1)
+    return {
+      outcome: 'refused',
+      detail: `ActiveCampaign didn’t delete it: ${String(out.result_message ?? 'no reason given').slice(0, 200)}`,
+    }
+  console.info(
+    `[newsletter] draft ${id} (“${campaign.name}”) deleted by the send watcher: every wave of it has gone`
+  )
+  return { outcome: 'deleted' }
 }
 
 /* ─── Approval: the lock and the record (Upstash) ─────────────────────── */
@@ -3172,13 +3491,15 @@ export interface LockHolder {
   approver: string
   /** ISO timestamp. */
   at: string
-  /** The wave it approves; null for the whole list. */
+  /** The first wave it approves; null for the whole list. */
   wave?: number | null
+  /** The last wave it approves (approve once: every wave from `wave` on). */
+  through?: number | null
 }
 
 /** One key per list + issue, whatever the approval sends: a whole-list send
- *  and a wave (or two waves) of one issue are never approved side by side,
- *  or both could pass the "already sent" read before either create lands. */
+ *  and waves of one issue are never approved side by side, or both could
+ *  pass the "already sent" read before either create lands. */
 function approveLockKey(listId: string, baseName: string): string {
   return `${LOCK_PREFIX}${listId}:${baseName}`
 }
@@ -3266,8 +3587,10 @@ export interface ApprovalRecord {
   /** ISO timestamp. */
   approvedAt: string
   approver: string
-  /** The reason typed to send a held wave anyway; absent otherwise. Not part
-   *  of the wave contract, so readers may ignore it. */
+  /** The reason typed to send a held wave anyway; absent otherwise. Only the
+   *  first wave of an approval carries it (the holds are on that one). The
+   *  send watcher reads it: a wave sent anyway past a missing verdict isn't
+   *  canceled for it. */
   override?: string
 }
 
@@ -3285,7 +3608,7 @@ async function recordApproval(r: ApprovalRecord): Promise<void> {
 
 /** Another approval of this issue for this list (the whole list or any
  *  wave) holds the lock: still running, or finished less than 15 minutes
- *  ago. The message names the holder's wave when it's known, else the
+ *  ago. The message names the holder's waves when they're known, else the
  *  refused one's. */
 export class ApprovalLockedError extends Error {
   readonly detail: string
@@ -3293,10 +3616,16 @@ export class ApprovalLockedError extends Error {
   constructor(
     issue: string,
     holder: LockHolder | null,
-    wave: number | null = null
+    wave: number | null = null,
+    through: number | null = null
   ) {
-    const theirs = holder && holder.wave !== undefined ? holder.wave : wave
-    const what = theirs == null ? `“${issue}”` : `wave ${theirs} of “${issue}”`
+    const mine = holder == null || holder.wave === undefined
+    const from = mine ? wave : (holder.wave ?? null)
+    const to = mine ? through : (holder.through ?? null)
+    const what =
+      from == null
+        ? `“${issue}”`
+        : `${wavesLabel(from, to ?? from)} of “${issue}”`
     const detail = `Another approval of ${what} for this list ${
       holder ? `(${holder.approver}) ` : ''
     }started less than 15 minutes ago and may already have scheduled it. Don’t press again: check Recent sends, which updates by itself.`
@@ -3365,9 +3694,12 @@ export class MaybeScheduledError extends Error {
 }
 
 /** ActiveCampaign made the send wrongly, and the new campaign was deleted
- *  at once: nothing goes out. */
+ *  at once (with every other one the approval had made): nothing goes out.
+ *  `retryNow`: the approval's lock goes too, so it may be approved again
+ *  at once; otherwise the lock runs its 15 minutes ("tell Claude first"). */
 export class SendDeletedError extends Error {
   readonly detail: string
+  readonly retryNow: boolean = false
   constructor(detail: string) {
     super(detail)
     this.detail = detail
@@ -3383,10 +3715,19 @@ export class WaveDroppedError extends SendDeletedError {}
 /** …because the new wave couldn't be read back to check it (ActiveCampaign
  *  failing to answer, not misbehaving): it's gone, so the approval's lock
  *  goes too and the wave can be approved again at once. */
-export class ReadBackDeletedError extends SendDeletedError {}
+export class ReadBackDeletedError extends SendDeletedError {
+  override readonly retryNow = true
+}
+
+/** An approval of several waves ran out of time (ActiveCampaign answering
+ *  slowly) and took back the waves it had made: nothing was scheduled, and
+ *  it may be approved again at once. */
+export class TooSlowError extends SendDeletedError {
+  override readonly retryNow = true
+}
 
 export interface ScheduledSend extends ApprovalFacts {
-  /** The new, sending campaign. */
+  /** The new, sending campaign (for waves: the first, soonest one). */
   campaignId: string
   /** ActiveCampaign is holding the send for its compliance review ("Pending
    *  Approval"); it goes out once they approve it. */
@@ -3395,21 +3736,42 @@ export interface ScheduledSend extends ApprovalFacts {
   sdate: string | null
   activeContacts: number | null
   segmentId: string | null
-  /** The draft stays for the next wave (it goes after the last one). */
+  /** The draft stays until the issue's last wave has gone. */
   draftKept: boolean
   /** ActiveCampaign started sending at once instead of at `sdate` (it read
    *  the time as past): too late to cancel, only pause or stop. */
   sendingNow: boolean
+  /** Every wave this approval scheduled, soonest first; empty for a
+   *  whole-list send. */
+  scheduled: ScheduledWave[]
   /** Things that went wrong after the send was safely scheduled. */
   notes: string[]
 }
 
-/** One wave of the list, as the page listed it. */
-export interface WaveChoice {
-  /** The wave's saved segment (segmentsV2 id). */
-  segmentId: string
+/** One wave an approval scheduled. */
+export interface ScheduledWave {
   wave: number
   waves: number
+  campaignId: string
+  name: string
+  segmentId: string
+  /** The wave's count at approval. */
+  expected: number | null
+  /** When it starts (ISO). */
+  sendAt: string
+  /** As ActiveCampaign stored it (the account's local time). */
+  sdate: string | null
+  held: boolean
+  sendingNow: boolean
+}
+
+/** The waves an approval schedules, as the page listed them: wave `from`
+ *  and every one after it, up to the last (`waves`). */
+export interface WaveRange {
+  from: number
+  waves: number
+  /** The saved segment (segmentsV2 id) of each wave from `from` on. */
+  segmentIds: string[]
 }
 
 export interface ApproveOptions {
@@ -3417,44 +3779,49 @@ export interface ApproveOptions {
   approver: string
   /** Ids of the warnings ticked in the confirm dialog. */
   confirmed?: string[]
-  /** Send one wave instead of the whole list. */
-  wave?: WaveChoice | null
+  /** Schedule the waves still to go instead of sending to the whole list. */
+  waves?: WaveRange | null
   /** Typed in the dialog to send a held wave anyway; logged and recorded. */
   override?: string | null
 }
 
-function isWaveChoice(w: WaveChoice): boolean {
+/** A well-formed range: whole waves from..waves, one segment per wave. The
+ *  route checks a request with it before anything is read; approveAndSend
+ *  checks again. */
+export function isWaveRange(r: WaveRange): boolean {
   return (
-    Number.isInteger(w.wave) &&
-    Number.isInteger(w.waves) &&
-    w.waves >= 2 &&
-    w.waves <= 9 &&
-    w.wave >= 1 &&
-    w.wave <= w.waves &&
-    typeof w.segmentId === 'string' &&
-    SEGMENT_ID_RE.test(w.segmentId)
+    Number.isInteger(r.from) &&
+    Number.isInteger(r.waves) &&
+    r.waves >= 2 &&
+    r.waves <= 9 &&
+    r.from >= 1 &&
+    r.from <= r.waves &&
+    Array.isArray(r.segmentIds) &&
+    r.segmentIds.length === r.waves - r.from + 1 &&
+    r.segmentIds.every(s => typeof s === 'string' && SEGMENT_ID_RE.test(s))
   )
 }
 
-/** The chosen wave as ActiveCampaign has it now, with all the list's waves;
- *  refuses when they changed since the page showed them. */
-function chosenWave(
+/** The list's waves as ActiveCampaign has them now; refuses when the waves
+ *  the page showed for the range changed since. */
+function chosenWaves(
   segments: WaveSegment[] | { error: string } | null,
-  wave: WaveChoice
+  range: WaveRange
 ): WaveSegment[] {
   if (segments == null)
     throw new DraftProblemError([
       'this list has no wave segments in ActiveCampaign any more – reload the page',
     ])
   if ('error' in segments) throw new DraftProblemError([segments.error])
-  const s = segments.find(x => x.wave === wave.wave)
-  if (
-    !s ||
-    segments.length !== wave.waves ||
-    s.segmentId.toLowerCase() !== wave.segmentId.toLowerCase()
-  )
+  const same =
+    segments.length === range.waves &&
+    range.segmentIds.every((id, i) => {
+      const s = segments.find(x => x.wave === range.from + i)
+      return s != null && s.segmentId.toLowerCase() === id.toLowerCase()
+    })
+  if (!same)
     throw new DraftProblemError([
-      'the waves in ActiveCampaign changed since the page loaded – reload it and choose the wave again',
+      'the waves in ActiveCampaign changed since the page loaded – reload it and approve the waves again',
     ])
   return segments
 }
@@ -3472,28 +3839,30 @@ function sameEmail(a: RawMessage, b: RawMessage): boolean {
   )
 }
 
-/** Verify the draft one last time, then schedule it — to the whole list, or
- *  to one wave (`opts.wave`) — to send a few minutes later
- *  (sendDelayMinutes). Refuses (DraftProblemError) on any verification
- *  problem or block, a wave out of order or already sent,
+/** Verify the draft one last time, then schedule it: to the whole list, or
+ *  — `opts.waves` — every wave still to go, from the next one to the last
+ *  (approve once). Refuses (DraftProblemError) on any verification problem
+ *  or block, waves out of order or already scheduled or sent,
  *  NeedsConfirmationError for unticked warnings, NeedsOverrideError for a
  *  held wave without a typed reason, ApprovalLockedError while another
- *  approval of the issue (whole list or any wave) holds the lock. Any error
- *  once the create has been asked for is a MaybeScheduledError (or a
- *  SendDeletedError, when the new campaign was deleted again). The draft is
- *  kept after every wave but the last. */
+ *  approval of the issue (whole list or waves) holds the lock. Once a create
+ *  has been asked for: a SendDeletedError when every campaign it made is
+ *  known to be deleted again (nothing goes out), else a MaybeScheduledError.
+ *  A whole-list send deletes the draft; waves keep it until the last one
+ *  has gone (the send watcher deletes it then). */
 export async function approveAndSend(
   draftId: string,
   listId: string,
   opts: ApproveOptions
 ): Promise<ScheduledSend> {
+  const startedAt = Date.now()
   const approver = opts.approver.trim() || 'an unnamed approver'
   const refusal = listRefusal(listId)
   if (refusal) throw new DraftProblemError([refusal])
-  const wave = opts.wave ?? null
-  if (wave && !isWaveChoice(wave))
+  const range = opts.waves ?? null
+  if (range && !isWaveRange(range))
     throw new DraftProblemError([
-      'that isn’t one of the list’s waves – reload the page',
+      'those aren’t the list’s waves – reload the page',
     ])
   const { campaign, problems, messageId, msg } = await readDraft(
     draftId,
@@ -3505,9 +3874,6 @@ export async function approveAndSend(
     )
   }
   const baseName = baseIssueName(campaign.name)
-  const sendName = wave
-    ? waveCampaignName(baseName, wave.wave, wave.waves)
-    : campaign.name
   const lockKey = approveLockKey(listId, baseName)
   const claim = await claimApproveLock(
     lockKey,
@@ -3515,35 +3881,43 @@ export async function approveAndSend(
       draftId,
       approver,
       at: new Date().toISOString(),
-      wave: wave?.wave ?? null,
+      wave: range?.from ?? null,
+      through: range?.waves ?? null,
     },
     listId
   )
   if (!claim.ok)
-    throw new ApprovalLockedError(baseName, claim.holder, wave?.wave ?? null)
+    throw new ApprovalLockedError(
+      baseName,
+      claim.holder,
+      range?.from ?? null,
+      range?.waves ?? null
+    )
 
   let createAsked = false
   try {
-    // The email itself, how many it would reach, and the wave as
-    // ActiveCampaign has it now (not as the page showed it).
+    // The email itself, how many it would reach, and the waves as
+    // ActiveCampaign has them now (not as the page showed them).
     const [checks, active, segments, names] = await Promise.all([
       sendChecks({ name: campaign.name, listId }, msg, [], new Date()),
       activeContactCount(listId),
-      wave ? readWaveSegments(listId, { fresh: true }) : null,
+      range ? readWaveSegments(listId, { fresh: true }) : null,
       listNames().catch(() => new Map<string, string>()),
     ])
     if (checks.blocks.length > 0) throw new DraftProblemError(checks.blocks)
-    const warmup = warmupRefusal(listId, active, wave?.wave ?? null)
+    const warmup = warmupRefusal(listId, active, range?.from ?? null)
     if (warmup) throw new DraftProblemError([warmup])
-    let expected = active
-    if (wave) {
-      const waves = chosenWave(segments, wave)
-      expected = (await waveCounts(listId, waves, active, { fresh: true }))[
-        wave.wave - 1
-      ]
-      if (expected == null)
+    let waveSegs: WaveSegment[] = []
+    let counts: Array<number | null> = []
+    if (range) {
+      waveSegs = chosenWaves(segments, range)
+      counts = await waveCounts(listId, waveSegs, active, { fresh: true })
+      const uncounted = waveSegs
+        .filter(s => s.wave >= range.from && counts[s.wave - 1] == null)
+        .map(s => s.wave)
+      if (uncounted.length > 0)
         throw new DraftProblemError([
-          `wave ${wave.wave} couldn’t be counted just now – try again in a minute`,
+          `${waveList(uncounted)} couldn’t be counted just now – try again in a minute`,
         ])
     }
     const ticked = new Set(opts.confirmed ?? [])
@@ -3568,12 +3942,12 @@ export async function approveAndSend(
       sentOnList(campaigns, draftId, campaign.name, listId, null),
       mapLimit(otherDrafts, 3, c => campaignListIds(c.id)),
     ])
-    // Already sent: to the whole list, or (for a wave) this same wave. A
-    // whole-list send is refused once any wave of the issue went, and every
-    // wave once the whole list got it.
+    // Already sent, going or scheduled: to the whole list, or any wave this
+    // approval would schedule. A whole-list send is refused once any wave of
+    // the issue is live, and every wave once the whole list got it.
     const sent = live.filter(c => {
       const w = waveOf(c.name)
-      return wave == null || w == null || w.wave === wave.wave
+      return range == null || w == null || w.wave >= range.from
     })
     if (sent.length > 0) {
       throw new DraftProblemError(
@@ -3583,21 +3957,29 @@ export async function approveAndSend(
         })
       )
     }
-    // Waves go in order, each once the one before has finished and the gap
-    // has passed (or with a typed reason).
+    // Waves go in order: every wave before the first one approved here has
+    // finished, and that first one starts once the gap after the last of
+    // them has passed (holds aside, which take a typed reason).
     let override: string | null = null
-    if (wave) {
+    let startFrom: number | null = null
+    if (range) {
       const health = await readHealth(
         live.filter(c => waveOf(c.name)).map(c => c.id)
       )
-      const p = waveProgress(wave.waves, live, health, offset)
+      const p = waveProgress(
+        range.waves,
+        live,
+        health,
+        offset,
+        waveTiming(listId)
+      )
       if (p.blocked) throw new DraftProblemError([p.blocked])
       if (p.wait) throw new DraftProblemError([p.wait])
-      if (p.next !== wave.wave)
+      if (p.next !== range.from)
         throw new DraftProblemError([
           p.next == null
-            ? 'every wave of this issue has gone out'
-            : `waves go in order: wave ${p.next} is next, not wave ${wave.wave}`,
+            ? 'every wave of this issue has gone out or is scheduled'
+            : `waves go in order: wave ${p.next} is next, not wave ${range.from}`,
         ])
       const holds = holdsAt(p, new Date())
       if (holds.length > 0) {
@@ -3606,9 +3988,10 @@ export async function approveAndSend(
           throw new NeedsOverrideError(holds)
         override = reason.slice(0, 500)
         console.warn(
-          `[newsletter] ${approver} is sending wave ${wave.wave}/${wave.waves} of “${baseName}” on list ${listId} although ${holds.join('; ')}. Reason given: ${override}`
+          `[newsletter] ${approver} is sending ${wavesLabel(range.from, range.waves)} of “${baseName}” on list ${listId} although ${holds.join('; ')}. Reason given: ${override}`
         )
       }
+      startFrom = p.startFrom
     }
     const older = olderIssueBlocks(
       campaign.name,
@@ -3626,34 +4009,53 @@ export async function approveAndSend(
         'the email changed while it was being approved (a card edit in another tab, or a rebuild) – look at it again, then approve',
       ])
 
-    const sendAt = new Date(Date.now() + sendDelayMinutes(listId) * 60_000)
-    // From here on the send may exist even when an answer says it doesn't:
-    // the lock stays, and every error tells the approver not to press again.
+    const listName = names.get(listId) ?? null
+    // From here on a send may exist even when an answer says it doesn't:
+    // the lock stays (unless every campaign made is known to be deleted
+    // again), and every unclear error tells the approver not to press again.
     createAsked = true
-    return await createAndConfirm({
+    if (!range) {
+      const sendAt = new Date(Date.now() + sendDelayMinutes(listId) * 60_000)
+      return await createAndConfirm({
+        draftId,
+        listId,
+        messageId,
+        baseName,
+        sdate: formatLocal(sendAt, offset),
+        active,
+        facts: {
+          name: campaign.name,
+          listId,
+          listName,
+          wave: null,
+          waves: null,
+          expected: active,
+          approver,
+          sendAt: sendAt.toISOString(),
+          override: null,
+        },
+      })
+    }
+    return await createWaves({
       draftId,
       listId,
       messageId,
       baseName,
-      sdate: formatLocal(sendAt, offset),
+      range,
+      segments: waveSegs,
+      counts,
+      startFrom,
+      offset,
       active,
-      wave,
-      facts: {
-        name: sendName,
-        listId,
-        listName: names.get(listId) ?? null,
-        wave: wave?.wave ?? null,
-        waves: wave?.waves ?? null,
-        expected,
-        approver,
-        sendAt: sendAt.toISOString(),
-        override,
-      },
+      approver,
+      listName,
+      override,
+      startedAt,
     })
   } catch (err) {
-    // Nothing exists: refused before the create, or the new campaign is
-    // known to be deleted again after a read back that failed.
-    if (!createAsked || err instanceof ReadBackDeletedError) {
+    // Nothing exists: refused before the create, or every campaign made is
+    // known to be deleted again after ActiveCampaign failed to answer.
+    if (!createAsked || (err instanceof SendDeletedError && err.retryNow)) {
       await releaseApproveLock(lockKey).catch(e =>
         console.error(
           `[newsletter] releasing the approval lock for draft ${draftId} failed: ${e instanceof Error ? e.message : String(e)}`
@@ -3666,18 +4068,21 @@ export async function approveAndSend(
   }
 }
 
-/** The create and everything after it. Every failure here is a
- *  MaybeScheduledError unless the new campaign is known to be gone. */
-async function createAndConfirm(a: {
+/** campaign_create for one send — the whole list, or one wave (`segmentId`)
+ *  — then the read back of what ActiveCampaign stored: link tracking off, a
+ *  wave's segment kept, a status that sends. Throws a SendDeletedError when
+ *  it came back wrong (or, for a wave, unreadable) and was deleted at once,
+ *  and a MaybeScheduledError for anything else after the create: it may
+ *  exist. */
+async function createVerified(a: {
   draftId: string
   listId: string
   messageId: string
-  baseName: string
   sdate: string
-  active: number | null
-  wave: WaveChoice | null
+  /** The wave's saved segment; null for the whole list. */
+  segmentId: string | null
   facts: ApprovalFacts
-}): Promise<ScheduledSend> {
+}): Promise<{ newId: string; live: RawCampaign }> {
   const { facts } = a
   let newId: string | null = null
   try {
@@ -3699,7 +4104,7 @@ async function createAndConfirm(a: {
       // A wave: the saved segment's id. AC keeps it as a hidden numeric
       // segment row that points at it (test sweep, 29 Sept 2026); read back
       // below, since without it the send would reach the whole list.
-      ...(a.wave ? { segmentid: a.wave.segmentId } : {}),
+      ...(a.segmentId ? { segmentid: a.segmentId } : {}),
       sdate: a.sdate,
       [`p[${a.listId}]`]: a.listId,
       [`m[${a.messageId}]`]: 100,
@@ -3719,7 +4124,7 @@ async function createAndConfirm(a: {
     } catch (err) {
       // Unread, nobody knows whether ActiveCampaign kept the wave: a wave is
       // never left to go out, maybe to the whole list, unchecked.
-      if (a.wave) {
+      if (a.segmentId) {
         console.error(
           `[newsletter] reading back campaign ${newId} failed: ${err instanceof Error ? err.message : String(err)}`
         )
@@ -3742,76 +4147,80 @@ async function createAndConfirm(a: {
         facts
       )
     }
-    if (a.wave) {
-      const wrong = await segmentProblem(live.segmentid, a.wave.segmentId)
+    if (a.segmentId) {
+      const wrong = await segmentProblem(live.segmentid, a.segmentId)
       if (wrong) await deleteBadSend(newId, 'wave', wrong, facts)
     }
     // '7' = ActiveCampaign holds the send for its compliance review. The
     // campaign exists and will go out once they approve it, so this counts as
-    // scheduled: the draft shell must go, or it could be approved a second time.
-    const held = live.status === '7'
-    if (live.status !== '1' && live.status !== '2' && !held) {
+    // scheduled.
+    if (live.status !== '1' && live.status !== '2' && live.status !== '7') {
       throw new Error(
         `the new campaign ${newId} has status ${statusLabel(live.status)} – check the ActiveCampaign dashboard`
       )
     }
+    return { newId, live }
+  } catch (err) {
+    if (err instanceof MaybeScheduledError || err instanceof SendDeletedError)
+      throw err
+    const reason = err instanceof Error ? err.message : String(err)
+    console.error(
+      `[newsletter] approval of draft ${a.draftId} by ${facts.approver} failed after campaign_create for “${facts.name}”${newId ? ` (campaign ${newId})` : ''}: ${reason}`
+    )
+    throw new MaybeScheduledError(
+      `It may have been scheduled anyway${newId ? ` (campaign ${newId}${facts.wave != null ? `, wave ${facts.wave}` : ''})` : facts.wave != null ? ` (wave ${facts.wave})` : ''}: something went wrong after ActiveCampaign was asked to schedule it. Don’t press Approve again – check Recent sends, which updates by itself.`,
+      newId,
+      facts
+    )
+  }
+}
 
+/** A whole-list send: the create, then the draft shell deleted, the send
+ *  time noted and the approval recorded. Every failure here is a
+ *  MaybeScheduledError unless the new campaign is known to be gone. */
+async function createAndConfirm(a: {
+  draftId: string
+  listId: string
+  messageId: string
+  baseName: string
+  sdate: string
+  active: number | null
+  facts: ApprovalFacts
+}): Promise<ScheduledSend> {
+  const { facts } = a
+  const { newId, live } = await createVerified({
+    draftId: a.draftId,
+    listId: a.listId,
+    messageId: a.messageId,
+    sdate: a.sdate,
+    segmentId: null,
+    facts,
+  })
+  try {
+    // The campaign exists and will go out (or is held for ActiveCampaign's
+    // review, and goes once they approve it): the draft shell must go, or it
+    // could be approved a second time.
+    const held = live.status === '7'
     const notes: string[] = []
-    // The message now belongs to the sending campaign. After a whole-list
-    // send or the last wave the draft shell is noise (and harmless if it
-    // stays: the page shows it as already sent); before the last wave it is
-    // what the next wave is approved from.
-    const lastWave = a.wave == null || a.wave.wave === a.wave.waves
-    if (lastWave) {
-      try {
-        await v1('campaign_delete', { id: a.draftId })
-      } catch (err) {
-        console.error(
-          `[newsletter] deleting draft ${a.draftId} after approval failed: ${err instanceof Error ? err.message : String(err)}`
-        )
-        notes.push(
-          `The draft (campaign ${a.draftId}) couldn’t be deleted; it now shows as already sent.`
-        )
-      }
-    }
-    // Clicks on a test copy of this issue count from its first send on
-    // (newsletter-clicks.ts); a later wave doesn't move that time.
+    // The message now belongs to the sending campaign; the draft shell is
+    // noise (and harmless if it stays: the page shows it as already sent).
     try {
-      await noteSendTime(a.baseName, Date.parse(facts.sendAt))
+      await v1('campaign_delete', { id: a.draftId })
     } catch (err) {
       console.error(
-        `[newsletter] recording the send time of campaign ${newId} failed: ${err instanceof Error ? err.message : String(err)}`
+        `[newsletter] deleting draft ${a.draftId} after approval failed: ${err instanceof Error ? err.message : String(err)}`
       )
       notes.push(
-        'The send time couldn’t be recorded, so if a test copy of this issue was sent, readers’ clicks may not be counted for up to 30 days.'
+        `The draft (campaign ${a.draftId}) couldn’t be deleted; it now shows as already sent.`
       )
     }
+    notes.push(...(await noteFirstSend(a.baseName, facts.sendAt, newId)))
     if (isRealList(a.listId)) {
-      try {
-        await recordApproval({
-          campaignId: newId,
-          listId: a.listId,
-          name: facts.name,
-          baseName: a.baseName,
-          wave: facts.wave,
-          waves: facts.waves,
-          segmentId: a.wave?.segmentId ?? null,
-          expected: facts.expected,
-          approvedAt: new Date().toISOString(),
-          approver: facts.approver,
-          ...(facts.override ? { override: facts.override } : {}),
-        })
-      } catch (err) {
-        console.error(
-          `[newsletter] recording approval of campaign ${newId} failed: ${err instanceof Error ? err.message : String(err)}`
-        )
-        notes.push(
-          'The approval couldn’t be recorded for the send watcher, so it may flag this send as not approved here.'
-        )
-      }
+      const note = await recordFor(newId, a.listId, a.baseName, facts, null)
+      if (note) notes.push(note)
     }
     console.info(
-      `[newsletter] draft ${a.draftId} approved by ${facts.approver} → campaign ${newId} “${facts.name}” (${facts.expected ?? '?'} contacts) ${held ? 'held for ActiveCampaign review' : 'scheduled'} for ${live.sdate ?? a.sdate} on list ${a.listId}${lastWave ? '' : '; draft kept for the next wave'}`
+      `[newsletter] draft ${a.draftId} approved by ${facts.approver} → campaign ${newId} “${facts.name}” (${facts.expected ?? '?'} contacts) ${held ? 'held for ActiveCampaign review' : 'scheduled'} for ${live.sdate ?? a.sdate} on list ${a.listId}`
     )
     return {
       ...facts,
@@ -3820,24 +4229,303 @@ async function createAndConfirm(a: {
       draftId: a.draftId,
       sdate: live.sdate ?? a.sdate,
       activeContacts: a.active,
-      segmentId: a.wave?.segmentId ?? null,
-      draftKept: !lastWave,
+      segmentId: null,
+      draftKept: false,
       sendingNow: live.status === '2',
+      scheduled: [],
       notes,
     }
   } catch (err) {
-    if (err instanceof MaybeScheduledError || err instanceof SendDeletedError)
-      throw err
     const reason = err instanceof Error ? err.message : String(err)
     console.error(
-      `[newsletter] approval of draft ${a.draftId} by ${facts.approver} failed after campaign_create${newId ? ` (campaign ${newId})` : ''}: ${reason}`
+      `[newsletter] approval of draft ${a.draftId} by ${facts.approver} failed after campaign_create (campaign ${newId}): ${reason}`
     )
     throw new MaybeScheduledError(
-      `It may have been scheduled anyway${newId ? ` (campaign ${newId})` : ''}: something went wrong after ActiveCampaign was asked to schedule it. Don’t press Approve again – check Recent sends, which updates by itself.`,
+      `It may have been scheduled anyway (campaign ${newId}): something went wrong after ActiveCampaign was asked to schedule it. Don’t press Approve again – check Recent sends, which updates by itself.`,
       newId,
       facts
     )
   }
+}
+
+/** Clicks on a test copy of the issue count from its first send on
+ *  (newsletter-clicks.ts); a later approval doesn't move that time. A
+ *  failure is a note: the send itself is fine. */
+async function noteFirstSend(
+  baseName: string,
+  sendAt: string,
+  campaignId: string
+): Promise<string[]> {
+  try {
+    await noteSendTime(baseName, Date.parse(sendAt))
+    return []
+  } catch (err) {
+    console.error(
+      `[newsletter] recording the send time of campaign ${campaignId} failed: ${err instanceof Error ? err.message : String(err)}`
+    )
+    return [
+      'The send time couldn’t be recorded, so if a test copy of this issue was sent, readers’ clicks may not be counted for up to 30 days.',
+    ]
+  }
+}
+
+/** Record a real-list approval for the send watcher; a note when that
+ *  fails (the send itself is fine, but the watcher may flag it). */
+async function recordFor(
+  campaignId: string,
+  listId: string,
+  baseName: string,
+  facts: ApprovalFacts,
+  segmentId: string | null
+): Promise<string | null> {
+  try {
+    await recordApproval({
+      campaignId,
+      listId,
+      name: facts.name,
+      baseName,
+      wave: facts.wave,
+      waves: facts.waves,
+      segmentId,
+      expected: facts.expected,
+      approvedAt: new Date().toISOString(),
+      approver: facts.approver,
+      ...(facts.override ? { override: facts.override } : {}),
+    })
+    return null
+  } catch (err) {
+    console.error(
+      `[newsletter] recording approval of campaign ${campaignId} failed: ${err instanceof Error ? err.message : String(err)}`
+    )
+    return facts.wave == null
+      ? 'The approval couldn’t be recorded for the send watcher, so it may flag this send as not approved here.'
+      : `The approval of wave ${facts.wave} couldn’t be recorded for the send watcher, so it may flag that wave as not approved here, and it can’t tell whether a typed reason covered it.`
+  }
+}
+
+/** One campaign an approval of waves has made, checked and recorded. */
+interface MadeWave {
+  slot: WaveSlot
+  facts: ApprovalFacts
+  segmentId: string
+  newId: string
+  live: RawCampaign
+}
+
+/** Approve once: make the campaign of every wave from `range.from` to the
+ *  last, timed by waveSchedule, each exactly as one wave was made before
+ *  (createVerified: same name, segment read back, tracking off, status 1)
+ *  and recorded for the send watcher as soon as it exists. The soonest is
+ *  made last, so every campaign made before it is a day or more away (ten
+ *  minutes on a test list) and can be deleted again well before it would
+ *  start. All or nothing: when one fails, or ActiveCampaign is too slow to
+ *  finish in time, every campaign made so far is deleted again (takeBack)
+ *  and the error says what is left, if anything. The draft stays. */
+async function createWaves(a: {
+  draftId: string
+  listId: string
+  messageId: string
+  baseName: string
+  range: WaveRange
+  segments: WaveSegment[]
+  counts: Array<number | null>
+  startFrom: number | null
+  offset: string
+  active: number | null
+  approver: string
+  listName: string | null
+  override: string | null
+  startedAt: number
+}): Promise<ScheduledSend> {
+  const { range } = a
+  const t = waveTiming(a.listId)
+  const plan = waveSchedule({
+    from: range.from,
+    waves: range.waves,
+    now: Date.now(),
+    notBefore: a.startFrom,
+    delayMs: t.delayMs,
+    spacingMs: t.spacingMs,
+  })
+  const made: MadeWave[] = []
+  const notes: string[] = []
+  // Any failure in here, whatever it is, takes back what was made.
+  try {
+    for (const planned of [...plan].reverse()) {
+      if (Date.now() - a.startedAt > PRESS_CREATE_BY_MS)
+        throw new TooSlowError(
+          `ActiveCampaign answered too slowly to schedule ${wavesLabel(range.from, range.waves)} in one go, so the approval stopped before wave ${planned.wave} and nothing goes out. Try again in a few minutes.`
+        )
+      // The first wave goes out its delay after its own create at the
+      // soonest: the later ones were made before it.
+      const slot =
+        planned.wave === range.from
+          ? {
+              ...planned,
+              startsAt: Math.max(planned.startsAt, Date.now() + t.delayMs),
+            }
+          : planned
+      const segment = a.segments.find(s => s.wave === slot.wave)
+      if (!segment) throw new Error(`wave ${slot.wave} has no segment`)
+      const facts: ApprovalFacts = {
+        name: waveCampaignName(a.baseName, slot.wave, range.waves),
+        listId: a.listId,
+        listName: a.listName,
+        wave: slot.wave,
+        waves: range.waves,
+        expected: a.counts[slot.wave - 1] ?? null,
+        approver: a.approver,
+        sendAt: new Date(slot.startsAt).toISOString(),
+        // The holds were on the first wave; the later ones wait for their
+        // own verdicts.
+        override: slot.wave === range.from ? a.override : null,
+      }
+      const one = await createVerified({
+        draftId: a.draftId,
+        listId: a.listId,
+        messageId: a.messageId,
+        sdate: formatLocal(new Date(slot.startsAt), a.offset),
+        segmentId: segment.segmentId,
+        facts,
+      })
+      made.push({ slot, facts, segmentId: segment.segmentId, ...one })
+      // Recorded as soon as it exists: the watcher calls a campaign with no
+      // record "not sent through the approval page" after three minutes.
+      if (isRealList(a.listId)) {
+        const note = await recordFor(
+          one.newId,
+          a.listId,
+          a.baseName,
+          facts,
+          segment.segmentId
+        )
+        if (note) notes.push(note)
+      }
+    }
+  } catch (err) {
+    throw await takeBack(made, a, err)
+  }
+  // Every wave is made and checked: nothing below is taken back, and
+  // anything going wrong here is said as "may have been scheduled".
+  try {
+    const soonest = [...made].reverse()
+    const first = soonest[0]
+    notes.push(
+      ...(await noteFirstSend(a.baseName, first.facts.sendAt, first.newId))
+    )
+    const scheduled: ScheduledWave[] = soonest.map(m => ({
+      wave: m.slot.wave,
+      waves: range.waves,
+      campaignId: m.newId,
+      name: m.facts.name,
+      segmentId: m.segmentId,
+      expected: m.facts.expected,
+      sendAt: m.facts.sendAt,
+      sdate: m.live.sdate ?? formatLocal(new Date(m.slot.startsAt), a.offset),
+      held: m.live.status === '7',
+      sendingNow: m.live.status === '2',
+    }))
+    console.info(
+      `[newsletter] draft ${a.draftId} approved by ${a.approver} → ${wavesLabel(range.from, range.waves)} of “${a.baseName}” on list ${a.listId}: ${scheduled
+        .map(
+          s =>
+            `wave ${s.wave} campaign ${s.campaignId} (${s.expected ?? '?'} contacts) ${s.held ? 'held for ActiveCampaign review' : 'scheduled'} for ${s.sdate}`
+        )
+        .join('; ')}; draft kept until the last wave has gone`
+    )
+    return {
+      ...first.facts,
+      campaignId: first.newId,
+      held: first.live.status === '7',
+      draftId: a.draftId,
+      sdate: scheduled[0].sdate,
+      activeContacts: a.active,
+      segmentId: first.segmentId,
+      draftKept: true,
+      sendingNow: first.live.status === '2',
+      scheduled,
+      notes,
+    }
+  } catch (err) {
+    console.error(
+      `[newsletter] approval of draft ${a.draftId}: every wave was made, then: ${err instanceof Error ? err.message : String(err)}`
+    )
+    throw new MaybeScheduledError(
+      `${capitalize(wavesLabel(range.from, range.waves))} may have been scheduled: something went wrong after ActiveCampaign was asked to schedule them. Don’t press Approve again – check the issue and Recent sends, which update by themselves.`,
+      made[made.length - 1]?.newId ?? null,
+      made[made.length - 1]?.facts ?? null
+    )
+  }
+}
+
+/** An approval of waves failed part-way (`cause`): delete again every
+ *  campaign it made — none has started, the soonest is made last — through
+ *  the same path as the page's Cancel, and return the error to throw. When
+ *  every one is known to be gone, `cause` itself with that added (a
+ *  SendDeletedError keeps its class, so its lock rule; nothing goes out).
+ *  When one may still be there, a MaybeScheduledError that names it. */
+async function takeBack(
+  made: MadeWave[],
+  a: { draftId: string; range: WaveRange; baseName: string },
+  cause: unknown
+): Promise<Error> {
+  const left: Array<{ wave: number; id: string; startsAt: number }> = []
+  for (const m of made) {
+    const r = await deleteUnstarted(m.newId, ['1', '7'])
+    if (r.kind !== 'gone')
+      left.push({ wave: m.slot.wave, id: m.newId, startsAt: m.slot.startsAt })
+  }
+  forgetSharedCampaigns(made.map(m => m.newId))
+  const taken = made
+    .map(m => m.slot.wave)
+    .filter(w => !left.some(l => l.wave === w))
+  const what = wavesLabel(a.range.from, a.range.waves)
+  console.error(
+    `[newsletter] approval of ${what} of “${a.baseName}” (draft ${a.draftId}) failed part-way: ${cause instanceof Error ? cause.message : String(cause)}; ${
+      made.length === 0
+        ? 'nothing had been made yet'
+        : `took back ${taken.length ? waveList(taken) : 'nothing'}${left.length ? `, NOT ${left.map(l => `wave ${l.wave} (campaign ${l.id})`).join(', ')}` : ''}`
+    }`
+  )
+  const tookBack = taken.length
+    ? ` ${capitalize(waveList(taken))}, which this approval had already scheduled, ${taken.length === 1 ? 'was' : 'were'} canceled again.`
+    : ''
+  if (left.length === 0) {
+    if (cause instanceof SendDeletedError) {
+      const Same = cause.constructor as new (detail: string) => SendDeletedError
+      return new Same(`${cause.detail}${tookBack}`)
+    }
+    if (cause instanceof MaybeScheduledError)
+      return new MaybeScheduledError(
+        `${cause.detail}${tookBack}`,
+        cause.campaignId,
+        cause.facts
+      )
+    return new MaybeScheduledError(
+      `Something went wrong while approving ${what}, so the approval stopped.${tookBack} Don’t press Approve again – check Recent sends, which updates by itself.`,
+      null,
+      made[0]?.facts ?? null
+    )
+  }
+  const soonest = left.reduce((x, y) => (y.startsAt < x.startsAt ? y : x))
+  const stillThere = `${capitalize(waveList(left.map(l => l.wave)))} (campaign${left.length === 1 ? '' : 's'} ${left.map(l => l.id).join(', ')}) couldn’t be canceled again, so ${left.length === 1 ? 'it is' : 'they are'} still scheduled: cancel ${left.length === 1 ? 'it' : 'them'} on the newsletter page (or in ActiveCampaign) before ${formatUtc(new Date(soonest.startsAt))}.`
+  const why =
+    cause instanceof SendDeletedError || cause instanceof MaybeScheduledError
+      ? cause.detail
+      : `Something went wrong while approving ${what}.`
+  const facts =
+    cause instanceof MaybeScheduledError && cause.facts
+      ? cause.facts
+      : (made.find(m => m.newId === soonest.id)?.facts ?? null)
+  return new MaybeScheduledError(
+    `The approval of ${what} stopped part-way. ${why}${tookBack} ${stillThere}${
+      cause instanceof MaybeScheduledError
+        ? ''
+        : ' Don’t press Approve again until then.'
+    }`,
+    soonest.id,
+    facts
+  )
 }
 
 /** Why the campaign AC stored isn't the wave that was asked for, or null.
@@ -3891,7 +4579,7 @@ async function deleteBadSend(
   if (!gone) {
     throw new MaybeScheduledError(
       kind === 'unread'
-        ? `ActiveCampaign created campaign ${campaignId} for wave ${facts.wave}, but ${why}, so nobody knows whether it kept the wave, and it couldn’t be deleted either. Cancel it under Recent sends (or delete it in ActiveCampaign: Campaigns → ${campaignId}) before it sends, then approve the wave again.`
+        ? `ActiveCampaign created campaign ${campaignId} for wave ${facts.wave}, but ${why}, so nobody knows whether it kept the wave, and it couldn’t be deleted either. Cancel it under Recent sends (or delete it in ActiveCampaign: Campaigns → ${campaignId}) before it sends, then approve again.`
         : `ActiveCampaign created campaign ${campaignId} wrongly (${kind === 'wave' ? `the wave: ${why}, so it would go to the whole list` : why}), and it couldn’t be deleted. Delete it in ActiveCampaign now (Campaigns → ${campaignId}), before it sends.`,
       campaignId,
       facts
@@ -3899,7 +4587,7 @@ async function deleteBadSend(
   }
   if (kind === 'unread')
     throw new ReadBackDeletedError(
-      `ActiveCampaign created campaign ${campaignId} for wave ${facts.wave}, but it couldn’t be read back to check it kept the wave, so it was deleted at once. Nothing was sent, and the draft is still here: approve the wave again in a minute.`
+      `ActiveCampaign created campaign ${campaignId} for wave ${facts.wave}, but it couldn’t be read back to check it kept the wave, so it was deleted at once. Nothing was sent, and the draft is still here: approve again in a minute.`
     )
   if (kind === 'tracking')
     throw new LinkTrackingError(
@@ -3992,8 +4680,14 @@ export interface StopResult {
   status: string
   by: string
   /** After a cancel: whether the draft is still there to approve it (or its
-   *  wave) again; null if that couldn't be read. */
+   *  waves) again; null if that couldn't be read. */
   draftWaiting: boolean | null
+  /** After canceling a wave: the later waves of the issue that hadn't
+   *  started, canceled with it (waves go in order), soonest first. */
+  alsoCanceled: Array<{ campaignId: string; wave: number }>
+  /** Later waves that may still go out — not canceled, or not readable —
+   *  and what to do; null when there are none. */
+  laterProblem: string | null
 }
 
 const ACTION_WORDS: Record<StopAction, { done: string; want: string[] }> = {
@@ -4084,51 +4778,51 @@ export async function stopSend(
       if (refusal) throw new StopRefusedError(refusal)
     }
 
-    // The call. No answer means it may or may not have happened.
-    let ok: boolean
-    try {
-      if (action === 'cancel') {
-        ok = Number((await v3delete(`campaigns/${id}/delete`)).succeeded) === 1
-        if (!ok) {
-          // v1's delete is the other route to the same thing — but only for
-          // a send that still hasn't started: AC may have refused because
-          // its scheduler got there first, and then Pause is the way.
-          const now = await readCampaign()
-          if (now && (now.status === '1' || now.status === '7'))
-            ok =
-              Number(
-                (await v1answer('campaign_delete', { id })).result_code
-              ) === 1
-        }
-      } else {
+    // The call, then what ActiveCampaign has now. No answer means it may or
+    // may not have happened.
+    let after: RawCampaign | null
+    if (action === 'cancel') {
+      const r = await deleteUnstarted(id, ['1', '7'])
+      if (r.kind === 'unclear') {
+        console.error(
+          `[newsletter] cancel of campaign ${id} by ${by}: ${r.step === 'delete' ? 'no clear answer' : 'no read back'}: ${r.error}`
+        )
+        throw new StopFailedError(
+          r.step === 'delete'
+            ? `No clear answer from ActiveCampaign, so campaign ${id} may or may not have been canceled. Recent sends updates by itself; if it is still going, press again or do it in ActiveCampaign (Campaigns → ${id}).`
+            : `ActiveCampaign ${r.accepted ? 'accepted' : 'refused'} the cancel, but campaign ${id} couldn’t be read back. Recent sends updates by itself: check it there.`,
+          true
+        )
+      }
+      after = r.kind === 'gone' ? null : { ...before, status: r.status }
+    } else {
+      let ok: boolean
+      try {
         const answer = await v3put<Record<string, unknown>>(
           `campaigns/${id}/${action}`,
           {}
         )
         ok = Number(answer.succeeded) === 1
+      } catch (err) {
+        console.error(
+          `[newsletter] ${action} of campaign ${id} by ${by}: no clear answer: ${err instanceof Error ? err.message : String(err)}`
+        )
+        throw new StopFailedError(
+          `No clear answer from ActiveCampaign, so campaign ${id} may or may not have been ${ACTION_WORDS[action].done}. Recent sends updates by itself; if it is still going, press again or do it in ActiveCampaign (Campaigns → ${id}).`,
+          true
+        )
       }
-    } catch (err) {
-      console.error(
-        `[newsletter] ${action} of campaign ${id} by ${by}: no clear answer: ${err instanceof Error ? err.message : String(err)}`
-      )
-      throw new StopFailedError(
-        `No clear answer from ActiveCampaign, so campaign ${id} may or may not have been ${ACTION_WORDS[action].done}. Recent sends updates by itself; if it is still going, press again or do it in ActiveCampaign (Campaigns → ${id}).`,
-        true
-      )
-    }
-
-    // What ActiveCampaign has now.
-    let after: RawCampaign | null
-    try {
-      after = await readCampaign()
-    } catch (err) {
-      console.error(
-        `[newsletter] reading campaign ${id} after ${action} failed: ${err instanceof Error ? err.message : String(err)}`
-      )
-      throw new StopFailedError(
-        `ActiveCampaign ${ok ? 'accepted' : 'refused'} the ${action}, but campaign ${id} couldn’t be read back. Recent sends updates by itself: check it there.`,
-        true
-      )
+      try {
+        after = await readCampaign()
+      } catch (err) {
+        console.error(
+          `[newsletter] reading campaign ${id} after ${action} failed: ${err instanceof Error ? err.message : String(err)}`
+        )
+        throw new StopFailedError(
+          `ActiveCampaign ${ok ? 'accepted' : 'refused'} the ${action}, but campaign ${id} couldn’t be read back. Recent sends updates by itself: check it there.`,
+          true
+        )
+      }
     }
     const done =
       action === 'cancel'
@@ -4150,11 +4844,18 @@ export async function stopSend(
       )
     }
 
-    // A canceled send reached nobody: its approval may be pressed again
-    // straight away (the issue's lock would otherwise hold for 15 minutes).
+    // A canceled wave takes the later ones of its issue with it: they can't
+    // go out of order. Then the issue's approval may be pressed again
+    // straight away (its lock would otherwise hold for 15 minutes).
     let draftWaiting: boolean | null = null
+    let later: Awaited<ReturnType<typeof cancelLaterWaves>> = {
+      alsoCanceled: [],
+      laterProblem: null,
+    }
     if (action === 'cancel') {
       const baseName = baseIssueName(before.name)
+      const w = waveOf(before.name)
+      if (w) later = await cancelLaterWaves(baseName, w.wave, listIds[0], by)
       await releaseApproveLock(approveLockKey(listIds[0], baseName)).catch(
         err =>
           console.warn(
@@ -4170,7 +4871,237 @@ export async function stopSend(
       status: after ? statusLabel(after.status) : 'deleted',
       by,
       draftWaiting,
+      ...later,
     }
+  } finally {
+    forgetSharedCampaigns([id])
+    await releaseStopLock(lockKey)
+  }
+}
+
+/** What deleting a campaign that hasn't started came to: `gone` (read back:
+ *  not there), `kept` (still there with this status: ActiveCampaign refused,
+ *  or it started first), or `unclear` (no answer from the delete or the
+ *  read back: it may or may not be gone). */
+type DeleteResult =
+  | { kind: 'gone' }
+  | { kind: 'kept'; status: string; accepted: boolean }
+  | {
+      kind: 'unclear'
+      step: 'delete' | 'readback'
+      accepted: boolean
+      error: string
+    }
+
+/** Delete a campaign that hasn't started sending. The page's Cancel, the
+ *  take-back of an approval that failed part-way and the send watcher all
+ *  come here: v3 DELETE first; when ActiveCampaign refuses while the
+ *  campaign still has a status in `allow` (1 scheduled, 7 held), v1
+ *  campaign_delete, the other route to the same thing (both proven on
+ *  scheduled campaigns, 29 Sept 2026); then a read back, which alone says
+ *  whether it is gone. AC's DELETE refuses a campaign that is sending and
+ *  v1 is only tried on a status in `allow`, so a send that started first is
+ *  left alone ('kept': pause it instead). Never throws for ActiveCampaign's
+ *  answers. */
+async function deleteUnstarted(
+  id: string,
+  allow: string[],
+  limits: CallLimits = {}
+): Promise<DeleteResult> {
+  const read = () =>
+    v3<{ campaign?: RawCampaign }>(`campaigns/${acId(id)}`, limits)
+      .then(d => d.campaign ?? null)
+      .catch((err: Error) => {
+        if (/: 404 /.test(err.message)) return null
+        throw err
+      })
+  const text = (err: unknown) =>
+    err instanceof Error ? err.message : String(err)
+  let accepted = false
+  try {
+    accepted =
+      Number(
+        (await v3delete(`campaigns/${acId(id)}/delete`, limits)).succeeded
+      ) === 1
+    if (!accepted) {
+      const now = await read()
+      if (now && allow.includes(String(now.status)))
+        accepted =
+          Number(
+            (await v1answer('campaign_delete', { id }, limits)).result_code
+          ) === 1
+    }
+  } catch (err) {
+    return { kind: 'unclear', step: 'delete', accepted, error: text(err) }
+  }
+  let after: RawCampaign | null
+  try {
+    after = await read()
+  } catch (err) {
+    return { kind: 'unclear', step: 'readback', accepted, error: text(err) }
+  }
+  return after == null
+    ? { kind: 'gone' }
+    : { kind: 'kept', status: String(after.status), accepted }
+}
+
+/** After wave `wave` of an issue was canceled: cancel every later wave of it
+ *  on the list that hasn't started (scheduled or held), each under its own
+ *  stop lock, through deleteUnstarted. What couldn't be done is said in
+ *  `laterProblem`. */
+async function cancelLaterWaves(
+  baseName: string,
+  wave: number,
+  listId: string,
+  by: string
+): Promise<Pick<StopResult, 'alsoCanceled' | 'laterProblem'>> {
+  const alsoCanceled: StopResult['alsoCanceled'] = []
+  const problems: string[] = []
+  let later: RawCampaign[]
+  let lists: Array<string[] | null>
+  try {
+    later = (await allCampaigns({ fresh: true }))
+      .filter(
+        c =>
+          baseIssueName(c.name) === baseName &&
+          (waveOf(c.name)?.wave ?? 0) > wave &&
+          (c.status === '1' || c.status === '7')
+      )
+      .sort((a, b) => waveOf(a.name)!.wave - waveOf(b.name)!.wave)
+    lists = await mapLimit(later, 3, c =>
+      campaignListIds(c.id).catch(() => null)
+    )
+  } catch (err) {
+    console.error(
+      `[newsletter] reading the later waves of “${baseName}” after a cancel failed: ${err instanceof Error ? err.message : String(err)}`
+    )
+    return {
+      alsoCanceled,
+      laterProblem:
+        'The later waves of this issue couldn’t be read just now, so any still scheduled are still scheduled: cancel them too under Recent sends.',
+    }
+  }
+  for (const [i, c] of later.entries()) {
+    const l = lists[i]
+    const n = waveOf(c.name)!.wave
+    if (l == null) {
+      problems.push(`wave ${n} (campaign ${c.id}) couldn’t be checked`)
+      continue
+    }
+    if (l.length !== 1 || l[0] !== listId) continue
+    const lockKey = `${STOP_LOCK_PREFIX}${c.id}`
+    if (!(await claimStopLock(lockKey))) {
+      problems.push(
+        `wave ${n} (campaign ${c.id}) is being changed by another press`
+      )
+      continue
+    }
+    try {
+      const r = await deleteUnstarted(c.id, ['1', '7'])
+      console.info(
+        `[newsletter] campaign ${c.id} “${c.name}” canceled with an earlier wave by ${by}: ${r.kind === 'gone' ? 'deleted' : `NOT deleted (${r.kind})`}`
+      )
+      if (r.kind === 'gone') alsoCanceled.push({ campaignId: c.id, wave: n })
+      else
+        problems.push(
+          r.kind === 'kept'
+            ? `wave ${n} (campaign ${c.id}) is ${statusLabel(r.status)} and wasn’t canceled`
+            : `wave ${n} (campaign ${c.id}) may or may not have been canceled (no clear answer)`
+        )
+    } finally {
+      forgetSharedCampaigns([c.id])
+      await releaseStopLock(lockKey)
+    }
+  }
+  return {
+    alsoCanceled,
+    laterProblem: problems.length
+      ? `${capitalize(problems.join('; '))}: cancel ${problems.length === 1 ? 'it' : 'them'} under Recent sends, or ${problems.length === 1 ? 'it goes' : 'they go'} out without the earlier wave.`
+      : null,
+  }
+}
+
+/** What the send watcher's cancel came to. */
+export type WatcherCancel =
+  | { outcome: 'canceled' }
+  | { outcome: 'gone' }
+  | { outcome: 'started'; status: string }
+  | { outcome: 'busy' }
+  | { outcome: 'refused'; detail: string }
+  | { outcome: 'unclear'; detail: string }
+
+/** The send watcher cancels a scheduled wave that must not go out (a red
+ *  verdict, or none, on a wave before it). Narrower than the page's Cancel:
+ *  only a campaign still scheduled (status 1; a held one is left for the
+ *  page, a started one is never touched), only the one the watcher named —
+ *  still on `listId` alone, still called `name` — under the same stop lock
+ *  and through the same delete as the page's, inside the watcher's
+ *  `limits`. It leaves the approval lock alone: an approval running now
+ *  keeps it. */
+export async function cancelScheduledWave(
+  campaignId: string,
+  expect: { listId: string; name: string },
+  opts: { by: string; limits: CallLimits }
+): Promise<WatcherCancel> {
+  const id = acId(campaignId)
+  const lockKey = `${STOP_LOCK_PREFIX}${id}`
+  if (!(await claimStopLock(lockKey))) return { outcome: 'busy' }
+  try {
+    const gone = (err: Error) => {
+      if (/: 404 /.test(err.message)) return null
+      throw err
+    }
+    let before: RawCampaign | null
+    let listIds: string[] | null
+    try {
+      ;[before, listIds] = await Promise.all([
+        v3<{ campaign?: RawCampaign }>(`campaigns/${id}`, opts.limits)
+          .then(d => d.campaign ?? null)
+          .catch(gone),
+        campaignListIds(id, opts.limits).catch(gone),
+      ])
+    } catch (err) {
+      return {
+        outcome: 'unclear',
+        detail: `it couldn’t be read (${err instanceof Error ? err.message.slice(0, 120) : String(err)})`,
+      }
+    }
+    if (!before || !listIds) return { outcome: 'gone' }
+    if (
+      before.name !== expect.name ||
+      listIds.length !== 1 ||
+      listIds[0] !== expect.listId
+    )
+      return {
+        outcome: 'refused',
+        detail: `campaign ${id} isn’t “${expect.name}” on list ${expect.listId} any more`,
+      }
+    const status = String(before.status)
+    if (status === '7')
+      return {
+        outcome: 'refused',
+        detail:
+          'it is held for ActiveCampaign’s review, and only scheduled waves are canceled automatically',
+      }
+    if (status !== '1') return { outcome: 'started', status }
+    const r = await deleteUnstarted(id, ['1'], opts.limits)
+    console.info(
+      `[newsletter] campaign ${id} “${before.name}” cancel by ${opts.by}: ${r.kind === 'gone' ? 'deleted' : `NOT deleted (${r.kind})`}`
+    )
+    if (r.kind === 'gone') return { outcome: 'canceled' }
+    if (r.kind === 'unclear')
+      return {
+        outcome: 'unclear',
+        detail: `no clear answer from ActiveCampaign (${r.error.slice(0, 120)})`,
+      }
+    if (r.status === '1')
+      return { outcome: 'refused', detail: 'ActiveCampaign didn’t delete it' }
+    if (r.status === '7')
+      return {
+        outcome: 'refused',
+        detail: 'it went into ActiveCampaign’s review instead',
+      }
+    return { outcome: 'started', status: r.status }
   } finally {
     forgetSharedCampaigns([id])
     await releaseStopLock(lockKey)

@@ -10,6 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   camp,
+  expireLocks,
   freshModule,
   kv,
   MAIL_SCRIPT_URL,
@@ -50,9 +51,21 @@ const ENV = { ...process.env }
 const WHO = { approver: 'Bryce Robertson' }
 const ISSUE = 'Events · Week 41, 2026'
 
-/** The page's choice of wave k of n (the fixture's segments). */
-function wave(k: number, n = 4) {
-  return { segmentId: WAVE_IDS[k - 1], wave: k, waves: n }
+/** The page's choice: wave k and every one after it, of n (the fixture's
+ *  segments). */
+function waves(k: number, n = 4) {
+  return { from: k, waves: n, segmentIds: WAVE_IDS.slice(k - 1, n) }
+}
+
+/** The creates in the order they were asked for: [name, segment, sdate]. */
+function created(ac: ReturnType<typeof makeAC>) {
+  return ac.calls
+    .filter(c => c.action === 'campaign_create')
+    .map(c => [
+      c.form!.get('name'),
+      c.form!.get('segmentid'),
+      c.form!.get('sdate'),
+    ])
 }
 
 /** List 6 with 2,889 active and the four waves. */
@@ -112,10 +125,13 @@ describe('waves on the page', () => {
       reached: 0,
       next: 1,
       notBefore: null,
+      startFrom: null,
+      spacingMinutes: 1440,
       holds: [],
       wait: null,
       blocked: null,
       wholeList: false,
+      going: false,
     })
     expect(
       d.waves!.waves.map(w => [w.wave, w.waves, w.label, w.count, w.sent])
@@ -161,6 +177,8 @@ describe('waves on the page', () => {
     expect(d.waves!.waves[0].sent).toEqual({
       campaignId: '180',
       status: 'sent',
+      scheduledAt: null,
+      canCancel: false,
       finishedAt: '2026-10-08T14:30:00.000Z',
       sent: 494,
       bounces: 5,
@@ -169,12 +187,16 @@ describe('waves on the page', () => {
       spamComplaints: 1,
       health: 'green',
     })
+    // The verdict is in: wave 2 may start as soon as the 18 hours are up.
     expect(d.waves).toMatchObject({
       reached: 494,
       next: 2,
       notBefore: '2026-10-09T08:30:00.000Z',
+      startFrom: '2026-10-09T08:30:00.000Z',
+      going: false,
     })
     expect(d.editable).toBe(true)
+    expect(d.deletable).toBe(true)
   })
 
   it('without wave segments a big list is blocked and a small one goes whole', async () => {
@@ -214,7 +236,7 @@ describe('waves on the page', () => {
     )
     expect(d.blocks.join(' ')).toMatch(/must go out in waves/)
     const r = await outcome(
-      nl.approveAndSend('200', '6', { ...WHO, wave: wave(1) })
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
     )
     expect((r.err as Error).message).toMatch(/doesn’t leave out exactly/)
     expect(ac.creates).toEqual([])
@@ -231,7 +253,12 @@ describe('waves on the page', () => {
     const nl = await freshModule()
     const [d] = await nl.listDrafts()
     expect(d.sendDelayMinutes).toBe(2)
-    expect(d.waves).toMatchObject({ next: 1, wholeList: true, error: null })
+    expect(d.waves).toMatchObject({
+      next: 1,
+      wholeList: true,
+      error: null,
+      spacingMinutes: 10,
+    })
     expect(d.waves!.waves.map(w => [w.label, w.count])).toEqual([
       ['SWEEP TEST wave 1', 1],
       ['SWEEP TEST wave 2 (everyone else)', 1],
@@ -239,21 +266,33 @@ describe('waves on the page', () => {
   })
 })
 
-/* ─── Approving a wave ─────────────────────────────────────────────────── */
+/* ─── Approve once: one press schedules every wave still to go ─────────── */
 
-describe('approving a wave', () => {
-  it('wave 1 goes to its segment only, named for the wave; the draft stays and the watcher gets the record', async () => {
+describe('approving the waves (approve once)', () => {
+  it('one press schedules waves 1–4, the soonest last, each to its own segment and a day apart; the draft stays and each is recorded', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-08T15:00:00Z'))
     const ac = makeAC(waved())
     vi.stubGlobal('fetch', ac.fetchMock)
     const nl = await freshModule()
-    const r = await nl.approveAndSend('200', '6', { ...WHO, wave: wave(1) })
-    const create = ac.calls.find(c => c.action === 'campaign_create')!.form!
-    expect(create.get('segmentid')).toBe(WAVE_IDS[0])
-    expect(create.get('name')).toBe(`${ISSUE} · wave 1/4`)
-    expect(create.get('status')).toBe('1')
-    expect(create.get('p[6]')).toBe('6')
+    const r = await nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
+    // Made last wave first; sdates in the account's time (UTC−5).
+    expect(created(ac)).toEqual([
+      [`${ISSUE} · wave 4/4`, WAVE_IDS[3], '2026-10-11 10:05:00'],
+      [`${ISSUE} · wave 3/4`, WAVE_IDS[2], '2026-10-10 10:05:00'],
+      [`${ISSUE} · wave 2/4`, WAVE_IDS[1], '2026-10-09 10:05:00'],
+      [`${ISSUE} · wave 1/4`, WAVE_IDS[0], '2026-10-08 10:05:00'],
+    ])
+    // Each made exactly as one wave was before.
+    for (const c of ac.calls.filter(x => x.action === 'campaign_create')) {
+      expect(c.form!.get('status')).toBe('1')
+      expect(c.form!.get('tracklinks')).toBe('none')
+      expect(c.form!.get('tracklinksanalytics')).toBe('0')
+      expect(c.form!.get('p[6]')).toBe('6')
+      expect(c.form!.get('m[300]')).toBe('100')
+    }
     expect(r).toMatchObject({
-      campaignId: '201',
+      campaignId: '204',
       name: `${ISSUE} · wave 1/4`,
       wave: 1,
       waves: 4,
@@ -262,132 +301,174 @@ describe('approving a wave', () => {
       draftKept: true,
       activeContacts: 2889,
       override: null,
+      sendAt: '2026-10-08T15:05:00.000Z',
       listName: 'AISafety.com Events',
+      notes: [],
     })
-    // The draft is kept for wave 2, still a draft.
+    expect(
+      r.scheduled.map(s => [s.wave, s.campaignId, s.sendAt, s.expected])
+    ).toEqual([
+      [1, '204', '2026-10-08T15:05:00.000Z', 494],
+      [2, '203', '2026-10-09T15:05:00.000Z', 986],
+      [3, '202', '2026-10-10T15:05:00.000Z', 710],
+      [4, '201', '2026-10-11T15:05:00.000Z', 699],
+    ])
+    // The draft stays (a canceled wave is approved again from it).
     expect(ac.camps.find(c => c.id === '200')?.status).toBe('0')
     expect(ac.calls.some(c => c.action === 'campaign_delete')).toBe(false)
-    expect(kv.data.get('aisafety:newsletter:approved:201')).toMatchObject({
-      campaignId: '201',
-      listId: '6',
-      name: `${ISSUE} · wave 1/4`,
-      baseName: ISSUE,
-      wave: 1,
-      waves: 4,
-      segmentId: WAVE_IDS[0],
-      expected: 494,
-      approver: 'Bryce Robertson',
-    })
-    expect(kv.zsets.get('aisafety:newsletter:approved')?.has('201')).toBe(true)
-    // The page now shows wave 1 going out, wave 2 waiting for it.
+    // Every wave recorded for the send watcher, the reason (none) on none.
+    for (const [id, k, n] of [
+      ['204', 1, 494],
+      ['203', 2, 986],
+      ['202', 3, 710],
+      ['201', 4, 699],
+    ] as const) {
+      const rec = kv.data.get(`aisafety:newsletter:approved:${id}`)
+      expect(rec).toMatchObject({
+        campaignId: id,
+        listId: '6',
+        name: `${ISSUE} · wave ${k}/4`,
+        baseName: ISSUE,
+        wave: k,
+        waves: 4,
+        segmentId: WAVE_IDS[k - 1],
+        expected: n,
+        approver: 'Bryce Robertson',
+      })
+      expect(rec).not.toHaveProperty('override')
+      expect(kv.zsets.get('aisafety:newsletter:approved')?.has(id)).toBe(true)
+    }
+    // The page now shows the schedule, not Approve, and the email is frozen.
     const [d] = await nl.listDrafts()
     expect(d.alreadySent).toBeNull()
-    expect(d.waves).toMatchObject({ next: 2 })
-    expect(d.waves!.wait).toMatch(
-      /wave 2 can go once wave 1 has finished sending \(it is scheduled now\)/
-    )
-  })
-
-  it('goes out five minutes after approval on a real list, two on a test list', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(new Date('2026-10-08T15:00:00Z'))
-    const ac = makeAC(waved())
-    vi.stubGlobal('fetch', ac.fetchMock)
-    let nl = await freshModule()
-    const r = await nl.approveAndSend('200', '6', { ...WHO, wave: wave(1) })
-    expect(r.sendAt).toBe('2026-10-08T15:05:00.000Z')
-    // AC's sdate is in the account's time (UTC−5 here).
+    expect(d.waves).toMatchObject({ next: null, going: true, wait: null })
     expect(
-      ac.calls.find(c => c.action === 'campaign_create')!.form!.get('sdate')
-    ).toBe('2026-10-08 10:05:00')
-
-    const test = makeAC({ draftList: '5' })
-    vi.stubGlobal('fetch', test.fetchMock)
-    nl = await freshModule()
-    const t = await nl.approveAndSend('200', '5', WHO)
-    expect(t.sendAt).toBe('2026-10-08T15:02:00.000Z')
+      d.waves!.waves.map(w => [
+        w.wave,
+        w.sent?.status,
+        w.sent?.scheduledAt,
+        w.sent?.canCancel,
+      ])
+    ).toEqual([
+      [1, 'scheduled', '2026-10-08T15:05:00.000Z', true],
+      [2, 'scheduled', '2026-10-09T15:05:00.000Z', true],
+      [3, 'scheduled', '2026-10-10T15:05:00.000Z', true],
+      [4, 'scheduled', '2026-10-11T15:05:00.000Z', true],
+    ])
+    expect(d.editable).toBe(false)
+    expect(d.deletable).toBe(false)
+    expect(d.editLock).toMatch(
+      /^Waves 1–4 of this issue are scheduled or going out and send this draft’s email as it was approved/
+    )
+    const e = await outcome(
+      nl.editDraftCard('200', 'g0', 'recAAAAAAAAAAAAAA', { desc: 'New text.' })
+    )
+    expect(e.err).toBeInstanceOf(nl.DraftProblemError)
+    expect(
+      ac.calls.some(c => c.method === 'PUT' && c.path.startsWith('messages/'))
+    ).toBe(false)
   })
 
-  it('waves go in order', async () => {
-    const ac = makeAC(waved())
-    vi.stubGlobal('fetch', ac.fetchMock)
-    const nl = await freshModule()
-    const r = await outcome(
-      nl.approveAndSend('200', '6', { ...WHO, wave: wave(2) })
-    )
-    expect(r.err).toBeInstanceOf(nl.DraftProblemError)
-    expect((r.err as Error).message).toMatch(
-      /waves go in order: wave 1 is next, not wave 2/
-    )
-    expect(ac.creates).toEqual([])
-  })
-
-  it('wave 2 waits while wave 1 is still going out', async () => {
-    const ac = makeAC(
-      waved({ extra: [sentWave(1, { status: '2', ldate: null })] })
-    )
-    vi.stubGlobal('fetch', ac.fetchMock)
-    const nl = await freshModule()
-    const r = await outcome(
-      nl.approveAndSend('200', '6', { ...WHO, wave: wave(2) })
-    )
-    expect((r.err as Error).message).toMatch(
-      /wave 2 can go once wave 1 has finished sending \(it is sending now\)/
-    )
-    expect(ac.creates).toEqual([])
-  })
-
-  it('within 18 hours of wave 1, wave 2 needs a typed reason, which is logged and recorded', async () => {
+  it('wave 1 already went tonight: one press schedules waves 2–4 from the 18-hour gap, with room for its verdict', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(new Date('2026-10-08T20:00:00Z')) // 5½ hours after
+    vi.setSystemTime(new Date('2026-10-08T22:00:00Z'))
+    // Wave 1 finished 8 October, 14:30 UTC (the one-press-per-wave flow).
+    const ac = makeAC(waved({ extra: [sentWave(1)] }))
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const [d] = await nl.listDrafts()
+    expect(d.waves).toMatchObject({
+      next: 2,
+      notBefore: '2026-10-09T08:30:00.000Z',
+      startFrom: '2026-10-09T10:00:00.000Z',
+      holds: [],
+    })
+    const r = await nl.approveAndSend('200', '6', { ...WHO, waves: waves(2) })
+    // No reason needed: the gap only sets the time. 18 hours after the
+    // finish, plus 90 minutes while the watcher's verdict isn't in.
+    expect(created(ac)).toEqual([
+      [`${ISSUE} · wave 4/4`, WAVE_IDS[3], '2026-10-11 05:00:00'],
+      [`${ISSUE} · wave 3/4`, WAVE_IDS[2], '2026-10-10 05:00:00'],
+      [`${ISSUE} · wave 2/4`, WAVE_IDS[1], '2026-10-09 05:00:00'],
+    ])
+    expect(r.scheduled.map(s => [s.wave, s.sendAt])).toEqual([
+      [2, '2026-10-09T10:00:00.000Z'],
+      [3, '2026-10-10T10:00:00.000Z'],
+      [4, '2026-10-11T10:00:00.000Z'],
+    ])
+    expect(r).toMatchObject({ wave: 2, expected: 986, override: null })
+  })
+
+  it('…pressed once the verdict is in: from five minutes after the press', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-09T09:00:00Z'))
+    const ac = makeAC(waved({ extra: [sentWave(1)] }))
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    kv.data.set('aisafety:newsletter:health:180', {
+      verdict: 'green',
+      reasons: [],
+    })
+    const r = await nl.approveAndSend('200', '6', { ...WHO, waves: waves(2) })
+    expect(r.scheduled.map(s => [s.wave, s.sendAt])).toEqual([
+      [2, '2026-10-09T09:05:00.000Z'],
+      [3, '2026-10-10T09:05:00.000Z'],
+      [4, '2026-10-11T09:05:00.000Z'],
+    ])
+  })
+
+  it('a verdict that should be in but isn’t holds the waves; a typed reason sends them and is recorded on the first only', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    // 19 hours after wave 1 finished, and no verdict on it.
+    vi.setSystemTime(new Date('2026-10-09T09:30:00Z'))
     const ac = makeAC(waved({ extra: [sentWave(1)] }))
     vi.stubGlobal('fetch', ac.fetchMock)
     const nl = await freshModule()
     const first = await outcome(
-      nl.approveAndSend('200', '6', { ...WHO, wave: wave(2) })
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(2) })
     )
     expect(first.err).toBeInstanceOf(nl.NeedsOverrideError)
     expect((first.err as InstanceType<NL['NeedsOverrideError']>).holds).toEqual(
       [
-        'wave 1 finished less than 18 hours ago; wave 2 is due from 9 October 2026, 08:30 UTC',
+        'the send watcher hasn’t checked wave 1 yet (it was due 9 October 2026, 08:30 UTC), so it would cancel wave 2 before it starts',
       ]
     )
     // Too short a reason is no reason.
     const short = await outcome(
-      nl.approveAndSend('200', '6', { ...WHO, wave: wave(2), override: 'ok' })
+      nl.approveAndSend('200', '6', {
+        ...WHO,
+        waves: waves(2),
+        override: 'ok',
+      })
     )
     expect(short.err).toBeInstanceOf(nl.NeedsOverrideError)
     expect(ac.creates).toEqual([])
 
-    const reason = 'A deadline on Friday; readers need it today'
+    const reason = 'The watcher is down; the numbers look fine by hand'
     const r = await nl.approveAndSend('200', '6', {
       ...WHO,
-      wave: wave(2),
+      waves: waves(2),
       override: reason,
     })
     expect(r).toMatchObject({ wave: 2, expected: 986, override: reason })
     expect(vi.mocked(console.warn).mock.calls.flat().join(' ')).toMatch(
-      /Bryce Robertson is sending wave 2\/4 .* although wave 1 finished less than 18 hours ago.*Reason given: A deadline on Friday/
+      /Bryce Robertson is sending waves 2–4 of “Events · Week 41, 2026” on list 6 although the send watcher hasn’t checked wave 1 yet.*Reason given: The watcher is down/
     )
-    expect(
-      kv.data.get(`aisafety:newsletter:approved:${r.campaignId}`)
-    ).toMatchObject({ wave: 2, override: reason })
+    const rec = (id: string) =>
+      kv.data.get(`aisafety:newsletter:approved:${id}`) as Record<
+        string,
+        unknown
+      >
+    const byWave = Object.fromEntries(r.scheduled.map(s => [s.wave, s]))
+    expect(rec(byWave[2].campaignId)).toMatchObject({
+      wave: 2,
+      override: reason,
+    })
+    expect(rec(byWave[3].campaignId)).not.toHaveProperty('override')
+    expect(rec(byWave[4].campaignId)).not.toHaveProperty('override')
   })
 
-  it('18 hours after wave 1, wave 2 goes without a reason', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(new Date('2026-10-09T10:00:00Z'))
-    const ac = makeAC(waved({ extra: [sentWave(1)] }))
-    vi.stubGlobal('fetch', ac.fetchMock)
-    const nl = await freshModule()
-    const r = await nl.approveAndSend('200', '6', { ...WHO, wave: wave(2) })
-    expect(r).toMatchObject({ wave: 2, expected: 986, draftKept: true })
-    expect(
-      kv.data.get(`aisafety:newsletter:approved:${r.campaignId}`)
-    ).not.toHaveProperty('override')
-  })
-
-  it('a red verdict from the watcher holds the next wave; a small-sample one doesn’t', async () => {
+  it('a red verdict from the watcher holds the waves; a small-sample one doesn’t', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-10-09T10:00:00Z'))
     const ac = makeAC(waved({ extra: [sentWave(1)] }))
@@ -399,7 +480,7 @@ describe('approving a wave', () => {
       smallSample: false,
     })
     const r = await outcome(
-      nl.approveAndSend('200', '6', { ...WHO, wave: wave(2) })
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(2) })
     )
     expect((r.err as InstanceType<NL['NeedsOverrideError']>).holds).toEqual([
       'the send watcher flagged wave 1 red: hard bounces 3.1% (over 2%)',
@@ -417,21 +498,104 @@ describe('approving a wave', () => {
     })
     nl = await freshModule()
     await expect(
-      nl.approveAndSend('200', '6', { ...WHO, wave: wave(2) })
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(2) })
     ).resolves.toMatchObject({ wave: 2 })
   })
 
-  it('the same wave twice is refused', async () => {
-    const ac = makeAC(waved({ extra: [sentWave(1)] }))
+  it('test lists: two minutes after the press, then ten minutes apart', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-08T15:00:00Z'))
+    const ac = makeAC({
+      draftList: '5',
+      active: { '5': 3 },
+      segments: waveSegments(3, 'SWEEP TEST wave '),
+      tagCounts: { '5': { '101': 1, '102': 1 } },
+    })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const r = await nl.approveAndSend('200', '5', {
+      ...WHO,
+      waves: waves(1, 3),
+    })
+    expect(r.scheduled.map(s => [s.wave, s.sendAt])).toEqual([
+      [1, '2026-10-08T15:02:00.000Z'],
+      [2, '2026-10-08T15:12:00.000Z'],
+      [3, '2026-10-08T15:22:00.000Z'],
+    ])
+    // A test list isn't the watcher's: nothing recorded.
+    expect(kv.zsets.size).toBe(0)
+  })
+
+  it('waves go in order', async () => {
+    const ac = makeAC(waved())
     vi.stubGlobal('fetch', ac.fetchMock)
     const nl = await freshModule()
     const r = await outcome(
-      nl.approveAndSend('200', '6', { ...WHO, wave: wave(1) })
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(2) })
     )
+    expect(r.err).toBeInstanceOf(nl.DraftProblemError)
     expect((r.err as Error).message).toMatch(
-      /wave 1 of this issue already went to this list as campaign 180 \(sent\) – approving it again would send it twice/
+      /waves go in order: wave 1 is next, not wave 2/
     )
     expect(ac.creates).toEqual([])
+  })
+
+  it('the rest wait while an earlier wave is still going out', async () => {
+    const ac = makeAC(
+      waved({ extra: [sentWave(1, { status: '2', ldate: null })] })
+    )
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const r = await outcome(
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(2) })
+    )
+    expect((r.err as Error).message).toMatch(
+      /waves 2–4 can go once wave 1 has finished sending \(it is sending now\)/
+    )
+    expect(ac.creates).toEqual([])
+  })
+
+  it('the same waves twice are refused: any wave of the range scheduled, going or sent', async () => {
+    const ac = makeAC(waved())
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    await nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
+    expireLocks()
+    const again = await outcome(
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
+    )
+    expect(again.err).toBeInstanceOf(nl.DraftProblemError)
+    expect(
+      (again.err as InstanceType<NL['DraftProblemError']>).problems
+    ).toEqual(
+      ['204', '203', '202', '201'].map(
+        (id, i) =>
+          `wave ${i + 1} of this issue already went to this list as campaign ${id} (scheduled) – approving it again would send it twice`
+      )
+    )
+    expect(ac.creates).toHaveLength(4)
+
+    // One wave of the range already there (a status it doesn't know counts):
+    // nothing is made.
+    for (const status of ['1', '7', '9']) {
+      const one = makeAC(
+        waved({
+          extra: [
+            sentWave(1),
+            camp({ id: '182', name: `${ISSUE} · wave 3/4`, status }),
+          ],
+        })
+      )
+      vi.stubGlobal('fetch', one.fetchMock)
+      const fresh = await freshModule()
+      const r = await outcome(
+        fresh.approveAndSend('200', '6', { ...WHO, waves: waves(2) })
+      )
+      expect((r.err as Error).message).toMatch(
+        /wave 3 of this issue already went to this list as campaign 182/
+      )
+      expect(one.creates).toEqual([])
+    }
   })
 
   it('a whole-list send refuses every wave of the issue, and any wave refuses the whole list', async () => {
@@ -443,7 +607,7 @@ describe('approving a wave', () => {
     vi.stubGlobal('fetch', ac.fetchMock)
     let nl = await freshModule()
     const r = await outcome(
-      nl.approveAndSend('200', '6', { ...WHO, wave: wave(1) })
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
     )
     expect((r.err as Error).message).toMatch(
       /this issue already went to this list as campaign 150/
@@ -476,7 +640,7 @@ describe('approving a wave', () => {
     vi.stubGlobal('fetch', ac.fetchMock)
     const nl = await freshModule()
     const r = await outcome(
-      nl.approveAndSend('200', '6', { ...WHO, wave: wave(2) })
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(2) })
     )
     expect((r.err as Error).message).toMatch(
       /wave 1 was stopped after reaching 200 people, so no further wave of this issue goes out/
@@ -486,7 +650,7 @@ describe('approving a wave', () => {
     expect(d.waves!.blocked).toMatch(/wave 1 was stopped/)
   })
 
-  it('the last wave deletes the draft', async () => {
+  it('the last wave on its own: the draft stays until it has gone (the send watcher deletes it then)', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-10-12T10:00:00Z'))
     const ac = makeAC(
@@ -500,13 +664,21 @@ describe('approving a wave', () => {
     )
     vi.stubGlobal('fetch', ac.fetchMock)
     const nl = await freshModule()
-    const r = await nl.approveAndSend('200', '6', { ...WHO, wave: wave(4) })
+    kv.data.set('aisafety:newsletter:health:182', {
+      verdict: 'green',
+      reasons: [],
+    })
+    const r = await nl.approveAndSend('200', '6', { ...WHO, waves: waves(4) })
     expect(r).toMatchObject({
       name: `${ISSUE} · wave 4/4`,
       expected: 699,
-      draftKept: false,
+      draftKept: true,
     })
-    expect(ac.camps.some(c => c.id === '200')).toBe(false)
+    expect(r.scheduled).toHaveLength(1)
+    expect(ac.camps.find(c => c.id === '200')?.status).toBe('0')
+    const [d] = await nl.listDrafts()
+    expect(d.alreadySent).toBeNull()
+    expect(d.waves).toMatchObject({ going: true, next: null })
   })
 
   it('ActiveCampaign dropping the wave: the send is deleted at once, nothing goes out, the draft stays', async () => {
@@ -514,13 +686,14 @@ describe('approving a wave', () => {
     vi.stubGlobal('fetch', ac.fetchMock)
     const nl = await freshModule()
     const r = await outcome(
-      nl.approveAndSend('200', '6', { ...WHO, wave: wave(1) })
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
     )
     expect(r.err).toBeInstanceOf(nl.WaveDroppedError)
     expect(r.err).toBeInstanceOf(nl.SendDeletedError)
     expect((r.err as Error).message).toMatch(
       /didn’t keep the wave on the new campaign 201 \(it came back with no segment\), so it would have gone to the whole list/
     )
+    // The first one made (wave 4) came back wrong: nothing else was made.
     expect(ac.creates).toEqual(['201'])
     expect(ac.camps.some(c => c.id === '201')).toBe(false)
     expect(
@@ -537,7 +710,7 @@ describe('approving a wave', () => {
     vi.stubGlobal('fetch', ac.fetchMock)
     const nl = await freshModule()
     const r = await outcome(
-      nl.approveAndSend('200', '6', { ...WHO, wave: wave(1) })
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
     )
     expect(r.err).toBeInstanceOf(nl.WaveDroppedError)
     expect((r.err as Error).message).toMatch(
@@ -551,7 +724,7 @@ describe('approving a wave', () => {
     vi.stubGlobal('fetch', ac.fetchMock)
     const nl = await freshModule()
     const r = await outcome(
-      nl.approveAndSend('200', '6', { ...WHO, wave: wave(1) })
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
     )
     expect(r.err).toBeInstanceOf(nl.MaybeScheduledError)
     expect((r.err as Error).message).toMatch(
@@ -559,46 +732,51 @@ describe('approving a wave', () => {
     )
   })
 
-  it('refuses a wave that changed since the page loaded', async () => {
+  it('refuses waves that changed since the page loaded', async () => {
     const ac = makeAC(waved())
     vi.stubGlobal('fetch', ac.fetchMock)
     const nl = await freshModule()
     for (const w of [
-      { segmentId: WAVE_IDS[1], wave: 1, waves: 4 },
-      { segmentId: WAVE_IDS[0], wave: 1, waves: 3 },
+      { from: 1, waves: 4, segmentIds: [WAVE_IDS[1], ...WAVE_IDS.slice(1)] },
+      { from: 2, waves: 3, segmentIds: WAVE_IDS.slice(1, 3) },
     ]) {
       const r = await outcome(
-        nl.approveAndSend('200', '6', { ...WHO, wave: w })
+        nl.approveAndSend('200', '6', { ...WHO, waves: w })
       )
       expect((r.err as Error).message).toMatch(
         /the waves in ActiveCampaign changed since the page loaded/
       )
     }
-    const bad = await outcome(
-      nl.approveAndSend('200', '6', {
-        ...WHO,
-        wave: { segmentId: 'not-a-uuid', wave: 1, waves: 4 },
-      })
-    )
-    expect((bad.err as Error).message).toMatch(/isn’t one of the list’s waves/)
+    for (const w of [
+      { from: 1, waves: 4, segmentIds: ['not-a-uuid', ...WAVE_IDS.slice(1)] },
+      // Not every wave from the first to the last.
+      { from: 1, waves: 4, segmentIds: WAVE_IDS.slice(0, 2) },
+    ]) {
+      const bad = await outcome(
+        nl.approveAndSend('200', '6', { ...WHO, waves: w })
+      )
+      expect((bad.err as Error).message).toMatch(
+        /those aren’t the list’s waves/
+      )
+    }
     expect(ac.creates).toEqual([])
   })
 
-  it('two presses on the same wave at once: one sends, the other is refused', async () => {
+  it('two presses at once: one schedules, the other is refused', async () => {
     const ac = makeAC(waved({ latencyMs: 20 }))
     vi.stubGlobal('fetch', ac.fetchMock)
     const nl = await freshModule()
     const r = await Promise.allSettled([
-      nl.approveAndSend('200', '6', { ...WHO, wave: wave(1) }),
-      nl.approveAndSend('200', '6', { approver: 'plex', wave: wave(1) }),
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) }),
+      nl.approveAndSend('200', '6', { approver: 'plex', waves: waves(1) }),
     ])
-    expect(ac.creates).toHaveLength(1)
+    expect(ac.creates).toHaveLength(4)
     const refused = r.find(
       x => x.status === 'rejected'
     ) as PromiseRejectedResult
     expect(refused.reason).toBeInstanceOf(nl.ApprovalLockedError)
     expect(refused.reason.message).toMatch(
-      /Another approval of wave 1 of “Events · Week 41, 2026”/
+      /Another approval of waves 1–4 of “Events · Week 41, 2026”/
     )
   })
 
@@ -627,6 +805,189 @@ describe('approving a wave', () => {
       nl.editDraftCard('200', 'g0', 'recAAAAAAAAAAAAAA', { desc: 'New text.' })
     ).resolves.toHaveProperty('cards')
   })
+
+  it('the draft can’t be deleted while a wave is still to go: it is how a canceled wave is approved again', async () => {
+    const ac = makeAC(waved())
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    await nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
+    expireLocks()
+    const r = await outcome(nl.deleteDraft('200', 'Bryce'))
+    expect(r.err).toBeInstanceOf(nl.DraftProblemError)
+    expect((r.err as Error).message).toMatch(
+      /Waves 1–4 of this issue are still to go out, and a canceled wave is approved again from this draft/
+    )
+    expect(ac.calls.some(c => c.action === 'campaign_delete')).toBe(false)
+  })
+})
+
+/* ─── All or nothing ───────────────────────────────────────────────────── */
+
+describe('all or nothing: a press that fails part-way takes back what it made', () => {
+  /** The pretend ActiveCampaign, with a hook on each campaign_create
+   *  (n = 1 for the first) once the campaign exists, before the answer. */
+  function hooked(
+    ac: ReturnType<typeof makeAC>,
+    onCreate: (n: number, id: string) => void,
+    more?: (url: string, init?: RequestInit) => Response | null
+  ) {
+    let n = 0
+    return async (input: string | URL, init?: RequestInit) => {
+      const url = String(input)
+      const early = more?.(url, init)
+      if (early) return early
+      const res = await ac.fetchMock(input, init)
+      if (url.includes('api_action=campaign_create'))
+        onCreate(++n, String(ac.creates[ac.creates.length - 1]))
+      return res
+    }
+  }
+
+  it('a wave that comes back wrong mid-way: it and the waves already made are deleted, nothing is left', async () => {
+    const ac = makeAC(waved())
+    // The second campaign made (wave 3) comes back without its segment.
+    vi.stubGlobal(
+      'fetch',
+      hooked(ac, n => {
+        if (n === 2) ac.camps.find(c => c.id === '202')!.segmentid = '0'
+      })
+    )
+    const nl = await freshModule()
+    const r = await outcome(
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
+    )
+    expect(r.err).toBeInstanceOf(nl.WaveDroppedError)
+    expect((r.err as Error).message).toMatch(
+      /didn’t keep the wave on the new campaign 202 .*Tell Claude before trying again\. Wave 4, which this approval had already scheduled, was canceled again\.$/
+    )
+    expect(ac.creates).toEqual(['201', '202'])
+    expect(ac.camps.some(c => c.id === '201' || c.id === '202')).toBe(false)
+    expect(ac.camps.find(c => c.id === '200')?.status).toBe('0')
+    // As for one wave that came back wrong: the lock stays a while.
+    const again = await outcome(
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
+    )
+    expect(again.err).toBeInstanceOf(nl.ApprovalLockedError)
+  })
+
+  it('an unclear create mid-way: the waves made are deleted again, and it says that one may be scheduled', async () => {
+    const ac = makeAC(waved({ createGatewayError: [false, true] }))
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const r = await outcome(
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
+    )
+    const err = r.err as InstanceType<NL['MaybeScheduledError']>
+    expect(err).toBeInstanceOf(nl.MaybeScheduledError)
+    expect(err.message).toMatch(
+      /^It may have been scheduled anyway \(wave 3\): something went wrong after ActiveCampaign was asked to schedule it\. Don’t press Approve again – check Recent sends, which updates by itself\. Wave 4, which this approval had already scheduled, was canceled again\.$/
+    )
+    expect(err.facts).toMatchObject({ wave: 3, expected: 710 })
+    // Wave 4 is gone; wave 3's create may have landed (it did here).
+    expect(ac.camps.some(c => c.id === '201')).toBe(false)
+    expect(ac.camps.some(c => c.id === '202')).toBe(true)
+    expect(ac.creates).toEqual(['201', '202'])
+  })
+
+  it('a wave that can’t be read back mid-way: everything is deleted, and it may be approved again at once', async () => {
+    const ac = makeAC(waved())
+    vi.stubGlobal(
+      'fetch',
+      hooked(
+        ac,
+        () => {},
+        url =>
+          /\/api\/3\/campaigns\/202$/.test(new URL(url).pathname)
+            ? Response.json({ message: 'read failed' }, { status: 500 })
+            : null
+      )
+    )
+    const nl = await freshModule()
+    const r = await outcome(
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
+    )
+    expect(r.err).toBeInstanceOf(nl.ReadBackDeletedError)
+    expect((r.err as Error).message).toMatch(
+      /Nothing was sent, and the draft is still here: approve again in a minute\. Wave 4, which this approval had already scheduled, was canceled again\.$/
+    )
+    expect(ac.camps.some(c => c.id === '201' || c.id === '202')).toBe(false)
+    // No lock left: the next press goes through.
+    vi.stubGlobal('fetch', ac.fetchMock)
+    await expect(
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
+    ).resolves.toMatchObject({ wave: 1 })
+  })
+
+  it('a wave made that can’t be deleted again is named: cancel it before it starts', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-08T15:00:00Z'))
+    const ac = makeAC(waved())
+    vi.stubGlobal(
+      'fetch',
+      hooked(
+        ac,
+        n => {
+          if (n === 2) ac.camps.find(c => c.id === '202')!.segmentid = '0'
+        },
+        (url, init) => {
+          // Campaign 201 (wave 4) won't go: both deletes refuse.
+          const path = new URL(url).pathname
+          if (
+            init?.method === 'DELETE' &&
+            path.endsWith('/campaigns/201/delete')
+          )
+            return Response.json({ succeeded: 0, message: 'busy' })
+          if (
+            url.includes('api_action=campaign_delete') &&
+            String(init?.body).includes('id=201')
+          )
+            return Response.json({ result_code: 0, result_message: 'busy' })
+          return null
+        }
+      )
+    )
+    const nl = await freshModule()
+    const r = await outcome(
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
+    )
+    const err = r.err as InstanceType<NL['MaybeScheduledError']>
+    expect(err).toBeInstanceOf(nl.MaybeScheduledError)
+    expect(err.campaignId).toBe('201')
+    expect(err.message).toMatch(
+      /^The approval of waves 1–4 stopped part-way\. ActiveCampaign didn’t keep the wave on the new campaign 202 .* Wave 4 \(campaign 201\) couldn’t be canceled again, so it is still scheduled: cancel it on the newsletter page \(or in ActiveCampaign\) before 11 October 2026, 15:05 UTC\. Don’t press Approve again until then\.$/
+    )
+    expect(ac.camps.some(c => c.id === '201')).toBe(true)
+    expect(ac.camps.some(c => c.id === '202')).toBe(false)
+  })
+
+  it('ActiveCampaign too slow: it stops before the next wave and deletes what it made', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-08T15:00:00Z'))
+    const ac = makeAC(waved())
+    // The first create takes two and a half minutes.
+    vi.stubGlobal(
+      'fetch',
+      hooked(ac, n => {
+        if (n === 1) vi.setSystemTime(new Date('2026-10-08T15:02:30Z'))
+      })
+    )
+    const nl = await freshModule()
+    const r = await outcome(
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
+    )
+    expect(r.err).toBeInstanceOf(nl.TooSlowError)
+    expect(r.err).toBeInstanceOf(nl.SendDeletedError)
+    expect((r.err as Error).message).toMatch(
+      /answered too slowly to schedule waves 1–4 in one go, so the approval stopped before wave 3 and nothing goes out\. Try again in a few minutes\. Wave 4, which this approval had already scheduled, was canceled again\./
+    )
+    expect(ac.creates).toEqual(['201'])
+    expect(ac.camps.some(c => c.id === '201')).toBe(false)
+    // Nothing exists, so it may be pressed again at once.
+    vi.stubGlobal('fetch', ac.fetchMock)
+    await expect(
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
+    ).resolves.toMatchObject({ wave: 1 })
+  })
 })
 
 /* ─── The owner hears about every real-list approval ──────────────────── */
@@ -645,7 +1006,7 @@ describe('the owner’s notice', () => {
     const nl = await freshModule(MAIL_ENV)
     const r = await nl.approveAndSend('200', '6', {
       approver: 'plex',
-      wave: wave(1),
+      waves: waves(1),
     })
     expect(await nl.notifyApproval(r)).toBe(true)
     expect(ac.mails).toHaveLength(1)
@@ -663,7 +1024,7 @@ describe('the owner’s notice', () => {
       'To: 494 people on AISafety.com Events (list 6)',
       'Sends: 8 October 2026, 15:05 UTC',
       'Approved by: plex',
-      'Campaign: 201',
+      'Campaign: 204',
       'To cancel it before it sends, or pause or stop it while it’s sending: https://aisafety.com/admin/newsletter',
     ])
       expect(text).toContain(line)
@@ -677,14 +1038,15 @@ describe('the owner’s notice', () => {
     vi.stubGlobal('fetch', ac.fetchMock)
     let nl = await freshModule(MAIL_ENV)
     const r = await outcome(
-      nl.approveAndSend('200', '6', { ...WHO, wave: wave(1) })
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
     )
+    // The first campaign made (wave 4) answered with a gateway error.
     const err = r.err as InstanceType<NL['MaybeScheduledError']>
     expect(err).toBeInstanceOf(nl.MaybeScheduledError)
-    expect(err.facts).toMatchObject({ wave: 1, expected: 494, listId: '6' })
+    expect(err.facts).toMatchObject({ wave: 4, expected: 699, listId: '6' })
     await nl.notifyApproval({ ...err.facts!, campaignId: err.campaignId }, true)
     expect(ac.mails[0].subject).toBe(
-      `Newsletter: “${ISSUE} · wave 1/4” may have been scheduled – check`
+      `Newsletter: “${ISSUE} · wave 4/4” may have been scheduled – check`
     )
     expect(String(ac.mails[0].text)).toMatch(
       /ran into an error after ActiveCampaign was asked to schedule it/
@@ -712,27 +1074,106 @@ describe('stopping a send', () => {
       send_amt: status === '1' || status === '7' ? '0' : '120',
     })
 
-  it('cancels a scheduled wave: it is deleted, and the wave can be approved again at once', async () => {
+  it('cancels a scheduled wave with the later ones: they are deleted, and the waves can be approved again at once', async () => {
     const ac = makeAC(waved())
     vi.stubGlobal('fetch', ac.fetchMock)
     const nl = await freshModule()
-    const sent = await nl.approveAndSend('200', '6', { ...WHO, wave: wave(1) })
+    const sent = await nl.approveAndSend('200', '6', {
+      ...WHO,
+      waves: waves(1),
+    })
+    expect(sent.campaignId).toBe('204')
     const r = await nl.stopSend(sent.campaignId, 'cancel', BY)
     expect(r).toMatchObject({
-      campaignId: '201',
+      campaignId: '204',
       action: 'cancel',
       status: 'deleted',
       draftWaiting: true,
       by: 'Bryce Robertson',
+      laterProblem: null,
     })
-    expect(ac.camps.some(c => c.id === '201')).toBe(false)
+    // Waves go in order: 2–4 went with wave 1.
+    expect(r.alsoCanceled).toEqual([
+      { campaignId: '203', wave: 2 },
+      { campaignId: '202', wave: 3 },
+      { campaignId: '201', wave: 4 },
+    ])
+    expect(ac.camps.map(c => c.id)).toEqual(['200'])
     expect(vi.mocked(console.info).mock.calls.flat().join(' ')).toMatch(
-      /campaign 201 “Events · Week 41, 2026 · wave 1\/4” cancel by Bryce Robertson: scheduled → deleted/
+      /campaign 204 “Events · Week 41, 2026 · wave 1\/4” cancel by Bryce Robertson: scheduled → deleted/
     )
-    // The lock went with it: the same wave can be approved again now.
+    // The lock went with it: the waves can be approved again now.
     await expect(
-      nl.approveAndSend('200', '6', { ...WHO, wave: wave(1) })
-    ).resolves.toMatchObject({ campaignId: '202' })
+      nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
+    ).resolves.toMatchObject({ campaignId: '208', wave: 1 })
+  })
+
+  it('canceling a later wave leaves the earlier ones; the issue offers the canceled ones again once those have gone', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-08T15:00:00Z'))
+    const ac = makeAC(waved())
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    await nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
+    // Wave 3 is campaign 202; wave 4 (201) goes with it, waves 1–2 stay.
+    const r = await nl.stopSend('202', 'cancel', BY)
+    expect(r.alsoCanceled).toEqual([{ campaignId: '201', wave: 4 }])
+    expect(ac.camps.map(c => c.id).sort()).toEqual(['200', '203', '204'])
+    let [d] = await nl.listDrafts()
+    expect(d.waves).toMatchObject({
+      next: 3,
+      going: true,
+      wait: 'waves 3–4 can go once wave 2 has finished sending (it is scheduled now)',
+    })
+    // Waves 1 and 2 go out, and the watcher judges wave 2.
+    for (const [id, ldate] of [
+      ['204', '2026-10-08T10:20:00-05:00'],
+      ['203', '2026-10-09T10:20:00-05:00'],
+    ]) {
+      const c = ac.camps.find(x => x.id === id)!
+      c.status = '5'
+      c.ldate = ldate
+      c.send_amt = '500'
+    }
+    kv.data.set('aisafety:newsletter:health:203', {
+      verdict: 'green',
+      reasons: [],
+    })
+    vi.setSystemTime(new Date('2026-10-10T12:00:00Z'))
+    ;[d] = await nl.listDrafts()
+    expect(d.waves).toMatchObject({ next: 3, going: false, wait: null })
+    const again = await nl.approveAndSend('200', '6', {
+      ...WHO,
+      waves: waves(3),
+    })
+    expect(again.scheduled.map(s => [s.wave, s.sendAt])).toEqual([
+      [3, '2026-10-10T12:05:00.000Z'],
+      [4, '2026-10-11T12:05:00.000Z'],
+    ])
+  })
+
+  it('a later wave that can’t be canceled is named', async () => {
+    const ac = makeAC(waved())
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    await nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
+    // Wave 4 (campaign 201) won't go: both deletes refuse.
+    vi.stubGlobal('fetch', (input: string | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (init?.method === 'DELETE' && url.endsWith('/campaigns/201/delete'))
+        return Promise.resolve(Response.json({ succeeded: 0 }))
+      if (
+        url.includes('api_action=campaign_delete') &&
+        String(init?.body).includes('id=201')
+      )
+        return Promise.resolve(Response.json({ result_code: 0 }))
+      return ac.fetchMock(input, init)
+    })
+    const r = await nl.stopSend('202', 'cancel', BY)
+    expect(r.alsoCanceled).toEqual([])
+    expect(r.laterProblem).toBe(
+      'Wave 4 (campaign 201) is scheduled and wasn’t canceled: cancel it under Recent sends, or it goes out without the earlier wave.'
+    )
   })
 
   it('a second press finds the send gone and changes nothing', async () => {
@@ -1003,7 +1444,7 @@ describe('the routes', () => {
     expect(await stale.json()).toEqual({ error: 'reauth' })
   })
 
-  it('Approve: a wave, then 409 on a second press; no email to the owner', async () => {
+  it('Approve: every wave still to go, then 409 on a second press; no email to the owner', async () => {
     const ac = makeAC(waved())
     vi.stubGlobal('fetch', ac.fetchMock)
     await freshModule({
@@ -1014,16 +1455,20 @@ describe('the routes', () => {
     const body = {
       campaign: '200',
       list: '6',
-      wave: { segment: WAVE_IDS[0], k: 1, n: 4 },
+      waves: { from: 1, n: 4, segments: WAVE_IDS },
     }
     const first = await POST(post(body))
     expect(first.status).toBe(200)
-    expect(await first.json()).toMatchObject({
-      campaignId: '201',
+    const answer = await first.json()
+    expect(answer).toMatchObject({
+      campaignId: '204',
       wave: 1,
       expected: 494,
       draftKept: true,
     })
+    expect(
+      (answer.scheduled as Array<{ wave: number }>).map(s => s.wave)
+    ).toEqual([1, 2, 3, 4])
     // No email for an ordinary approval (Bryce, 2 Oct 2026), with the mail
     // script set up: nothing is queued to run after the answer.
     expect(afterQueue).toHaveLength(0)
@@ -1032,18 +1477,20 @@ describe('the routes', () => {
     const second = await POST(post(body))
     expect(second.status).toBe(409)
     expect(await second.json()).toMatchObject({ locked: true })
-    expect(ac.creates).toEqual(['201'])
+    expect(ac.creates).toEqual(['201', '202', '203', '204'])
 
-    const malformed = await POST(
-      post({ ...body, wave: { segment: 'x', k: 1, n: 4 } })
-    )
-    expect(malformed.status).toBe(400)
+    for (const waves of [
+      { from: 1, n: 4, segments: ['x'] },
+      { from: 'one', n: 4, segments: WAVE_IDS },
+      { from: 1, n: 4, segments: 'all' },
+    ]) {
+      const malformed = await POST(post({ ...body, waves }))
+      expect(malformed.status).toBe(400)
+    }
   })
 
-  it('Approve: a held wave answers 409 needsOverride with the holds', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(new Date('2026-10-08T20:00:00Z'))
-    const ac = makeAC(waved({ extra: [sentWave(1)] }))
+  it('Approve: a page loaded before approve once (one wave per press) is asked to reload', async () => {
+    const ac = makeAC(waved())
     vi.stubGlobal('fetch', ac.fetchMock)
     await freshModule()
     const { POST } = await approveRoute()
@@ -1051,13 +1498,41 @@ describe('the routes', () => {
       post({
         campaign: '200',
         list: '6',
-        wave: { segment: WAVE_IDS[1], k: 2, n: 4 },
+        wave: { segment: WAVE_IDS[0], k: 1, n: 4 },
+      })
+    )
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({
+      problems: [
+        'this page is out of date – reload it, then approve the waves again',
+      ],
+    })
+    expect(ac.calls).toEqual([])
+  })
+
+  it('Approve: held waves answer 409 needsOverride with the holds', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-09T10:00:00Z'))
+    const ac = makeAC(waved({ extra: [sentWave(1)] }))
+    vi.stubGlobal('fetch', ac.fetchMock)
+    await freshModule()
+    kv.data.set('aisafety:newsletter:health:180', {
+      verdict: 'red',
+      reasons: ['hard bounces 3.1% (red at 2%)'],
+    })
+    const { POST } = await approveRoute()
+    const res = await POST(
+      post({
+        campaign: '200',
+        list: '6',
+        waves: { from: 2, n: 4, segments: WAVE_IDS.slice(1) },
       })
     )
     expect(res.status).toBe(409)
     expect(await res.json()).toMatchObject({
       needsOverride: true,
-      holds: [expect.stringMatching(/wave 2 is due from 9 October 2026/)],
+      holds: [expect.stringMatching(/the send watcher flagged wave 1 red/)],
     })
+    expect(ac.creates).toEqual([])
   })
 })
