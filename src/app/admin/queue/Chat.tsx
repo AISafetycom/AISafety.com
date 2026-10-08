@@ -1,7 +1,12 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { fableChangesOf, type FableChange } from '@/lib/admin/queue-fable'
+import {
+  fableChangesOf,
+  wentOut,
+  wentOutNote,
+  type FableChange,
+} from '@/lib/admin/queue-fable'
 import Icon from '@/components/Icon'
 import type { AgentInfo, QueueItem } from '@/lib/admin/queue'
 import styles from './queue.module.css'
@@ -143,6 +148,19 @@ interface Undo {
   edits?: Record<string, string | undefined>
   reply?: string | null
 }
+
+/** A decided item, opened from Done today: its cards are read-only and
+ *  say what became of them, with no Apply or Undo. */
+export interface Decided {
+  /** The button the decision was made with: "Publish", "Apply change". */
+  label: string
+  /** The row's saved edits as the page's editors hold them, when the
+   *  decision wrote them to the listing; empty when it wrote nothing (a
+   *  rejection). */
+  sent: Record<string, string>
+  /** The reply draft that went with the decision; null when none did. */
+  reply: string | null
+}
 const LINK_RE = /https?:\/\/[^\s<>)\]]+/g
 const INLINE_RE = /(\*\*[^*\n]+\*\*|`[^`\n]+`|https?:\/\/[^\s<>)\]]+)/g
 const BULLET_RE = /^\s*(?:[-•*]|\d+[.)])\s+/
@@ -185,6 +203,7 @@ export default function Chat({
   edits,
   reply,
   canEditField,
+  decided,
   onSetEdits,
   onSetReply,
   onWrote,
@@ -200,6 +219,8 @@ export default function Chat({
   /** Whether the page lets this field be edited (no formulas, no
    *  housekeeping); a change to any other field is left out. */
   canEditField: (field: string) => boolean
+  /** Set once the item is decided: nothing applies any more. */
+  decided: Decided | null
   /** Replace the page's pending edits. */
   onSetEdits: (edits: Record<string, string>) => void
   /** Set the reply draft as edited on the page (null: as it came). */
@@ -266,6 +287,9 @@ export default function Chat({
     (msg: Msg) => {
       if (msg.role !== 'fable') return
       if (msg.wrote) onWrote?.()
+      // A decided item keeps what went with its decision: a reply that
+      // lands after it changes nothing on the page.
+      if (decided) return
       const { edits: proposed, reply: draft } = blocksOf(textOf(msg))
       const undo: Undo = {}
       if (proposed) {
@@ -286,7 +310,7 @@ export default function Chat({
       }
       if (undo.edits || undo.reply !== undefined) undoRef.current[msg.at] = undo
     },
-    [canEditField, onSetEdits, onSetReply, onWrote]
+    [canEditField, decided, onSetEdits, onSetReply, onWrote]
   )
   // Read through a ref by loadHistory, so that it changes only with the
   // agent's token or the item. The page hands down new callbacks on every
@@ -810,6 +834,7 @@ export default function Chat({
                   edits={edits}
                   reply={reply}
                   canEditField={canEditField}
+                  decided={decided}
                   onSetEdits={onSetEdits}
                   onSetReply={onSetReply}
                   undo={undoFor(m)}
@@ -827,6 +852,7 @@ export default function Chat({
                 edits={edits}
                 reply={reply}
                 canEditField={canEditField}
+                decided={decided}
                 onSetEdits={onSetEdits}
                 onSetReply={onSetReply}
                 streaming
@@ -1155,6 +1181,7 @@ function Parts({
   edits,
   reply,
   canEditField,
+  decided,
   onSetEdits,
   onSetReply,
   undo,
@@ -1165,6 +1192,7 @@ function Parts({
   edits: Record<string, string>
   reply: string | null
   canEditField: (field: string) => boolean
+  decided: Decided | null
   onSetEdits: (edits: Record<string, string>) => void
   onSetReply: (text: string | null) => void
   undo?: () => void
@@ -1190,6 +1218,7 @@ function Parts({
             edits={edits}
             reply={reply}
             canEditField={canEditField}
+            decided={decided}
             onSetEdits={onSetEdits}
             onSetReply={onSetReply}
             undo={undo}
@@ -1208,6 +1237,7 @@ function Prose({
   edits,
   reply,
   canEditField,
+  decided,
   onSetEdits,
   onSetReply,
   undo,
@@ -1219,6 +1249,7 @@ function Prose({
   edits: Record<string, string>
   reply: string | null
   canEditField: (field: string) => boolean
+  decided: Decided | null
   onSetEdits: (edits: Record<string, string>) => void
   onSetReply: (text: string | null) => void
   undo?: () => void
@@ -1241,6 +1272,7 @@ function Prose({
           key={`r${n}`}
           proposed={m[2].trim()}
           current={reply}
+          decided={decided}
           onSet={onSetReply}
           undo={undo}
         />
@@ -1254,6 +1286,7 @@ function Prose({
             proposed={parsed}
             edits={edits}
             canEditField={canEditField}
+            decided={decided}
             onSet={onSetEdits}
             undo={undo}
             cap={cap}
@@ -1280,11 +1313,13 @@ function Prose({
 
 /** Field values from a reply. They are applied the moment the reply
  *  lands; the card shows what changed, with Undo, and turns back into an
- *  Apply button if the page's value is later edited away from it. */
+ *  Apply button if the page's value is later edited away from it. On a
+ *  decided item it only says whether they went out with the decision. */
 function EditsCard({
   proposed,
   edits,
   canEditField,
+  decided,
   onSet,
   undo,
   cap,
@@ -1292,6 +1327,7 @@ function EditsCard({
   proposed: Record<string, string>
   edits: Record<string, string>
   canEditField: (field: string) => boolean
+  decided: Decided | null
   onSet: (edits: Record<string, string>) => void
   undo?: () => void
   cap: DescCap
@@ -1302,7 +1338,10 @@ function EditsCard({
     Object.entries(proposed).filter(([k]) => canEditField(k))
   )
   const keys = Object.keys(usable)
-  const applied = keys.length > 0 && keys.every(k => edits[k] === usable[k])
+  const went = decided ? wentOut(usable, decided.sent) : []
+  const applied = decided
+    ? keys.length > 0 && went.length === keys.length
+    : keys.length > 0 && keys.every(k => edits[k] === usable[k])
   if (keys.length === 0) {
     return (
       <p className={styles.chatTool}>
@@ -1327,13 +1366,20 @@ function EditsCard({
           </div>
         )
       })}
-      <CardFoot
-        applied={applied}
-        appliedText="Applied – goes with Accept"
-        applyText="Apply to the listing"
-        onApply={() => onSet({ ...edits, ...usable })}
-        undo={undo}
-      />
+      {decided ? (
+        <DecidedFoot
+          done={applied}
+          text={wentOutNote(keys, went, decided.label)}
+        />
+      ) : (
+        <CardFoot
+          applied={applied}
+          appliedText="Applied – goes with Accept"
+          applyText="Apply to the listing"
+          onApply={() => onSet({ ...edits, ...usable })}
+          undo={undo}
+        />
+      )}
     </div>
   )
 }
@@ -1343,11 +1389,13 @@ function EditsCard({
 function ReplyCard({
   proposed,
   current,
+  decided,
   onSet,
   undo,
 }: {
   proposed: string
   current: string | null
+  decided: Decided | null
   onSet: (text: string | null) => void
   undo?: () => void
 }) {
@@ -1356,20 +1404,42 @@ function ReplyCard({
       <p className={styles.chatTool}>This item has no reply draft to update.</p>
     )
   }
-  const applied = current === proposed
+  const applied = decided
+    ? decided.reply?.trim() === proposed
+    : current === proposed
   return (
     <div className={styles.chatEdits}>
       <span className={styles.chatWho}>
         {applied ? 'Reply draft, updated' : 'New reply draft'}
       </span>
       <pre className={styles.chatPre}>{proposed}</pre>
-      <CardFoot
-        applied={applied}
-        appliedText="The draft on the page is updated"
-        applyText="Use as the reply draft"
-        onApply={() => onSet(proposed)}
-        undo={undo}
-      />
+      {decided ? (
+        <DecidedFoot
+          done={applied}
+          text={applied ? `Went with ${decided.label}` : 'Not used'}
+        />
+      ) : (
+        <CardFoot
+          applied={applied}
+          appliedText="The draft on the page is updated"
+          applyText="Use as the reply draft"
+          onApply={() => onSet(proposed)}
+          undo={undo}
+        />
+      )}
+    </div>
+  )
+}
+
+/** A card's foot on a decided item: what became of it, nothing to click. */
+function DecidedFoot({ done, text }: { done: boolean; text: string }) {
+  return (
+    <div className={styles.chatCardFoot}>
+      <span
+        className={`${styles.chatTool} ${done ? '' : styles.chatNotApplied}`}
+      >
+        {text}
+      </span>
     </div>
   )
 }
