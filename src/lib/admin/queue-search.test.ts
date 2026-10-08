@@ -58,6 +58,7 @@ function item(over: Partial<QueueItem>): QueueItem {
     decidedAt: null,
     appliedAt: null,
     error: null,
+    reviewAgainOn: null,
     ...over,
   }
 }

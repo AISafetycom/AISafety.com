@@ -13,6 +13,7 @@ import type {
   RejectReply,
 } from '@/lib/admin/queue'
 import { missingFields } from '@/lib/admin/queue-needed'
+import { laterSince, laterUntil } from '@/lib/admin/queue-later'
 import { rejectReplyFor, shownDeclineChip } from '@/lib/admin/queue-decline'
 import {
   itemParts,
@@ -404,9 +405,39 @@ function isoDate(ms: number): string {
 
 /** Decided at or after the given moment. A row with no decision time
  *  (there should be none) is shown rather than lost. */
+/** When an item shown as decided comes back, if it was set aside with
+ *  "Review again in a week" rather than decided. Only for items isOpen()
+ *  calls decided: an open status there means set aside. */
+function setAsideUntil(item: QueueItem): string | null {
+  return item.status === 'Pending' || item.status === 'Failed'
+    ? item.reviewAgainOn
+    : null
+}
+
+/** When it was decided, or set aside (a week before it comes back). */
+function decidedAtOf(item: QueueItem): string | null {
+  const later = setAsideUntil(item)
+  return later ? laterSince(later) : item.decidedAt
+}
+
+/** The mark beside a decision: a clock for an item set aside. */
+function doneIcon(item: QueueItem): string {
+  if (setAsideUntil(item)) return ICON.clock
+  return item.status === 'Rejected' ? ICON.x : ICON.check
+}
+
 function decidedSince(item: QueueItem, since: number): boolean {
-  const t = item.decidedAt ? Date.parse(item.decidedAt) : NaN
+  const at = decidedAtOf(item)
+  const t = at ? Date.parse(at) : NaN
   return !Number.isFinite(t) || t >= since
+}
+
+/** "15 October", in the viewer's own time zone. */
+function dayMonth(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+  })
 }
 
 function show(v: unknown): string {
@@ -743,11 +774,14 @@ function sameEdits(
   return ka.length === Object.keys(b).length && ka.every(k => a[k] === b[k])
 }
 
+/** Waiting for a decision. An item set aside with "Review again in a
+ *  week" counts as decided until its date. */
 function isOpen(item: QueueItem): boolean {
   return (
-    item.status === 'Pending' ||
-    item.status === 'Revising' ||
-    item.status === 'Failed'
+    (item.status === 'Pending' ||
+      item.status === 'Revising' ||
+      item.status === 'Failed') &&
+    !laterUntil(item, Date.now())
   )
 }
 
@@ -979,6 +1013,8 @@ function replyLabel(item: QueueItem): string {
 }
 
 function doneLabel(item: QueueItem): string {
+  const later = setAsideUntil(item)
+  if (later) return `Back on ${dayMonth(later)}`
   if (item.status === 'Rejected') return 'Rejected'
   if (item.status === 'Accepted') return 'Accepted'
   if (item.type === 'Add') return 'Published'
@@ -1008,8 +1044,18 @@ function decidedOf(item: QueueItem): Decided | null {
 }
 
 /** The toast and the row while a decision is on its way to Airtable. */
+/** What happens when an item set aside comes back: Fable reviews an
+ *  addition's listing again first (the Mac worker's `later` duty); anything
+ *  else is simply back in the list. */
+function laterNote(item: QueueItem): string {
+  return item.type === 'Add' && item.targetRecord
+    ? 'Fable reviews it again first'
+    : 'Back in the list then'
+}
+
 function workingLabel(item: QueueItem, action: Decision): string {
   if (action === 'reject') return 'Rejecting…'
+  if (action === 'later') return 'Setting it aside…'
   const label = acceptLabel(item)
   if (label === 'Publish') return 'Publishing…'
   if (label === 'Accept flag') return 'Accepting…'
@@ -1055,6 +1101,8 @@ interface Toast {
   item: QueueItem
   /** A rejection: the mark is a cross in the danger colour. */
   no: boolean
+  /** Set aside to review again: the mark is a clock. */
+  later?: boolean
   /** working: the decision is still on its way to Airtable (the toast
    *  stays up, U queues an undo). done: it landed. failed: the item is
    *  still in the list, with Retry. */
@@ -1175,7 +1223,7 @@ async function fetchChatRows(agent: AgentInfo): Promise<ChatRows | null> {
 const WORKER_NOTE = 'the Mac saves the reply draft within five minutes'
 const OFFLINE_SUB = `Mac agent not reachable · ${WORKER_NOTE}`
 
-type Decision = 'accept' | 'reject'
+type Decision = 'accept' | 'reject' | 'later'
 type Action = Decision | 'undo'
 
 export default function QueueAdmin({
@@ -1782,7 +1830,9 @@ export default function QueueAdmin({
     groups.broom.sort(byVerdict)
     groups.rules.sort(oldest)
     groups.comb.sort(byVerdict)
-    done.sort((a, b) => ((a.decidedAt ?? '') < (b.decidedAt ?? '') ? 1 : -1))
+    done.sort((a, b) =>
+      (decidedAtOf(a) ?? '') < (decidedAtOf(b) ?? '') ? 1 : -1
+    )
     const doneHits = search ? done.filter(i => hits.has(i.id)) : done
     // Sub-heads only where a section spans more than one page; a section on
     // a single page lists its items as they are.
@@ -2282,7 +2332,8 @@ export default function QueueAdmin({
       const reply = drafts[item.id]?.reply ?? null
       const replyDraft =
         action === 'accept' && reply !== null ? { replyDraft: reply } : {}
-      const decision = action === 'accept' || action === 'reject'
+      const decision =
+        action === 'accept' || action === 'reject' || action === 'later'
       if (decision) {
         // The page moves on now; the write lands behind it. The previous
         // decision stops being U's target (the Done list still has it).
@@ -2294,6 +2345,7 @@ export default function QueueAdmin({
         setToast({
           item,
           no: action === 'reject',
+          later: action === 'later',
           state: 'working',
           text: workingLabel(item, action),
         })
@@ -2386,25 +2438,29 @@ export default function QueueAdmin({
               ? {
                   item: updated,
                   no: action === 'reject',
+                  later: action === 'later',
                   state: 'done',
                   text,
-                  sub: draftPending
-                    ? agent
-                      ? 'Saving the reply draft in Gmail…'
-                      : `Reply draft: ${WORKER_NOTE}`
-                    : rejectReplyPending
-                      ? agent
-                        ? updated.source === 'Discord'
-                          ? updated.rejectReply?.text
-                            ? 'Getting the reply ready to copy…'
-                            : 'Fable is writing the reply…'
-                          : updated.rejectReply?.text
-                            ? 'Saving the reply draft in Gmail…'
-                            : 'Fable is writing the reply for Gmail…'
-                        : 'Reply: the Mac saves it within five minutes'
-                      : updated.source === 'Discord' && updated.replyDraft
-                        ? 'Reply drafted · copy it and send it yourself on Discord'
-                        : undefined,
+                  sub:
+                    action === 'later'
+                      ? laterNote(updated)
+                      : draftPending
+                        ? agent
+                          ? 'Saving the reply draft in Gmail…'
+                          : `Reply draft: ${WORKER_NOTE}`
+                        : rejectReplyPending
+                          ? agent
+                            ? updated.source === 'Discord'
+                              ? updated.rejectReply?.text
+                                ? 'Getting the reply ready to copy…'
+                                : 'Fable is writing the reply…'
+                              : updated.rejectReply?.text
+                                ? 'Saving the reply draft in Gmail…'
+                                : 'Fable is writing the reply for Gmail…'
+                            : 'Reply: the Mac saves it within five minutes'
+                          : updated.source === 'Discord' && updated.replyDraft
+                            ? 'Reply drafted · copy it and send it yourself on Discord'
+                            : undefined,
                 }
               : prev
           )
@@ -2439,7 +2495,7 @@ export default function QueueAdmin({
             item,
             no: action === 'reject',
             state: 'failed',
-            text: `${action === 'reject' ? 'Reject' : acceptLabel(item)} failed · ${message}`,
+            text: `${action === 'reject' ? 'Reject' : action === 'later' ? 'Review again in a week' : acceptLabel(item)} failed · ${message}`,
             sub: 'Still in the list',
             retry: { action, extra },
           })
@@ -2633,6 +2689,19 @@ export default function QueueAdmin({
                 typed: d.other,
               }),
             })
+          }
+          break
+        case 'w':
+          if (
+            canEdit &&
+            item &&
+            isOpen(item) &&
+            item.status !== 'Revising' &&
+            d.mode === 'idle' &&
+            !d.busy
+          ) {
+            e.preventDefault()
+            void act(item, 'later')
           }
           break
         case 'r':
@@ -3232,7 +3301,10 @@ export default function QueueAdmin({
             {toast.state === 'failed' ? (
               '!'
             ) : toast.state === 'done' ? (
-              <Icon src={toast.no ? ICON.x : ICON.check} size={16} />
+              <Icon
+                src={toast.later ? ICON.clock : toast.no ? ICON.x : ICON.check}
+                size={16}
+              />
             ) : null}
           </span>
           <SafeImg
@@ -3346,6 +3418,13 @@ export default function QueueAdmin({
                 reject, then <kbd>1</kbd>–<kbd>3</kbd> picks a reason and
                 rejects at once; or type one (or none) and press{' '}
                 <kbd>Enter</kbd>
+              </dd>
+              <dt>
+                <kbd>W</kbd>
+              </dt>
+              <dd>
+                review again in a week: out of the list until then, and Fable
+                reviews an addition again before it comes back
               </dd>
               <dt>
                 <kbd>F</kbd>
@@ -3501,13 +3580,10 @@ function Row({
               <span
                 className={`${styles.withIcon} ${item.status === 'Rejected' ? styles.no : styles.yes}`}
               >
-                <Icon
-                  src={item.status === 'Rejected' ? ICON.x : ICON.check}
-                  size={12}
-                />
+                <Icon src={doneIcon(item)} size={12} />
                 {doneLabel(item)}
               </span>
-              <span>{ago(item.decidedAt)}</span>
+              <span>{ago(decidedAtOf(item))}</span>
             </>
           ) : (
             item.verdict && (
@@ -3628,6 +3704,8 @@ function Detail({
   // Nothing on the item can be touched while Claude is revising it, and a
   // view-only session can never touch it.
   const revising = item.status === 'Revising' || readOnly
+  // Set aside with "Review again in a week": when it comes back.
+  const later = setAsideUntil(item)
   const nothingToApply = item.type === 'Change' && item.changes.length === 0
   const reason = d.chip ?? d.other.trim()
   // The reasons open in the bar at the bottom, which then grows over the
@@ -4471,19 +4549,17 @@ function Detail({
             <span
               className={`${styles.withIcon} ${item.status === 'Rejected' ? styles.no : styles.yes}`}
             >
-              <Icon
-                src={item.status === 'Rejected' ? ICON.x : ICON.check}
-                size={12}
-              />
+              <Icon src={doneIcon(item)} size={12} />
               {doneLabel(item)}
             </span>
+            {later && <span className={styles.note}>{laterNote(item)}</span>}
             {item.rejectReason && (
               <span className={styles.note}>{item.rejectReason}</span>
             )}
             {replyLabel(item) && (
               <span className={styles.note}>{replyLabel(item)}</span>
             )}
-            <span className={styles.note}>{ago(item.decidedAt)}</span>
+            <span className={styles.note}>{ago(decidedAtOf(item))}</span>
             {onUndo && (
               <button
                 className={styles.ghost}
@@ -4598,6 +4674,15 @@ function Detail({
             >
               <Icon src={ICON.x} size={12} />
               Reject <kbd>R</kbd>
+            </button>
+            <button
+              className={styles.ghost}
+              disabled={d.busy}
+              title="Out of the list for a week, then back for another look"
+              onClick={() => act('later')}
+            >
+              <Icon src={ICON.clock} size={12} />
+              Review again in a week <kbd>W</kbd>
             </button>
             {editCount > 0 && (
               <span className={styles.note}>
@@ -6000,15 +6085,12 @@ function DoneList({
                 <span
                   className={`${styles.withIcon} ${item.status === 'Rejected' ? styles.no : styles.yes}`}
                 >
-                  <Icon
-                    src={item.status === 'Rejected' ? ICON.x : ICON.check}
-                    size={12}
-                  />
+                  <Icon src={doneIcon(item)} size={12} />
                   {doneLabel(item)}
                 </span>
                 {item.rejectReason && <span>{item.rejectReason}</span>}
                 {replyLabel(item) && <span>{replyLabel(item)}</span>}
-                <span>{ago(item.decidedAt)}</span>
+                <span>{ago(decidedAtOf(item))}</span>
               </span>
             </span>
             {/* The buttons act on their own, without opening the item. */}
