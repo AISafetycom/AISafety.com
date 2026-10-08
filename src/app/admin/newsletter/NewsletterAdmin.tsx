@@ -1356,9 +1356,6 @@ function ReorderPanel({
   /** The save in flight (text saves itself — Bryce, 25 Sept 2026 — so a
    *  second one waits for it rather than racing it). */
   const inFlight = useRef<Promise<boolean> | null>(null)
-  const editable = groups.some(g =>
-    g.cards.some(c => c.fields.length > 0 || c.fit !== null)
-  )
 
   // Chrome doesn't always fire dragend on a row React moved in the DOM while
   // it was being dragged, which left that row dimmed after the drop (Bryce,
@@ -1684,11 +1681,6 @@ function ReorderPanel({
 
   return (
     <div className={styles.reorder}>
-      <p className={adminStyles.sectionHint}>
-        Drag a listing to move it. Cards stay within their section.
-        {editable && ' Edit changes any text on a card.'} Everything saves into
-        the draft by itself and the preview updates; nothing is sent.
-      </p>
       {groups.map(g => (
         <div key={g.id} className={styles.reorderGroup}>
           {groups.length > 1 && (
