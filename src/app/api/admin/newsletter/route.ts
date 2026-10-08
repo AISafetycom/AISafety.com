@@ -76,13 +76,13 @@ import {
   DraftProblemError,
   isNewsletterConfigured,
   isRealList,
+  isWaveRange,
   listDrafts,
   listRecent,
   MaybeScheduledError,
   NeedsConfirmationError,
   NeedsOverrideError,
   notifyApproval,
-  SEGMENT_ID_RE,
   SendDeletedError,
   type WaveRange,
 } from '@/lib/admin/newsletter'
@@ -314,20 +314,12 @@ export async function POST(req: NextRequest) {
  *  whole list). approveAndSend checks the range against the list's waves. */
 function parseWaves(waves: unknown): WaveRange | null | undefined {
   if (waves === undefined || waves === null) return null
+  if (typeof waves !== 'object') return undefined
   const w = waves as { from?: unknown; n?: unknown; segments?: unknown }
-  if (
-    typeof w !== 'object' ||
-    !Number.isInteger(w.from) ||
-    !Number.isInteger(w.n) ||
-    !Array.isArray(w.segments) ||
-    w.segments.length < 1 ||
-    w.segments.length > 9 ||
-    !w.segments.every(s => typeof s === 'string' && SEGMENT_ID_RE.test(s))
-  )
-    return undefined
-  return {
-    from: w.from as number,
-    waves: w.n as number,
-    segmentIds: w.segments as string[],
-  }
+  const range = {
+    from: w.from,
+    waves: w.n,
+    segmentIds: w.segments,
+  } as WaveRange
+  return isWaveRange(range) ? range : undefined
 }

@@ -3785,7 +3785,10 @@ export interface ApproveOptions {
   override?: string | null
 }
 
-function isWaveRange(r: WaveRange): boolean {
+/** A well-formed range: whole waves from..waves, one segment per wave. The
+ *  route checks a request with it before anything is read; approveAndSend
+ *  checks again. */
+export function isWaveRange(r: WaveRange): boolean {
   return (
     Number.isInteger(r.from) &&
     Number.isInteger(r.waves) &&
