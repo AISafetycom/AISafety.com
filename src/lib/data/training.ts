@@ -24,7 +24,7 @@ const TRAINING_FIELD = {
   name: 'fldNq08J2QqQ8SreD',
   logo: 'fldlVUH5xZ7sNGv0j',
   description: 'fldIRngvk0vjSwjh8',
-  cardBlurb: 'fldeFSq8sk9zwJIGh',
+  homepageBlurb: 'fldeFSq8sk9zwJIGh',
   url: 'fld1dv9ed8uwiaHh4',
   type: 'fldYhxEyLrNOBWIpY',
   mode: 'fldh2n93X7R478mDW',
@@ -109,11 +109,12 @@ export interface TrainingProgram extends ProgramBase {
   /** Announced but not yet accepting applications (outranks the deadline). */
   notYetOpen: boolean
   /**
-   * Short version of the description for the homepage training card,
-   * written by the featured-queue job. Absent from the public Data API, so
-   * contributor mode falls back to trimming the description.
+   * Short version of the description for the homepage training card (the
+   * "Homepage blurb (auto)" field), written by the featured-queue job.
+   * Absent from the public Data API, so contributor mode falls back to
+   * trimming the description.
    */
-  cardBlurb?: string | null
+  homepageBlurb?: string | null
 }
 
 export interface RecurringProgram extends ProgramBase {
@@ -349,7 +350,8 @@ export function trainingProgramFromRecord(
     applicationStatus,
     applicationsClose: closesOn,
     notYetOpen,
-    cardBlurb: optionalString(f[TRAINING_FIELD.cardBlurb])?.trim() || null,
+    homepageBlurb:
+      optionalString(f[TRAINING_FIELD.homepageBlurb])?.trim() || null,
     lengthBucket: lengthBucketFor(startDate, endDate),
   }
 }

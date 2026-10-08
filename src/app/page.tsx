@@ -79,15 +79,15 @@ function programDateLine(program: TrainingProgram): string {
 }
 
 // The featured box fits three lines, like the events card's blurb, while
-// Airtable descriptions run longer. The Training table's Card blurb holds a
-// short version written for this box (~/featured-queue/blurbs.py has Opus
-// write one for every live program); this trim is the fallback while it's
-// empty. Show whole sentences up to that budget — never a cut-off sentence
+// Airtable descriptions run longer. The Training table's "Homepage blurb
+// (auto)" field holds a short version written for this box
+// (~/featured-queue/blurbs.py has Opus write one for every live program);
+// this trim is the fallback while it's empty. Show whole sentences up to that budget — never a cut-off sentence
 // or an ellipsis. When even the first sentence is too long, end it at its
 // last clause break instead ("…risks from advanced AI, for professionals…"
 // → "…risks from advanced AI."), which can leave a list cut short.
-function cardBlurb(program: TrainingProgram): string {
-  return program.cardBlurb || leadSentences(program.description)
+function homepageBlurb(program: TrainingProgram): string {
+  return program.homepageBlurb || leadSentences(program.description)
 }
 
 function leadSentences(text: string, max = 125): string {
@@ -282,7 +282,7 @@ export default async function Home() {
               </div>
             </div>
             <p className={`${styles['max-3-lines']} margin-bottom-40px`}>
-              {cardBlurb(featuredProgram)}
+              {homepageBlurb(featuredProgram)}
             </p>
             {featuredProgram.url !== '#' && (
               <TrackedLink

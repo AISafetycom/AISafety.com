@@ -59,7 +59,7 @@
     50% 50%;
 }
 
-/* Guard for the featured blurb: the copy is already a short Card blurb or
+/* Guard for the featured blurb: the copy is already a short Homepage blurb or
    trimmed to whole sentences in page.tsx, so this only catches text too long
    for three lines, keeping the "Learn more" button inside the card. Lifted on
    stacked (mobile) layouts below. */
