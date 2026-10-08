@@ -11,17 +11,18 @@
 
 /* Hovering the card link (anywhere outside the pill) brightens the border,
    matching the pill's own focus treatment. */
-.card:has(.heading:hover) {
+.card:has(.headingLink:hover) {
   border-color: color-mix(in srgb, var(--bright-teal-500) 60%, transparent);
 }
 
-.heading {
+.heading,
+.status {
   text-align: center;
 }
 
-/* Stretch the heading link's click area over the whole card, so the space
-   around the email pill opens the newsletter too. */
-.heading::after {
+/* Substack mode: stretch the heading link's click area over the whole card,
+   so the space around the email pill opens the newsletter too. */
+.headingLink::after {
   content: '';
   position: absolute;
   inset: 0;
@@ -83,4 +84,16 @@
   border-radius: 999px;
   background-color: transparent;
   cursor: pointer;
+}
+
+/* While a signup is on its way (dimmed with .opacity-50). */
+.submit:disabled {
+  cursor: progress;
+}
+
+/* Honeypot field: moved off-screen rather than display:none so naive bots
+   still "see" and fill it. */
+.trap {
+  position: absolute;
+  left: -9999px;
 }
