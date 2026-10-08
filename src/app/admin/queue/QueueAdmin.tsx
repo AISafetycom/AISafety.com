@@ -281,8 +281,6 @@ function linkIcon(url: string): string {
   return ICON.external
 }
 
-type Theme = 'light' | 'dark'
-const THEME_KEY = 'aisafety-admin-queue:theme'
 const COLLAPSED_KEY = 'aisafety-admin-queue:collapsed'
 const FOLDED_PAGES_KEY = 'aisafety-admin-queue:folded-pages'
 const KIND_KEY = 'aisafety-admin-queue:kind'
@@ -1279,7 +1277,6 @@ export default function QueueAdmin({
     return () => clearTimeout(t)
   }, [dayStart])
   const [showHelp, setShowHelp] = useState(false)
-  const [theme, setTheme] = useState<Theme>('light')
   const [kind, setKind] = useState<Kind>('additions')
   const [collapsed, setCollapsed] = useState<Record<Section, boolean>>({
     fable: false,
@@ -1329,8 +1326,6 @@ export default function QueueAdmin({
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem(THEME_KEY)
-      if (saved === 'dark' || saved === 'light') setTheme(saved)
       const folded = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '{}')
       if (folded && typeof folded === 'object') {
         setCollapsed(prev => {
@@ -1394,16 +1389,6 @@ export default function QueueAdmin({
     if (selected && kindOf(selected) !== next) setSelectedId(null)
     try {
       localStorage.setItem(KIND_KEY, next)
-    } catch {
-      // ignore
-    }
-  }
-
-  const toggleTheme = () => {
-    const next: Theme = theme === 'light' ? 'dark' : 'light'
-    setTheme(next)
-    try {
-      localStorage.setItem(THEME_KEY, next)
     } catch {
       // ignore
     }
@@ -2797,10 +2782,7 @@ export default function QueueAdmin({
   const toastRetry = toast?.retry ?? null
 
   return (
-    <div
-      ref={rootRef}
-      className={`${styles.queue} ${theme === 'dark' ? styles.dark : ''}`}
-    >
+    <div ref={rootRef} className={styles.queue}>
       <div className={styles.top}>
         <div className={styles.topLeft}>
           <h1 className={styles.h1}>Queue</h1>
@@ -2895,9 +2877,6 @@ export default function QueueAdmin({
             title="Keyboard shortcuts (?)"
           >
             <Icon src={ICON.question} />
-          </button>
-          <button className={styles.ghost} onClick={toggleTheme}>
-            {theme === 'light' ? 'Dark' : 'Light'}
           </button>
         </div>
         {total > 0 && (
