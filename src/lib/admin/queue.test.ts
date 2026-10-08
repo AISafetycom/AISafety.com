@@ -31,6 +31,7 @@ import {
   handledOutside,
   mergeEdits,
   queueTargets,
+  noReplyOf,
   rejectReplyOf,
   undoItem,
   type QueueItem,
@@ -76,6 +77,7 @@ function item(over: Partial<QueueItem>): QueueItem {
     replyStatus: null,
     saidBy: null,
     replyTo: null,
+    noReply: null,
     rejectReply: null,
     rejectDrafts: {},
     rejectReason: null,
@@ -766,5 +768,24 @@ describe('rejectReplyOf', () => {
         decided
       )
     ).toBeNull()
+  })
+})
+
+describe('noReplyOf', () => {
+  it('reads why a Form row has no reply draft', () => {
+    expect(noReplyOf({ kind: 'add', no_reply: 'no email' })).toBe('no email')
+    expect(noReplyOf({ no_reply: 'no notification' })).toBe('no notification')
+  })
+  it('gives way to a reply block, and is null when no reason is given', () => {
+    expect(
+      noReplyOf({ no_reply: 'no email', reply: { to: 'a@example.com' } })
+    ).toBeNull()
+    expect(noReplyOf({ kind: 'add' })).toBeNull()
+  })
+  it('warns about a reason it does not know', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(noReplyOf({ no_reply: 'mailbox full' })).toBeNull()
+    expect(warn).toHaveBeenCalledOnce()
+    warn.mockRestore()
   })
 })
