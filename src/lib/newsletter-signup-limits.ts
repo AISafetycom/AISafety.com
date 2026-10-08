@@ -12,7 +12,7 @@
     uses up a real reader's tries; past that the route answers as usual
     without sending again;
   - per UTC day, across both newsletters: the owner gets one email once 100
-    signups have gone through, and above 500 the boxes turn signups away
+    signups have gone through, and above 1,000 the boxes turn signups away
     until midnight UTC (a flood of unconfirmed contacts would otherwise eat
     into the account's contact limit).
 
@@ -36,7 +36,7 @@ import type { SignupNewsletter } from '@/lib/newsletter-signup'
 export const IP_SIGNUPS_PER_HOUR = 30
 export const ADDRESS_SENDS_PER_DAY = 3
 export const DAILY_ALERT_AFTER = 100
-export const DAILY_CAP = 500
+export const DAILY_CAP = 1000
 
 /** How long an Upstash call may take before the limit is skipped. */
 const STORE_TIMEOUT_MS = 1500
