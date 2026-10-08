@@ -163,6 +163,15 @@ async function judged(
 beforeEach(() => {
   process.env.ACTIVECAMPAIGN_URL = 'https://alignment23684.api-us1.com'
   process.env.ACTIVECAMPAIGN_KEY = KEY
+  // No Upstash, as on a laptop: Vercel's build has it set, and the cancel's
+  // approval lock (newsletter.ts) would then call the stubbed fetch too.
+  for (const name of [
+    'KV_REST_API_URL',
+    'KV_REST_API_TOKEN',
+    'UPSTASH_REDIS_REST_URL',
+    'UPSTASH_REDIS_REST_TOKEN',
+  ])
+    vi.stubEnv(name, '')
   ac = {
     campaigns: [],
     lists: {},
@@ -273,6 +282,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
   delete process.env.VERCEL_ENV
 })
 
