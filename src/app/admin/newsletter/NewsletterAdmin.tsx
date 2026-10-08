@@ -191,6 +191,19 @@ interface Recent {
   actions: StopAction[]
 }
 
+/** One newsletter's listings that its next issue would pick up as new
+ *  (src/lib/admin/newsletter-lineup.ts). */
+type LineupSection =
+  | {
+      items: Array<{ id: string; name: string }>
+      /** "8 September 2026" (Events, Training) or "Issue #22, 2026"
+       *  (Funding): what "new" is measured from. */
+      since: string
+      /** Funding only: closing in the next two weeks (not new). */
+      closing?: Array<{ id: string; name: string }>
+    }
+  | { error: string }
+
 interface Payload {
   fetchedAt: string
   /** This session may approve. Preview-only reviewers get false and no
@@ -198,7 +211,18 @@ interface Payload {
   canSend: boolean
   drafts: Draft[]
   recent: Recent[]
+  lineup: Record<'events' | 'training' | 'funding', LineupSection>
 }
+
+const LINEUP: Array<{
+  key: keyof Payload['lineup']
+  label: string
+  since: string
+}> = [
+  { key: 'events', label: 'Events', since: 'added since' },
+  { key: 'training', label: 'Training', since: 'added since' },
+  { key: 'funding', label: 'Funding', since: 'new since' },
+]
 
 /** How often the page rereads ActiveCampaign on its own, so an approved
  *  issue turns from "scheduled" into "sent" (and the opens move) without a
@@ -797,6 +821,33 @@ export default function NewsletterAdmin({
           Could not read ActiveCampaign: {loadError}
         </p>
       )}
+
+      <div className={adminStyles.editorBlock}>
+        <div className={adminStyles.editorBlockHeader}>
+          <h2 className={adminStyles.editorBlockTitle}>Lined up</h2>
+        </div>
+        <p className={adminStyles.sectionHint}>
+          What Pen would pick up if it drafted each newsletter now. Listings
+          already in a draft waiting below aren’t counted.
+        </p>
+        <div className={styles.lineup}>
+          {LINEUP.map(({ key, label, since }) => {
+            const section = data?.lineup[key]
+            return (
+              <div key={key} className={styles.lineupTile}>
+                <span className={styles.lineupLabel}>{label}</span>
+                {!section ? (
+                  <span className={styles.lineupCount}>—</span>
+                ) : 'error' in section ? (
+                  <span className={styles.noticeError}>{section.error}</span>
+                ) : (
+                  <LineupCounts section={section} since={since} />
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
 
       <div className={adminStyles.editorBlock}>
         <div className={adminStyles.editorBlockHeader}>
@@ -2196,6 +2247,58 @@ const STOP_LABELS: Record<StopAction, string> = {
   pause: 'Pause',
   stop: 'Stop',
   resume: 'Resume',
+}
+
+/** One newsletter's numbers in the Lined up block, and the listings behind
+ *  them. Funding has a second number: closing in the next two weeks. */
+function LineupCounts({
+  section,
+  since,
+}: {
+  section: Extract<LineupSection, { items: unknown }>
+  since: string
+}) {
+  const groups = [
+    { title: section.closing ? 'New' : null, items: section.items },
+    ...(section.closing
+      ? [{ title: 'Closing in the next two weeks', items: section.closing }]
+      : []),
+  ].filter(g => g.items.length > 0)
+  return (
+    <>
+      <div className={styles.lineupCounts}>
+        <div className={styles.lineupStat}>
+          <span className={styles.lineupCount}>{section.items.length}</span>
+          <span className={styles.lineupSince}>
+            {since} {section.since}
+          </span>
+        </div>
+        {section.closing && (
+          <div className={styles.lineupStat}>
+            <span className={styles.lineupCount}>{section.closing.length}</span>
+            <span className={styles.lineupSince}>
+              closing in the next two weeks
+            </span>
+          </div>
+        )}
+      </div>
+      {groups.length > 0 && (
+        <details className={styles.lineupList}>
+          <summary>Show listings</summary>
+          {groups.map(g => (
+            <div key={g.title ?? 'items'}>
+              {g.title && <p className={styles.lineupGroup}>{g.title}</p>}
+              <ul>
+                {g.items.map(item => (
+                  <li key={item.id}>{item.name}</li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </details>
+      )}
+    </>
+  )
 }
 
 /** One issue's rows in Recent sends. A single whole-list send is one row; an

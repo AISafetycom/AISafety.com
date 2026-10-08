@@ -243,6 +243,82 @@
   font-weight: 600;
 }
 
+/* ─── Lined up ────────────────────────────────────────────────────────── */
+
+.lineup {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (max-width: 640px) {
+  .lineup {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.lineupTile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--teal-800);
+  border-radius: 8px;
+  background: var(--teal-900);
+}
+
+.lineupLabel {
+  font-size: 12px;
+  color: var(--teal-300);
+}
+
+.lineupCounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 28px;
+}
+
+.lineupStat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lineupCount {
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--white);
+}
+
+.lineupSince {
+  font-size: 12px;
+  color: var(--teal-300);
+}
+
+.lineupList {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--white);
+}
+
+.lineupList summary {
+  cursor: pointer;
+  color: var(--bright-teal-300);
+}
+
+.lineupGroup {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--teal-300);
+}
+
+.lineupList ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  line-height: 1.5;
+}
+
 /* ─── Reorder panel ───────────────────────────────────────────────────── */
 
 .reorder {
