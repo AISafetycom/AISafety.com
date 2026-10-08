@@ -179,8 +179,13 @@ const APPROVE_LOCK_SECONDS = 15 * 60
  *  landed); reads give up after READ_TIMEOUT_MS per attempt. */
 const WRITE_TIMEOUT_MS = 25_000
 const READ_TIMEOUT_MS = 20_000
-/** Gmail clips an email at about 102 KB; stay well under it. */
-const MAX_HTML_BYTES = 90 * 1024
+/** Gmail clips an email at about 102 KB; stay under it. 96 KiB since 8 October
+ *  2026: ActiveCampaign's link tracking is off (28 September), so at send time
+ *  it adds only the open pixel and the filled-in merge tags (under 1 KB), not
+ *  the ~12% the old 90 KiB allowed for. The pipeline now declares the font once
+ *  per email (render.hoist_type), so 15 Events cards fit (~96 KB). Keep
+ *  SITE_MAX_HTML_BYTES in ~/Newsletter/issue.py in step. */
+const MAX_HTML_BYTES = 96 * 1024
 /** How many campaigns one read covers (AC's page maximum). */
 const CAMPAIGN_READ_WINDOW = 100
 

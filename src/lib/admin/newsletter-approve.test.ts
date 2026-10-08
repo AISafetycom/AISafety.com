@@ -854,12 +854,20 @@ describe('contentChecks', () => {
     ])
   })
 
-  it('blocks HTML over 90 KB', async () => {
+  it('blocks HTML over 96 KB', async () => {
     const { contentChecks } = await nl()
-    const big = buildEmail({ body: `<p>${'x'.repeat(95 * 1024)}</p>` })
+    const big = buildEmail({ body: `<p>${'x'.repeat(100 * 1024)}</p>` })
     expect(contentChecks(input({ html: big.html })).blocks[0]).toMatch(
-      /the email is 9\d KB, over the 90 KB limit/
+      /the email is 10\d KB, over the 96 KB limit/
     )
+  })
+
+  it('lets a 95 KB email through (15 Events cards, 8 October 2026)', async () => {
+    const { contentChecks } = await nl()
+    const e = buildEmail({ body: `<p>${'x'.repeat(93 * 1024)}</p>` })
+    expect(
+      contentChecks(input({ html: e.html })).blocks.filter(b => /KB/.test(b))
+    ).toEqual([])
   })
 
   it('asks about leftover words, braces and stray merge tags – once each', async () => {

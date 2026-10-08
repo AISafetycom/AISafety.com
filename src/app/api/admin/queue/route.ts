@@ -14,8 +14,9 @@
   GET  /api/admin/queue?order=<tbl>            → { order } – the page's published
        listings by Sort, for placing an addition (null for a table with no Sort)
   POST /api/admin/queue  body { id, action, edits?, reason?, replyDraft? } → { item }
-       action: accept | reject | edit | undo
-       (edit keeps the page's pending edits, and the reply draft as
+       action: accept | reject | edit | later | undo
+       (later sets the item aside for a week, Fable reviews it again then;
+       undo also brings back an item set aside; edit keeps the page's pending edits, and the reply draft as
        edited, on the row – nothing more)
 
   `agent` is { port, token } for the local agent on the owner's Mac (null
@@ -38,6 +39,7 @@ import {
   getQueueItem,
   getTableSchema,
   getTargetFields,
+  laterItem,
   listQueue,
   QueueError,
   rejectItem,
@@ -112,7 +114,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-const ACTIONS = new Set(['accept', 'reject', 'edit', 'undo'])
+const ACTIONS = new Set(['accept', 'reject', 'edit', 'later', 'undo'])
 
 export async function POST(req: NextRequest) {
   const auth = await ensureAuth(true)
@@ -159,6 +161,8 @@ export async function POST(req: NextRequest) {
           : undefined
       )
       return json({ item: await getQueueItem(id) })
+    } else if (action === 'later') {
+      await laterItem(item)
     } else {
       await undoItem(item)
     }

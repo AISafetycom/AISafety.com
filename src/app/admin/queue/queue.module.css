@@ -1,43 +1,11 @@
 /* The Queue's own look. Bryce works in this page for long stretches, so it
    is built for triage rather than to match the admin's teal card stack
-   (his call, 9 Sept 2026): a light, calm surface by default with a dark
-   option, one item in focus, short labels, generous spacing. The palette is
-   scoped to .queue so nothing here leaks into the rest of the admin. */
+   (his call, 9 Sept 2026): a calm dark surface, one item in focus, short
+   labels, generous spacing. Dark only since 8 Oct 2026 (Bryce: "Let's get
+   rid of light mode"). The palette is scoped to .queue so nothing here leaks
+   into the rest of the admin. */
 
 .queue {
-  --q-bg: #f6f5f1;
-  --q-panel: #ffffff;
-  --q-panel-2: #faf9f6;
-  --q-border: #e7e4dc;
-  --q-border-strong: #d6d2c8;
-  --q-text: #1f2328;
-  --q-text-2: #4b5157;
-  --q-muted: #7a8188;
-  --q-accent: #0f766e;
-  --q-accent-text: #ffffff;
-  --q-accent-soft: #e4f3ef;
-  --q-danger: #b42318;
-  --q-danger-soft: #fdecea;
-  --q-warn: #9a5b00;
-  --q-warn-soft: #fff4e0;
-  --q-sel: #eaf4f1;
-  --q-shadow: 0 1px 2px rgba(20, 24, 28, 0.06);
-
-  margin: 0;
-  /* Height is set from JS to fill the viewport below the admin header. */
-  min-height: 320px;
-  overflow: hidden;
-  background: var(--q-bg);
-  color: var(--q-text);
-  font-family: var(--font-inter), Inter, system-ui, sans-serif;
-  font-size: 14px;
-  line-height: 1.5;
-  letter-spacing: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.dark {
   --q-bg: #15171b;
   --q-panel: #1d2025;
   --q-panel-2: #22262c;
@@ -55,6 +23,19 @@
   --q-warn-soft: #3a2d14;
   --q-sel: #1f2c2a;
   --q-shadow: none;
+
+  margin: 0;
+  /* Height is set from JS to fill the viewport below the admin header. */
+  min-height: 320px;
+  overflow: hidden;
+  background: var(--q-bg);
+  color: var(--q-text);
+  font-family: var(--font-inter), Inter, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .queue a {
@@ -1524,8 +1505,7 @@
 
 /* A training or event Type as the site's pill: the type's colour (the
    site's own variable, set per pill as --pill) as text, a 30% border and a
-   12% wash. The site's colours are made for its dark cards, so on the light
-   panel the text is darkened to read while the wash keeps the hue. */
+   12% wash, as on the site's own dark cards. */
 .typePills {
   display: inline-flex;
   flex-wrap: wrap;
@@ -1542,14 +1522,8 @@
   font-size: 12.5px;
   font-weight: 600;
   letter-spacing: -0.2px;
-  color: color-mix(in srgb, var(--pill) 45%, #1f2328);
-  border: 1px solid color-mix(in srgb, var(--pill) 60%, transparent);
-  background: color-mix(in srgb, var(--pill) 18%, transparent);
-}
-
-.dark .typePill {
   color: var(--pill);
-  border-color: color-mix(in srgb, var(--pill) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--pill) 30%, transparent);
   background: color-mix(in srgb, var(--pill) 12%, transparent);
 }
 
