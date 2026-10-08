@@ -86,9 +86,30 @@
   cursor: pointer;
 }
 
-/* While a signup is on its way (dimmed with .opacity-50). */
+/* While a signup is on its way: the arrow becomes a loading circle. */
 .submit:disabled {
   cursor: progress;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid color-mix(in srgb, var(--white) 30%, transparent);
+  border-top-color: var(--white);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2.4s;
+  }
 }
 
 /* Honeypot field: moved off-screen rather than display:none so naive bots

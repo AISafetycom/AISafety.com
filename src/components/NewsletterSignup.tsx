@@ -160,15 +160,21 @@ function ActiveCampaignSignup({
             />
             <button
               type="submit"
-              className={`${styles.submit}${sending ? ' opacity-50' : ''}`}
-              aria-label="Subscribe"
+              className={styles.submit}
+              aria-label={sending ? 'Subscribing' : 'Subscribe'}
               disabled={sending}
             >
-              <Icon
-                src="/images/icons/arrow-right.svg"
-                size={16}
-                className="color-white"
-              />
+              {/* A loading circle while the signup is on its way, so a
+                  press of Enter visibly did something (Bryce, 8 Oct 2026). */}
+              {sending ? (
+                <span className={styles.spinner} aria-hidden="true" />
+              ) : (
+                <Icon
+                  src="/images/icons/arrow-right.svg"
+                  size={16}
+                  className="color-white"
+                />
+              )}
             </button>
           </label>
         )}
