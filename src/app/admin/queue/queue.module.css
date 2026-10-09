@@ -846,6 +846,19 @@
   overflow-wrap: anywhere;
 }
 
+.findingLead a,
+.findingDetail a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--q-border-strong);
+  text-underline-offset: 2px;
+}
+
+.findingLead a:hover,
+.findingDetail a:hover {
+  text-decoration-color: currentColor;
+}
+
 /* The links sit at the right end of the pills row. */
 .links {
   display: flex;
