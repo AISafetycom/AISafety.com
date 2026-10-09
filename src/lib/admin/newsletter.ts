@@ -2469,6 +2469,9 @@ interface Manifest {
   groups: Array<{ id: string; label: string; cards: ManifestCard[] }>
   /** The plain-text email as segments; card segments carry `c` = `gN:KEY`. */
   text: Array<{ t: string; c?: string }>
+  /** Cards taken out on this page, oldest first; a rebuild leaves them out
+   *  too (render.py `merge_removals()`). */
+  removed?: Array<{ g: string; key: string; title: string }>
 }
 
 function readManifest(html: string): Manifest | null {
@@ -2596,6 +2599,57 @@ export function reorderHtml(
     blocks = cardBlocks(html)
   }
   return { html, text: rebuildText(manifest, order) }
+}
+
+/** A card the page can't take out; `detail` is written for the page (routes
+ *  send it, never a caught error's message). */
+export class RemoveCardError extends Error {
+  readonly detail: string
+  constructor(detail: string) {
+    super(detail)
+    this.detail = detail
+  }
+}
+
+/** Pure: the email without one card — its block, its plain-text segment and
+ *  its manifest entry — with the plain text rebuilt in the cards' current
+ *  order, and the card added to the manifest's `removed` list so a rebuild
+ *  leaves it out too. The last card of a section can't go: its heading (or
+ *  the whole email) would have nothing under it. Mirrors render.py
+ *  `remove_card()` byte for byte (fixture newsletter-card-remove.json). */
+export function removeCardHtml(
+  html: string,
+  gid: string,
+  key: string
+): { html: string; text: string } {
+  const manifest = readManifest(html)
+  if (!manifest) throw new RemoveCardError('no card manifest in this email')
+  const mine = cardBlocks(html).filter(b => b.gid === gid)
+  const block = mine.find(b => b.key === key)
+  if (!block) throw new RemoveCardError(`unknown card ${gid}:${key}`)
+  if (mine.length === 1)
+    throw new RemoveCardError(
+      'it’s the only card in its section, so it can’t be removed on its own'
+    )
+  let title = key
+  for (const g of manifest.groups) {
+    if (g.id !== gid) continue
+    const card = g.cards.find(c => c.key === key)
+    if (card) title = card.title || key
+    g.cards = g.cards.filter(c => c.key !== key)
+  }
+  manifest.text = manifest.text.filter(seg => seg.c !== `${gid}:${key}`)
+  manifest.removed = [...(manifest.removed ?? []), { g: gid, key, title }]
+  const encoded = Buffer.from(JSON.stringify(manifest), 'utf8').toString(
+    'base64'
+  )
+  const out = (html.slice(0, block.start) + html.slice(block.end)).replace(
+    MANIFEST_RE,
+    () => `<!--aisafety-cards:${encoded}-->`
+  )
+  const order: Record<string, string[]> = {}
+  for (const b of cardBlocks(out)) (order[b.gid] ??= []).push(b.key)
+  return { html: out, text: rebuildText(manifest, order) }
 }
 
 /** The plain-text email from the manifest's segments, with each listed
@@ -2969,6 +3023,24 @@ export async function reorderDraft(
     `reordered: ${Object.entries(order)
       .map(([g, k]) => `${g}=${k.join(',')}`)
       .join(' ')}`,
+    knownMessageId
+  )
+}
+
+/** Take one card out of a draft, the same way as a reorder: verify, rewrite
+ *  HTML + text, re-stamp, write back, re-check. Returns the cards left. The
+ *  listing's Newsletter tick is the route's job (newsletter-listing.ts), once
+ *  this has gone through. */
+export async function removeDraftCard(
+  draftId: string,
+  gid: string,
+  key: string,
+  knownMessageId?: string
+): Promise<{ cards: CardGroup[] }> {
+  return rewriteDraft(
+    draftId,
+    body => removeCardHtml(body, gid, key),
+    `card ${gid}:${key} removed`,
     knownMessageId
   )
 }

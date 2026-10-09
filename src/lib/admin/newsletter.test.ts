@@ -9,6 +9,8 @@ import {
   isLiveCampaign,
   liveCampaignsNamed,
   previewText,
+  RemoveCardError,
+  removeCardHtml,
   ReorderError,
   reorderHtml,
   sendTestCopy,
@@ -36,6 +38,7 @@ import {
 } from './newsletter'
 import { createHash } from 'node:crypto'
 import cardEdit from './__fixtures__/newsletter-card-edit.json'
+import cardRemove from './__fixtures__/newsletter-card-remove.json'
 import siteCardEdit from './__fixtures__/newsletter-site-card-edit.json'
 
 // Fixtures generated with the pipeline's own function
@@ -192,6 +195,66 @@ describe('reorderHtml', () => {
   })
   it('refuses an email without a manifest', () => {
     expect(() => reorderHtml('<p>x</p>', { g0: ['a'] })).toThrow(ReorderError)
+  })
+})
+
+describe('removeCardHtml (mirrors ~/Newsletter/render.py remove_card)', () => {
+  const html = issue([
+    { id: 'g0', label: 'Closing soon', keys: ['a', 'b', 'c'] },
+    { id: 'g1', label: 'New', keys: ['x', 'y'] },
+  ])
+  const removedList = (email: string) =>
+    JSON.parse(
+      Buffer.from(
+        /<!--aisafety-cards:([A-Za-z0-9+/=]+)-->/.exec(email)![1],
+        'base64'
+      ).toString('utf8')
+    ).removed
+  it('takes out the card, its text and its manifest entry', () => {
+    const out = removeCardHtml(html, 'g0', 'b')
+    expect(cardGroups(out.html)?.map(g => g.cards.map(c => c.key))).toEqual([
+      ['a', 'c'],
+      ['x', 'y'],
+    ])
+    expect(out.text).toBe(
+      'HEAD\n== Closing soon ==\n* a\n* c\n== New ==\n* x\n* y\nTAIL\n'
+    )
+    expect(out.html).not.toContain('<!--card:g0:b-->')
+    expect(
+      out.html.startsWith(
+        '<html><body><p>intro</p><h2>Closing soon</h2><!--card:g0:a-->'
+      )
+    ).toBe(true)
+  })
+  it('rebuilds the text in the current order after a reorder', () => {
+    const moved = reorderHtml(html, { g0: ['c', 'a', 'b'] })
+    expect(removeCardHtml(moved.html, 'g0', 'a').text).toBe(
+      'HEAD\n== Closing soon ==\n* c\n* b\n== New ==\n* x\n* y\nTAIL\n'
+    )
+  })
+  it('records every removal in the manifest, so a rebuild leaves them out', () => {
+    const once = removeCardHtml(html, 'g0', 'b')
+    const twice = removeCardHtml(once.html, 'g1', 'x')
+    expect(removedList(html)).toBeUndefined()
+    expect(removedList(twice.html)).toEqual([
+      { g: 'g0', key: 'b', title: 'Title b' },
+      { g: 'g1', key: 'x', title: 'Title x' },
+    ])
+  })
+  it('refuses the last card of a section, an unknown card and an email without a manifest', () => {
+    const one = removeCardHtml(html, 'g1', 'x')
+    expect(() => removeCardHtml(one.html, 'g1', 'y')).toThrow(RemoveCardError)
+    expect(() => removeCardHtml(html, 'g0', 'zz')).toThrow(RemoveCardError)
+    expect(() => removeCardHtml(html, 'g1', 'a')).toThrow(RemoveCardError)
+    expect(() => removeCardHtml('<p>x</p>', 'g0', 'a')).toThrow(RemoveCardError)
+  })
+  it('gives byte-identical output to the pipeline (render.py remove_card)', () => {
+    const moved = reorderHtml(cardEdit.input, cardRemove.order)
+    const out = removeCardHtml(moved.html, cardRemove.group, cardRemove.key)
+    expect(createHash('sha256').update(out.html, 'utf8').digest('hex')).toBe(
+      cardRemove.expectedHtmlSha256
+    )
+    expect(out.text).toBe(cardRemove.expectedText)
   })
 })
 

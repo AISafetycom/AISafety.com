@@ -13,6 +13,7 @@ import {
   type WaveSlot,
   wavesLabel,
 } from '@/lib/admin/newsletter-warmup'
+import Icon from '@/components/Icon'
 import adminStyles from '../admin.module.css'
 import styles from './newsletter.module.css'
 import NewsletterAlerts from './NewsletterAlerts'
@@ -1556,6 +1557,17 @@ function ReorderPanel({
   /** The save in flight (text saves itself — Bryce, 25 Sept 2026 — so a
    *  second one waits for it rather than racing it). */
   const inFlight = useRef<Promise<boolean> | null>(null)
+  /** The card waiting on the Remove dialog. */
+  const [removing, setRemoving] = useState<{
+    gid: string
+    card: CardInfo
+  } | null>(null)
+  /** A removal in flight, or how the last one went (said in the panel). */
+  const [removeNote, setRemoveNote] = useState<{
+    kind: 'busy' | 'ok' | 'error'
+    text: string
+  } | null>(null)
+  const removeBusy = removeNote?.kind === 'busy'
 
   // Chrome doesn't always fire dragend on a row React moved in the DOM while
   // it was being dragged, which left that row dimmed after the drop (Bryce,
@@ -1836,9 +1848,82 @@ function ReorderPanel({
     return ok
   }
 
+  /** Take a card out of the draft (after the dialog; Bryce, 9 Oct 2026). The
+   *  draft's answer is the cards left; the panel says what happened to the
+   *  listing's Newsletter tick. Waits for a save in flight, and saves wait
+   *  for it. */
+  async function removeCard(gid: string, card: CardInfo) {
+    setRemoving(null)
+    // Its open editor goes with it, unsaved text and all.
+    if (editing?.gid === gid && editing.key === card.key) setEditing(null)
+    if (inFlight.current) await inFlight.current
+    const run = (async () => {
+      setRemoveNote({ kind: 'busy', text: `Removing “${card.title}”…` })
+      try {
+        const res = await fetch('/api/admin/newsletter/remove', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            campaign: draft.id,
+            message: draft.messageId ?? undefined,
+            group: gid,
+            key: card.key,
+          }),
+        })
+        const body = (await res.json()) as {
+          error?: string
+          problems?: string[]
+          cards?: CardGroup[]
+          tick?:
+            | { status: 'unticked' }
+            | { status: 'none'; why: string }
+            | { status: 'failed'; reason: string }
+        }
+        if (!res.ok || !body.cards) {
+          throw new Error(
+            body.problems?.length
+              ? body.problems.join('; ')
+              : (body.error ?? `HTTP ${res.status}`)
+          )
+        }
+        setGroups(gs =>
+          gs.map(g =>
+            g.id === gid
+              ? { ...g, cards: g.cards.filter(c => c.key !== card.key) }
+              : g
+          )
+        )
+        onSaved(body.cards, '')
+        const tick = body.tick
+        setRemoveNote({
+          kind: 'ok',
+          text: `Removed “${card.title}”.${
+            tick?.status === 'unticked'
+              ? ' Its Newsletter box in Airtable is unticked, so it can go in a later issue.'
+              : tick?.status === 'failed'
+                ? ` Its Newsletter box in Airtable couldn’t be unticked (${tick.reason}): untick it there if it should go in a later issue.`
+                : ''
+          }`,
+        })
+        return true
+      } catch (err) {
+        setRemoveNote({
+          kind: 'error',
+          text: `“${card.title}” not removed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        })
+        return false
+      }
+    })()
+    inFlight.current = run
+    await run
+    inFlight.current = null
+  }
+
   // ActiveCampaign sometimes takes 10+ seconds a request; say so rather than
   // leave "Saving…" looking stuck.
-  const busy = saving || savingCard
+  const busy = saving || savingCard || removeBusy
   const [slow, setSlow] = useState(false)
   useEffect(() => {
     if (!busy) {
@@ -1853,7 +1938,8 @@ function ReorderPanel({
   // Typed text waiting for its autosave, a moved card, or a save in flight:
   // a test copy or an approval sent now would go out without it, so the page
   // waits. Cleared when the panel closes.
-  const unsaved = Boolean(pendingKey) || dirty || saving || savingCard
+  const unsaved =
+    Boolean(pendingKey) || dirty || saving || savingCard || removeBusy
   const unsavedRef = useRef(onUnsavedChange)
   useEffect(() => {
     unsavedRef.current = onUnsavedChange
@@ -1871,13 +1957,13 @@ function ReorderPanel({
   useEffect(() => {
     // Not mid-drag, not while a save runs, and only when the order on screen
     // differs from the draft's.
-    if (!dirty || drag || saving || savingCard || error) return
+    if (!dirty || drag || saving || savingCard || removeBusy || error) return
     const timer = window.setTimeout(
       () => void saveOrderRef.current(),
       ORDER_SAVE_DELAY_MS
     )
     return () => window.clearTimeout(timer)
-  }, [orderKey, dirty, drag, saving, savingCard, error])
+  }, [orderKey, dirty, drag, saving, savingCard, removeBusy, error])
 
   return (
     <div className={styles.reorder}>
@@ -1900,7 +1986,7 @@ function ReorderPanel({
                       ? ` ${styles.reorderRowDragging}`
                       : ''
                   }`}
-                  draggable={!open}
+                  draggable={!open && !removeBusy}
                   tabIndex={0}
                   aria-label={`${c.title}, position ${i + 1} of ${g.cards.length}. Arrow keys move it.`}
                   onKeyDown={e => {
@@ -1961,6 +2047,20 @@ function ReorderPanel({
                       {open ? 'Close' : 'Edit'}
                     </button>
                   )}
+                  <button
+                    type="button"
+                    className={`${styles.rowButton} ${styles.rowIconButton}`}
+                    disabled={busy || dirty || g.cards.length === 1}
+                    aria-label={`Remove “${c.title}” from this issue`}
+                    title={
+                      g.cards.length === 1
+                        ? 'The only card in its section can’t be removed on its own'
+                        : 'Remove from this issue'
+                    }
+                    onClick={() => setRemoving({ gid: g.id, card: c })}
+                  >
+                    <Icon src="/images/icons/trash.svg" size={16} />
+                  </button>
                 </li>,
                 open && (
                   <li key={`${c.key}-edit`} className={styles.fitEditor}>
@@ -2124,6 +2224,29 @@ function ReorderPanel({
             'The new order saves in a moment.'
           )}
         </p>
+      )}
+      {removeNote && (
+        <p
+          className={
+            removeNote.kind === 'error'
+              ? styles.noticeError
+              : removeNote.kind === 'ok'
+                ? styles.noticeOk
+                : styles.notice
+          }
+          role="status"
+          aria-live="polite"
+        >
+          {removeNote.text}
+          {removeNote.kind === 'busy' && slowNote}
+        </p>
+      )}
+      {removing && (
+        <ConfirmRemoveCard
+          title={removing.card.title}
+          onCancel={() => setRemoving(null)}
+          onConfirm={() => void removeCard(removing.gid, removing.card)}
+        />
       )}
     </div>
   )
@@ -2934,6 +3057,65 @@ function ConfirmDelete({
             onClick={onConfirm}
           >
             Delete draft
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** Confirmation for Remove on a card row: what removing does, in plain
+ *  words. Focus starts on "Go back". */
+function ConfirmRemoveCard({
+  title,
+  onCancel,
+  onConfirm,
+}: {
+  title: string
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const backRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    backRef.current?.focus()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel])
+  return (
+    <div className={styles.overlay} onClick={onCancel}>
+      <div
+        className={styles.dialog}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-remove-card-title"
+        onClick={e => e.stopPropagation()}
+      >
+        <h2 id="confirm-remove-card-title" className={styles.dialogTitle}>
+          Remove “{title}” from this issue?
+        </h2>
+        <p className={styles.dialogNote}>
+          It comes out of this email now, and a rebuild of the issue leaves it
+          out too. Its Newsletter box in Airtable is unticked, so Pen can put it
+          in a later issue.
+        </p>
+        <div className={styles.dialogActions}>
+          <button
+            ref={backRef}
+            type="button"
+            className={styles.button}
+            onClick={onCancel}
+          >
+            Go back
+          </button>
+          <button
+            type="button"
+            className={styles.buttonPrimary}
+            onClick={onConfirm}
+          >
+            Remove card
           </button>
         </div>
       </div>
