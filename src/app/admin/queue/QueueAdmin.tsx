@@ -16,6 +16,12 @@ import { missingFields } from '@/lib/admin/queue-needed'
 import { laterSince, laterUntil } from '@/lib/admin/queue-later'
 import { rejectReplyFor, shownDeclineChip } from '@/lib/admin/queue-decline'
 import {
+  OUTCOME_LABEL,
+  ruleTestHeadline,
+  type RuleTest,
+  type RuleTestResult,
+} from '@/lib/admin/queue-rule-test'
+import {
   itemParts,
   markRanges,
   matchDoc,
@@ -4427,6 +4433,7 @@ function Detail({
             )}
           </section>
         )}
+        {item.type === 'Rule' && <RuleTestBlock test={item.ruleTest} />}
         {item.type === 'Rule' && item.ruleWording && (
           // The rule as it will read, folded away: the summary is what gets
           // read (9 Sept 2026: no diffs on the card); the words are there on
@@ -5976,6 +5983,70 @@ function ReplyDraft({
         <Icon src={ICON.pencil} size={12} />
       </span>
     </pre>
+  )
+}
+
+/** What the Mac's test of a rule on the owner's past decisions found
+ *  (~/Queue/replay.py, 9 Oct 2026): one line, Fable's take, then each
+ *  decision it would have changed, "Goes against you" first; the ones where
+ *  his call stands sit behind a fold. */
+function RuleTestBlock({ test }: { test: RuleTest | null }) {
+  if (!test) {
+    return (
+      <section className={styles.block}>
+        <h3 className={styles.h3}>Tested on your past decisions</h3>
+        <p className={styles.note}>
+          Not tested yet. The Mac tests each new rule on your past decisions
+          within a few minutes.
+        </p>
+      </section>
+    )
+  }
+  const changed = test.results.filter(r => r.outcome !== 'keeps')
+  const same = test.results.filter(r => r.outcome === 'keeps')
+  return (
+    <section className={styles.block}>
+      <h3 className={styles.h3}>Tested on your past decisions</h3>
+      <p className={styles.summary}>{ruleTestHeadline(test)}</p>
+      {test.summary && <p className={styles.note}>{test.summary}</p>}
+      {changed.length > 0 && (
+        <ul className={styles.ruleTest}>
+          {changed.map(r => (
+            <RuleTestLine key={r.row} result={r} />
+          ))}
+        </ul>
+      )}
+      {same.length > 0 && (
+        <details className={styles.findingMore}>
+          <summary>
+            {same.length === 1
+              ? '1 more it touches, same as you'
+              : `${same.length} more it touches, same as you`}
+          </summary>
+          <ul className={styles.ruleTest}>
+            {same.map(r => (
+              <RuleTestLine key={r.row} result={r} />
+            ))}
+          </ul>
+        </details>
+      )}
+    </section>
+  )
+}
+
+function RuleTestLine({ result: r }: { result: RuleTestResult }) {
+  return (
+    <li className={styles.ruleTestLine}>
+      <span className={styles.ruleTestOutcome} data-outcome={r.outcome}>
+        {OUTCOME_LABEL[r.outcome]}
+      </span>
+      <span>
+        <strong className={styles.ruleTestTitle}>{r.title}</strong>
+        {r.taught && <span className={styles.note}> (taught it)</span>}
+        {' \u2013 '}
+        {r.why}
+      </span>
+    </li>
   )
 }
 

@@ -1299,6 +1299,60 @@
   color: var(--q-text);
 }
 
+/* A rule's test on past decisions (RuleTestBlock): one line per decision
+   it would have changed, its outcome as a small coloured label. */
+.ruleTest {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.ruleTestLine {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--q-text-2);
+  overflow-wrap: anywhere;
+}
+
+.ruleTestTitle {
+  font-weight: 600;
+  color: var(--q-text);
+}
+
+.ruleTestOutcome {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--q-muted);
+  border: 1px solid var(--q-border-strong);
+}
+
+.ruleTestOutcome[data-outcome='breaks'] {
+  color: var(--q-danger);
+  background: var(--q-danger-soft);
+  border-color: transparent;
+}
+
+.ruleTestOutcome[data-outcome='unclear'] {
+  color: var(--q-warn);
+  background: var(--q-warn-soft);
+  border-color: transparent;
+}
+
+.ruleTestOutcome[data-outcome='fixes'] {
+  color: var(--q-accent);
+  background: var(--q-accent-soft);
+  border-color: transparent;
+}
+
 .siteFrame {
   /* The site's own ground and column width (.collection-list is 369px), so
      the card reads exactly as a visitor sees it. */

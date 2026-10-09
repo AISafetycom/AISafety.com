@@ -41,6 +41,7 @@ import { isExpiredAttachment } from './attachment-url'
 import { roomFor, SORT_FIELD, type Placed } from './queue-place'
 import type { ListingDates } from './queue-urgent'
 import { reviewAgainAt } from './queue-later'
+import { ruleTestOf, type RuleTest } from './queue-rule-test'
 
 export const QUEUE_TABLE_ID = 'tblonlKwIFJ7Aa8QN'
 const BROOM_ISSUES_TABLE_ID = 'tblntD3WITPEgjHRK'
@@ -134,6 +135,9 @@ export interface QueueItem {
    *  is judged on its words (Bryce, 5 Oct 2026, the teach loop). */
   ruleWording: string | null
   ruleWas: string | null
+  /** Rule: the Mac's test of the rule on the owner's past decisions
+   *  (proposal `replay`, ~/Queue/replay.py); null until it has run. */
+  ruleTest: RuleTest | null
   verdict: Verdict | null
   reasons: string[]
   rejectChips: string[]
@@ -501,6 +505,7 @@ function rowToItem(
   let appliesTo: string | null = null
   let ruleWording: string | null = null
   let ruleWas: string | null = null
+  let ruleTest: RuleTest | null = null
   let replyTo: string | null = null
   let noReply: NoReply | null = null
   let rejectReply: RejectReply | null = null
@@ -512,6 +517,7 @@ function rowToItem(
     appliesTo = str(proposal.applies_to) ?? str(proposal.appliesTo)
     ruleWording = str(proposal.wording)
     ruleWas = str(proposal.was)
+    ruleTest = ruleTestOf(proposal.replay)
     name = str(proposal.name)
     url = str(proposal.url)
     if (isRecord(proposal.reply)) {
@@ -592,6 +598,7 @@ function rowToItem(
     appliesTo,
     ruleWording,
     ruleWas,
+    ruleTest,
     verdict: str(f[F.verdict]) as Verdict | null,
     reasons: lines(f[F.reasons]),
     rejectChips: lines(f[F.rejectChips]),
