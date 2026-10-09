@@ -591,6 +591,14 @@
   cursor: default;
 }
 
+/* An icon-only row button (Remove, 9 Oct 2026): a 16px icon at the height of
+   the text buttons beside it. */
+.rowIconButton {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 4px;
+}
+
 /* Send test after a test of the issue as it is now went out. */
 .sentTick {
   color: var(--bright-teal-300);
