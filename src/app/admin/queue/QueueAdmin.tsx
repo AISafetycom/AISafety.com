@@ -3843,14 +3843,16 @@ function Detail({
       </h3>
       {item.source === 'Broom' ? (
         <div className={styles.finding}>
-          <p className={styles.findingLead}>{splitExcerpt(excerpt).lead}</p>
+          <p className={styles.findingLead}>
+            {linkify(splitExcerpt(excerpt).lead)}
+          </p>
           {splitExcerpt(excerpt).detail && (
             // Broom's evidence, folded away: the summary is what gets
             // read (Bryce, 11 Sept 2026); the rest is there on a click.
             <details className={styles.findingMore}>
               <summary>Details</summary>
               <p className={styles.findingDetail}>
-                {splitExcerpt(excerpt).detail}
+                {linkify(splitExcerpt(excerpt).detail ?? '')}
               </p>
             </details>
           )}
@@ -5803,13 +5805,15 @@ function linkify(text: string): React.ReactNode[] {
   let last = 0
   for (const m of text.matchAll(LINK_RE)) {
     const i = m.index ?? 0
+    // A link that ends a sentence or a quote leaves that mark outside it.
+    const url = m[0].replace(/[.,;:!?'"]+$/, '')
     if (i > last) out.push(text.slice(last, i))
     out.push(
-      <a key={i} href={m[0]} target="_blank" rel="noreferrer">
-        {m[0]}
+      <a key={i} href={url} target="_blank" rel="noreferrer">
+        {url}
       </a>
     )
-    last = i + m[0].length
+    last = i + url.length
   }
   if (last < text.length) out.push(text.slice(last))
   return out
