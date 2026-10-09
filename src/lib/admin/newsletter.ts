@@ -2443,6 +2443,10 @@ export interface CardField {
   original: string | null
   /** The text carries a link, which a plain-text edit would drop. */
   hasLink: boolean
+  /** The row's icon (`calendar`, `paper`…); null for the title and the
+   *  description. Lets the listing check (newsletter-changes.ts) tell a
+   *  changed line from a row that changed shape. */
+  icon: string | null
 }
 
 export interface CardGroup {
@@ -2849,6 +2853,7 @@ function cardFields(
           ? stripHtml(orig)
           : null,
       hasLink: /<a\s/i.test(m[3]),
+      icon: m[2] ?? null,
     })
   }
   return out
@@ -2981,6 +2986,24 @@ export function setFieldsHtml(
 /** Edit text on one card inside a draft — any of its fields, and on funding
  *  cards the "Consider applying if" line — in one write: verify, rewrite
  *  HTML + text, re-stamp, write back, re-check. Returns the cards. */
+/** The cards of a pipeline draft as they read in ActiveCampaign now, after
+ *  the same checks as approval: for the listing check on the approval page
+ *  (newsletter-changes.ts). Throws DraftProblemError when the draft fails
+ *  them or carries no card markers. */
+export async function draftCardGroups(
+  draftId: string,
+  knownMessageId?: string
+): Promise<CardGroup[]> {
+  const { problems, msg } = await readDraft(draftId, null, knownMessageId)
+  if (problems.length > 0 || !msg)
+    throw new DraftProblemError(
+      problems.length > 0 ? problems : ['no message on the draft']
+    )
+  const groups = cardGroups(msg.html ?? '')
+  if (!groups) throw new DraftProblemError(['this email has no card markers'])
+  return groups
+}
+
 export async function editDraftCard(
   draftId: string,
   gid: string,
