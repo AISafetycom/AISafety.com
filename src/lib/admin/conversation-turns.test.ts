@@ -3,10 +3,12 @@ import {
   entryFromEnd,
   historyIsComplete,
   loggedTurnCount,
+  placePerTurn,
+  placeTurn,
   replyIndexOf,
-  slicePerTurn,
   turnFromEnd,
   turnsToKeep,
+  type TurnPlacement,
 } from './conversation-turns'
 
 const u = { role: 'user' }
@@ -51,53 +53,298 @@ describe('turnsToKeep', () => {
   })
 })
 
-describe('slicePerTurn', () => {
-  it('cuts an array that spans every turn', () => {
-    expect(slicePerTurn(['a', 'b', 'c'], 3, 2)).toEqual(['a', 'b'])
-    expect(slicePerTurn(['a', 'b', 'c'], 3, 3)).toEqual(['a', 'b', 'c'])
-    expect(slicePerTurn(['a', 'b', 'c'], 3, 0)).toEqual([])
+/** A turn time `n` minutes into the conversation. */
+const at = (n: number) => new Date(Date.UTC(2026, 8, 9, 2, n)).toISOString()
+
+describe('placePerTurn', () => {
+  const place = (from: number, to: number, insert = true): TurnPlacement => ({
+    from,
+    to,
+    insert,
+    latest: true,
+  })
+  it('cuts an array that spans every turn, then appends', () => {
+    expect(placePerTurn(['a', 'b', 'c'], 3, place(2, 3), 'n')).toEqual([
+      'a',
+      'b',
+      'n',
+    ])
+    expect(placePerTurn(['a', 'b', 'c'], 3, place(3, 3), 'n')).toEqual([
+      'a',
+      'b',
+      'c',
+      'n',
+    ])
+    expect(placePerTurn(['a', 'b', 'c'], 3, place(0, 3), 'n')).toEqual(['n'])
+  })
+  it('slots an entry in mid-array, replacing only the range given', () => {
+    expect(placePerTurn(['a', 'b', 'd'], 3, place(2, 2), 'c')).toEqual([
+      'a',
+      'b',
+      'c',
+      'd',
+    ])
+    expect(placePerTurn(['a', 'x', 'd'], 3, place(1, 2), 'b')).toEqual([
+      'a',
+      'b',
+      'd',
+    ])
   })
   it('respects end alignment on an array that started late', () => {
     // Four turns, the array covers only the last two.
-    expect(slicePerTurn(['c', 'd'], 4, 3)).toEqual(['c'])
-    expect(slicePerTurn(['c', 'd'], 4, 2)).toEqual([])
-    expect(slicePerTurn(['c', 'd'], 4, 4)).toEqual(['c', 'd'])
+    expect(placePerTurn(['c', 'd'], 4, place(3, 4), 'n')).toEqual(['c', 'n'])
+    expect(placePerTurn(['c', 'd'], 4, place(2, 4), 'n')).toEqual(['n'])
+    expect(placePerTurn(['c', 'd'], 4, place(1, 4), 'n')).toEqual(['n'])
+    expect(placePerTurn(['c', 'd'], 4, place(4, 4), 'n')).toEqual([
+      'c',
+      'd',
+      'n',
+    ])
+    expect(placePerTurn(['c', 'd'], 4, place(3, 3), 'n')).toEqual([
+      'c',
+      'n',
+      'd',
+    ])
+    // A turn from before the array started has no slot in it.
+    expect(placePerTurn(['c', 'd'], 4, place(1, 1), 'n')).toEqual(['c', 'd'])
   })
-  it('is empty for a missing array', () => {
-    expect(slicePerTurn(undefined, 3, 3)).toEqual([])
+  it('starts a missing array with the newest entry only', () => {
+    expect(placePerTurn(undefined, 3, place(3, 3), 'n')).toEqual(['n'])
+    expect(placePerTurn(undefined, 3, place(1, 1), 'n')).toEqual([])
+  })
+  it('leaves the array alone when the write is dropped', () => {
+    expect(placePerTurn(['a', 'b'], 2, place(2, 2, false), 'n')).toEqual([
+      'a',
+      'b',
+    ])
   })
 })
 
-describe('a re-sent turn, written the way upsertConversation writes', () => {
-  // Mirrors the per-turn bookkeeping in upsertConversation: keep the turns
-  // before this write's position, then append.
+describe('placeTurn', () => {
+  // Turns at reply positions 1, 3, 5, 7, sent at minutes 0, 1, 2, 3.
+  const row = {
+    tools: [[], [], [], []],
+    turnIndices: [1, 3, 5, 7],
+    turnTimes: [at(0), at(1), at(2), at(3)],
+  }
+  it('appends a new turn after the others', () => {
+    expect(placeTurn(row, 9, at(4))).toEqual({
+      from: 4,
+      to: 4,
+      insert: true,
+      latest: true,
+    })
+  })
+  it('lets a Try again replace its turn', () => {
+    expect(placeTurn(row, 7, at(4))).toEqual({
+      from: 3,
+      to: 4,
+      insert: true,
+      latest: true,
+    })
+  })
+  it('lets an Edit of an earlier message drop every later turn', () => {
+    expect(placeTurn(row, 3, at(4))).toEqual({
+      from: 1,
+      to: 4,
+      insert: true,
+      latest: true,
+    })
+  })
+  it('slots a late turn in before the newer one instead of truncating', () => {
+    // Turn 7's write is late: the next turn (9) landed first.
+    const raced = {
+      tools: [[], [], [], []],
+      turnIndices: [1, 3, 5, 9],
+      turnTimes: [at(0), at(1), at(2), at(4)],
+    }
+    expect(placeTurn(raced, 7, at(3))).toEqual({
+      from: 3,
+      to: 3,
+      insert: true,
+      latest: false,
+    })
+  })
+  it('drops a late turn the visitor has since re-sent or edited away', () => {
+    // A Try again on turn 7, sent at minute 4, landed before the original.
+    const retried = { ...row, turnTimes: [at(0), at(1), at(2), at(4)] }
+    expect(placeTurn(retried, 7, at(3))).toMatchObject({
+      insert: false,
+      latest: false,
+    })
+    // An Edit of the message behind turn 3, sent at minute 4.
+    const edited = {
+      tools: [[], []],
+      turnIndices: [1, 3],
+      turnTimes: [at(0), at(4)],
+    }
+    expect(placeTurn(edited, 7, at(3))).toMatchObject({
+      insert: false,
+      latest: false,
+    })
+  })
+  it('handles new rows, legacy rows and writes without a position', () => {
+    expect(placeTurn(null, 1, at(0))).toEqual({
+      from: 0,
+      to: 0,
+      insert: true,
+      latest: true,
+    })
+    // No positions: append, as before 2 Sept 2026.
+    const noPositions = { tools: [[], []], turnTimes: [at(0), at(5)] }
+    expect(placeTurn(noPositions, 3, at(1))).toEqual({
+      from: 2,
+      to: 2,
+      insert: true,
+      latest: true,
+    })
+    // No turn times: every write counts as the newest.
+    const noTimes = { tools: [[], [], []], turnIndices: [1, 3, 5] }
+    expect(placeTurn(noTimes, 3, at(0))).toEqual({
+      from: 1,
+      to: 3,
+      insert: true,
+      latest: true,
+    })
+    expect(placeTurn(row, null, at(1))).toEqual({
+      from: 4,
+      to: 4,
+      insert: true,
+      latest: true,
+    })
+  })
+  it('ignores turns logged before positions were recorded', () => {
+    // Four turns, positions and times only for the last two.
+    const partial = {
+      tools: [[], [], [], []],
+      turnIndices: [5, 9],
+      turnTimes: [at(2), at(4)],
+    }
+    expect(placeTurn(partial, 7, at(3))).toEqual({
+      from: 3,
+      to: 3,
+      insert: true,
+      latest: false,
+    })
+  })
+})
+
+describe('turn writes, applied the way upsertConversation applies them', () => {
+  interface Row {
+    tools: unknown[]
+    turnIndices?: unknown[]
+    turnTimes?: unknown[]
+  }
+  // Mirrors the per-turn bookkeeping in upsertConversation (and its
+  // late-write branch): place the write, then splice every array alike.
   function write(
-    previous: { tools: unknown[]; turnIndices?: unknown[] } | null,
+    previous: Row | null,
     historyIndices: number[],
+    turnAt: string | undefined,
     tools: unknown
-  ) {
+  ): Row {
     const replyIndex = replyIndexOf(historyIndices)
     const total = previous?.tools.length ?? 0
-    const keep = previous ? turnsToKeep(previous, replyIndex) : 0
-    return {
-      tools: [...slicePerTurn(previous?.tools, total, keep), tools],
-      turnIndices: [
-        ...slicePerTurn(previous?.turnIndices, total, keep),
-        replyIndex,
-      ],
+    const placement = placeTurn(previous, replyIndex, turnAt ?? '')
+    const row: Row = {
+      tools: placePerTurn(previous?.tools, total, placement, tools),
     }
+    if (previous?.turnIndices || !previous) {
+      row.turnIndices = placePerTurn(
+        previous?.turnIndices,
+        total,
+        placement,
+        replyIndex
+      )
+    }
+    if (turnAt !== undefined) {
+      row.turnTimes = placePerTurn(
+        previous?.turnTimes,
+        total,
+        placement,
+        turnAt
+      )
+    }
+    return row
   }
-  it('replaces the entry instead of adding one', () => {
-    let row = write(null, [0, 1], ['search'])
-    row = write(row, [0, 1, 2, 3], ['search', 'history'])
+  const upTo = (n: number) => Array.from({ length: n + 1 }, (_, i) => i)
+
+  it('replaces a re-sent entry instead of adding one', () => {
+    let row = write(null, upTo(1), at(0), ['search'])
+    row = write(row, upTo(3), at(1), ['search', 'history'])
     // Try again on the second question: same positions, new tool calls.
-    row = write(row, [0, 1, 2, 3], ['get_listing'])
+    row = write(row, upTo(3), at(2), ['get_listing'])
     expect(row.tools).toEqual([['search'], ['get_listing']])
     expect(row.turnIndices).toEqual([1, 3])
     // Editing the first question starts the transcript over.
-    row = write(row, [0, 1], [])
+    row = write(row, upTo(1), at(3), [])
     expect(row.tools).toEqual([[]])
     expect(row.turnIndices).toEqual([1])
+    expect(row.turnTimes).toEqual([at(3)])
+  })
+  it('keeps the newer turn when an earlier one is written late', () => {
+    // The 9 Sept 2026 row: turn 13 errored in the visitor's browser, they
+    // sent the next message (reply 15), and turn 13's write landed last.
+    let row = write(null, upTo(11), at(0), ['t11'])
+    row = write(row, upTo(15), at(3), ['t15'])
+    row = write(row, upTo(13), at(2), ['t13'])
+    expect(row.tools).toEqual([['t11'], ['t13'], ['t15']])
+    expect(row.turnIndices).toEqual([11, 13, 15])
+    expect(row.turnTimes).toEqual([at(0), at(2), at(3)])
+    // A Try again on turn 13 afterwards is a real re-send: turn 15 goes.
+    row = write(row, upTo(13), at(4), ['t13 again'])
+    expect(row.tools).toEqual([['t11'], ['t13 again']])
+  })
+  it('lets a late Try again replace the entry it re-sent, keeping later turns', () => {
+    let row = write(null, upTo(1), at(0), ['t1'])
+    row = write(row, upTo(3), at(1), ['t3'])
+    // Try again on turn 3 (minute 2) is slow; the visitor moves on to
+    // turn 5 (minute 3) before its write lands.
+    row = write(row, upTo(5), at(3), ['t5'])
+    row = write(row, upTo(3), at(2), ['t3 retry'])
+    expect(row.tools).toEqual([['t1'], ['t3 retry'], ['t5']])
+    expect(row.turnTimes).toEqual([at(0), at(2), at(3)])
+  })
+  it('drops a late turn that a Try again already replaced', () => {
+    let row = write(null, upTo(1), at(0), ['t1'])
+    // Turn 3 (minute 1) errors in the browser; Try again (minute 2) lands
+    // first, then the original's write arrives.
+    row = write(row, upTo(3), at(2), ['retry'])
+    row = write(row, upTo(3), at(1), ['original'])
+    expect(row.tools).toEqual([['t1'], ['retry']])
+    expect(row.turnTimes).toEqual([at(0), at(2)])
+  })
+  it('behaves as before on legacy rows without positions or times', () => {
+    // No positions: every write appends.
+    const legacy: Row = { tools: [['a'], ['b']] }
+    expect(write(legacy, upTo(3), undefined, ['c']).tools).toEqual([
+      ['a'],
+      ['b'],
+      ['c'],
+    ])
+    // Positions but no times: a write at a logged position re-sends it.
+    const noTimes: Row = { tools: [['a'], ['b']], turnIndices: [1, 3] }
+    expect(write(noTimes, upTo(3), undefined, ['b2']).tools).toEqual([
+      ['a'],
+      ['b2'],
+    ])
+  })
+  it('keeps every message on its own entry after a mid-array insert', () => {
+    let row = write(null, upTo(1), at(0), ['t1'])
+    row = write(row, upTo(5), at(2), ['t5'])
+    row = write(row, upTo(3), at(1), ['t3'])
+    const data = {
+      history: [u, a, u, a, u, a],
+      historyIndices: upTo(5),
+      tools: row.tools,
+      turnTimes: row.turnTimes,
+      turnIndices: row.turnIndices,
+    }
+    expect(entryFromEnd(data.tools, turnFromEnd(data, 1))).toEqual(['t1'])
+    expect(entryFromEnd(data.tools, turnFromEnd(data, 3))).toEqual(['t3'])
+    expect(entryFromEnd(data.turnTimes, turnFromEnd(data, 2))).toBe(at(1))
+    expect(entryFromEnd(data.tools, turnFromEnd(data, 5))).toEqual(['t5'])
+    expect(loggedTurnCount(data)).toBe(3)
   })
 })
 
