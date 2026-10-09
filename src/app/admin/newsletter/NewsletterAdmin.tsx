@@ -39,7 +39,34 @@ interface CardField {
   /** The text as built, when it has been edited since; null otherwise. */
   original: string | null
   hasLink: boolean
+  /** The row's icon; null for the title and the description. */
+  icon?: string | null
 }
+
+/** A listing in a waiting email that changed since the email was built (see
+ *  src/lib/admin/newsletter-changes.ts): an open Broom item from the Queue,
+ *  and/or card text that no longer matches the listing on the site. */
+interface ListingAlert {
+  key: string
+  group: string
+  title: string
+  broom: Array<{
+    id: string
+    verdict: string | null
+    status: string
+    changes: Array<{ field: string; from: string; to: string }>
+    reason: string | null
+  }>
+  changes: Array<{ name: string; label: string; email: string; site: string }>
+  /** The card can be rewritten from the listing line by line. */
+  updatable: boolean
+  note: string | null
+}
+
+type AlertState =
+  | { status: 'loading' }
+  | { status: 'ok'; items: ListingAlert[] }
+  | { status: 'error'; error: string }
 
 /** Pen stamps each item with its Airtable record id; only those cards can
  *  pass a description on to the site's listing. */
@@ -263,6 +290,25 @@ const LINEUP: Array<{
  *  so no faster than this; the Refresh button is still there for right now. */
 const POLL_MS = 30_000
 
+/** Drafts whose listings are checked against the site: still to go out, not
+ *  mid-waves, carrying cards, passing the pipeline's checks. */
+function checkable(d: Draft): boolean {
+  return (
+    !d.alreadySent && !d.editLock && d.cards != null && d.problems.length === 0
+  )
+}
+
+/** "2026-10-18" → "18 Oct 2026"; anything else as it came. */
+function shortDate(v: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v)
+  if (!m) return v
+  const month = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).toLocaleString(
+    'en-US',
+    { month: 'short', timeZone: 'UTC' }
+  )
+  return `${+m[3]} ${month} ${m[1]}`
+}
+
 function when(iso: string | null): string {
   if (!iso) return '—'
   const d = new Date(iso)
@@ -476,6 +522,7 @@ function hostOf(url: string): string {
 export default function NewsletterAdmin({
   canSend,
   testTo,
+  canQueue = false,
 }: {
   /** This session may approve (from the server, so it is known before the
    *  ActiveCampaign read finishes). Picks which notice shows at the top; the
@@ -484,6 +531,8 @@ export default function NewsletterAdmin({
   /** Where "Send test" delivers: the approver's own sign-in address. Null
    *  for view-only sessions, which get no test button. */
   testTo: string | null
+  /** May decide Queue items: Fix on a changed listing applies a Broom item. */
+  canQueue?: boolean
 }) {
   const [data, setData] = useState<Payload | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -999,6 +1048,125 @@ export default function NewsletterAdmin({
         : rs
     })
     if (text) setNotice({ kind: 'ok', text })
+    // A saved edit can settle a changed listing (or not): check again.
+    if (text) recheckListings(draftId)
+  }
+
+  /* ─── Listings that changed since the email was built (9 Oct 2026) ───
+     Bryce rarely opens the Queue, so Broom's fixes for listings in a waiting
+     email, and any listing edited after the build, show on the draft itself
+     with a button each. Read once per draft (an ActiveCampaign read and two
+     Airtable reads), again after a Fix, a saved edit or Refresh. */
+  const [alerts, setAlerts] = useState<Record<string, AlertState>>({})
+  const [fixingKey, setFixingKey] = useState<string | null>(null)
+  const alertsAsked = useRef<Set<string>>(new Set())
+
+  const fetchAlerts = useCallback(async (draft: Draft) => {
+    alertsAsked.current.add(draft.id)
+    setAlerts(a => ({ ...a, [draft.id]: { status: 'loading' } }))
+    try {
+      const q = new URLSearchParams({ draft: draft.id })
+      if (draft.messageId) q.set('message', draft.messageId)
+      const res = await fetch(`/api/admin/newsletter/changes?${q}`, {
+        cache: 'no-store',
+      })
+      const body = (await res.json()) as {
+        alerts?: ListingAlert[]
+        error?: string
+        problems?: string[]
+      }
+      if (!res.ok || !body.alerts)
+        throw new Error(
+          body.problems?.join('; ') ?? body.error ?? `HTTP ${res.status}`
+        )
+      setAlerts(a => ({
+        ...a,
+        [draft.id]: { status: 'ok', items: body.alerts ?? [] },
+      }))
+    } catch (err) {
+      setAlerts(a => ({
+        ...a,
+        [draft.id]: {
+          status: 'error',
+          error: err instanceof Error ? err.message : String(err),
+        },
+      }))
+    }
+  }, [])
+
+  useEffect(() => {
+    for (const d of data?.drafts ?? [])
+      if (checkable(d) && !alertsAsked.current.has(d.id)) void fetchAlerts(d)
+  }, [data, fetchAlerts])
+
+  function recheckListings(draftId?: string) {
+    if (draftId) alertsAsked.current.delete(draftId)
+    else alertsAsked.current.clear()
+    // The effect above asks again on the next render of the list.
+    setData(d => (d ? { ...d } : d))
+  }
+
+  function alertsFor(draftId: string): ListingAlert[] {
+    const a = alerts[draftId]
+    return a?.status === 'ok' ? a.items : []
+  }
+
+  /** Fix one listing: apply Broom's change (when there is one) and rewrite
+   *  the card in this email from the listing. */
+  async function fixListing(
+    draft: Draft,
+    alert: ListingAlert,
+    queueId: string | null
+  ) {
+    setFixingKey(`${draft.id}:${alert.key}`)
+    setNotice(null)
+    try {
+      const res = await fetch('/api/admin/newsletter/changes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaign: draft.id,
+          key: alert.key,
+          queue: queueId,
+          message: draft.messageId ?? undefined,
+        }),
+      })
+      const body = (await res.json()) as {
+        cards?: CardGroup[]
+        alerts?: ListingAlert[]
+        applied?: boolean
+        cardUpdated?: boolean
+        note?: string | null
+        error?: string
+        problems?: string[]
+      }
+      if (!res.ok || !body.cards || !body.alerts)
+        throw new Error(
+          body.problems?.join('; ') ?? body.error ?? `HTTP ${res.status}`
+        )
+      const done = [
+        body.applied ? 'the listing is fixed' : null,
+        body.cardUpdated ? 'this email now says the same' : null,
+      ].filter(Boolean)
+      setAlerts(a => ({
+        ...a,
+        [draft.id]: { status: 'ok', items: body.alerts ?? [] },
+      }))
+      if (body.cardUpdated) draftChanged(draft.id, body.cards, '')
+      setNotice({
+        kind: body.note ? 'error' : 'ok',
+        text:
+          `${alert.title}: ${done.length ? done.join(' and ') : 'nothing to change'}.` +
+          (body.note ? ` ${body.note}` : ''),
+      })
+    } catch (err) {
+      setNotice({
+        kind: 'error',
+        text: `${alert.title}: ${err instanceof Error ? err.message : String(err)}`,
+      })
+    } finally {
+      setFixingKey(null)
+    }
   }
 
   return (
@@ -1026,7 +1194,10 @@ export default function NewsletterAdmin({
           <button
             type="button"
             className={styles.button}
-            onClick={() => void load()}
+            onClick={() => {
+              alertsAsked.current.clear()
+              void load()
+            }}
             disabled={loading}
             style={{ marginLeft: 12, padding: '4px 10px', fontSize: 12 }}
           >
@@ -1248,6 +1419,22 @@ export default function NewsletterAdmin({
                   {draft.editLock}.
                 </p>
               )}
+              {checkable(draft) && alerts[draft.id] && (
+                <ListingChanges
+                  state={alerts[draft.id]}
+                  canFix={data.canSend}
+                  canQueue={canQueue}
+                  busyKey={
+                    fixingKey?.startsWith(`${draft.id}:`)
+                      ? fixingKey.slice(draft.id.length + 1)
+                      : null
+                  }
+                  disabled={fixingKey != null || busyId != null || unsaved}
+                  onFix={(alert, queueId) =>
+                    void fixListing(draft, alert, queueId)
+                  }
+                />
+              )}
               {draft.warnings.length > 0 && (
                 <div className={styles.warnings}>
                   <p className={styles.warningsTitle}>
@@ -1450,6 +1637,7 @@ export default function NewsletterAdmin({
           draft={confirming.draft}
           choice={confirming.choice}
           holds={confirming.holds}
+          changed={alertsFor(confirming.draft.id)}
           schedule={confirming.schedule}
           onCancel={() => setConfirming(null)}
           onConfirm={(confirmed, override) =>
@@ -2253,6 +2441,112 @@ function ReorderPanel({
 }
 
 /** The warnings as a list. */
+/** The listings in a waiting email that changed since it was built, each
+ *  with its button: Fix (apply Broom's change, then update the email) or
+ *  Update email (the listing was edited by hand since the build). */
+function ListingChanges({
+  state,
+  canFix,
+  canQueue,
+  busyKey,
+  disabled,
+  onFix,
+}: {
+  state: AlertState
+  canFix: boolean
+  canQueue: boolean
+  busyKey: string | null
+  disabled: boolean
+  onFix: (alert: ListingAlert, queueId: string | null) => void
+}) {
+  if (state.status === 'loading')
+    return (
+      <p className={`${styles.notice} ${styles.testResult}`}>
+        Checking this email’s listings against the site…
+      </p>
+    )
+  if (state.status === 'error')
+    return (
+      <p className={`${styles.noticeError} ${styles.testResult}`}>
+        Couldn’t check this email’s listings against the site: {state.error}
+      </p>
+    )
+  if (state.items.length === 0) return null
+  const n = state.items.length
+  return (
+    <div className={styles.warnings}>
+      <p className={styles.warningsTitle}>
+        {n === 1 ? 'A listing' : `${n} listings`} in this email changed since it
+        was built. Fix {n === 1 ? 'it' : 'them'} before sending:
+      </p>
+      <ul className={styles.changeList}>
+        {state.items.map(a => {
+          const fix = a.broom.find(b => b.status !== 'Revising') ?? null
+          const revising = a.broom.length > 0 && !fix
+          const busy = busyKey === a.key
+          return (
+            <li key={a.key} className={styles.changeItem}>
+              <span className={styles.changeName}>{a.title}</span>
+              {a.broom.map(b => (
+                <span key={b.id} className={styles.changeLine}>
+                  Broom found:{' '}
+                  {b.changes
+                    .map(
+                      c =>
+                        `${c.field} ${shortDate(c.from)} → ${shortDate(c.to)}`
+                    )
+                    .join(' · ')}
+                  {b.reason && (
+                    <span className={styles.muted}> ({b.reason})</span>
+                  )}
+                </span>
+              ))}
+              {a.broom.length === 0 &&
+                a.changes.map(c => (
+                  <span key={c.name} className={styles.changeLine}>
+                    {c.label}: the email says “{c.email}”, the site now says “
+                    {c.site}”
+                  </span>
+                ))}
+              {a.note && (
+                <span className={`${styles.changeLine} ${styles.muted}`}>
+                  {a.note}
+                </span>
+              )}
+              {canFix && (fix || (a.changes.length > 0 && a.updatable)) && (
+                <span>
+                  <button
+                    type="button"
+                    className={styles.rowButton}
+                    disabled={disabled || (fix != null && !canQueue)}
+                    title={
+                      fix && !canQueue
+                        ? 'Applying a Broom fix needs Queue access'
+                        : undefined
+                    }
+                    onClick={() => onFix(a, fix?.id ?? null)}
+                  >
+                    {busy
+                      ? 'Fixing…'
+                      : fix
+                        ? 'Fix listing and email'
+                        : 'Update email'}
+                  </button>
+                </span>
+              )}
+              {revising && (
+                <span className={`${styles.changeLine} ${styles.muted}`}>
+                  Fable is revising this fix; it can be applied in a minute.
+                </span>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
 function WarningItems({ items }: { items: SendWarning[] }) {
   return (
     <ul className={styles.warningList}>
@@ -2273,10 +2567,14 @@ function ConfirmSend({
   choice,
   holds,
   schedule,
+  changed = [],
   onCancel,
   onConfirm,
 }: {
   draft: Draft
+  /** Listings in the email that changed since it was built, still unfixed:
+   *  sending anyway takes its own tick. */
+  changed?: ListingAlert[]
   choice: Choice
   /** Why the first wave is held (a red verdict, say); empty when it isn't. */
   holds: string[]
@@ -2298,7 +2596,11 @@ function ConfirmSend({
   const [reason, setReason] = useState('')
   const reasonOk =
     holds.length === 0 || reason.trim().length >= OVERRIDE_MIN_CHARS
-  const allTicked = groups.every(g => ticked.has(g.kind)) && reasonOk
+  const [changedOk, setChangedOk] = useState(false)
+  const allTicked =
+    groups.every(g => ticked.has(g.kind)) &&
+    reasonOk &&
+    (changed.length === 0 || changedOk)
   const waves =
     typeof choice === 'number'
       ? (draft.waves?.waves ?? []).filter(w => w.wave >= choice)
@@ -2386,8 +2688,26 @@ function ConfirmSend({
             )
           })}
         </dl>
-        {(groups.length > 0 || holds.length > 0) && (
+        {(groups.length > 0 || holds.length > 0 || changed.length > 0) && (
           <div className={styles.dialogChecks}>
+            {changed.length > 0 && (
+              <fieldset className={styles.dialogCheck}>
+                <legend>Listings changed since this email was built</legend>
+                <ul className={styles.warningList}>
+                  {changed.map(a => (
+                    <li key={a.key}>{a.title}</li>
+                  ))}
+                </ul>
+                <label className={styles.checkRow}>
+                  <input
+                    type="checkbox"
+                    checked={changedOk}
+                    onChange={e => setChangedOk(e.target.checked)}
+                  />
+                  Send it with the old details anyway
+                </label>
+              </fieldset>
+            )}
             {holds.length > 0 && (
               <fieldset className={styles.dialogCheck}>
                 <legend>
