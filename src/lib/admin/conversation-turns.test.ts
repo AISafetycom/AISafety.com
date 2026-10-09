@@ -55,6 +55,8 @@ describe('turnsToKeep', () => {
 
 /** A turn time `n` minutes into the conversation. */
 const at = (n: number) => new Date(Date.UTC(2026, 8, 9, 2, n)).toISOString()
+const atSec = (s: number) =>
+  new Date(Date.UTC(2026, 8, 9, 2, 0, s)).toISOString()
 
 describe('placePerTurn', () => {
   const place = (from: number, to: number, insert = true): TurnPlacement => ({
@@ -168,9 +170,13 @@ describe('placeTurn', () => {
   it('drops a late turn the visitor has since re-sent or edited away', () => {
     // A Try again on turn 7, sent at minute 4, landed before the original.
     const retried = { ...row, turnTimes: [at(0), at(1), at(2), at(4)] }
-    expect(placeTurn(retried, 7, at(3))).toMatchObject({
+    expect(placeTurn(retried, 7, at(3))).toEqual({
+      from: 4,
+      to: 4,
       insert: false,
       latest: false,
+      // Named so the skip can be logged with both turns.
+      supersededBy: { position: 7, turnAt: at(4) },
     })
     // An Edit of the message behind turn 3, sent at minute 4.
     const edited = {
@@ -181,6 +187,32 @@ describe('placeTurn', () => {
     expect(placeTurn(edited, 7, at(3))).toMatchObject({
       insert: false,
       latest: false,
+      supersededBy: { position: 3, turnAt: at(4) },
+    })
+  })
+  it('keeps the next message after a stopped turn, stamped on arrival', () => {
+    // Turn 13 reached the server at 100 s, was stopped at 101 s and logged
+    // at once as abandoned, on an instance still loading the catalog. The
+    // visitor's next message reached a warm instance at 103 s. Its time is
+    // its arrival, not the end of that slow load, so it reads as sent
+    // after turn 13 — whether it moves on (reply 15) or edits message 12
+    // and re-sends it (reply 13).
+    const stopped = {
+      tools: [[], []],
+      turnIndices: [11, 13],
+      turnTimes: [atSec(0), atSec(100)],
+    }
+    expect(placeTurn(stopped, 15, atSec(103))).toEqual({
+      from: 2,
+      to: 2,
+      insert: true,
+      latest: true,
+    })
+    expect(placeTurn(stopped, 13, atSec(103))).toEqual({
+      from: 1,
+      to: 2,
+      insert: true,
+      latest: true,
     })
   })
   it('handles new rows, legacy rows and writes without a position', () => {
@@ -294,6 +326,14 @@ describe('turn writes, applied the way upsertConversation applies them', () => {
     // A Try again on turn 13 afterwards is a real re-send: turn 15 goes.
     row = write(row, upTo(13), at(4), ['t13 again'])
     expect(row.tools).toEqual([['t11'], ['t13 again']])
+  })
+  it('keeps a stopped turn and the message sent after it', () => {
+    // Turn 13 is stopped and logged at once; the next message follows.
+    let row = write(null, upTo(11), atSec(0), ['t11'])
+    row = write(row, upTo(13), atSec(100), [])
+    row = write(row, upTo(15), atSec(103), ['t15'])
+    expect(row.tools).toEqual([['t11'], [], ['t15']])
+    expect(row.turnIndices).toEqual([11, 13, 15])
   })
   it('lets a late Try again replace the entry it re-sent, keeping later turns', () => {
     let row = write(null, upTo(1), at(0), ['t1'])

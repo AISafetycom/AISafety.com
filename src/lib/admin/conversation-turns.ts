@@ -97,6 +97,10 @@ export interface TurnPlacement {
    *  prompt version become the row's. False for a LATE write: a slow request
    *  that finished after the visitor had already sent a later message. */
   latest: boolean
+  /** Set when the write is dropped (insert false): the logged turn that
+   *  cut it away — sent after it, at its position or an earlier one — so
+   *  the skip can be logged with both turns' positions and times. */
+  supersededBy?: { position: number; turnAt: string }
 }
 
 /** Where a turn whose reply lands at `replyIndex`, and whose user message
@@ -121,7 +125,13 @@ export interface TurnPlacement {
  *    2026).
  *
  *  Rows without positions append, as they always have; rows without turn
- *  times treat every write as the newest. */
+ *  times treat every write as the newest.
+ *
+ *  Everything here rests on turn times following the order the visitor sent
+ *  their messages, so the chat route stamps `turnAt` the moment a request
+ *  reaches it, before any slow setup: a turn stamped seconds late could
+ *  look sent after the visitor's next message and get that message's turn
+ *  dropped. */
 export function placeTurn(
   previous: {
     tools: unknown[]
@@ -159,7 +169,13 @@ export function placeTurn(
     if (!Number.isFinite(t) || t <= at) continue
     // A later turn at this position or before it: re-sent or edited away.
     if (position <= replyIndex) {
-      return { from: total, to: total, insert: false, latest: false }
+      return {
+        from: total,
+        to: total,
+        insert: false,
+        latest: false,
+        supersededBy: { position, turnAt: time },
+      }
     }
     if (firstLater == null) firstLater = g
   }

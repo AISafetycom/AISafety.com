@@ -863,8 +863,11 @@ async function writeLateTurn(
   perTurn: <T>(arr: T[] | undefined, next: T) => T[]
 ): Promise<void> {
   if (!placement.insert) {
-    console.log(
-      `[assistant] late turn write skipped for session ${input.session}: the visitor re-sent or edited that message before it landed`
+    // Rare, and it drops a turn from the log, so say exactly which turns
+    // were compared: a wrong drop shows up here with both times.
+    const by = placement.supersededBy
+    console.warn(
+      `[assistant] late turn write skipped for session ${input.session}: reply ${replyIndexOf(input.historyIndices)} (message at ${input.turnAt}) was re-sent or edited away by reply ${by?.position} (message at ${by?.turnAt}) before it landed`
     )
     return
   }
