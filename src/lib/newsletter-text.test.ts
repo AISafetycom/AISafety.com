@@ -5,7 +5,9 @@ import { describe, expect, it } from 'vitest'
 import {
   TEXT_SCRIPT,
   TEXT_SCRIPT_HASH,
-  safeInline,
+  inlineHtml,
+  inlinePlain,
+  parseInline,
   textHtml,
   textPage,
   textPlain,
@@ -70,8 +72,16 @@ describe('textVersion', () => {
   it('reads a real issue: its intro, its section and every card with the email’s own link', () => {
     const tv = textVersion(WEEK_41)!
     expect(tv.intro).toEqual([
-      'This is a weekly newsletter that lists newly announced training programs addressing existential risk from AI. ' +
-        'Visit <a href="https://aisafety.com/api/nl/ef5a4892a0dbf9ee/1">AISafety.com/training</a> for the full directory of upcoming programs.',
+      [
+        {
+          text: 'This is a weekly newsletter that lists newly announced training programs addressing existential risk from AI. Visit ',
+        },
+        {
+          text: 'AISafety.com/training',
+          href: 'https://aisafety.com/api/nl/ef5a4892a0dbf9ee/1',
+        },
+        { text: ' for the full directory of upcoming programs.' },
+      ],
     ])
     expect(tv.groups).toHaveLength(1)
     const [g] = tv.groups
@@ -197,10 +207,12 @@ describe('textVersion', () => {
   })
 })
 
-describe('safeInline', () => {
-  it('keeps text, http links, bold and italics, and nothing else', () => {
+describe('parseInline and inlineHtml', () => {
+  const clean = (html: string) => inlineHtml(parseInline(html))
+
+  it('keep text, http links, bold and italics, and nothing else', () => {
     expect(
-      safeInline(
+      clean(
         '<span style="x">Hi <b>bold</b> <i>it</i> <a style="c" href="https://x.example/?a=1&amp;b=2">x</a>' +
           '<img src="y"><script>alert(1)</script></span>'
       )
@@ -209,18 +221,45 @@ describe('safeInline', () => {
     )
   })
 
-  it('keeps only the words of a link that isn’t a web address', () => {
+  it('never let a tag back in: escaped or broken markup stays text', () => {
+    expect(clean('&lt;script&gt;alert(1)&lt;/script&gt;')).toBe(
+      '&lt;script&gt;alert(1)&lt;/script&gt;'
+    )
+    expect(clean('<scr<b>ipt>x</b> 1 < 2')).toBe('ipt&gt;x 1 &lt; 2')
+    expect(clean('<<em>script>x')).toBe('&lt;<em>script&gt;x</em>')
     expect(
-      safeInline(
+      clean('<a href="https://x.example/&quot;onclick=&quot;y">x</a>')
+    ).toBe('<a href="https://x.example/&quot;onclick=&quot;y">x</a>')
+  })
+
+  it('keep only the words of a link that isn’t a web address', () => {
+    expect(
+      clean(
         '<a href="%UNSUBSCRIBELINK%">unsubscribe</a> <a href="javascript:x">go</a>'
       )
     ).toBe('unsubscribe go')
-    expect(safeInline('<a href="mailto:x@example.com">x</a>')).toBe('x')
+    expect(clean('<a href="mailto:x@example.com">x</a>')).toBe('x')
   })
 
-  it('closes a link left open', () => {
-    expect(safeInline('<a href="https://x.example/">x')).toBe(
+  it('close a link left open, and keep one link one <a>', () => {
+    expect(clean('<a href="https://x.example/">x')).toBe(
       '<a href="https://x.example/">x</a>'
+    )
+    expect(clean('<a href="https://x.example/"><b>big</b> deal</a>')).toBe(
+      '<a href="https://x.example/"><strong>big</strong> deal</a>'
+    )
+  })
+
+  it('give plain text with each link’s address unless its words are one', () => {
+    expect(
+      inlinePlain(
+        parseInline(
+          'Visit <a href="https://aisafety.com/api/nl/0123456789abcdef/1">AISafety.com/events</a> or ' +
+            '<a href="https://x.example/">the <b>map</b></a> &amp; 1 &lt; 2.<br>Next'
+        )
+      )
+    ).toBe(
+      'Visit AISafety.com/events or the map (https://x.example/) & 1 < 2.\nNext'
     )
   })
 })

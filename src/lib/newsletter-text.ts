@@ -44,9 +44,19 @@ export interface TextTitle {
   href: string
 }
 
+/** A piece of an intro paragraph: plain characters (entities already
+ *  decoded), with the link, bold and italics they sit in. "\n" is a line
+ *  break. Turned back into HTML only by inlineHtml(), which escapes. */
+export interface Run {
+  text: string
+  href?: string
+  strong?: boolean
+  em?: boolean
+}
+
 export interface TextVersion {
-  /** The intro paragraphs as safe HTML: text, links, bold, italics. */
-  intro: string[]
+  /** The intro paragraphs, each as runs. */
+  intro: Run[][]
   groups: TextGroup[]
 }
 
@@ -136,39 +146,98 @@ function decode(s: string): string {
   })
 }
 
-/** Pure: an email paragraph's inside, keeping only text, links (http(s)
- *  only; one to an ActiveCampaign tag keeps just its words), bold, italics
- *  and line breaks. */
-export function safeInline(html: string): string {
-  let open = 0
-  return (
-    html.replace(
-      /<(\/?)([a-zA-Z][a-zA-Z0-9]*)\b([^>]*)>/g,
-      (_, close, tag: string, attrs: string) => {
-        const t = tag.toLowerCase()
-        if (t === 'a') {
-          if (close) {
-            if (!open) return ''
-            open--
-            return '</a>'
-          }
-          const href = /\bhref\s*=\s*"([^"]*)"/i.exec(attrs)
-          const url = href ? unescapeAttr(href[1]) : ''
-          if (!/^https?:\/\//i.test(url)) return ''
-          open++
-          return `<a href="${esc(url)}">`
-        }
-        if (t === 'br') return close ? '' : '<br>'
-        const norm = { strong: 'strong', b: 'strong', em: 'em', i: 'em' }[t]
-        return norm ? `<${close}${norm}>` : ''
-      }
-    ) + '</a>'.repeat(open)
-  )
+/** Pure: an email paragraph's inside as runs, keeping only text, links
+ *  (http(s) only; one to an ActiveCampaign tag keeps just its words), bold,
+ *  italics and line breaks. Every other tag is dropped; no HTML survives as
+ *  HTML. */
+export function parseInline(html: string): Run[] {
+  const runs: Run[] = []
+  let href: string | undefined
+  let strong = 0
+  let em = 0
+  const add = (text: string) => {
+    const run: Run = {
+      text,
+      ...(href ? { href } : {}),
+      ...(strong ? { strong: true } : {}),
+      ...(em ? { em: true } : {}),
+    }
+    const last = runs[runs.length - 1]
+    if (
+      last &&
+      last.text !== '\n' &&
+      text !== '\n' &&
+      last.href === run.href &&
+      last.strong === run.strong &&
+      last.em === run.em
+    )
+      last.text += text
+    else runs.push(run)
+  }
+  for (const m of html.matchAll(
+    /<(\/?)([a-zA-Z][a-zA-Z0-9]*)\b([^>]*)>|([^<]+)|</g
+  )) {
+    if (m[2] === undefined) {
+      add(decode(m[4] ?? '<'))
+      continue
+    }
+    const close = m[1] === '/'
+    const t = m[2].toLowerCase()
+    if (t === 'a') {
+      const found = close ? null : /\bhref\s*=\s*"([^"]*)"/i.exec(m[3])
+      const url = found ? decode(found[1]) : ''
+      href = /^https?:\/\//i.test(url) ? url : undefined
+    } else if (t === 'br') {
+      if (!close) add('\n')
+    } else if (t === 'strong' || t === 'b')
+      strong = Math.max(0, strong + (close ? -1 : 1))
+    else if (t === 'em' || t === 'i') em = Math.max(0, em + (close ? -1 : 1))
+  }
+  return runs
+}
+
+/** Pure: runs as HTML — every character escaped, each link one <a>. */
+export function inlineHtml(runs: Run[]): string {
+  let out = ''
+  let open: string | undefined
+  for (const r of runs) {
+    if (r.href !== open) {
+      if (open) out += '</a>'
+      if (r.href) out += `<a href="${esc(r.href)}">`
+      open = r.href
+    }
+    if (r.text === '\n') {
+      out += '<br>'
+      continue
+    }
+    let piece = esc(r.text)
+    if (r.em) piece = `<em>${piece}</em>`
+    if (r.strong) piece = `<strong>${piece}</strong>`
+    out += piece
+  }
+  return open ? out + '</a>' : out
+}
+
+/** Pure: runs as plain text. A link whose words are already its address
+ *  ("AISafety.com/training") stays as the words; any other gets its address
+ *  after it in brackets. */
+export function inlinePlain(runs: Run[]): string {
+  let out = ''
+  for (let i = 0; i < runs.length; ) {
+    const href = runs[i].href
+    let words = ''
+    for (; i < runs.length && runs[i].href === href; i++) words += runs[i].text
+    out +=
+      href && !/^[\w.-]+\.[a-z]{2,}(\/\S*)?$/i.test(words.trim())
+        ? `${words} (${href})`
+        : words
+  }
+  return out.trim()
 }
 
 /** Pure: the intro paragraphs of the email (render.py intro_paragraphs():
  *  the <p>s that open the body cell, before its first section or card). */
-function introOf(email: string): string[] {
+function introOf(email: string): Run[][] {
   const cell = /<td\b[^>]*class="inner"[^>]*>/.exec(email)
   if (!cell) return []
   const from = cell.index + cell[0].length
@@ -177,8 +246,15 @@ function introOf(email: string): string[] {
     .filter(i => i >= 0)
   const region = email.slice(from, ends.length ? Math.min(...ends) : undefined)
   return [...region.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/g)]
-    .map(m => safeInline(m[1]).trim())
-    .filter(p => decode(p.replace(/<[^>]*>/g, '')).trim())
+    .map(m => {
+      const runs = parseInline(m[1])
+      if (runs.length) {
+        runs[0].text = runs[0].text.trimStart()
+        runs[runs.length - 1].text = runs[runs.length - 1].text.trimEnd()
+      }
+      return runs.filter(r => r.text)
+    })
+    .filter(runs => runs.some(r => r.text.trim()))
 }
 
 /** Pure: each card's own link in the email, by "gN:KEY". */
@@ -269,7 +345,7 @@ export function textHtml(tv: TextVersion, title?: TextTitle): string {
         `<p><strong><a href="${esc(title.href)}">${esc(title.text)}</a></strong></p>`,
       ]
     : []
-  out.push(...tv.intro.map(p => `<p><em>${p}</em></p>`))
+  out.push(...tv.intro.map(p => `<p><em>${inlineHtml(p)}</em></p>`))
   for (const g of tv.groups) {
     out.push(`<p><strong>${esc(g.label)}</strong></p>`)
     for (const n of g.notes) out.push(`<p>${linkify(n)}</p>`)
@@ -286,29 +362,12 @@ export function textHtml(tv: TextVersion, title?: TextTitle): string {
   return out.join('\n')
 }
 
-/** Pure: an intro paragraph as plain text. A link whose words are already
- *  its address ("AISafety.com/training") stays as the words; any other
- *  gets its address after it in brackets. */
-function plainInline(html: string): string {
-  return decode(
-    html
-      .replace(/<a href="([^"]*)">([\s\S]*?)<\/a>/g, (_, href, inner) => {
-        const words = decode(inner.replace(/<[^>]*>/g, '')).trim()
-        return /^[\w.-]+\.[a-z]{2,}(\/\S*)?$/i.test(words)
-          ? inner
-          : `${inner} (${unescapeAttr(href)})`
-      })
-      .replace(/<br>/g, '\n')
-      .replace(/<[^>]*>/g, '')
-  ).trim()
-}
-
 /** Pure: the text version as plain text, for apps that paste no
  *  formatting: the same title and listings, each link written out under
  *  its line. */
 export function textPlain(tv: TextVersion, title?: TextTitle): string {
   const out: string[] = title ? [`${title.text}\n${title.href}`] : []
-  out.push(...tv.intro.map(plainInline))
+  out.push(...tv.intro.map(inlinePlain))
   for (const g of tv.groups) {
     out.push(g.label, ...g.notes)
     for (const c of g.cards)
