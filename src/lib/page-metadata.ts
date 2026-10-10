@@ -14,10 +14,18 @@ import type { SitePage } from './site-pages'
  * (file-based images only apply when the same segment's config leaves
  * `images` unset). Both happened on 2–3 September 2026.
  */
-export function pageMetadata({ path, title, description }: SitePage): Metadata {
+export function pageMetadata(
+  { path, title, description }: SitePage,
+  /** A feed to announce, so a feed reader given the page's address finds
+   *  it (/events and /training: their newsletter's). */
+  feed?: { url: string; title: string }
+): Metadata {
   return {
     title: `${title} – AISafety.com`,
     description,
-    alternates: { canonical: path },
+    alternates: {
+      canonical: path,
+      ...(feed ? { types: { 'application/rss+xml': [feed] } } : {}),
+    },
   }
 }
