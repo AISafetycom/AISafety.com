@@ -91,6 +91,9 @@ describe('/newsletter/<key>/<issue>', () => {
     expect(html).toContain('noindex')
     expect(html).not.toMatch(/%[A-Z]/)
     expect(html).not.toContain('View in browser')
+    expect(html).toContain(
+      '<a href="/newsletter/events/week-41-2026/text" style="color:#aab2b3;text-decoration:underline;text-decoration-color:#325354;">Copy text version</a>'
+    )
     expect(html).not.toContain('aisafety-issue')
     expect(html).not.toContain('aisafety-cards')
     expect(h.put).toHaveBeenCalledTimes(1)
