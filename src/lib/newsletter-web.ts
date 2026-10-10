@@ -16,15 +16,36 @@
    email as sent; the page leaves out what only works inside an email: the
    footer between the pipeline's <!--web:hide--> markers (Unsubscribe, View
    in browser, the postal address), the content marker and the card
-   manifest. The page isn't indexed by search engines.
+   manifest. In the footer's place it links the issue's text version
+   (src/lib/newsletter-text.ts, 10 Oct 2026). The page isn't indexed by
+   search engines.
 
    This module is the pure part (addresses and the page itself); the reads
    and the kept copy are in src/app/newsletter/[key]/[issue]/route.ts. */
 
+// `sender` is the From name each newsletter goes out under (~/Newsletter/ac.py).
 export const WEB_NEWSLETTERS = {
-  events: { list: '6', prefix: 'Events', unit: 'week', page: '/events' },
-  training: { list: '7', prefix: 'Training', unit: 'week', page: '/training' },
-  funding: { list: '8', prefix: 'Funding', unit: 'issue', page: '/funding' },
+  events: {
+    list: '6',
+    prefix: 'Events',
+    unit: 'week',
+    page: '/events',
+    sender: 'AI Safety Events',
+  },
+  training: {
+    list: '7',
+    prefix: 'Training',
+    unit: 'week',
+    page: '/training',
+    sender: 'AI Safety Training',
+  },
+  funding: {
+    list: '8',
+    prefix: 'Funding',
+    unit: 'issue',
+    page: '/funding',
+    sender: 'AI Safety Funding',
+  },
 } as const
 
 export type WebKey = keyof typeof WEB_NEWSLETTERS
@@ -68,12 +89,29 @@ export function webPath(name: string): string | null {
   return `/newsletter/${key}/${unit}-${m[3]}-${m[4]}`
 }
 
-/** Pure: the sent email as a web page. */
-export function webPage(email: string): string {
+/** Pure: the footer the web version shows in place of the email's: the
+ *  link to the issue's text version, set like the email's own footer. */
+function webFooter(textHref: string): string {
+  return (
+    '<div style="margin-top:24px;border-top:1px solid #1c3334;"></div>\n' +
+    '<div style="margin-top:24px;font-size:13px;line-height:22px;font-weight:300;color:#aab2b3;">' +
+    `<a href="${textHref.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}" ` +
+    'style="color:#aab2b3;text-decoration:underline;text-decoration-color:#325354;">Text version</a></div>'
+  )
+}
+
+/** Pure: the sent email as a web page. With `textHref` (the issue has a
+ *  text version), its footer is the link to that instead. */
+export function webPage(email: string, textHref?: string): string {
+  let footer = textHref ? webFooter(textHref) : ''
   return (
     email
       // The pipeline's footer: divider, Unsubscribe · View in browser, address.
-      .replace(/<!--web:hide-->[\s\S]*?<!--\/web:hide-->/g, '')
+      .replace(/<!--web:hide-->[\s\S]*?<!--\/web:hide-->/g, () => {
+        const out = footer
+        footer = ''
+        return out
+      })
       // Emails built before the markers: the same footer lines, unmarked.
       .replace(
         /<div[^>]*>\s*<a href="%UNSUBSCRIBELINK%"[\s\S]*?<\/div>\s*<div[^>]*>%SENDER-INFO-SINGLELINE%<\/div>/g,
