@@ -2811,7 +2811,12 @@ export default function QueueAdmin({
           break
         case 'Escape':
           if (showHelp) setShowHelp(false)
-          else if (item && d.mode !== 'idle') {
+          else if (item && d.editing) {
+            // An open field editor closes wherever the focus is: a click on
+            // the blank part of a choice editor takes focus off its buttons,
+            // and Esc then went nowhere (Bryce, 10 Oct 2026, on a Type field).
+            setDraft(item.id, { editing: null })
+          } else if (item && d.mode !== 'idle') {
             setDraft(item.id, { mode: 'idle', chip: null, other: '' })
           } else if (showDone && doneOpen) setDoneOpen(false)
           else if (searching) clearSearch()
