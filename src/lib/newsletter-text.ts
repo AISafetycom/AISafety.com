@@ -37,6 +37,13 @@ export interface TextGroup {
   cards: TextCard[]
 }
 
+/** The line a copy starts with, so a paste says where it's from:
+ *  "AI Safety Training · Week 41, 2026", linking the issue's web version. */
+export interface TextTitle {
+  text: string
+  href: string
+}
+
 export interface TextVersion {
   /** The intro paragraphs as safe HTML: text, links, bold, italics. */
   intro: string[]
@@ -253,11 +260,16 @@ function linkify(line: string): string {
 }
 
 /** Pure: the text version as simple HTML — what the page shows and the
- *  button copies. One paragraph per card, so a paste keeps each listing
- *  together; detail rows (joined with " · ") in italics, like the Substack
- *  emails had them. */
-export function textHtml(tv: TextVersion): string {
-  const out: string[] = tv.intro.map(p => `<p><em>${p}</em></p>`)
+ *  button copies. The title first, in bold; one paragraph per card, so a
+ *  paste keeps each listing together; detail rows (joined with " · ") in
+ *  italics, like the Substack emails had them. */
+export function textHtml(tv: TextVersion, title?: TextTitle): string {
+  const out: string[] = title
+    ? [
+        `<p><strong><a href="${esc(title.href)}">${esc(title.text)}</a></strong></p>`,
+      ]
+    : []
+  out.push(...tv.intro.map(p => `<p><em>${p}</em></p>`))
   for (const g of tv.groups) {
     out.push(`<p><strong>${esc(g.label)}</strong></p>`)
     for (const n of g.notes) out.push(`<p>${linkify(n)}</p>`)
@@ -292,9 +304,11 @@ function plainInline(html: string): string {
 }
 
 /** Pure: the text version as plain text, for apps that paste no
- *  formatting: the same listings, each link written out under its card. */
-export function textPlain(tv: TextVersion): string {
-  const out: string[] = tv.intro.map(plainInline)
+ *  formatting: the same title and listings, each link written out under
+ *  its line. */
+export function textPlain(tv: TextVersion, title?: TextTitle): string {
+  const out: string[] = title ? [`${title.text}\n${title.href}`] : []
+  out.push(...tv.intro.map(plainInline))
   for (const g of tv.groups) {
     out.push(g.label, ...g.notes)
     for (const c of g.cards)
@@ -345,7 +359,8 @@ export const TEXT_SCRIPT = `(function () {
 export const TEXT_SCRIPT_HASH =
   'sha256-' + createHash('sha256').update(TEXT_SCRIPT).digest('base64')
 
-/** Pure: the text version's page. `emailHref` is the issue's web version. */
+/** Pure: the text version's page. `emailHref` is the issue's web version
+ *  (a path on the site); the copy's title links it in full. */
 export function textPage(
   tv: TextVersion,
   key: WebKey,
@@ -353,6 +368,10 @@ export function textPage(
   emailHref: string
 ): string {
   const sender = WEB_NEWSLETTERS[key].sender
+  const title = {
+    text: `${sender} · ${subject}`,
+    href: `https://aisafety.com${emailHref}`,
+  }
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -391,9 +410,9 @@ export function textPage(
 <a href="${esc(emailHref)}">View the email</a>
 </div>
 <div class="text" id="text">
-${textHtml(tv)}
+${textHtml(tv, title)}
 </div>
-<textarea id="plain" readonly aria-hidden="true" tabindex="-1">${esc(textPlain(tv))}</textarea>
+<textarea id="plain" readonly aria-hidden="true" tabindex="-1">${esc(textPlain(tv, title))}</textarea>
 </main>
 <script>${TEXT_SCRIPT}</script>
 </body>

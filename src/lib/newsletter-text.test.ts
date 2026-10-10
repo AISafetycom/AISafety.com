@@ -256,6 +256,19 @@ describe('textHtml and textPlain', () => {
     )
   })
 
+  it('start with the title when given one', () => {
+    const title = {
+      text: 'AI Safety Events · Week 41, 2026',
+      href: 'https://aisafety.com/newsletter/events/week-41-2026',
+    }
+    expect(textHtml(tv, title).split('\n')[0]).toBe(
+      '<p><strong><a href="https://aisafety.com/newsletter/events/week-41-2026">AI Safety Events · Week 41, 2026</a></strong></p>'
+    )
+    expect(textPlain(tv, title)).toMatch(
+      /^AI Safety Events · Week 41, 2026\nhttps:\/\/aisafety\.com\/newsletter\/events\/week-41-2026\n\nThe intro/
+    )
+  })
+
   it('escape what the plain text carries', () => {
     const odd = textVersion(
       email({
@@ -290,8 +303,16 @@ describe('textPage', () => {
     expect(TEXT_SCRIPT_HASH).toBe(
       'sha256-' + createHash('sha256').update(TEXT_SCRIPT).digest('base64')
     )
+    // What's copied starts with where it's from, linked in full.
+    expect(page).toContain(
+      '<div class="text" id="text">\n<p><strong><a href="https://aisafety.com/newsletter/training/week-41-2026">' +
+        'AI Safety Training · Week 41, 2026</a></strong></p>\n<p><em>This is a weekly newsletter'
+    )
     // The plain version rides along, escaped, for the button.
-    expect(page).toContain('<textarea id="plain"')
+    expect(page).toContain(
+      '<textarea id="plain" readonly aria-hidden="true" tabindex="-1">AI Safety Training · Week 41, 2026\n' +
+        'https://aisafety.com/newsletter/training/week-41-2026\n\nThis is a weekly newsletter'
+    )
     expect(page).toContain('Berkeley, USA &amp; London, UK')
     expect(page).not.toContain('Slack')
   })
