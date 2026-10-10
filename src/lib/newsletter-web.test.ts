@@ -88,6 +88,23 @@ describe('webPage', () => {
     expect(page).toMatch(/^<!DOCTYPE html>/)
   })
 
+  it('links the text version in place of the footer, once', () => {
+    const page = webPage(
+      email(
+        `<!--web:hide-->${DIVIDER}${LINKS}<!--/web:hide--><!--web:hide-->x<!--/web:hide-->`
+      ),
+      '/newsletter/events/week-41-2026/text'
+    )
+    expect(page).not.toContain('Unsubscribe')
+    expect(page.match(/>Text version</g)).toHaveLength(1)
+    expect(page).toContain(
+      '<a href="/newsletter/events/week-41-2026/text" style="color:#aab2b3;text-decoration:underline;text-decoration-color:#325354;">Text version</a>'
+    )
+    expect(
+      webPage(email(`<!--web:hide-->${LINKS}<!--/web:hide-->`))
+    ).not.toContain('>Text version<')
+  })
+
   it('keeps the page out of search engines', () => {
     expect(webPage(email(''))).toContain(
       '<head>\n<meta name="robots" content="noindex">\n<meta charset="utf-8">'
