@@ -794,6 +794,36 @@
   overflow-wrap: anywhere;
 }
 
+/* Listings changed since the email was built (9 Oct 2026): one item per
+   listing, its finding in the warning colour and its button under it. */
+.changeList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.changeItem {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.changeName {
+  font-weight: 600;
+  color: var(--white);
+}
+
+.changeLine {
+  color: #f5b942;
+}
+
 /* The confirm dialog's ticks: one box per kind of warning, the list
    scrolling inside the dialog when it's long. */
 .dialogChecks {
