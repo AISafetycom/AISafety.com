@@ -22,7 +22,7 @@
     },
     {
       "path": "/api/admin/newsletter/archive",
-      "schedule": "30 6 * * *"
+      "schedule": "37 6 * * *"
     }
   ]
 }

@@ -202,15 +202,38 @@ export function etagMatches(header: string | null, etag: string): boolean {
    (Feedly, Inoreader, NewsBlur…) fetches once for all its users and says
    how many in its User-Agent ("… 12 subscribers"); a reader app on
    someone's own device fetches for that person alone. Search engines,
-   link checkers and scripts aren't readers. */
+   AI assistants, link previews, checkers and scripts aren't readers, and
+   nor is someone opening the feed in a browser tab (the route leaves those
+   out by their navigation headers). Anyone can send any User-Agent, so a
+   subscriber count is taken only from a known service, under its own
+   name, and never above SERVICE_MAX: a made-up one can't add rows or
+   inflate the numbers beyond that. */
 
+/** Feed services that report their users' count, by the name they're
+ *  stored under. */
+const FEED_SERVICES: [string, RegExp][] = [
+  ['Feedly', /feedly/i],
+  ['Inoreader', /inoreader/i],
+  ['NewsBlur', /newsblur/i],
+  ['Feedbin', /feedbin/i],
+  ['The Old Reader', /theoldreader/i],
+  ['Feeder', /feeder\.co\b/i],
+  ['Feedspot', /feedspot/i],
+  ['Bloglovin', /bloglovin/i],
+  ['Netvibes', /netvibes/i],
+]
 const SUBSCRIBERS_RE = /(\d{1,7})\s+(?:subscribers?|readers?)\b/i
+const FEED_ID_RE = /feed-?id[:=\s]\s*(\d{1,12})/i
+/** More users than any one service plausibly has for this feed: the
+ *  newsletters' own lists hold about 3,000. */
+export const SERVICE_MAX = 5000
 const NOT_A_READER_RE =
-  /bot\b|crawler|spider|slurp|curl|wget|python|go-http-client|node-fetch|undici|axios|okhttp|java\/|libwww|httpclient|headless|playwright|puppeteer|lighthouse|facebookexternalhit|preview/i
+  /bot|crawl|spider|slurp|preview|prefetch|scan|monitor|curl|wget|python|java\/|go-http|okhttp|axios|node-fetch|undici|^node$|^deno|^bun\/|libwww|httpclient|headless|phantom|playwright|puppeteer|lighthouse|zgrab|facebookexternalhit|whatsapp|iframely|embedly|-User\b|Meta-External|cohere-ai/i
 
 export type FeedReader =
-  /** A feed service, and how many of its users follow the feed. The
-   *  service is named by its User-Agent with the count taken out. */
+  /** A known feed service, and how many of its users follow the feed.
+   *  `service` is its name, plus the feed id it sends, if any (a service
+   *  can follow the feed under two addresses, each with its own users). */
   | { kind: 'service'; service: string; readers: number }
   /** A reader app fetching for one person. */
   | { kind: 'direct' }
@@ -220,14 +243,26 @@ export type FeedReader =
 export function feedReader(userAgent: string | null): FeedReader | null {
   const ua = (userAgent ?? '').trim()
   if (!ua) return null
-  const m = SUBSCRIBERS_RE.exec(ua)
-  if (m) {
-    const service = ua
-      .replace(SUBSCRIBERS_RE, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 200)
-    return { kind: 'service', service, readers: Number(m[1]) }
+  const count = SUBSCRIBERS_RE.exec(ua)
+  const known = FEED_SERVICES.find(([, re]) => re.test(ua))
+  if (count && known) {
+    const id = FEED_ID_RE.exec(ua)?.[1]
+    return {
+      kind: 'service',
+      service: id ? `${known[0]} ${id}` : known[0],
+      readers: Math.min(Number(count[1]), SERVICE_MAX),
+    }
   }
   return NOT_A_READER_RE.test(ua) ? null : { kind: 'direct' }
+}
+
+/** Pure: whether a request is a browser opening the feed as a page (a
+ *  click on the past issues page's link, or the address typed in): a
+ *  look, not a reader. Browsers send these headers on every page load;
+ *  feed services and reader apps don't. */
+export function isBrowserLoad(headers: Headers): boolean {
+  return (
+    headers.get('sec-fetch-mode') === 'navigate' ||
+    ['document', 'iframe'].includes(headers.get('sec-fetch-dest') ?? '')
+  )
 }

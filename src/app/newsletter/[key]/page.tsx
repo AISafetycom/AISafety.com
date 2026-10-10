@@ -25,7 +25,12 @@ import styles from './page.module.css'
 // readers. A newsletter with no issue sent that way yet (Funding, until its
 // move) is a 404 until its first one. Kept out of search results, like the
 // issues themselves.
+//
+// force-static: the reads behind the list (Upstash, ActiveCampaign) are
+// uncached fetches, which would otherwise make Next render the page on
+// every visit instead of every ten minutes.
 
+export const dynamic = 'force-static'
 export const revalidate = 600
 export const dynamicParams = false
 
@@ -61,10 +66,13 @@ export default async function PastIssuesPage({ params }: Props) {
   try {
     issues = await archiveIssues(key)
   } catch (err) {
-    // Neither the record nor ActiveCampaign answered: say so (until the
-    // next rebuild, ten minutes on) rather than fail the site's build.
+    // Neither the record nor ActiveCampaign answered. After the build, a
+    // failed rebuild keeps the last good page up: let it fail. During the
+    // build (several a day, after Airtable edits), say so on the page
+    // until the first rebuild rather than fail the whole site's deploy.
+    if (process.env.NEXT_PHASE !== 'phase-production-build') throw err
     console.error(
-      `[newsletter-archive] /newsletter/${key}: ${err instanceof Error ? err.message : String(err)}`
+      `[newsletter-archive] /newsletter/${key} at build: ${err instanceof Error ? err.message : String(err)}`
     )
     issues = null
   }
@@ -83,7 +91,10 @@ export default async function PastIssuesPage({ params }: Props) {
           {issues ? (
             <ul className={`paragraph-small ${styles.issues}`}>
               {issues.map(issue => (
-                <li key={issue.slug} className={styles.issue}>
+                <li
+                  key={issue.slug}
+                  className={`${styles.issue} gap-16px padding-top-12px padding-bottom-12px`}
+                >
                   <span className="color-teal-400">
                     {issue.sentAt ? formatDate(new Date(issue.sentAt)) : ''}
                   </span>
@@ -92,7 +103,7 @@ export default async function PastIssuesPage({ params }: Props) {
                     newsletter={nl.prefix}
                     target="issue"
                     label={issue.slug}
-                    className={styles.title}
+                    className={`color-white ${styles.title}`}
                   >
                     {issueTitle(key, issue.slug)}
                   </ArchiveLink>

@@ -12,11 +12,13 @@
      nobody opens the pages. Elsewhere (a laptop, a preview) the record is
      only read: every copy of the site shares the one Upstash database.
 
-   Each feed fetch is also counted here, per newsletter per day (see
-   feedReader()): a feed service's own subscriber count, and the reader apps
-   that fetch for one person, as an approximate distinct count that keeps no
-   address. /admin/analytics' Newsletters tab shows them. */
+   Each feed fetch by a reader is also counted here, per newsletter per day
+   (see feedReader()): a known feed service's own subscriber count, and the
+   reader apps that fetch for one person, as an approximate distinct count
+   of salted hashes that keeps no address. /admin/analytics' Newsletters
+   tab shows them. */
 
+import { createHmac, randomBytes } from 'node:crypto'
 import { Redis } from '@upstash/redis'
 import { sentIssuesOn } from '@/lib/admin/newsletter'
 import { WEB_NEWSLETTERS, type WebKey } from '@/lib/newsletter-web'
@@ -42,9 +44,10 @@ const store =
 const ISSUES_PREFIX = 'aisafety:newsletter:archive:'
 
 /** The feed's readers, per newsletter per UTC day: a hash of feed services
- *  (their User-Agent → subscriber count, the day's latest) and a
- *  HyperLogLog of reader apps. No expiry: they're tiny, and the history is
- *  the point. */
+ *  (service name → subscriber count, the day's latest) and a HyperLogLog
+ *  of reader apps. No expiry: they're tiny (the hash has a field per known
+ *  service, the HyperLogLog at most 12 KB), and the history is the point.
+ *  The day's salt (`salt:<day>`) expires after two days. */
 const FEED_PREFIX = 'aisafety:newsletter:feed:'
 
 /** Only the live site writes the record and the feed counts, the way only
@@ -130,9 +133,34 @@ function utcDay(at: Date): string {
   return at.toISOString().slice(0, 10)
 }
 
+/** The day's random salt for the reader apps' count, made by whichever
+ *  fetch comes first and gone two days later: until then the day's fetches
+ *  share it, so one app counts once; after, nobody can test whether a given
+ *  address and app fetched the feed that day. Kept in memory for the day
+ *  on this instance. */
+const salts = new Map<string, string>()
+
+async function daySalt(redis: Redis, day: string): Promise<string> {
+  const known = salts.get(day)
+  if (known) return known
+  const key = `${FEED_PREFIX}salt:${day}`
+  // "s" first: Upstash would read an all-digit value back as a number.
+  await redis.set(key, `s${randomBytes(16).toString('hex')}`, {
+    nx: true,
+    ex: 2 * 86_400,
+  })
+  const salt = await redis.get<string>(key)
+  if (typeof salt !== 'string') throw new Error(`no salt for ${day}`)
+  salts.clear()
+  salts.set(day, salt)
+  return salt
+}
+
 /** Counts one fetch of the feed, on the live site only (a laptop's or a
- *  preview's fetches would land in the same counts). Never throws: it runs
- *  after the reader has had the feed, and a count must never break it. */
+ *  preview's fetches would land in the same counts). A reader app goes in
+ *  as a salted hash of its address and User-Agent, so the count keeps
+ *  neither. Never throws: it runs after the reader has had the feed, and a
+ *  count must never break it. */
 export async function countFeedFetch(
   key: WebKey,
   reader: FeedReader,
@@ -140,13 +168,18 @@ export async function countFeedFetch(
   at: Date
 ): Promise<void> {
   if (!store || !writesRecord()) return
-  const base = `${FEED_PREFIX}${key}:${utcDay(at)}`
+  const day = utcDay(at)
+  const base = `${FEED_PREFIX}${key}:${day}`
   try {
     if (reader.kind === 'service')
       await store.hset(`${base}:services`, {
         [reader.service]: reader.readers,
       })
-    else await store.pfadd(`${base}:direct`, fetcher)
+    else {
+      const salt = await daySalt(store, day)
+      const id = createHmac('sha256', salt).update(fetcher).digest('base64url')
+      await store.pfadd(`${base}:direct`, id)
+    }
   } catch (err) {
     // Analytics only: the feed has already gone out.
     console.warn(

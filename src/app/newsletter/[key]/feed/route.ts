@@ -6,10 +6,11 @@
   src/lib/newsletter-archive-store.ts where the list comes from). 404 for a
   newsletter with no issue sent that way yet.
 
-  Each fetch is counted as a reader (after the answer has gone), so the CDN
-  doesn't keep the feed: every poll reaches the function. What's kept
-  instead is the built feed, on this server instance, for ten minutes, and
-  a reader asking again for the copy it has gets a 304 without the body.
+  Each fetch by a reader is counted (after the answer has gone; feedReader()
+  and isBrowserLoad() say who counts), so the CDN doesn't keep the feed:
+  every poll reaches the function. What's kept instead is the built feed,
+  on this server instance, for ten minutes, and a reader asking again for
+  the copy it has gets a 304 without the body.
 */
 
 import { after } from 'next/server'
@@ -23,6 +24,7 @@ import {
   feedEtag,
   feedReader,
   feedXml,
+  isBrowserLoad,
   type FeedEntry,
 } from '@/lib/newsletter-archive'
 import { archiveIssues, countFeedFetch } from '@/lib/newsletter-archive-store'
@@ -115,7 +117,9 @@ export async function GET(req: Request, { params }: Ctx) {
     return text('This newsletter has no issues here yet.', 404, 'no-store')
 
   const reader =
-    req.method === 'GET' ? feedReader(req.headers.get('user-agent')) : null
+    req.method === 'GET' && !isBrowserLoad(req.headers)
+      ? feedReader(req.headers.get('user-agent'))
+      : null
   if (reader) {
     const fetcher = `${getClientIp(req.headers)}|${req.headers.get('user-agent') ?? ''}`
     after(() => countFeedFetch(key, reader, fetcher, new Date()))

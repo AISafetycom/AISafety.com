@@ -1747,8 +1747,9 @@ function PastIssuesPanel({
         Feed readers aren&apos;t for the range: they&apos;re the people
         following the feed on one day (UTC). A feed service such as Feedly
         fetches once for all its users and reports how many; a reader app
-        fetches for one person. Search engines and scripts aren&apos;t counted.
-        Recording since 10 October 2026.
+        fetches for one person. Opening the feed in a browser, search engines,
+        AI assistants and scripts aren&apos;t counted. Recording since October
+        2026.
       </p>
     </Panel>
   )

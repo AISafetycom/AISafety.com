@@ -7,6 +7,8 @@ import {
   feedEtag,
   feedReader,
   feedXml,
+  isBrowserLoad,
+  SERVICE_MAX,
   issueSlug,
   issueTitle,
   mergeIssues,
@@ -193,27 +195,44 @@ describe('feedEtag / etagMatches', () => {
 })
 
 describe('feedReader', () => {
-  it('takes a feed service’s own count of its users', () => {
+  it('takes a known feed service’s count of its users, under its name', () => {
     expect(
       feedReader(
         'Feedly/1.0 (+http://www.feedly.com/fetcher.html; 12 subscribers; like FeedFetcher-Google)'
       )
-    ).toEqual({
-      kind: 'service',
-      service:
-        'Feedly/1.0 (+http://www.feedly.com/fetcher.html; ; like FeedFetcher-Google)',
-      readers: 12,
-    })
+    ).toEqual({ kind: 'service', service: 'Feedly', readers: 12 })
     expect(
       feedReader(
         'Mozilla/5.0 (compatible; Inoreader/1.0; https://www.inoreader.com; 3 subscribers)'
       )
-    ).toMatchObject({ kind: 'service', readers: 3 })
+    ).toEqual({ kind: 'service', service: 'Inoreader', readers: 3 })
     expect(
       feedReader(
         'NewsBlur Feed Fetcher - 1 subscriber - https://www.newsblur.com/site/1 (Mozilla/5.0)'
       )
-    ).toMatchObject({ kind: 'service', readers: 1 })
+    ).toEqual({ kind: 'service', service: 'NewsBlur', readers: 1 })
+  })
+
+  it('keeps a service’s feeds apart by the feed id it sends', () => {
+    expect(feedReader('Feedbin feed-id:1234 - 4 subscribers')).toEqual({
+      kind: 'service',
+      service: 'Feedbin 1234',
+      readers: 4,
+    })
+  })
+
+  it('caps a count at SERVICE_MAX', () => {
+    expect(
+      feedReader(
+        'Feedly/1.0 (+http://www.feedly.com/fetcher.html; 9999999 subscribers)'
+      )
+    ).toEqual({ kind: 'service', service: 'Feedly', readers: SERVICE_MAX })
+  })
+
+  it('takes no count from an agent it doesn’t know', () => {
+    // A made-up service can't add rows or numbers: one fetcher at most.
+    expect(feedReader('x8231904 5 subscribers')).toEqual({ kind: 'direct' })
+    expect(feedReader('curl/8.4.0 9999999 subscribers')).toBeNull()
   })
 
   it('counts a reader app as one person', () => {
@@ -225,17 +244,40 @@ describe('feedReader', () => {
     )
   })
 
-  it('counts no search engine, script or empty agent', () => {
+  it('counts no search engine, AI assistant, link preview, script or empty agent', () => {
     for (const ua of [
       'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
       'Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)',
+      'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Claude-User/1.0; +Claude-User@anthropic.com)',
+      'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Perplexity-User/1.0; +https://perplexity.ai/perplexity-user)',
+      'meta-externalagent/1.1 (+https://developers.facebook.com/docs/sharing/webmasters/crawler)',
+      'WhatsApp/2.23.20.0',
+      'Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)',
       'curl/8.7.1',
       'python-requests/2.32.3',
       'Go-http-client/1.1',
-      'Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)',
+      'node',
       '',
       null,
     ])
       expect(feedReader(ua)).toBeNull()
+  })
+})
+
+describe('isBrowserLoad', () => {
+  it('tells a browser opening the feed as a page from a reader fetching it', () => {
+    const h = (init: Record<string, string>) => new Headers(init)
+    expect(
+      isBrowserLoad(
+        h({ 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' })
+      )
+    ).toBe(true)
+    expect(isBrowserLoad(h({ 'sec-fetch-dest': 'iframe' }))).toBe(true)
+    // A browser extension's reader fetches it from script.
+    expect(
+      isBrowserLoad(h({ 'sec-fetch-mode': 'cors', 'sec-fetch-dest': 'empty' }))
+    ).toBe(false)
+    // Feed services and reader apps send no Sec-Fetch headers.
+    expect(isBrowserLoad(h({}))).toBe(false)
   })
 })
