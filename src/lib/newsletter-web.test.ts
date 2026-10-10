@@ -96,13 +96,13 @@ describe('webPage', () => {
       '/newsletter/events/week-41-2026/text'
     )
     expect(page).not.toContain('Unsubscribe')
-    expect(page.match(/Copy text version/g)).toHaveLength(1)
+    expect(page.match(/>Text version</g)).toHaveLength(1)
     expect(page).toContain(
-      '<a href="/newsletter/events/week-41-2026/text" style="color:#aab2b3;text-decoration:underline;text-decoration-color:#325354;">Copy text version</a>'
+      '<a href="/newsletter/events/week-41-2026/text" style="color:#aab2b3;text-decoration:underline;text-decoration-color:#325354;">Text version</a>'
     )
     expect(
       webPage(email(`<!--web:hide-->${LINKS}<!--/web:hide-->`))
-    ).not.toContain('Copy text version')
+    ).not.toContain('>Text version<')
   })
 
   it('keeps the page out of search engines', () => {

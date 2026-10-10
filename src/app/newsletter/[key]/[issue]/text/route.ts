@@ -1,5 +1,5 @@
 /*
-  GET /newsletter/<key>/<issue>/text   (public — the email's "Copy text version" link)
+  GET /newsletter/<key>/<issue>/text   (public — the email's "Text version" link)
 
   A sent issue as simple text with links, and a button that copies it, for
   pasting into a chat or a doc (src/lib/newsletter-text.ts). Read from the

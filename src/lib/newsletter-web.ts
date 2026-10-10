@@ -96,7 +96,7 @@ function webFooter(textHref: string): string {
     '<div style="margin-top:24px;border-top:1px solid #1c3334;"></div>\n' +
     '<div style="margin-top:24px;font-size:13px;line-height:22px;font-weight:300;color:#aab2b3;">' +
     `<a href="${textHref.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}" ` +
-    'style="color:#aab2b3;text-decoration:underline;text-decoration-color:#325354;">Copy text version</a></div>'
+    'style="color:#aab2b3;text-decoration:underline;text-decoration-color:#325354;">Text version</a></div>'
   )
 }
 
