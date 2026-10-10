@@ -44,6 +44,27 @@ function getSessionId(): string {
   }
 }
 
+/** Gives the next conversation an id of its own. The conversation log keeps
+ *  one row per session id, so a chat started after Clear under the old id
+ *  overwrote the cleared one's row (7 Oct 2026: a three-message chat was
+ *  replaced by the one-message chat that followed it). */
+function rotateSessionId(): void {
+  if (typeof window === 'undefined') return
+  try {
+    sessionStorage.setItem(SESSION_KEY, newSessionId())
+  } catch (err) {
+    // Logging is best-effort and must never break the chat. Without
+    // storage, getSessionId already hands out a fresh id per call; dropping
+    // the old one at least stops the next chat from reusing it.
+    console.warn('[assistant] session id rotation failed', err)
+    try {
+      sessionStorage.removeItem(SESSION_KEY)
+    } catch {
+      // Storage is blocked outright, so no id was stored to reuse.
+    }
+  }
+}
+
 function captureUtm(): Record<string, string> | null {
   if (typeof window === 'undefined') return null
   const url = new URL(window.location.href)
@@ -65,6 +86,10 @@ interface GeoFallback {
 interface LiveTurn {
   turnIndex: number
   sentAt: number
+  /** The conversation the turn belongs to. Reports carry this rather than
+   *  the current id: clearing mid-reply starts a new session, and the
+   *  cleared turn's 'stopped' report still belongs on the old row. */
+  sessionId: string
   /** ms after send that the panel was first closed, if it was. */
   panelClosedAtMs?: number
   /** ms after send that the tab first went to the background, if it did. */
@@ -257,6 +282,11 @@ export default function Assistant() {
   const handleClear = useCallback(() => {
     chatRef.current?.clear()
     setHasMessages(false)
+    // The cleared chat is over: the next one gets its own session id, so its
+    // turns start a new row in the conversation log instead of overwriting
+    // this one. A reply the clear stopped mid-stream still reports on the
+    // old row (LiveTurn.sessionId).
+    rotateSessionId()
   }, [])
 
   // ── Delivery reporting ──────────────────────────────────────────────────
@@ -273,7 +303,11 @@ export default function Assistant() {
   const liveTurnRef = useRef<LiveTurn | null>(null)
   // A reply that arrived while the panel was closed or the tab hidden, not
   // yet brought into view.
-  const unseenRef = useRef<{ turnIndex: number; sentAt: number } | null>(null)
+  const unseenRef = useRef<{
+    turnIndex: number
+    sentAt: number
+    sessionId: string
+  } | null>(null)
 
   const reportDelivery = useCallback(
     (
@@ -293,7 +327,7 @@ export default function Assistant() {
         panelClosedAtMs: live.panelClosedAtMs,
         tabHiddenAtMs: live.tabHiddenAtMs,
         currentPage,
-        sessionId: getSessionId(),
+        sessionId: live.sessionId,
       })
     },
     [currentPage, fireLog]
@@ -311,14 +345,18 @@ export default function Assistant() {
       turnIndex: unseen.turnIndex,
       ms: Date.now() - unseen.sentAt,
       currentPage,
-      sessionId: getSessionId(),
+      sessionId: unseen.sessionId,
     })
   }, [currentPage, fireLog])
 
   const handleTurnLifecycle = useCallback(
     (e: TurnLifecycleEvent) => {
       if (e.phase === 'start') {
-        liveTurnRef.current = { turnIndex: e.turnIndex, sentAt: Date.now() }
+        liveTurnRef.current = {
+          turnIndex: e.turnIndex,
+          sentAt: Date.now(),
+          sessionId: getSessionId(),
+        }
         // Sending a new message means the panel is open and in use — any
         // earlier out-of-view reply has been superseded.
         unseenRef.current = null
@@ -329,7 +367,11 @@ export default function Assistant() {
       liveTurnRef.current = null
       reportDelivery(e.phase, live, e.ms, e.error)
       if (e.phase === 'received' && (!isOpenRef.current || !tabIsVisible())) {
-        unseenRef.current = { turnIndex: live.turnIndex, sentAt: live.sentAt }
+        unseenRef.current = {
+          turnIndex: live.turnIndex,
+          sentAt: live.sentAt,
+          sessionId: live.sessionId,
+        }
       }
     },
     [reportDelivery]
@@ -376,6 +418,9 @@ export default function Assistant() {
   }, [reportDelivery, reportSeenIfVisible])
 
   const buildBodyExtras = useCallback(async () => {
+    // Read before the geo lookup below can yield, so the turn goes to the
+    // conversation that was showing when it was sent.
+    const sessionId = getSessionId()
     const pageCtx = getPageContext()
     const referrer =
       typeof document !== 'undefined' && document.referrer
@@ -395,7 +440,7 @@ export default function Assistant() {
       referrer,
       utm,
       geoFallback,
-      sessionId: getSessionId(),
+      sessionId,
       // When the owner has excluded this browser, tell the server not to log
       // the turn — keeps their own testing out of the conversation log.
       noLog: isTrackingOptedOut() || undefined,

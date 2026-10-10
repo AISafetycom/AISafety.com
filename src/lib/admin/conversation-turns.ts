@@ -15,8 +15,14 @@
  *  and times one turn too early (2 Sept 2026: a fellowship search showed
  *  under an unrelated question about the map, with a bogus "1 earlier turn
  *  not stored" divider). This module owns both halves of the fix: at write
- *  time, which earlier entries a new turn supersedes; at read time, which
- *  entry a stored message belongs to.
+ *  time, which earlier entries a new turn supersedes — and, for a write that
+ *  lands after a later turn's, where it slots in (placeTurn); at read time,
+ *  which entry a stored message belongs to.
+ *
+ *  Entries stay in position order, which is also the order their turns
+ *  arrived in, so a late write can slot in mid-array without moving any
+ *  other turn: the readers place messages by position (turnIndices), and
+ *  every per-turn array gets the same entry at the same spot.
  */
 
 /** The slice of a row's Data the alignment needs. */
@@ -76,18 +82,137 @@ export function turnsToKeep(
   return total
 }
 
-/** A per-turn array cut down to the entries of the first `keep` of the
- *  row's `total` logged turns. The array may be shorter than `total` (rows
- *  that started before it was tracked), in which case its entries belong
- *  to the LAST turns — end alignment, as everywhere. */
-export function slicePerTurn<T>(
+/** Where one turn write goes among a row's logged turns. */
+export interface TurnPlacement {
+  /** The logged turns this write supersedes: the range [from, to) over the
+   *  row's turns, counted from the START (one turn per `tools` entry). The
+   *  write's own entry goes in at `from`. */
+  from: number
+  to: number
+  /** False when the visitor's chat has already cut this turn away, so the
+   *  write has nothing to add to what they saw. */
+  insert: boolean
+  /** True when no logged turn arrived after this one — the write is the
+   *  conversation's newest, so its history, message, reply, latency and
+   *  prompt version become the row's. False for a LATE write: a slow request
+   *  that finished after the visitor had already sent a later message. */
+  latest: boolean
+  /** Set when the write is dropped (insert false): the logged turn that
+   *  cut it away — sent after it, at its position or an earlier one — so
+   *  the skip can be logged with both turns' positions and times. */
+  supersededBy?: { position: number; turnAt: string }
+}
+
+/** Where a turn whose reply lands at `replyIndex`, and whose user message
+ *  arrived at `turnAt`, belongs among the row's logged turns.
+ *
+ *  A logged turn is part of the visitor's current chat unless a turn sent
+ *  AFTER it sits at the same or an earlier position: Try again re-sends at
+ *  the same position, Edit at an earlier one, and either cuts the chat back
+ *  past it. So:
+ *
+ *  - The newest write (no logged turn arrived later) supersedes every turn
+ *    at its position or after — a re-send replacing what it re-sent — and
+ *    becomes the last entry. The only case before late writes were handled.
+ *  - A late write whose position a later turn has re-sent or edited away
+ *    (any later turn at the same or an earlier position) is dropped.
+ *  - Any other late write is a turn the visitor did move on from (its
+ *    request outlived the browser's error, or its log write was just slow).
+ *    It goes in at its own position, replacing only older entries there,
+ *    and leaves the later turns alone. Before, it truncated them: a turn
+ *    that errored at 43 s in the visitor's browser and finished at 69 s on
+ *    the server erased the next turn, which had arrived in between (9 Sept
+ *    2026).
+ *
+ *  Rows without positions append, as they always have; rows without turn
+ *  times treat every write as the newest.
+ *
+ *  Everything here rests on turn times following the order the visitor sent
+ *  their messages, so the chat route stamps `turnAt` the moment a request
+ *  reaches it, before any slow setup: a turn stamped seconds late could
+ *  look sent after the visitor's next message and get that message's turn
+ *  dropped. */
+export function placeTurn(
+  previous: {
+    tools: unknown[]
+    turnIndices?: unknown[]
+    turnTimes?: unknown[]
+  } | null,
+  replyIndex: number | null,
+  turnAt: string
+): TurnPlacement {
+  if (!previous) return { from: 0, to: 0, insert: true, latest: true }
+  const total = previous.tools.length
+  const positions = previous.turnIndices
+  if (
+    replyIndex == null ||
+    !Array.isArray(positions) ||
+    positions.length === 0
+  ) {
+    return { from: total, to: total, insert: true, latest: true }
+  }
+  const from = turnsToKeep(previous, replyIndex)
+  const newest = { from, to: total, insert: true, latest: true }
+  const at = Date.parse(turnAt)
+  const times = previous.turnTimes
+  if (!Number.isFinite(at) || !Array.isArray(times)) return newest
+
+  // Every per-turn array lines up with tools from the end.
+  const positionOffset = total - positions.length
+  const timeOffset = total - times.length
+  let firstLater: number | null = null
+  for (let g = Math.max(positionOffset, timeOffset, 0); g < total; g++) {
+    const position = positions[g - positionOffset]
+    const time = times[g - timeOffset]
+    if (typeof position !== 'number' || typeof time !== 'string') continue
+    const t = Date.parse(time)
+    if (!Number.isFinite(t) || t <= at) continue
+    // A later turn at this position or before it: re-sent or edited away.
+    if (position <= replyIndex) {
+      return {
+        from: total,
+        to: total,
+        insert: false,
+        latest: false,
+        supersededBy: { position, turnAt: time },
+      }
+    }
+    if (firstLater == null) firstLater = g
+  }
+  if (firstLater == null) return newest
+  // Late but still in the chat: replace the older entries from this
+  // position up to the first later turn — all of which arrived before this
+  // one, so the chat has moved past them too — and keep the rest.
+  return {
+    from,
+    to: Math.max(from, firstLater),
+    insert: true,
+    latest: false,
+  }
+}
+
+/** A per-turn array with one write's `entry` placed: the entries of turns
+ *  [from, to) out, the entry in at `from` (when the placement inserts). The
+ *  array may be shorter than the row's `total` logged turns (rows that
+ *  started before it was tracked), in which case its entries belong to the
+ *  LAST turns — end alignment, as everywhere — and an entry for a turn
+ *  before the array's start has nowhere to go. */
+export function placePerTurn<T>(
   arr: T[] | undefined,
   total: number,
-  keep: number
+  placement: TurnPlacement,
+  entry: T
 ): T[] {
-  if (!Array.isArray(arr)) return []
-  const offset = total - arr.length
-  return arr.slice(0, Math.max(0, keep - offset))
+  const list = Array.isArray(arr) ? arr : []
+  if (!placement.insert) return list
+  const offset = total - list.length
+  const start = placement.from - offset
+  const end = Math.max(start, placement.to - offset)
+  if (start >= 0) return [...list.slice(0, start), entry, ...list.slice(end)]
+  // The array starts after this turn. If the write supersedes everything
+  // to the end, its entry is the new last turn — which the array does hold.
+  if (placement.to >= total) return [entry]
+  return list.slice(Math.max(0, end))
 }
 
 /** The number of turns the row has logged — the length of its per-turn
