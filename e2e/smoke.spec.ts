@@ -175,9 +175,16 @@ test.describe('routing', () => {
       .sort()
     expect(listed).toEqual(expect.arrayContaining(RESOURCE_PAGES))
     // The sitemap is curated (some pages are unlisted on purpose), but
-    // everything in it must be a page that exists.
+    // everything in it must be a page that exists. A page of a dynamic route
+    // (a newsletter's past issues, listed once it has one) isn't in the scan,
+    // so it must answer instead.
     for (const path of listed) {
-      expect(PUBLIC_PAGES, `${path} is in the sitemap`).toContain(path)
+      if (PUBLIC_PAGES.includes(path)) continue
+      expect(path, `${path} is in the sitemap`).toMatch(
+        /^\/newsletter\/[a-z]+$/
+      )
+      const page = await request.get(path)
+      expect(page.status(), `${path} is in the sitemap`).toBe(200)
     }
   })
 

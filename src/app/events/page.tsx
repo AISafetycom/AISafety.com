@@ -4,9 +4,14 @@ import PageHeader from '@/components/PageHeader'
 import { getEvents } from '@/lib/data/events'
 import EventsClient from './EventsClient'
 import { pageMetadata } from '@/lib/page-metadata'
+import { feedPath } from '@/lib/newsletter-archive'
+import { WEB_NEWSLETTERS } from '@/lib/newsletter-web'
 import { SITE_PAGES } from '@/lib/site-pages'
 
-export const metadata = pageMetadata(SITE_PAGES.events)
+export const metadata = pageMetadata(SITE_PAGES.events, {
+  url: feedPath('events'),
+  title: WEB_NEWSLETTERS.events.sender,
+})
 
 export default async function EventsPage() {
   const [events, lastUpdated] = await Promise.all([
