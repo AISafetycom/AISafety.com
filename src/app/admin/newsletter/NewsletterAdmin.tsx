@@ -3209,6 +3209,10 @@ function SendRows({
             {r.clicks.links.map(l => (
               <li key={l.url} className={styles.clicksRow}>
                 <span className={styles.clicksCount}>{l.clicks}</span>
+                {/* Its share of the issue's clicks. */}
+                <span className={styles.clicksShare}>
+                  {Math.round((l.clicks / r.clicks.total) * 100)}%
+                </span>
                 <span>{l.label}</span>
                 <a
                   href={l.url}
