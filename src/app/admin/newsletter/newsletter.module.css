@@ -757,7 +757,7 @@
 
 .clicksRow {
   display: grid;
-  grid-template-columns: 3em 1fr auto;
+  grid-template-columns: 3em 2.6em 1fr auto;
   gap: 10px;
   align-items: baseline;
 }
@@ -766,6 +766,12 @@
   text-align: right;
   font-weight: 600;
   color: var(--bright-teal-300);
+}
+
+/* The link's share of the issue's clicks, in the open rate's color. */
+.clicksShare {
+  text-align: right;
+  color: var(--teal-400);
 }
 
 /* ─── Pre-send warnings (29 Sept 2026) ────────────────────────────────── */
