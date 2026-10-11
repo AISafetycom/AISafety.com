@@ -15,7 +15,7 @@ import {
 import { archiveIssues } from '@/lib/newsletter-archive-store'
 import { withUtm } from '@/lib/utm'
 import PageHeader from '@/components/PageHeader'
-import { SIGNUP_HEADINGS, isSignupNewsletter } from '@/lib/newsletter-signup'
+import { isSignupNewsletter } from '@/lib/newsletter-signup'
 import ArchiveLink from './ArchiveLink'
 import styles from './page.module.css'
 
@@ -92,7 +92,8 @@ export default async function PastIssuesPage({ params }: Props) {
         lastUpdatedIso={newest}
         newsletter={signup != null}
         newsletterKey={signup ?? undefined}
-        newsletterHeading={signup ? SIGNUP_HEADINGS[signup] : undefined}
+        // The description above names the newsletter (Bryce, 11 Oct 2026).
+        newsletterHeading="Get the newsletter"
         newsletterTrackingPage={archivePath(key)}
         description={
           <>

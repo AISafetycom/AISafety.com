@@ -6,7 +6,6 @@ import TrainingClient from './TrainingClient'
 import { pageMetadata } from '@/lib/page-metadata'
 import { feedPath } from '@/lib/newsletter-archive'
 import { WEB_NEWSLETTERS } from '@/lib/newsletter-web'
-import { SIGNUP_HEADINGS } from '@/lib/newsletter-signup'
 import { SITE_PAGES } from '@/lib/site-pages'
 
 export const metadata = pageMetadata(SITE_PAGES.training, {
@@ -28,7 +27,7 @@ export default async function TrainingPage() {
         lastUpdatedIso={lastUpdated.lastUpdated}
         newsletter
         newsletterKey="training"
-        newsletterHeading={SIGNUP_HEADINGS.training}
+        newsletterHeading="Get a weekly summary of all new training programs"
         newsletterTrackingPage="Training"
         description={
           <>

@@ -24,13 +24,6 @@ export function isSignupNewsletter(v: unknown): v is SignupNewsletter {
   return (SIGNUP_NEWSLETTERS as readonly unknown[]).includes(v)
 }
 
-/** Each box's heading: on the resource page and on the newsletter's past
- *  issues page (/newsletter/<key>) alike. */
-export const SIGNUP_HEADINGS: Record<SignupNewsletter, string> = {
-  events: 'Get a weekly summary of all new events',
-  training: 'Get a weekly summary of all new training programs',
-}
-
 export interface AcForm {
   /** The form's number: the `f` hidden input on its hosted page. */
   formId: number
