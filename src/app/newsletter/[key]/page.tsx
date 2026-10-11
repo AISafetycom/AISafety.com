@@ -1,5 +1,4 @@
 import type { Metadata } from 'next'
-import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { formatDate } from '@/lib/format-date'
 import { WEB_NEWSLETTERS, isWebKey } from '@/lib/newsletter-web'
@@ -15,16 +14,22 @@ import {
 } from '@/lib/newsletter-archive'
 import { archiveIssues } from '@/lib/newsletter-archive-store'
 import { withUtm } from '@/lib/utm'
+import PageHeader from '@/components/PageHeader'
+import { SIGNUP_HEADINGS, isSignupNewsletter } from '@/lib/newsletter-signup'
 import ArchiveLink from './ArchiveLink'
 import styles from './page.module.css'
 
 // /newsletter/events, /newsletter/training: every issue sent through
 // ActiveCampaign, linking each one's web version, with the feed and the
-// Substack archive (src/lib/newsletter-archive.ts). Rebuilt at most every
+// Substack archive (src/lib/newsletter-archive.ts), under a header like the
+// resource pages': its "Updated" line is the newest issue, and the
+// newsletter's signup box sits beside it (its submits recorded under the
+// page's path, apart from /events' and /training's). Rebuilt at most every
 // ten minutes, so a new issue shows within that of reaching its first
 // readers. A newsletter with no issue sent that way yet (Funding, until its
-// move) is a 404 until its first one. Kept out of search results, like the
-// issues themselves.
+// move) is a 404 until its first one. Open to search engines and in the
+// sitemap (Bryce, 11 Oct 2026); the issues themselves aren't, since their
+// listings go out of date within weeks.
 //
 // force-static: the reads behind the list (Upstash, ActiveCampaign) are
 // uncached fetches, which would otherwise make Next render the page on
@@ -53,7 +58,6 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
         'application/rss+xml': [{ url: feedPath(key), title: sender }],
       },
     },
-    robots: { index: false, follow: true },
   }
 }
 
@@ -78,74 +82,80 @@ export default async function PastIssuesPage({ params }: Props) {
   }
   if (issues?.length === 0) notFound()
 
+  const signup = isSignupNewsletter(key) ? key : null
+  const newest = issues?.find(i => i.sentAt)?.sentAt ?? null
+
   return (
-    <div className="container-narrow">
-      <div className="flex justify-center">
-        <div className="width-9-col-narrow padding-bottom-56px">
-          <h1 className="padding-top-56px padding-bottom-40px">Past issues</h1>
-          <h2 className="padding-bottom-40px">
-            <span className="color-light-teal">{nl.sender}</span>{' '}
+    <div className="container-default">
+      <PageHeader
+        title="Past issues"
+        lastUpdatedIso={newest}
+        newsletter={signup != null}
+        newsletterKey={signup ?? undefined}
+        newsletterHeading={signup ? SIGNUP_HEADINGS[signup] : undefined}
+        newsletterTrackingPage={archivePath(key)}
+        description={
+          <>
+            <span className="color-teal-bright-300">{nl.sender}</span>{' '}
             {NEWSLETTER_ABOUT[key]}
-          </h2>
+          </>
+        }
+      />
 
-          {issues ? (
-            <ul className={`paragraph-small ${styles.issues}`}>
-              {issues.map(issue => (
-                <li
-                  key={issue.slug}
-                  className={`${styles.issue} gap-16px padding-top-12px padding-bottom-12px`}
+      <div className="width-7-col padding-bottom-56px">
+        {issues ? (
+          <ul className={`paragraph-small ${styles.issues}`}>
+            {issues.map(issue => (
+              <li
+                key={issue.slug}
+                className={`${styles.issue} gap-16px padding-top-12px padding-bottom-12px`}
+              >
+                <span className="color-teal-400">
+                  {issue.sentAt ? formatDate(new Date(issue.sentAt)) : ''}
+                </span>
+                <ArchiveLink
+                  href={issuePath(key, issue.slug)}
+                  newsletter={nl.prefix}
+                  target="issue"
+                  label={issue.slug}
+                  className={`color-white ${styles.title}`}
                 >
-                  <span className="color-teal-400">
-                    {issue.sentAt ? formatDate(new Date(issue.sentAt)) : ''}
-                  </span>
-                  <ArchiveLink
-                    href={issuePath(key, issue.slug)}
-                    newsletter={nl.prefix}
-                    target="issue"
-                    label={issue.slug}
-                    className={`color-white ${styles.title}`}
-                  >
-                    {issueTitle(key, issue.slug)}
-                  </ArchiveLink>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="color-teal-300">
-              The list of past issues couldn&apos;t be loaded just now. Please
-              try again in a few minutes.
-            </p>
-          )}
+                  {issueTitle(key, issue.slug)}
+                </ArchiveLink>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="color-teal-300">
+            The list of past issues couldn&apos;t be loaded just now. Please try
+            again in a few minutes.
+          </p>
+        )}
 
-          <p className="paragraph-small color-teal-300 padding-top-24px">
-            {SUBSTACK_NOTE[key]}{' '}
-            <ArchiveLink
-              href={withUtm(SUBSTACK_ARCHIVES[key], 'Newsletter')}
-              newsletter={nl.prefix}
-              target="substack"
-              className="color-light-teal"
-            >
-              Substack
-            </ArchiveLink>
-            .
-          </p>
-          <p className="paragraph-small color-teal-300 padding-top-16px">
-            To follow new issues in a feed reader, use the{' '}
-            <ArchiveLink
-              href={feedPath(key)}
-              newsletter={nl.prefix}
-              target="feed"
-              className="color-light-teal"
-            >
-              RSS feed
-            </ArchiveLink>
-            . To get them by email, sign up on{' '}
-            <Link href={nl.page} className="color-light-teal">
-              AISafety.com{nl.page}
-            </Link>
-            .
-          </p>
-        </div>
+        <p className="paragraph-small color-teal-300 padding-top-24px">
+          {SUBSTACK_NOTE[key]}{' '}
+          <ArchiveLink
+            href={withUtm(SUBSTACK_ARCHIVES[key], 'Newsletter')}
+            newsletter={nl.prefix}
+            target="substack"
+            className="color-light-teal"
+          >
+            Substack
+          </ArchiveLink>
+          .
+        </p>
+        <p className="paragraph-small color-teal-300 padding-top-16px">
+          To follow new issues in a feed reader, use the{' '}
+          <ArchiveLink
+            href={feedPath(key)}
+            newsletter={nl.prefix}
+            target="feed"
+            className="color-light-teal"
+          >
+            RSS feed
+          </ArchiveLink>
+          .
+        </p>
       </div>
     </div>
   )

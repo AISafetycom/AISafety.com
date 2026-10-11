@@ -17,6 +17,9 @@ const ROUTES = [
   '/map',
   '/media',
   '/media-channels',
+  // Each newsletter's past issues; Funding's joins once it has one.
+  '/newsletter/events',
+  '/newsletter/training',
   '/privacy',
   '/projects',
   '/self-study',

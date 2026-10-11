@@ -6,6 +6,7 @@ import EventsClient from './EventsClient'
 import { pageMetadata } from '@/lib/page-metadata'
 import { feedPath } from '@/lib/newsletter-archive'
 import { WEB_NEWSLETTERS } from '@/lib/newsletter-web'
+import { SIGNUP_HEADINGS } from '@/lib/newsletter-signup'
 import { SITE_PAGES } from '@/lib/site-pages'
 
 export const metadata = pageMetadata(SITE_PAGES.events, {
@@ -26,7 +27,7 @@ export default async function EventsPage() {
         lastUpdatedIso={lastUpdated.lastUpdated}
         newsletter
         newsletterKey="events"
-        newsletterHeading="Get a weekly summary of all new events"
+        newsletterHeading={SIGNUP_HEADINGS.events}
         newsletterTrackingPage="Events"
         description={
           <>

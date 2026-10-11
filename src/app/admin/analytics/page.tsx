@@ -834,12 +834,15 @@ export default async function AnalyticsPage({
                       totalShare={data.siteNewsletterShare ?? undefined}
                     />
                     <p className={styles.caption}>
-                      Submits of the newsletter email box on /events, /training,
-                      and /funding – not every submit ends in a signup (how the
-                      /events and /training ones ended is below). % of visitors
-                      = the share of the page&apos;s visitors who submitted it;
-                      the Total row divides by visitors to those three pages
-                      combined. Recording since 29 July 2026.
+                      Submits of the newsletter email box on /events, /training
+                      and /funding, and on the past issues pages
+                      (/newsletter/events, /newsletter/training, listed by their
+                      address) – not every submit ends in a signup (how the
+                      ActiveCampaign ones ended is below). % of visitors = the
+                      share of the page&apos;s visitors who submitted it; the
+                      Total row divides by visitors to the pages with the box
+                      combined. Recording since 29 July 2026; the past issues
+                      pages since October 2026.
                     </p>
                   </Panel>
                   <SignupResultsPanel
@@ -1332,13 +1335,14 @@ export default async function AnalyticsPage({
                   totalShare={data.siteNewsletterShare ?? undefined}
                 />
                 <p className={styles.caption}>
-                  Submits of the newsletter email box on /events, /training, and
-                  /funding – not every submit ends in a signup (the Newsletters
-                  tab shows how the /events and /training ones ended). % of
+                  Submits of the newsletter email box on /events, /training and
+                  /funding, and on the past issues pages (/newsletter/events,
+                  /newsletter/training) – not every submit ends in a signup (the
+                  Newsletters tab shows how the ActiveCampaign ones ended). % of
                   visitors = the share of the page&apos;s visitors who submitted
-                  it; the Total row divides by visitors to those three pages
-                  combined, since only they have the box. Recording since 29
-                  July 2026.
+                  it; the Total row divides by visitors to the pages with the
+                  box combined, since only they have it. Recording since 29 July
+                  2026; the past issues pages since October 2026.
                 </p>
               </Panel>
               <Panel title="Footer clicks">
@@ -1810,12 +1814,13 @@ function SignupResultsPanel({
         />
       )}
       <p className={styles.caption}>
-        Since 8 October 2026 the boxes on /events and /training sign people up
-        on the site, through ActiveCampaign. Signed up = ActiveCampaign took the
-        address and emailed a link to confirm it (whether the reader confirmed
-        shows in ActiveCampaign, not here). Errors = the visitor saw an error
-        message instead. /funding&apos;s box still opens Substack, so its
-        signups finish there and don&apos;t show here.
+        Since 8 October 2026 the boxes on /events and /training (and, since
+        October 2026, on their past issues pages) sign people up on the site,
+        through ActiveCampaign. Signed up = ActiveCampaign took the address and
+        emailed a link to confirm it (whether the reader confirmed shows in
+        ActiveCampaign, not here). Errors = the visitor saw an error message
+        instead. /funding&apos;s box still opens Substack, so its signups finish
+        there and don&apos;t show here.
       </p>
     </Panel>
   )

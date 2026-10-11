@@ -155,8 +155,16 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   'nav_overflow_open',
 ])
 
-/** The pages whose header carries the newsletter signup box. */
-const NEWSLETTER_BOX_PAGES = ['Events', 'Training', 'Funding']
+/** The pages whose header carries the newsletter signup box: the resource
+ *  pages by name, the newsletters' past issues pages by path (their submits
+ *  are recorded under it). */
+const NEWSLETTER_BOX_PAGES = [
+  'Events',
+  'Training',
+  'Funding',
+  '/newsletter/events',
+  '/newsletter/training',
+]
 
 /** Dashboard labels for newsletter_signup_error's reason (`source`). */
 const NEWSLETTER_ERROR_LABEL: Record<string, string> = {
@@ -1356,8 +1364,8 @@ function aggregate(
   const siteClickShare = anyOnSite(pageHits, 'Any listing')
   const siteContributeShare = anyOnSite(contributeHits, 'Any button')
   const siteAirtableShare = anyOnSite(airtableHits, 'Any card')
-  // The newsletter box only renders on Events, Training, and Funding, so its
-  // Total row divides by those pages' visitors — a site-wide denominator
+  // The newsletter box only renders on Events, Training, Funding and the
+  // past issues pages, so its Total row divides by those pages' visitors — a site-wide denominator
   // would count visitors who never saw the box.
   const newsletterVisitors = new Set<string>()
   for (const p of NEWSLETTER_BOX_PAGES)
