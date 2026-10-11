@@ -4,8 +4,11 @@
  *  the page loads this file too. From the first real sends (8 October
  *  2026): while the warm-up is on, a send to list 6, 7 or 8 with more than
  *  MAX_UNSEGMENTED_SEND active contacts must go out in waves (AC segments),
- *  never to the whole list in one go. */
-export const NEWSLETTER_WARMUP = true
+ *  never to the whole list in one go. Switched off on 12 October 2026, once
+ *  every imported reader had had the week 41 issue and wave 4's checks came
+ *  back clean (Bryce, 11 Oct 2026): sends go to the whole list again, and
+ *  the page still offers waves as an option where a list has them. */
+export const NEWSLETTER_WARMUP = false
 export const MAX_UNSEGMENTED_SEND = 50
 
 /* ─── Approve once (8 October 2026) ───────────────────────────────────────

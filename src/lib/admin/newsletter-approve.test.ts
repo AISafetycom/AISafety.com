@@ -27,6 +27,16 @@ vi.mock('@upstash/redis', async () => ({
   Redis: (await import('./__fixtures__/fake-ac')).FakeRedis,
 }))
 
+// The warm-up switch, set per test so both sides of it stay covered whatever
+// the shipped value (off since 12 Oct 2026). On unless a test turns it off.
+const warmup = vi.hoisted(() => ({ on: true }))
+vi.mock('./newsletter-warmup', async importOriginal => ({
+  ...(await importOriginal<typeof import('./newsletter-warmup')>()),
+  get NEWSLETTER_WARMUP() {
+    return warmup.on
+  },
+}))
+
 type NL = typeof import('./newsletter')
 
 const kvData = kv.data
@@ -40,6 +50,7 @@ const WHO = { approver: 'Bryce Robertson' }
 
 beforeEach(() => {
   resetKv()
+  warmup.on = true
   vi.spyOn(console, 'info').mockImplementation(() => {})
   vi.spyOn(console, 'error').mockImplementation(() => {})
   vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -128,6 +139,19 @@ describe('approveAndSend against a pretend ActiveCampaign (sweep scenarios A–I
     // again, not "another approval is running".
     const again = await outcome(nl.approveAndSend('200', '6', WHO))
     expect(again.err).toBeInstanceOf(nl.DraftProblemError)
+  })
+
+  it('E1. with the warm-up off, a 2,889-contact list sends as one', async () => {
+    warmup.on = false
+    const ac = makeAC({ active: { '6': 2889 } })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    expect(nl.NEWSLETTER_WARMUP).toBe(false)
+    await expect(nl.approveAndSend('200', '6', WHO)).resolves.toMatchObject({
+      campaignId: '201',
+      activeContacts: 2889,
+    })
+    expect(ac.creates).toHaveLength(1)
   })
 
   it('E2. up to 50 active contacts still sends as one (the rehearsal lists)', async () => {

@@ -9,6 +9,7 @@ import {
   useState,
 } from 'react'
 import {
+  NEWSLETTER_WARMUP,
   waveSchedule,
   type WaveSlot,
   wavesLabel,
@@ -418,10 +419,12 @@ function waveTimeBoth(at: string | number): string {
 
 /** What Approve sends unless the approver picks otherwise: the waves still
  *  to go when the list has waves, else the whole list; null when nothing
- *  may go. */
+ *  may go. With the warm-up off, the whole list whenever it may go (the
+ *  waves stay a choice). */
 function defaultChoice(d: Draft): Choice | null {
   const p = d.waves
   if (!p || p.error) return 'all'
+  if (!NEWSLETTER_WARMUP && p.wholeList) return 'all'
   if (p.next != null) return p.next
   return p.wholeList ? 'all' : null
 }

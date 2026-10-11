@@ -27,6 +27,16 @@ vi.mock('@upstash/redis', async () => ({
   Redis: (await import('./__fixtures__/fake-ac')).FakeRedis,
 }))
 
+// The warm-up switch, set per test so both sides of it stay covered whatever
+// the shipped value (off since 12 Oct 2026). On unless a test turns it off.
+const warmup = vi.hoisted(() => ({ on: true }))
+vi.mock('./newsletter-warmup', async importOriginal => ({
+  ...(await importOriginal<typeof import('./newsletter-warmup')>()),
+  get NEWSLETTER_WARMUP() {
+    return warmup.on
+  },
+}))
+
 // The routes' sign-in checks, and next/server's after() (outside a real
 // request it would throw): the callbacks are kept to be run by the test.
 const session = { fresh: true, canSend: true }
@@ -92,6 +102,7 @@ function sentWave(k: number, more: Parameters<typeof camp>[0] | object = {}) {
 }
 
 beforeEach(() => {
+  warmup.on = true
   resetKv()
   afterQueue.length = 0
   session.fresh = true
@@ -197,6 +208,25 @@ describe('waves on the page', () => {
     })
     expect(d.editable).toBe(true)
     expect(d.deletable).toBe(true)
+  })
+
+  it('with the warm-up off, a big list may go whole and its waves stay a choice', async () => {
+    warmup.on = false
+    const ac = makeAC(waved())
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const [d] = await nl.listDrafts()
+    expect(d.blocks).toEqual([])
+    expect(d.waves).toMatchObject({
+      error: null,
+      active: 2889,
+      next: 1,
+      wholeList: true,
+    })
+    await expect(nl.approveAndSend('200', '6', WHO)).resolves.toMatchObject({
+      campaignId: '201',
+      activeContacts: 2889,
+    })
   })
 
   it('without wave segments a big list is blocked and a small one goes whole', async () => {

@@ -19,6 +19,16 @@ import {
   waveOf,
 } from './newsletter-watch'
 
+// The warm-up switch, set per test so both sides of it stay covered whatever
+// the shipped value (off since 12 Oct 2026). On unless a test turns it off.
+const warmup = vi.hoisted(() => ({ on: true }))
+vi.mock('./newsletter-warmup', async importOriginal => ({
+  ...(await importOriginal<typeof import('./newsletter-warmup')>()),
+  get NEWSLETTER_WARMUP() {
+    return warmup.on
+  },
+}))
+
 /* ─── A pretend ActiveCampaign ────────────────────────────────────────────
    Campaigns as the v3 listing returns them, each campaign's lists, message
    HTML, active counts per list and the account. Every request is recorded so
@@ -161,6 +171,7 @@ async function judged(
 }
 
 beforeEach(() => {
+  warmup.on = true
   process.env.ACTIVECAMPAIGN_URL = 'https://alignment23684.api-us1.com'
   process.env.ACTIVECAMPAIGN_KEY = KEY
   // No Upstash, as on a laptop: Vercel's build has it set, and the cancel's
@@ -646,6 +657,23 @@ describe('runWatch: warm-up waves', () => {
         c.url.searchParams.get('listid') === '6'
     )
     expect(counted?.url.searchParams.get('status')).toBe('1')
+  })
+
+  it('stays quiet about a whole-list send once the warm-up is off', async () => {
+    warmup.on = false
+    const { store, sent, run } = setup()
+    ac.campaigns = [
+      campaign({
+        id: '220',
+        status: '1',
+        segmentid: '0',
+        sdate: acDate(-8 * MIN),
+      }),
+    ]
+    ac.lists['220'] = ['6']
+    await approve(store, '220', { wave: null, waves: null, expected: 2889 })
+    expect((await run()).alerts).toEqual([])
+    expect(sent).toEqual([])
   })
 
   it('allows a whole-list send to a small list (rehearsals)', async () => {
