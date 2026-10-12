@@ -17,6 +17,7 @@ import {
   type OverallListingRow,
   type SearchPanelData,
   type MapSearchPanelData,
+  type NewsletterArchiveRow,
   type NewsletterSignupResults,
   type VisitorShare,
   DASHBOARD_TZ,
@@ -53,6 +54,10 @@ import {
   readSendStats,
   type SendStats,
 } from '@/lib/admin/newsletter'
+import {
+  readFeedReaders,
+  type FeedReaders,
+} from '@/lib/newsletter-archive-store'
 import DateRangePicker from './DateRangePicker'
 import ExcludeToggle from './ExcludeToggle'
 import Logo from './Logo'
@@ -513,7 +518,7 @@ export default async function AnalyticsPage({
   const tabReq = tabRaw === 'funnel' ? 'chatbot' : tabRaw
   const onResourceTab = tabReq != null && !OVERVIEW_KEYS.has(tabReq)
 
-  const [data, funders, convStats, themes, searchIndex, sendStats] =
+  const [data, funders, convStats, themes, searchIndex, sendStats, feeds] =
     await Promise.all([
       readDashboard(
         range,
@@ -541,6 +546,9 @@ export default async function AnalyticsPage({
             return null
           })
         : null,
+      // The feeds' readers yesterday and so far today (UTC days); null =
+      // couldn't read them.
+      tabReq === 'newsletters' ? readFeedDays() : null,
     ])
 
   // Resource-page tabs: every page in PAGE_NAV always gets one (so quiet pages
@@ -826,17 +834,24 @@ export default async function AnalyticsPage({
                       totalShare={data.siteNewsletterShare ?? undefined}
                     />
                     <p className={styles.caption}>
-                      Submits of the newsletter email box on /events, /training,
-                      and /funding – not every submit ends in a signup (how the
-                      /events and /training ones ended is below). % of visitors
-                      = the share of the page&apos;s visitors who submitted it;
-                      the Total row divides by visitors to those three pages
-                      combined. Recording since 29 July 2026.
+                      Submits of the newsletter email box on /events, /training
+                      and /funding, and on the past issues pages
+                      (/newsletter/events, /newsletter/training, listed by their
+                      address) – not every submit ends in a signup (how the
+                      ActiveCampaign ones ended is below). % of visitors = the
+                      share of the page&apos;s visitors who submitted it; the
+                      Total row divides by visitors to the pages with the box
+                      combined. Recording since 29 July 2026; the past issues
+                      pages since October 2026.
                     </p>
                   </Panel>
                   <SignupResultsPanel
                     results={data.newsletterResults}
                     labelFor={name => labelByPage.get(name) ?? name}
+                  />
+                  <PastIssuesPanel
+                    rows={data.newsletterArchive}
+                    feeds={feeds}
                   />
                 </>
               }
@@ -1320,13 +1335,14 @@ export default async function AnalyticsPage({
                   totalShare={data.siteNewsletterShare ?? undefined}
                 />
                 <p className={styles.caption}>
-                  Submits of the newsletter email box on /events, /training, and
-                  /funding – not every submit ends in a signup (the Newsletters
-                  tab shows how the /events and /training ones ended). % of
+                  Submits of the newsletter email box on /events, /training and
+                  /funding, and on the past issues pages (/newsletter/events,
+                  /newsletter/training) – not every submit ends in a signup (the
+                  Newsletters tab shows how the ActiveCampaign ones ended). % of
                   visitors = the share of the page&apos;s visitors who submitted
-                  it; the Total row divides by visitors to those three pages
-                  combined, since only they have the box. Recording since 29
-                  July 2026.
+                  it; the Total row divides by visitors to the pages with the
+                  box combined, since only they have it. Recording since 29 July
+                  2026; the past issues pages since October 2026.
                 </p>
               </Panel>
               <Panel title="Footer clicks">
@@ -1605,6 +1621,144 @@ function DashboardTabs({
   )
 }
 
+/** Each newsletter's feed readers yesterday and so far today (UTC), or
+ *  null when Upstash couldn't be read. */
+async function readFeedDays(): Promise<{
+  yesterday: FeedReaders[]
+  today: FeedReaders[]
+} | null> {
+  const now = Date.now()
+  const day = (ms: number) => new Date(ms).toISOString().slice(0, 10)
+  try {
+    const [yesterday, today] = await Promise.all([
+      readFeedReaders(day(now - 86_400_000)),
+      readFeedReaders(day(now)),
+    ])
+    return { yesterday, today }
+  } catch (err) {
+    console.warn(
+      `[analytics] feed readers unavailable: ${err instanceof Error ? err.message : String(err)}`
+    )
+    return null
+  }
+}
+
+/** The Newsletters tab's past issues pages (/newsletter/events, /training)
+ *  and feeds: the pages' views and clicks in the range, and the feeds'
+ *  readers yesterday and today. */
+function PastIssuesPanel({
+  rows,
+  feeds,
+}: {
+  rows: NewsletterArchiveRow[]
+  feeds: { yesterday: FeedReaders[]; today: FeedReaders[] } | null
+}) {
+  const names = { events: 'Events', training: 'Training', funding: 'Funding' }
+  const readers = (list: FeedReaders[], name: string) => {
+    const r = list.find(f => names[f.newsletter] === name)
+    return r ? r.services + r.direct : 0
+  }
+  // Every newsletter with page views, clicks or feed readers.
+  const shown = [
+    ...new Set([
+      ...rows.map(r => r.name),
+      ...(feeds
+        ? [...feeds.yesterday, ...feeds.today]
+            .filter(f => f.services + f.direct > 0)
+            .map(f => names[f.newsletter])
+        : []),
+    ]),
+  ]
+  const rowFor = (name: string) =>
+    rows.find(r => r.name === name) ?? {
+      name,
+      views: 0,
+      issueClicks: 0,
+      feedClicks: 0,
+      substackClicks: 0,
+    }
+  const feedCell = (list: FeedReaders[] | undefined, name: string) =>
+    list ? readers(list, name).toLocaleString() : '—'
+  return (
+    <Panel title="Past issues and feeds">
+      {shown.length === 0 ? (
+        <p className={styles.dim}>
+          No views of the past issues pages and no feed readers in this range.
+        </p>
+      ) : (
+        <SortableTable
+          columns={[
+            { label: 'Newsletter', sort: 'text' },
+            { label: 'Page views', className: styles.numCol, sort: 'number' },
+            { label: 'To an issue', className: styles.numCol, sort: 'number' },
+            { label: 'To the feed', className: styles.numCol, sort: 'number' },
+            { label: 'To Substack', className: styles.numCol, sort: 'number' },
+            {
+              label: 'Feed readers yesterday',
+              className: styles.numCol,
+              sort: 'number',
+            },
+            {
+              label: 'Today so far',
+              className: styles.numCol,
+              sort: 'number',
+            },
+          ]}
+          values={shown.map(name => {
+            const r = rowFor(name)
+            return [
+              name,
+              r.views,
+              r.issueClicks,
+              r.feedClicks,
+              r.substackClicks,
+              feeds ? readers(feeds.yesterday, name) : null,
+              feeds ? readers(feeds.today, name) : null,
+            ]
+          })}
+        >
+          {shown.map(name => {
+            const r = rowFor(name)
+            return (
+              <tr key={name}>
+                <td>{name}</td>
+                <td className={styles.numCol}>{r.views.toLocaleString()}</td>
+                <td className={styles.numCol}>
+                  {r.issueClicks.toLocaleString()}
+                </td>
+                <td className={styles.numCol}>
+                  {r.feedClicks.toLocaleString()}
+                </td>
+                <td className={styles.numCol}>
+                  {r.substackClicks.toLocaleString()}
+                </td>
+                <td className={styles.numCol}>
+                  {feedCell(feeds?.yesterday, name)}
+                </td>
+                <td className={styles.numCol}>
+                  {feedCell(feeds?.today, name)}
+                </td>
+              </tr>
+            )
+          })}
+        </SortableTable>
+      )}
+      <p className={styles.caption}>
+        Each newsletter&apos;s past issues page (aisafety.com/newsletter/events,
+        /newsletter/training) lists its issues sent since the move to
+        ActiveCampaign on 8 October 2026, with an RSS feed (…/feed). Page views
+        and clicks follow the range; a click to an issue opens its web version.
+        Feed readers aren&apos;t for the range: they&apos;re the people
+        following the feed on one day (UTC). A feed service such as Feedly
+        fetches once for all its users and reports how many; a reader app
+        fetches for one person. Opening the feed in a browser, search engines,
+        AI assistants and scripts aren&apos;t counted. Recording since October
+        2026.
+      </p>
+    </Panel>
+  )
+}
+
 /** The Newsletters tab's results of the signups made on the site: the
  *  /events and /training boxes sign people up through ActiveCampaign (from 8
  *  October 2026). Per page, how many went through and how many showed the
@@ -1660,12 +1814,13 @@ function SignupResultsPanel({
         />
       )}
       <p className={styles.caption}>
-        Since 8 October 2026 the boxes on /events and /training sign people up
-        on the site, through ActiveCampaign. Signed up = ActiveCampaign took the
-        address and emailed a link to confirm it (whether the reader confirmed
-        shows in ActiveCampaign, not here). Errors = the visitor saw an error
-        message instead. /funding&apos;s box still opens Substack, so its
-        signups finish there and don&apos;t show here.
+        Since 8 October 2026 the boxes on /events and /training (and, since
+        October 2026, on their past issues pages) sign people up on the site,
+        through ActiveCampaign. Signed up = ActiveCampaign took the address and
+        emailed a link to confirm it (whether the reader confirmed shows in
+        ActiveCampaign, not here). Errors = the visitor saw an error message
+        instead. /funding&apos;s box still opens Substack, so its signups finish
+        there and don&apos;t show here.
       </p>
     </Panel>
   )

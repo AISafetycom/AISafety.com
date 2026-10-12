@@ -1,6 +1,7 @@
 /*
   Newsletter signups through ActiveCampaign: the signup boxes on /events and
-  /training post to /api/subscribe, which hands the address to the list's
+  /training (and their past issues pages, /newsletter/events and
+  /newsletter/training) post to /api/subscribe, which hands the address to the list's
   double opt-in form. ActiveCampaign then emails the reader a confirmation
   link, and only a confirmed reader joins the list.
 

@@ -1,0 +1,23 @@
+/* Past issues: one row per issue, its date then its subject, ruled like the
+   press page's news list. Spacing and colours come from utility classes;
+   this is only the two-column row, its rules and the link's hover. */
+
+.issues {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.issue {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  border-top: 1px solid var(--teal-700);
+}
+
+.issue:last-child {
+  border-bottom: 1px solid var(--teal-700);
+}
+
+.title:hover {
+  color: var(--bright-teal-300);
+}

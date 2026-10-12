@@ -66,8 +66,9 @@ const SOMETHING_WRONG =
 const OFFLINE =
   "Couldn't connect. Please check your internet connection and try again."
 
-/** Signs the reader up on the site. The heading is plain text: there's no
- *  public archive to link to. */
+/** Signs the reader up on the site. The heading is plain text: no link to
+ *  the newsletter's past issues page (/newsletter/<key>) for now (Bryce,
+ *  10 Oct 2026). */
 function ActiveCampaignSignup({
   heading,
   newsletter,

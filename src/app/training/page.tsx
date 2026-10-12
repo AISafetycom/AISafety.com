@@ -4,9 +4,14 @@ import PageHeader from '@/components/PageHeader'
 import { getTrainingPrograms, getRecurringPrograms } from '@/lib/data/training'
 import TrainingClient from './TrainingClient'
 import { pageMetadata } from '@/lib/page-metadata'
+import { feedPath } from '@/lib/newsletter-archive'
+import { WEB_NEWSLETTERS } from '@/lib/newsletter-web'
 import { SITE_PAGES } from '@/lib/site-pages'
 
-export const metadata = pageMetadata(SITE_PAGES.training)
+export const metadata = pageMetadata(SITE_PAGES.training, {
+  url: feedPath('training'),
+  title: WEB_NEWSLETTERS.training.sender,
+})
 
 export default async function TrainingPage() {
   const [programs, recurring, lastUpdated] = await Promise.all([

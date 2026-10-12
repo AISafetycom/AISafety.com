@@ -109,6 +109,12 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   // Substack mode (Funding) the card doubles as a link to the newsletter's
   // own page, so visitors can read it before subscribing.
   'newsletter_view',
+  // A click on a newsletter's past issues page (/newsletter/events,
+  // /newsletter/training): `page` is the newsletter ('Events'), `source`
+  // where the link leads ('issue' = an issue's web version, 'feed' = the
+  // RSS feed, 'substack' = the Substack archive), `label` the issue's
+  // address on an issue click. The pages' own views are page_views.
+  'newsletter_archive_click',
   // A click on one of the footer's links ("Help us out" / "Newsletters" /
   // "For press and developers" columns) — mostly outbound, so nothing else
   // records them.
@@ -149,8 +155,16 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   'nav_overflow_open',
 ])
 
-/** The pages whose header carries the newsletter signup box. */
-const NEWSLETTER_BOX_PAGES = ['Events', 'Training', 'Funding']
+/** The pages whose header carries the newsletter signup box: the resource
+ *  pages by name, the newsletters' past issues pages by path (their submits
+ *  are recorded under it). */
+const NEWSLETTER_BOX_PAGES = [
+  'Events',
+  'Training',
+  'Funding',
+  '/newsletter/events',
+  '/newsletter/training',
+]
 
 /** Dashboard labels for newsletter_signup_error's reason (`source`). */
 const NEWSLETTER_ERROR_LABEL: Record<string, string> = {
@@ -690,6 +704,9 @@ export interface DashboardData {
    *  through ActiveCampaign, from 8 October 2026), per page, and what went
    *  wrong when they didn't. */
   newsletterResults: NewsletterSignupResults
+  /** Each newsletter's past issues page (/newsletter/<key>, from 10 October
+   *  2026): its views and where its clicks went. */
+  newsletterArchive: NewsletterArchiveRow[]
   /** For `selectedPage`'s own tables: distinct visitors per listing / slot /
    *  filter group / filter value / contribute button / hovered listing,
    *  each against the page's distinct visitors. Keyed by the same row names
@@ -818,6 +835,7 @@ const EMPTY: Omit<DashboardData, 'source'> = {
   siteAirtableShare: null,
   siteNewsletterShare: null,
   newsletterResults: { byPage: [], errors: [] },
+  newsletterArchive: [],
   listingShare: [],
   anyListingShare: null,
   positionShare: [],
@@ -1346,8 +1364,8 @@ function aggregate(
   const siteClickShare = anyOnSite(pageHits, 'Any listing')
   const siteContributeShare = anyOnSite(contributeHits, 'Any button')
   const siteAirtableShare = anyOnSite(airtableHits, 'Any card')
-  // The newsletter box only renders on Events, Training, and Funding, so its
-  // Total row divides by those pages' visitors — a site-wide denominator
+  // The newsletter box only renders on Events, Training, Funding and the
+  // past issues pages, so its Total row divides by those pages' visitors — a site-wide denominator
   // would count visitors who never saw the box.
   const newsletterVisitors = new Set<string>()
   for (const p of NEWSLETTER_BOX_PAGES)
@@ -1469,6 +1487,7 @@ function aggregate(
     siteAirtableShare,
     siteNewsletterShare,
     newsletterResults: newsletterSignupResults(inRange, unique),
+    newsletterArchive: newsletterArchiveStats(inRange, unique),
     listingShare,
     anyListingShare,
     positionShare,
@@ -1570,6 +1589,64 @@ export function newsletterSignupResults(
     ),
     errors: tally(failed.map(e => newsletterErrorLabel(e.source))),
   }
+}
+
+export interface NewsletterArchiveRow {
+  /** The newsletter: 'Events', 'Training', 'Funding'. */
+  name: string
+  /** Views of its past issues page. */
+  views: number
+  /** Clicks on the page through to an issue, the feed, and Substack. */
+  issueClicks: number
+  feedClicks: number
+  substackClicks: number
+}
+
+/** The newsletters' past issues pages (/newsletter/<key>): views from
+ *  page_view, clicks from newsletter_archive_click, one row per newsletter
+ *  with any, busiest first. Follows the count mode: unique = one view per
+ *  visitor per page per day, and one click per visitor per link per day.
+ *  Exported for the unit test. */
+export function newsletterArchiveStats(
+  inRange: AnalyticsEvent[],
+  unique: boolean
+): NewsletterArchiveRow[] {
+  const rows = new Map<string, NewsletterArchiveRow>()
+  const rowFor = (name: string) => {
+    let row = rows.get(name)
+    if (!row) {
+      row = { name, views: 0, issueClicks: 0, feedClicks: 0, substackClicks: 0 }
+      rows.set(name, row)
+    }
+    return row
+  }
+  const seen = new Set<string>()
+  const counts = (e: AnalyticsEvent, what: string) => {
+    if (!unique || !e.vid) return true
+    const t = Date.parse(e.ts)
+    const key = `${e.vid}\x00${Number.isNaN(t) ? '' : dashboardDay(t)}\x00${what}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  }
+  for (const e of inRange) {
+    if (e.type === 'page_view') {
+      const m = /^\/newsletter\/(events|training|funding)\/?$/.exec(
+        e.page ?? ''
+      )
+      if (!m) continue
+      const name = m[1][0].toUpperCase() + m[1].slice(1)
+      if (counts(e, `view\x00${name}`)) rowFor(name).views++
+    } else if (e.type === 'newsletter_archive_click' && e.page) {
+      if (!counts(e, `click\x00${e.page}\x00${e.source}\x00${e.label ?? ''}`))
+        continue
+      const row = rowFor(e.page)
+      if (e.source === 'issue') row.issueClicks++
+      else if (e.source === 'feed') row.feedClicks++
+      else if (e.source === 'substack') row.substackClicks++
+    }
+  }
+  return [...rows.values()].sort((a, b) => b.views - a.views)
 }
 
 /** What a newsletter_signup_error's reason (`source`) means, in words. */

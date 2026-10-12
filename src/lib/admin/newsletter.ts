@@ -3296,6 +3296,54 @@ export async function sentIssueHtml(
   return null
 }
 
+/** An issue that has reached readers on a real list: its name without any
+ *  wave suffix ("Events · Week 41, 2026"), when it first went out there, as
+ *  an ISO instant (null when ActiveCampaign gives no readable date), and
+ *  how many it has gone to so far, every wave added up. */
+export interface SentIssue {
+  name: string
+  sentAt: string | null
+  readers: number
+}
+
+/** The issues that have reached readers on the real list `listId`, among
+ *  the newest CAMPAIGN_READ_WINDOW campaigns, newest first: for the past
+ *  issues page and feed (src/lib/newsletter-archive-store.ts), which keep
+ *  their own record of the ones older than that. An issue sent in waves is
+ *  one entry, dated by its first wave. Shares sentIssueHtml's half-minute
+ *  campaigns read; a sent campaign's lists are read once and remembered. */
+export async function sentIssuesOn(listId: string): Promise<SentIssue[]> {
+  if (!isRealList(listId) || !isNewsletterConfigured()) return []
+  const campaigns = await sharedRead('web-campaigns', 30_000, () =>
+    allCampaigns({ fresh: true })
+  )
+  const prefix = `${REAL_LISTS[listId].prefix} · `
+  const reached = campaigns.filter(
+    c => reachedReaders(c) && baseIssueName(c.name).startsWith(prefix)
+  )
+  const [lists, offset] = await Promise.all([
+    mapLimit(reached, 3, knownListIds),
+    accountUtcOffset(campaigns),
+  ])
+  const issues = new Map<string, { first: number; readers: number }>()
+  reached.forEach((c, i) => {
+    if (!lists[i].includes(listId)) return
+    const name = baseIssueName(c.name)
+    const at = instantMs(c.sdate ?? c.ldate, offset)
+    const issue = issues.get(name) ?? { first: NaN, readers: 0 }
+    if (!Number.isNaN(at) && !(issue.first <= at)) issue.first = at
+    issue.readers += Number(c.send_amt ?? 0) || 0
+    issues.set(name, issue)
+  })
+  return [...issues.entries()]
+    .map(([name, { first, readers }]) => ({
+      name,
+      sentAt: Number.isNaN(first) ? null : new Date(first).toISOString(),
+      readers,
+    }))
+    .sort((a, b) => (b.sentAt ?? '').localeCompare(a.sentAt ?? ''))
+}
+
 /** The message HTML as a subscriber will see it, with AC's personalisation
  *  tags neutralised so the preview renders cleanly. */
 export async function previewHtml(
