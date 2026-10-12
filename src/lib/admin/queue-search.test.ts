@@ -51,6 +51,7 @@ function item(over: Partial<QueueItem>): QueueItem {
     saidBy: null,
     replyTo: null,
     noReply: null,
+    alreadyReplied: null,
     rejectReply: null,
     rejectDrafts: {},
     rejectReason: null,

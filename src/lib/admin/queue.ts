@@ -42,6 +42,7 @@ import { roomFor, SORT_FIELD, type Placed } from './queue-place'
 import type { ListingDates } from './queue-urgent'
 import { reviewAgainAt } from './queue-later'
 import { ruleTestOf, type RuleTest } from './queue-rule-test'
+import { alreadyRepliedOf, type AlreadyReplied } from './queue-already'
 
 export const QUEUE_TABLE_ID = 'tblonlKwIFJ7Aa8QN'
 const BROOM_ISSUES_TABLE_ID = 'tblntD3WITPEgjHRK'
@@ -156,6 +157,12 @@ export interface QueueItem {
    *  the proposal's `no_reply` (worker duty f); shown where the draft would
    *  be (Bryce, 8 Oct 2026). Null once a `reply` block is there. */
   noReply: NoReply | null
+  /** Email/Form: the owner already replied to them by hand in the
+   *  request's Gmail thread, so neither Publish nor Reject saves a draft.
+   *  From the proposal's reply.already, written by the Mac (Bryce, 12 Oct
+   *  2026: a second decline nearly went to someone he had already
+   *  answered). Null when he hasn't. */
+  alreadyReplied: AlreadyReplied | null
   /** Rejected Email/Form: the reply the Mac wrote for this rejection and
    *  saved as a Gmail draft (Bryce, 4 Oct 2026: "when I reject something
    *  which was suggested, it should have an email response like when I
@@ -508,6 +515,7 @@ function rowToItem(
   let ruleTest: RuleTest | null = null
   let replyTo: string | null = null
   let noReply: NoReply | null = null
+  let alreadyReplied: AlreadyReplied | null = null
   let rejectReply: RejectReply | null = null
   let saidBy: SaidBy | null = null
   if (isRecord(proposal)) {
@@ -525,6 +533,7 @@ function rowToItem(
       const who = str(proposal.reply.name)
       replyTo = to ? (who ? `${who} <${to}>` : to) : null
       rejectReply = rejectReplyOf(proposal.reply.reject, str(f[F.decidedAt]))
+      alreadyReplied = alreadyRepliedOf(proposal.reply.already)
       if (proposal.reply.platform === 'discord' && who) {
         const how = str(proposal.reply.how)
         saidBy = {
@@ -606,6 +615,7 @@ function rowToItem(
     replyStatus: str(f[F.replyStatus]),
     replyTo,
     noReply,
+    alreadyReplied,
     rejectReply,
     rejectDrafts: parseRejectDrafts(f[F.rejectDrafts]),
     saidBy,

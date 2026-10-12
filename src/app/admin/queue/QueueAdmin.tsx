@@ -16,6 +16,10 @@ import { missingFields } from '@/lib/admin/queue-needed'
 import { laterSince, laterUntil } from '@/lib/admin/queue-later'
 import { rejectReplyFor, shownDeclineChip } from '@/lib/admin/queue-decline'
 import {
+  alreadyRepliedOf,
+  type AlreadyReplied,
+} from '@/lib/admin/queue-already'
+import {
   OUTCOME_LABEL,
   ruleTestHeadline,
   type RuleTest,
@@ -960,7 +964,8 @@ function wantsDraft(item: QueueItem): boolean {
     Boolean(item.replyDraft) &&
     (item.source === 'Email' || item.source === 'Form') &&
     item.replyStatus !== 'Saved' &&
-    item.replyStatus !== 'Sent'
+    item.replyStatus !== 'Sent' &&
+    !item.alreadyReplied
   )
 }
 
@@ -978,6 +983,7 @@ function wantsRejectReply(item: QueueItem): boolean {
       item.source === 'Form' ||
       item.source === 'Discord') &&
     Boolean(item.replyTo) &&
+    !item.alreadyReplied &&
     item.rejectReply?.state !== 'saved' &&
     item.rejectReply?.state !== 'ready' &&
     Date.parse(item.decidedAt ?? '') >= REJECT_REPLIES_SINCE
@@ -994,6 +1000,7 @@ function discordRejectText(item: QueueItem): string | null {
 }
 
 function replyLabel(item: QueueItem): string {
+  if (item.alreadyReplied) return 'Already replied by hand · no draft'
   if (item.status === 'Rejected') {
     if (item.source === 'Discord') {
       // A ready decline shows as Copy reply / Open on Discord instead.
@@ -1132,6 +1139,8 @@ interface AgentResult {
   chat: boolean
   /** reject_draft: the words saved in Gmail. */
   rejectText?: string
+  /** No draft: the owner had already replied in the thread, on this day. */
+  alreadyReplied?: AlreadyReplied
 }
 
 const AGENT_TIMEOUT_MS = 15000
@@ -1165,6 +1174,7 @@ async function callAgent(
       error?: string
       chat?: boolean
       rejectText?: string
+      alreadyReplied?: unknown
     }
     return {
       ok: Boolean(data.ok),
@@ -1173,6 +1183,7 @@ async function callAgent(
       detail: data.detail ?? data.error ?? '',
       chat: Boolean(data.chat),
       rejectText: data.rejectText,
+      alreadyReplied: alreadyRepliedOf(data.alreadyReplied) ?? undefined,
     }
   } catch {
     return {
@@ -2216,15 +2227,31 @@ export default function QueueAdmin({
   // reachable the worker does it within five minutes.
   const saveReply = useCallback(
     async (item: QueueItem) => {
-      const res = agent
+      const res: AgentResult = agent
         ? await callAgent(agent, '/act', { id: item.id, action: 'gmail_draft' })
-        : { ok: false, offline: true, replyStatus: null, detail: '' }
+        : {
+            ok: false,
+            offline: true,
+            replyStatus: null,
+            detail: '',
+            chat: false,
+          }
       if (agent) setAgentOnline(!res.offline)
       const sub = res.ok
         ? res.detail || 'Draft saved in Gmail'
         : res.offline
           ? OFFLINE_SUB
           : `Reply draft failed: ${res.detail}`
+      const already = res.alreadyReplied
+      if (already) {
+        setItems(prev =>
+          prev
+            ? prev.map(i =>
+                i.id === item.id ? { ...i, alreadyReplied: already } : i
+              )
+            : prev
+        )
+      }
       if (res.replyStatus) {
         const status = res.replyStatus
         setItems(prev =>
@@ -2277,21 +2304,30 @@ export default function QueueAdmin({
         : res.offline
           ? `Mac agent not reachable · the Mac writes the reply within five minutes`
           : `${discord ? 'Reply' : 'Reply draft'} failed: ${res.detail}`
-      const reply: RejectReply | null = res.offline
-        ? null
-        : res.ok
-          ? {
-              text: res.rejectText ?? null,
-              state: discord ? 'ready' : 'saved',
-              error: null,
-            }
-          : { text: null, state: 'failed', error: res.detail }
-      if (reply) {
+      const already = res.alreadyReplied ?? null
+      const reply: RejectReply | null =
+        res.offline || already
+          ? null
+          : res.ok
+            ? {
+                text: res.rejectText ?? null,
+                state: discord ? 'ready' : 'saved',
+                error: null,
+              }
+            : { text: null, state: 'failed', error: res.detail }
+      // What the row learns: the reply as it went, or (no draft) the day he
+      // had already replied by hand.
+      const patch: Partial<QueueItem> | null = reply
+        ? { rejectReply: reply }
+        : already
+          ? { alreadyReplied: already }
+          : null
+      if (patch) {
         setItems(prev =>
           prev
             ? prev.map(i =>
                 i.id === item.id && i.status === 'Rejected'
-                  ? { ...i, rejectReply: reply }
+                  ? { ...i, ...patch }
                   : i
               )
             : prev
@@ -2303,7 +2339,7 @@ export default function QueueAdmin({
           ? {
               ...prev,
               sub,
-              item: reply ? { ...prev.item, rejectReply: reply } : prev.item,
+              item: patch ? { ...prev.item, ...patch } : prev.item,
             }
           : prev
       )
@@ -2450,9 +2486,11 @@ export default function QueueAdmin({
                                 ? 'Saving the reply draft in Gmail…'
                                 : 'Fable is writing the reply for Gmail…'
                             : 'Reply: the Mac saves it within five minutes'
-                          : updated.source === 'Discord' && updated.replyDraft
-                            ? 'Reply drafted · copy it and send it yourself on Discord'
-                            : undefined,
+                          : updated.alreadyReplied
+                            ? `You already replied to them on ${updated.alreadyReplied.date} · no draft saved`
+                            : updated.source === 'Discord' && updated.replyDraft
+                              ? 'Reply drafted · copy it and send it yourself on Discord'
+                              : undefined,
                 }
               : prev
           )
@@ -4098,17 +4136,44 @@ function Detail({
       </section>
     ) : null
 
-  const replyBlock =
-    item.status === 'Rejected' ? (
-      (rejectReplyBlock ?? noReplyBlock)
-    ) : acceptBlock || declineBlock ? (
-      <div className={styles.replies}>
-        {acceptBlock}
-        {declineBlock}
-      </div>
-    ) : (
-      noReplyBlock
-    )
+  // He already answered them by hand in the request's thread: no draft on
+  // either decision, and the item says so where the replies would be (Bryce,
+  // 12 Oct 2026, after a second decline nearly went to someone he had
+  // already answered).
+  const alreadyBlock = item.alreadyReplied ? (
+    <section className={styles.block}>
+      <h3 className={styles.h3}>
+        Already replied{item.replyTo ? ` to ${item.replyTo}` : ''}
+      </h3>
+      <p className={styles.note}>
+        You replied by hand on {item.alreadyReplied.date}
+        {item.alreadyReplied.link && (
+          <>
+            {' · '}
+            <a href={item.alreadyReplied.link} target="_blank" rel="noreferrer">
+              see your reply
+            </a>
+          </>
+        )}
+        {isOpen(item)
+          ? `, so ${acceptLabel(item)} and Reject save no new draft.`
+          : ', so no new draft was saved.'}
+      </p>
+    </section>
+  ) : null
+
+  const replyBlock = alreadyBlock ? (
+    alreadyBlock
+  ) : item.status === 'Rejected' ? (
+    (rejectReplyBlock ?? noReplyBlock)
+  ) : acceptBlock || declineBlock ? (
+    <div className={styles.replies}>
+      {acceptBlock}
+      {declineBlock}
+    </div>
+  ) : (
+    noReplyBlock
+  )
 
   // The side panel: the verdict with its reasons, and under it the chat
   // with Fable (when the Mac agent is up), which is there for every item.
