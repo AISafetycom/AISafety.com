@@ -1689,6 +1689,8 @@ export default function QueueAdmin({
   // one (so a row never moves from under the item being chatted on), and
   // stays while it is open (so clicking it there does not send it back
   // down); it goes back to its place once it is left with nothing unread.
+  // The section shows only on the item's own tab (Additions, Changes or
+  // Rules), like every other section.
   const [fableTop, setFableTop] = useState<string[]>([])
   useEffect(() => {
     setFableTop(prev => {
@@ -1802,10 +1804,9 @@ export default function QueueAdmin({
         urgencies.set(item.id, urgency)
         urgentPerKind[k]++
       }
+      if (k !== kind) continue
       if (fableTop.includes(item.id)) groups.fable.push(item)
-      else if (k === kind) {
-        groups[urgency ? 'urgent' : sectionOf(item)].push(item)
-      }
+      else groups[urgency ? 'urgent' : sectionOf(item)].push(item)
     }
     const oldest = (a: QueueItem, b: QueueItem) =>
       a.createdAt < b.createdAt ? -1 : 1
@@ -2918,16 +2919,13 @@ export default function QueueAdmin({
                     {ordered.urgentPerKind[k.key]}
                   </span>
                 )}
-                {/* Items already in "Fable replying" at the top are not
-                    counted again here. */}
+                {/* Fable at work on another tab: its "Fable replying"
+                    items show only there, so the dot points the way. */}
                 {!searching && kind !== k.key && (
                   <FableDot
                     mark={markAmong(
                       (items ?? []).filter(
-                        i =>
-                          isOpen(i) &&
-                          kindOf(i) === k.key &&
-                          !fableTop.includes(i.id)
+                        i => isOpen(i) && kindOf(i) === k.key
                       )
                     )}
                   />
@@ -3192,9 +3190,6 @@ export default function QueueAdmin({
                               !pending[item.id] && Boolean(draft(item.id).error)
                             }
                             fable={fableMarks[item.id]}
-                            showKind={
-                              section === 'fable' && kindOf(item) !== kind
-                            }
                             urgency={
                               section === 'fable' || section === 'urgent'
                                 ? ordered.urgencies.get(item.id)
