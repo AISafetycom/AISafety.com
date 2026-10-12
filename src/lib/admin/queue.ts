@@ -1894,6 +1894,19 @@ export async function undoItem(item: QueueItem): Promise<void> {
     [F.error]: null,
     [F.rejectReply]: null,
   }
+  // Accept and Reject both clear a Broom flag's row, and it cannot come
+  // back. The reopened item lets go of it: the Mac worker takes a flag
+  // whose row is gone for one cleared in Airtable and closes the item
+  // within five minutes (Bryce, 12 Oct 2026: SteadRise, rejected and
+  // undone, then "already closed" on the second Reject).
+  if (
+    item.type === 'Change' &&
+    item.issueRow &&
+    isRecordId(item.issueRow) &&
+    !(await recordExists(BROOM_ISSUES_TABLE_ID, item.issueRow))
+  ) {
+    reopen[F.issueRow] = null
+  }
   if (item.status === 'Applied' && item.type === 'Add') {
     const t = target(item)
     await patchRecord(t.table, t.record, { 'Publish?': false })
