@@ -59,6 +59,11 @@ export function projectFromRecord(record: AirtableRawRecord): Project | null {
   const name = fieldString(f[FIELD.projectName])
   if (!name) return null
 
+  // A "Seeking owner" idea has no one running it yet, so it carries no
+  // contact anywhere: cards, search, chatbot and Data API.
+  const status = fieldText(f[FIELD.status])
+  const seekingOwner = status === 'Seeking owner'
+
   return {
     id: record.id,
     dateAdded: record.createdTime?.slice(0, 10) ?? null,
@@ -67,9 +72,9 @@ export function projectFromRecord(record: AirtableRawRecord): Project | null {
     description: fieldString(f[FIELD.descriptionShort]) || '',
     descriptionLong: fieldString(f[FIELD.descriptionLong]),
     logo: null,
-    contact: fieldString(f[FIELD.contactName]) || '',
-    email: fieldString(f[FIELD.contactEmail]),
-    status: fieldText(f[FIELD.status]),
+    contact: seekingOwner ? '' : fieldString(f[FIELD.contactName]) || '',
+    email: seekingOwner ? null : fieldString(f[FIELD.contactEmail]),
+    status,
     featured: fieldFeatured(f[FIELD.featured]),
     featuredTagline: fieldString(f[FIELD.featuredTagline]),
   }
