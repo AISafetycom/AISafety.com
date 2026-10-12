@@ -1118,7 +1118,8 @@ interface Toast {
   /** working: the decision is still on its way to Airtable (the toast
    *  stays up, U queues an undo). done: it landed. undoing: Undo was
    *  pressed and is on its way (the mark spins until the item is back).
-   *  failed: the decision or the undo did not land, with Retry. */
+   *  failed: the decision or the undo did not land, with Retry – or the
+   *  item was closed somewhere else and is under Done, without. */
   state: 'working' | 'done' | 'undoing' | 'failed'
   text: string
   /** A second line that fills in later: what happened to the reply draft. */
@@ -2401,6 +2402,7 @@ export default function QueueAdmin({
         pendingRef.current = rest
         setPending(rest)
       }
+      let status = 0
       try {
         const res = await fetch(API, {
           method: 'POST',
@@ -2412,6 +2414,7 @@ export default function QueueAdmin({
             ...extra,
           }),
         })
+        status = res.status
         const data = (await res.json()) as { item?: QueueItem; error?: string }
         if (!res.ok || !data.item) {
           throw new Error(data.error ?? `HTTP ${res.status}`)
@@ -2525,20 +2528,26 @@ export default function QueueAdmin({
         }
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e)
-        setDraft(item.id, { busy: false, error: message })
+        // 409: the item was decided or closed somewhere else (the Mac
+        // worker, another tab). Retrying can never work, so the list is
+        // read again first and the item moves to Done, with its own note
+        // on why.
+        const closed = decision && status === 409
+        setDraft(item.id, { busy: false, error: closed ? null : message })
+        if (closed) await load()
         if (decision) {
           forget()
           undoAfterRef.current.delete(item.id)
           // A failure takes the toast whatever it shows, and keeps it up
           // until Retry, Dismiss or the next decision. The item is still in
-          // the list, with the error on it.
+          // the list, with the error on it, unless it was closed.
           setToast({
             item,
             no: action === 'reject',
             state: 'failed',
-            text: `${action === 'reject' ? 'Reject' : action === 'later' ? 'Review again in a week' : acceptLabel(item)} failed · ${message}`,
-            sub: 'Still in the list',
-            retry: { action, extra },
+            text: `${action === 'reject' ? 'Reject' : action === 'later' ? 'Review again in a week' : acceptLabel(item)} failed · ${closed ? message.replace(/\s*Reload the page\.$/, '') : message}`,
+            sub: closed ? 'Moved to Done today' : 'Still in the list',
+            retry: closed ? undefined : { action, extra },
           })
         } else if (action === 'undo') {
           setToast({
@@ -2563,6 +2572,7 @@ export default function QueueAdmin({
       saveRejectReply,
       canEdit,
       forgetLive,
+      load,
     ]
   )
   actRef.current = act
@@ -3407,7 +3417,16 @@ export default function QueueAdmin({
               )}
               <button
                 className={styles.toastUndo}
-                onClick={() => select(toast.item.id)}
+                onClick={() => {
+                  // Where the item is now: one closed meanwhile is under
+                  // Done. Opening it as an open item put the first item in
+                  // the list in focus instead (Bryce, 12 Oct 2026).
+                  const now = itemsRef.current?.find(
+                    i => i.id === toast.item.id
+                  )
+                  if (now && !isOpen(now)) showDecided(now.id)
+                  else select(toast.item.id)
+                }}
               >
                 Open
               </button>
