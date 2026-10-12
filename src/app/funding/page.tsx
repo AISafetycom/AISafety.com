@@ -5,9 +5,14 @@ import FundingClient from './FundingClient'
 import { getFunders } from '@/lib/data/funding'
 import { isAcceptingApplications } from '@/lib/funding-status'
 import { pageMetadata } from '@/lib/page-metadata'
+import { feedPath } from '@/lib/newsletter-archive'
+import { WEB_NEWSLETTERS } from '@/lib/newsletter-web'
 import { SITE_PAGES } from '@/lib/site-pages'
 
-export const metadata = pageMetadata(SITE_PAGES.funding)
+export const metadata = pageMetadata(SITE_PAGES.funding, {
+  url: feedPath('funding'),
+  title: WEB_NEWSLETTERS.funding.sender,
+})
 
 export default async function FundingPage() {
   const [funders, lastUpdated] = await Promise.all([
@@ -27,7 +32,7 @@ export default async function FundingPage() {
         lastUpdatedIso={lastUpdated.lastUpdated}
         newsletter
         newsletterHeading="Get notified when new funding opportunities are announced"
-        newsletterSubscribeUrl="https://aisafetyfunding.substack.com/subscribe"
+        newsletterKey="funding"
         newsletterTrackingPage="Funding"
         description={
           <>

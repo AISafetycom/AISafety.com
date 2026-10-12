@@ -38,13 +38,13 @@
   - reached clearly more people than the approval expected (the wave wasn't
     kept to — nobody has yet proven ActiveCampaign honours a segment set
     through the v1 API at send time);
-  - is a pipeline draft on 6 or 7 older than 30 hours that isn't part of a
+  - is a pipeline draft on 6, 7 or 8 older than 30 hours that isn't part of a
     wave sequence still going out.
   And for the account: ActiveCampaign's API failing for more than an hour,
   account_view's subscriber_limit or status changing, and the contact count
   within 50 of the limit (at 5,000 ActiveCampaign stops EVERY campaign).
 
-  Once per sent issue or wave on 6/7, 18 hours after it finished: a health
+  Once per sent issue or wave on 6/7/8, 18 hours after it finished: a health
   check (bounces, unsubscribes, spam complaints, verified opens) with a
   green/amber/red verdict, emailed and stored for the page. A red one cancels
   the waves of that issue still scheduled (above); amber cancels nothing.
@@ -91,8 +91,9 @@ export { MAX_UNSEGMENTED_SEND, NEWSLETTER_WARMUP }
 /** Lists real subscribers are on. */
 const REAL_LISTS = ['6', '7', '8']
 /** Lists whose sends get the 18-hour health check and whose drafts must not
- *  sit around (the lists the ~2,889 imported readers are on). Their waves
- *  are the ones canceled after a red or missing verdict. */
+ *  sit around (the lists the imported readers are on: Events and Training,
+ *  and Funding from its move day). Their waves are the ones canceled after a
+ *  red or missing verdict. */
 const ISSUE_LISTS: readonly string[] = HEALTH_CHECK_LISTS
 const LIST_LABELS: Record<string, string> = {
   '6': 'Events',
@@ -1317,7 +1318,7 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
       summary.errors.push(`account: ${errorText(err)}`)
     }
 
-    // ── Health, 18 hours after a send on 6/7 finished ──
+    // ── Health, 18 hours after a send on 6/7/8 finished ──
     if (campaignsOk) {
       const due = relevant.filter(({ c, lists }) => {
         const finished = timeOf(c.ldate)
@@ -1417,7 +1418,7 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
     const held: CancelNeed[] = []
     if (campaignsOk) {
       try {
-        // The verdicts on every sent wave on 6/7 (one read; most are known).
+        // The verdicts on every sent wave on 6/7/8 (one read; most are known).
         const sentWaves = relevant
           .filter(
             ({ c, lists }) =>
@@ -1974,7 +1975,7 @@ function campaignAlerts(p: {
       })
     }
 
-    // A pipeline draft left waiting on 6/7.
+    // A pipeline draft left waiting on 6/7/8.
     if (
       c.status === '0' &&
       states[c.id].pipeline === true &&
@@ -2044,7 +2045,7 @@ function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
-/** Pure: the waves on the lists the watcher judges (6/7) that must not go
+/** Pure: the waves on the lists the watcher judges (6/7/8) that must not go
  *  out, soonest first:
  *  - every wave still to go (scheduled or held) after a wave whose 18-hour
  *    verdict came back red (not on a small sample) since it was approved.

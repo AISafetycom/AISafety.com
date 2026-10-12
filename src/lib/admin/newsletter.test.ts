@@ -1010,7 +1010,7 @@ describe('waveProgress', () => {
     )
     expect(judged.verdictPending).toBe(false)
     expect(judged.startFrom).toBe(Date.parse('2026-10-09T08:30:00Z'))
-    // Funding isn't judged by the watcher: no room kept for a verdict.
+    // Funding is judged too since its move: the same room for the verdict.
     const funding = waveProgress(
       4,
       [w('1', 1, '5')],
@@ -1018,8 +1018,8 @@ describe('waveProgress', () => {
       '-05:00',
       waveTiming('8')
     )
-    expect(funding.verdictPending).toBe(false)
-    expect(funding.startFrom).toBe(Date.parse('2026-10-09T08:30:00Z'))
+    expect(funding.verdictPending).toBe(true)
+    expect(funding.startFrom).toBe(Date.parse('2026-10-09T10:00:00Z'))
     // A test list waits ten minutes after the wave before it finished.
     const test = waveProgress(
       4,
@@ -1142,7 +1142,7 @@ describe('waveSchedule: when each wave of one approval starts', () => {
     ).toEqual([{ wave: 1, startsAt: 1100 }])
   })
 
-  it('timing per list: real lists 18 hours + verdict room on Events and Training', () => {
+  it('timing per list: real lists 18 hours + verdict room on Events, Training and Funding', () => {
     expect(waveTiming('6')).toEqual({
       gapMs: 18 * 3_600_000,
       leadMs: 90 * 60_000,
@@ -1150,7 +1150,7 @@ describe('waveSchedule: when each wave of one approval starts', () => {
       delayMs: 5 * 60_000,
       spacingMs: 24 * 3_600_000,
     })
-    expect(waveTiming('8')).toMatchObject({ judged: false, leadMs: 0 })
+    expect(waveTiming('8')).toEqual(waveTiming('6'))
     expect(waveTiming('5')).toEqual({
       gapMs: 10 * 60_000,
       leadMs: 0,

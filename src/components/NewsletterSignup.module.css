@@ -9,24 +9,9 @@
   border-radius: 16px;
 }
 
-/* Hovering the card link (anywhere outside the pill) brightens the border,
-   matching the pill's own focus treatment. */
-.card:has(.headingLink:hover) {
-  border-color: color-mix(in srgb, var(--bright-teal-500) 60%, transparent);
-}
-
 .heading,
 .status {
   text-align: center;
-}
-
-/* Substack mode: stretch the heading link's click area over the whole card,
-   so the space around the email pill opens the newsletter too. */
-.headingLink::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 16px;
 }
 
 .field {

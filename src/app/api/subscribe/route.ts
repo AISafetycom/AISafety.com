@@ -1,6 +1,7 @@
 /*
-  POST /api/subscribe — the newsletter signup boxes on /events and /training.
-  Body: { email, newsletter: 'events' | 'training', hp }, where `hp` is the
+  POST /api/subscribe — the newsletter signup boxes on /events, /training and
+  /funding. Body: { email, newsletter: 'events' | 'training' | 'funding', hp },
+  where `hp` is the
   box's hidden honeypot field (empty for a person).
 
   Hands the address to the newsletter's double opt-in form in ActiveCampaign
@@ -89,8 +90,8 @@ export async function POST(req: NextRequest) {
   }
   const b = body as Record<string, unknown>
 
-  // Only the newsletters that sign up through ActiveCampaign; Funding and
-  // Updates stay on Substack.
+  // Only the newsletters that sign up through ActiveCampaign; Updates stays
+  // on Substack.
   if (!isSignupNewsletter(b.newsletter)) {
     return fail(400, 'unknown_newsletter', MESSAGES.unknownNewsletter)
   }
