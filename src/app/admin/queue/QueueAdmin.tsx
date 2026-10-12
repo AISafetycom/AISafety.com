@@ -942,9 +942,10 @@ function acceptLabel(
   if (item.type === 'Add') return 'Publish'
   if (item.type === 'Change') {
     // a field edited beyond the (empty) proposal makes it a change too
-    return item.changes.length || Object.keys(edits).length
-      ? 'Apply change'
-      : 'Accept flag'
+    if (item.changes.length || Object.keys(edits).length) return 'Apply change'
+    // Nothing to apply: a Broom flag is accepted as a flag; anything else
+    // (a correction that needed the owner) is just marked done.
+    return item.source === 'Broom' ? 'Accept flag' : 'Mark done'
   }
   return 'Apply rule'
 }
@@ -1031,7 +1032,7 @@ function doneLabel(item: QueueItem): string {
   if (item.type === 'Add') return 'Published'
   if (item.type === 'Change') {
     const n = item.changes.length
-    if (n === 0) return 'Flag cleared'
+    if (n === 0) return item.source === 'Broom' ? 'Flag cleared' : 'Done'
     return `Changed ${n} field${n === 1 ? '' : 's'}`
   }
   return 'Applied'
@@ -1069,7 +1070,7 @@ function workingLabel(item: QueueItem, action: Decision): string {
   if (action === 'later') return 'Setting it aside…'
   const label = acceptLabel(item)
   if (label === 'Publish') return 'Publishing…'
-  if (label === 'Accept flag') return 'Accepting…'
+  if (label === 'Accept flag' || label === 'Mark done') return 'Accepting…'
   return 'Applying…'
 }
 
@@ -1115,14 +1116,15 @@ interface Toast {
   /** Set aside to review again: the mark is a clock. */
   later?: boolean
   /** working: the decision is still on its way to Airtable (the toast
-   *  stays up, U queues an undo). done: it landed. failed: the item is
-   *  still in the list, with Retry. */
-  state: 'working' | 'done' | 'failed'
+   *  stays up, U queues an undo). done: it landed. undoing: Undo was
+   *  pressed and is on its way (the mark spins until the item is back).
+   *  failed: the decision or the undo did not land, with Retry. */
+  state: 'working' | 'done' | 'undoing' | 'failed'
   text: string
   /** A second line that fills in later: what happened to the reply draft. */
   sub?: string
   /** What Retry sends again after a failure. */
-  retry?: { action: Decision; extra: Record<string, unknown> }
+  retry?: { action: Action; extra: Record<string, unknown> }
 }
 
 /** What the page tells the Mac agent to do after a decision: save the
@@ -2387,6 +2389,11 @@ export default function QueueAdmin({
           walk.slice(i + 1).find(free) ??
           walk.slice(0, Math.max(0, i)).reverse().find(free)
         if (next) reveal(next)
+      } else if (action === 'undo') {
+        // The write takes a second or two: the toast says so straight away,
+        // even after it has gone (U keeps working for five minutes), so the
+        // key never seems to do nothing (Bryce, 12 Oct 2026).
+        setToast({ item, no: false, state: 'undoing', text: 'Undoing…' })
       }
       const forget = () => {
         const rest = { ...pendingRef.current }
@@ -2497,17 +2504,21 @@ export default function QueueAdmin({
           if (draftPending) void saveReply(updated)
           if (rejectReplyPending) void saveRejectReply(updated)
         } else if (action === 'undo') {
-          // A rejection's reply already in Gmail stays there: say so.
-          setToast(
-            item.status === 'Rejected' && item.rejectReply?.state === 'saved'
-              ? {
-                  item: updated,
-                  no: false,
-                  state: 'done',
-                  text: 'Back in the queue',
-                  sub: 'The rejection reply is still in Gmail as a draft – delete it there',
-                }
-              : null
+          // A rejection's reply already in Gmail stays there: say so. A
+          // decision made while the undo was on its way keeps the toast.
+          setToast(prev =>
+            prev && prev.item.id !== item.id
+              ? prev
+              : item.status === 'Rejected' &&
+                  item.rejectReply?.state === 'saved'
+                ? {
+                    item: updated,
+                    no: false,
+                    state: 'done',
+                    text: 'Back in the queue',
+                    sub: 'The rejection reply is still in Gmail as a draft – delete it there',
+                  }
+                : null
           )
           setUndoable(null)
           select(updated.id)
@@ -2527,6 +2538,15 @@ export default function QueueAdmin({
             state: 'failed',
             text: `${action === 'reject' ? 'Reject' : action === 'later' ? 'Review again in a week' : acceptLabel(item)} failed · ${message}`,
             sub: 'Still in the list',
+            retry: { action, extra },
+          })
+        } else if (action === 'undo') {
+          setToast({
+            item,
+            no: false,
+            state: 'failed',
+            text: `Undo failed · ${message}`,
+            sub: 'The decision still stands',
             retry: { action, extra },
           })
         }
@@ -3310,7 +3330,8 @@ export default function QueueAdmin({
       {toast && (
         // Laid out like a list row (logo, name, the muted line) with a
         // bold tick or cross in front, so the eye reads it the same way.
-        // While the decision is on its way the mark is a spinning ring.
+        // While the decision (or its undo) is on its way the mark is a
+        // spinning ring.
         <div
           key={toast.item.id}
           className={`${styles.toast} ${toastLeaving ? styles.toastLeaving : ''}`}
@@ -3318,7 +3339,9 @@ export default function QueueAdmin({
         >
           <span
             className={`${styles.toastMark} ${toast.no ? styles.toastMarkNo : ''} ${
-              toast.state === 'working' ? styles.toastMarkWorking : ''
+              toast.state === 'working' || toast.state === 'undoing'
+                ? styles.toastMarkWorking
+                : ''
             } ${toast.state === 'failed' ? styles.toastMarkFailed : ''}`}
           >
             {toast.state === 'failed' ? (
@@ -3396,7 +3419,7 @@ export default function QueueAdmin({
                 <Icon src={ICON.x} size={12} />
               </button>
             </>
-          ) : (
+          ) : toast.state === 'undoing' ? null : (
             <button
               className={styles.toastUndo}
               disabled={toast.state === 'done' && draft(toast.item.id).busy}
@@ -4387,9 +4410,11 @@ function Detail({
           fableChanges.length === 0 &&
           extraFields.length === 0 ? (
             <p className={styles.note}>
-              No field change proposed. Accept says the flag was right and you
-              have dealt with it, and clears it in Airtable; Reject clears it as
-              wrong; edit a field yourself; or ask Fable for a change.
+              {item.source === 'Broom'
+                ? 'No field change proposed. Accept says the flag was right and you have dealt with it, and clears it in Airtable; Reject clears it as wrong; edit a field yourself; or ask Fable for a change.'
+                : item.targetRecord
+                  ? 'No field change proposed. Edit a field yourself or ask Fable for a change; Mark done once you have dealt with it another way; Reject if nothing needs doing.'
+                  : 'No listing matched, so there is nothing to change here. Ask Fable which listing it is and to fix it, or fix it in Airtable, then Mark done; Reject if nothing needs doing.'}
             </p>
           ) : (
             <div className={styles.diff}>
@@ -4508,7 +4533,8 @@ function Detail({
             </div>
           ))}
 
-        {item.type === 'Change' && (
+        {/* A correction no listing matched has no fields to pick from. */}
+        {item.type === 'Change' && Boolean(item.targetRecord) && (
           <FieldPicker
             key={item.id}
             fields={pickable}
