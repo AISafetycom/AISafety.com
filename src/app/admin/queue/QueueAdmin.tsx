@@ -942,9 +942,10 @@ function acceptLabel(
   if (item.type === 'Add') return 'Publish'
   if (item.type === 'Change') {
     // a field edited beyond the (empty) proposal makes it a change too
-    return item.changes.length || Object.keys(edits).length
-      ? 'Apply change'
-      : 'Accept flag'
+    if (item.changes.length || Object.keys(edits).length) return 'Apply change'
+    // Nothing to apply: a Broom flag is accepted as a flag; anything else
+    // (a correction that needed the owner) is just marked done.
+    return item.source === 'Broom' ? 'Accept flag' : 'Mark done'
   }
   return 'Apply rule'
 }
@@ -1031,7 +1032,7 @@ function doneLabel(item: QueueItem): string {
   if (item.type === 'Add') return 'Published'
   if (item.type === 'Change') {
     const n = item.changes.length
-    if (n === 0) return 'Flag cleared'
+    if (n === 0) return item.source === 'Broom' ? 'Flag cleared' : 'Done'
     return `Changed ${n} field${n === 1 ? '' : 's'}`
   }
   return 'Applied'
@@ -1069,7 +1070,7 @@ function workingLabel(item: QueueItem, action: Decision): string {
   if (action === 'later') return 'Setting it aside…'
   const label = acceptLabel(item)
   if (label === 'Publish') return 'Publishing…'
-  if (label === 'Accept flag') return 'Accepting…'
+  if (label === 'Accept flag' || label === 'Mark done') return 'Accepting…'
   return 'Applying…'
 }
 
@@ -1115,14 +1116,16 @@ interface Toast {
   /** Set aside to review again: the mark is a clock. */
   later?: boolean
   /** working: the decision is still on its way to Airtable (the toast
-   *  stays up, U queues an undo). done: it landed. failed: the item is
-   *  still in the list, with Retry. */
-  state: 'working' | 'done' | 'failed'
+   *  stays up, U queues an undo). done: it landed. undoing: Undo was
+   *  pressed and is on its way (the mark spins until the item is back).
+   *  failed: the decision or the undo did not land, with Retry – or the
+   *  item was closed somewhere else and is under Done, without. */
+  state: 'working' | 'done' | 'undoing' | 'failed'
   text: string
   /** A second line that fills in later: what happened to the reply draft. */
   sub?: string
   /** What Retry sends again after a failure. */
-  retry?: { action: Decision; extra: Record<string, unknown> }
+  retry?: { action: Action; extra: Record<string, unknown> }
 }
 
 /** What the page tells the Mac agent to do after a decision: save the
@@ -2387,6 +2390,11 @@ export default function QueueAdmin({
           walk.slice(i + 1).find(free) ??
           walk.slice(0, Math.max(0, i)).reverse().find(free)
         if (next) reveal(next)
+      } else if (action === 'undo') {
+        // The write takes a second or two: the toast says so straight away,
+        // even after it has gone (U keeps working for five minutes), so the
+        // key never seems to do nothing (Bryce, 12 Oct 2026).
+        setToast({ item, no: false, state: 'undoing', text: 'Undoing…' })
       }
       const forget = () => {
         const rest = { ...pendingRef.current }
@@ -2394,6 +2402,7 @@ export default function QueueAdmin({
         pendingRef.current = rest
         setPending(rest)
       }
+      let status = 0
       try {
         const res = await fetch(API, {
           method: 'POST',
@@ -2405,6 +2414,7 @@ export default function QueueAdmin({
             ...extra,
           }),
         })
+        status = res.status
         const data = (await res.json()) as { item?: QueueItem; error?: string }
         if (!res.ok || !data.item) {
           throw new Error(data.error ?? `HTTP ${res.status}`)
@@ -2497,36 +2507,55 @@ export default function QueueAdmin({
           if (draftPending) void saveReply(updated)
           if (rejectReplyPending) void saveRejectReply(updated)
         } else if (action === 'undo') {
-          // A rejection's reply already in Gmail stays there: say so.
-          setToast(
-            item.status === 'Rejected' && item.rejectReply?.state === 'saved'
-              ? {
-                  item: updated,
-                  no: false,
-                  state: 'done',
-                  text: 'Back in the queue',
-                  sub: 'The rejection reply is still in Gmail as a draft – delete it there',
-                }
-              : null
+          // A rejection's reply already in Gmail stays there: say so. A
+          // decision made while the undo was on its way keeps the toast.
+          setToast(prev =>
+            prev && prev.item.id !== item.id
+              ? prev
+              : item.status === 'Rejected' &&
+                  item.rejectReply?.state === 'saved'
+                ? {
+                    item: updated,
+                    no: false,
+                    state: 'done',
+                    text: 'Back in the queue',
+                    sub: 'The rejection reply is still in Gmail as a draft – delete it there',
+                  }
+                : null
           )
           setUndoable(null)
           select(updated.id)
         }
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e)
-        setDraft(item.id, { busy: false, error: message })
+        // 409: the item was decided or closed somewhere else (the Mac
+        // worker, another tab). Retrying can never work, so the list is
+        // read again first and the item moves to Done, with its own note
+        // on why.
+        const closed = decision && status === 409
+        setDraft(item.id, { busy: false, error: closed ? null : message })
+        if (closed) await load()
         if (decision) {
           forget()
           undoAfterRef.current.delete(item.id)
           // A failure takes the toast whatever it shows, and keeps it up
           // until Retry, Dismiss or the next decision. The item is still in
-          // the list, with the error on it.
+          // the list, with the error on it, unless it was closed.
           setToast({
             item,
             no: action === 'reject',
             state: 'failed',
-            text: `${action === 'reject' ? 'Reject' : action === 'later' ? 'Review again in a week' : acceptLabel(item)} failed · ${message}`,
-            sub: 'Still in the list',
+            text: `${action === 'reject' ? 'Reject' : action === 'later' ? 'Review again in a week' : acceptLabel(item)} failed · ${closed ? message.replace(/\s*Reload the page\.$/, '') : message}`,
+            sub: closed ? 'Moved to Done today' : 'Still in the list',
+            retry: closed ? undefined : { action, extra },
+          })
+        } else if (action === 'undo') {
+          setToast({
+            item,
+            no: false,
+            state: 'failed',
+            text: `Undo failed · ${message}`,
+            sub: 'The decision still stands',
             retry: { action, extra },
           })
         }
@@ -2543,6 +2572,7 @@ export default function QueueAdmin({
       saveRejectReply,
       canEdit,
       forgetLive,
+      load,
     ]
   )
   actRef.current = act
@@ -3310,7 +3340,8 @@ export default function QueueAdmin({
       {toast && (
         // Laid out like a list row (logo, name, the muted line) with a
         // bold tick or cross in front, so the eye reads it the same way.
-        // While the decision is on its way the mark is a spinning ring.
+        // While the decision (or its undo) is on its way the mark is a
+        // spinning ring.
         <div
           key={toast.item.id}
           className={`${styles.toast} ${toastLeaving ? styles.toastLeaving : ''}`}
@@ -3318,7 +3349,9 @@ export default function QueueAdmin({
         >
           <span
             className={`${styles.toastMark} ${toast.no ? styles.toastMarkNo : ''} ${
-              toast.state === 'working' ? styles.toastMarkWorking : ''
+              toast.state === 'working' || toast.state === 'undoing'
+                ? styles.toastMarkWorking
+                : ''
             } ${toast.state === 'failed' ? styles.toastMarkFailed : ''}`}
           >
             {toast.state === 'failed' ? (
@@ -3384,7 +3417,16 @@ export default function QueueAdmin({
               )}
               <button
                 className={styles.toastUndo}
-                onClick={() => select(toast.item.id)}
+                onClick={() => {
+                  // Where the item is now: one closed meanwhile is under
+                  // Done. Opening it as an open item put the first item in
+                  // the list in focus instead (Bryce, 12 Oct 2026).
+                  const now = itemsRef.current?.find(
+                    i => i.id === toast.item.id
+                  )
+                  if (now && !isOpen(now)) showDecided(now.id)
+                  else select(toast.item.id)
+                }}
               >
                 Open
               </button>
@@ -3396,7 +3438,7 @@ export default function QueueAdmin({
                 <Icon src={ICON.x} size={12} />
               </button>
             </>
-          ) : (
+          ) : toast.state === 'undoing' ? null : (
             <button
               className={styles.toastUndo}
               disabled={toast.state === 'done' && draft(toast.item.id).busy}
@@ -3824,10 +3866,53 @@ function Detail({
         ].filter(
           k =>
             !proposedFields.has(k) &&
+            !fableFields.has(k) &&
             !UNPICKABLE_TYPES.has(types.get(k)?.type ?? '')
         )
   const extraWas = (k: string): unknown =>
     isOpen(item) ? live?.fields[k] : item.before?.[k]
+  // A field Fable changed from the chat: its picture is shown as it is;
+  // anything else can be edited like a field picked with E, from Fable's
+  // value. A decided change shows the edit that went out with it.
+  const fableRow = (c: FableChange) => {
+    if (touchesPicture(c)) {
+      return (
+        <FableChangeRow
+          key={`fable:${c.field}`}
+          change={c}
+          page={item.page}
+          live={live?.fields[c.field]}
+          cap={c.field === cap.field ? cap.cap : undefined}
+        />
+      )
+    }
+    const edit = isOpen(item)
+      ? d.edits[c.field]
+      : item.status === 'Applied'
+        ? editsAsText(item.edits ?? {})[c.field]
+        : undefined
+    return (
+      <ExtraChangeRow
+        key={`fable:${c.field}`}
+        field={c.field}
+        page={item.page}
+        info={types.get(c.field)}
+        was={c.from}
+        fable={c}
+        edit={edit}
+        editing={d.editing === c.field}
+        canEdit={!revising && isOpen(item)}
+        cap={c.field === cap.field ? cap.cap : undefined}
+        onEditing={on => setD({ editing: on ? c.field : null })}
+        onEdit={text => {
+          const edits = { ...d.edits }
+          if (text === null) delete edits[c.field]
+          else edits[c.field] = text
+          setD({ editing: null, edits })
+        }}
+      />
+    )
+  }
   // What the picker offers: the record's other fields that can be typed
   // into, in the table's order.
   const pickable =
@@ -4352,9 +4437,11 @@ function Detail({
           fableChanges.length === 0 &&
           extraFields.length === 0 ? (
             <p className={styles.note}>
-              No field change proposed. Accept says the flag was right and you
-              have dealt with it, and clears it in Airtable; Reject clears it as
-              wrong; edit a field yourself; or ask Fable for a change.
+              {item.source === 'Broom'
+                ? 'No field change proposed. Accept says the flag was right and you have dealt with it, and clears it in Airtable; Reject clears it as wrong; edit a field yourself; or ask Fable for a change.'
+                : item.targetRecord
+                  ? 'No field change proposed. Edit a field yourself or ask Fable for a change; Mark done once you have dealt with it another way; Reject if nothing needs doing.'
+                  : 'No listing matched, so there is nothing to change here. Ask Fable which listing it is and to fix it, or fix it in Airtable, then Mark done; Reject if nothing needs doing.'}
             </p>
           ) : (
             <div className={styles.diff}>
@@ -4362,13 +4449,7 @@ function Detail({
                 // A proposed field Fable has since changed on the record
                 // shows Fable's value in its place, once; Accept keeps it.
                 fableFields.has(c.field) ? (
-                  <FableChangeRow
-                    key={`fable:${c.field}`}
-                    change={fableFields.get(c.field)!}
-                    page={item.page}
-                    live={live?.fields[c.field]}
-                    cap={c.field === cap.field ? cap.cap : undefined}
-                  />
+                  fableRow(fableFields.get(c.field)!)
                 ) : (
                   <div key={c.field} className={styles.diffRow}>
                     <span className={styles.label}>
@@ -4455,15 +4536,7 @@ function Detail({
               )}
               {fableChanges
                 .filter(c => !proposedFields.has(c.field))
-                .map(c => (
-                  <FableChangeRow
-                    key={`fable:${c.field}`}
-                    change={c}
-                    page={item.page}
-                    live={live?.fields[c.field]}
-                    cap={c.field === cap.field ? cap.cap : undefined}
-                  />
-                ))}
+                .map(fableRow)}
               {extraFields.map(k => (
                 <ExtraChangeRow
                   key={`extra:${k}`}
@@ -4487,7 +4560,8 @@ function Detail({
             </div>
           ))}
 
-        {item.type === 'Change' && (
+        {/* A correction no listing matched has no fields to pick from. */}
+        {item.type === 'Change' && Boolean(item.targetRecord) && (
           <FieldPicker
             key={item.id}
             fields={pickable}
@@ -4966,10 +5040,11 @@ function ByFable({ change }: { change?: FableChange }) {
   )
 }
 
-/** A field Fable changed on the listing from the chat, among a change's
+/** A picture Fable changed on the listing from the chat, among a change's
  *  fields (in the place of the proposed one when the proposal names it):
  *  it is on the record already, so it is shown, not edited, and Accept
- *  neither writes it again nor writes the proposal over it. */
+ *  neither writes it again nor writes the proposal over it. Fable's other
+ *  fields are ExtraChangeRows, which can be edited. */
 function FableChangeRow({
   change,
   page,
@@ -5036,12 +5111,16 @@ function editText(v: unknown): string {
 
 /** A field edited beyond what a change proposes: what the record holds,
  *  the arrow, and the edit, which opens its field's own editor on a click
- *  and can be dropped again with the cross. */
+ *  and can be dropped again with the cross. A field Fable changed from the
+ *  chat is one too, from what it held before Fable to Fable's value, which
+ *  can be edited the same way (Bryce, 12 Oct 2026: "I'm unable to edit
+ *  these fields created by Fable"). */
 function ExtraChangeRow({
   field,
   page,
   info,
   was,
+  fable,
   edit,
   editing,
   canEdit,
@@ -5052,8 +5131,11 @@ function ExtraChangeRow({
   field: string
   page: string | null
   info: FieldInfo | undefined
-  /** The record's value now (before Accept, on a decided change). */
+  /** The record's value now (before Accept, on a decided change); for a
+   *  field Fable changed, what it held before Fable. */
   was: unknown
+  /** Fable's change to the field, whose value the edit starts from. */
+  fable?: FableChange
   /** The edit as text; undefined while the field is only open. */
   edit: string | undefined
   editing: boolean
@@ -5065,7 +5147,8 @@ function ExtraChangeRow({
   onEdit: (text: string | null) => void
 }) {
   const box = info?.type === 'checkbox'
-  const base = box ? (was === true ? 'true' : 'false') : editText(was)
+  const now = fable ? fable.to : was
+  const base = box ? (now === true ? 'true' : 'false') : editText(now)
   const value = edit ?? base
   // Back to what the record holds is not an edit.
   const save = (text: string) => onEdit(text === base ? null : text)
@@ -5117,6 +5200,14 @@ function ExtraChangeRow({
       </span>
       <span className={styles.to}>
         {to}
+        {fable && edit === undefined && !editing && (
+          <em
+            className={styles.byFable}
+            title="Fable changed this in Airtable from the chat, so it is on the record already. Apply keeps it, unless you edit it."
+          >
+            by Fable
+          </em>
+        )}
         {cap !== undefined && !editing && <Counted text={value} cap={cap} />}
         {canEdit && edit !== undefined && !editing && (
           <button

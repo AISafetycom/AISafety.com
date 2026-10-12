@@ -1682,15 +1682,21 @@ export async function acceptItem(
       if (typeof sort === 'number') await makeRoom(t.table, t.record, sort)
       await patchRecord(t.table, t.record, { ...fields, 'Publish?': true })
     } else if (item.type === 'Change') {
-      const t = target(item)
+      // A row with no listing at all is a correction the Mac could not place
+      // (no page named, no listing plainly the one): nothing to apply, so
+      // accepting it just marks it done (12 Oct 2026).
+      const t = item.targetTable || item.targetRecord ? target(item) : null
       const fields: Record<string, unknown> = {}
       // A proposed field Fable has since changed on the record from the
       // chat holds Fable's value, which the page shows in the proposal's
       // place: Accept leaves it, so the older proposal never lands over it
       // (Threading the Needle, 7 Oct 2026: Broom's raw logo and a "dark
       // version of the same new mark" placeholder sat above Fable's
-      // finished logos, and Apply would have written them back).
-      const kept = item.changes.map(c => c.field).filter(k => keep.includes(k))
+      // finished logos, and Apply would have written them back). One the
+      // admin edited on the page is written as edited (Bryce, 12 Oct 2026).
+      const kept = item.changes
+        .map(c => c.field)
+        .filter(k => keep.includes(k) && !(k in edits))
       if (kept.length > 0) saved[KEPT_KEY] = kept
       for (const c of item.changes) {
         if (c.field.length > 100 || kept.includes(c.field)) continue
@@ -1704,8 +1710,10 @@ export async function acceptItem(
       }
       // Fields edited beyond the proposal go in the same write; what they
       // held is kept on the row so Undo can put it back.
-      const extra = extraEdits(item, edits, await getTableSchema(t.table))
-      if (Object.keys(extra).length > 0) {
+      const extra = t
+        ? extraEdits(item, edits, await getTableSchema(t.table))
+        : {}
+      if (t && Object.keys(extra).length > 0) {
         const before = await currentValues(
           t.table,
           t.record,
@@ -1715,10 +1723,11 @@ export async function acceptItem(
         saved[BEFORE_KEY] = before
       }
       if (Object.keys(fields).length > 0) {
+        const to = t ?? target(item) // fields but no listing: the usual error
         await patchRecord(
-          t.table,
-          t.record,
-          await withAttachmentShapes(t.table, fields, 'throw')
+          to.table,
+          to.record,
+          await withAttachmentShapes(to.table, fields, 'throw')
         )
       }
       // The Broom flag row goes either way: an applied fix clears it, and
@@ -1892,6 +1901,19 @@ export async function undoItem(item: QueueItem): Promise<void> {
     [F.rejectReason]: null,
     [F.error]: null,
     [F.rejectReply]: null,
+  }
+  // Accept and Reject both clear a Broom flag's row, and it cannot come
+  // back. The reopened item lets go of it: the Mac worker takes a flag
+  // whose row is gone for one cleared in Airtable and closes the item
+  // within five minutes (Bryce, 12 Oct 2026: SteadRise, rejected and
+  // undone, then "already closed" on the second Reject).
+  if (
+    item.type === 'Change' &&
+    item.issueRow &&
+    isRecordId(item.issueRow) &&
+    !(await recordExists(BROOM_ISSUES_TABLE_ID, item.issueRow))
+  ) {
+    reopen[F.issueRow] = null
   }
   if (item.status === 'Applied' && item.type === 'Add') {
     const t = target(item)
