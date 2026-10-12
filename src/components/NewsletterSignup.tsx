@@ -6,57 +6,37 @@ import {
   trackNewsletterSignup,
   trackNewsletterSignupError,
   trackNewsletterSignupSuccess,
-  trackNewsletterView,
 } from '@/lib/analytics'
 import type { SignupNewsletter } from '@/lib/newsletter-signup'
-import { withUtm } from '@/lib/utm'
 import styles from './NewsletterSignup.module.css'
 
-/** The newsletter signup box beside a resource page's header, in one of two
- *  modes:
- *  - `newsletter` set (/events, /training): signs the reader up on the site,
- *    through /api/subscribe and the newsletter's ActiveCampaign form, and
- *    asks them to confirm from their inbox.
- *  - `subscribeUrl` set (/funding, while the Funding newsletter is still on
- *    Substack): opens Substack's subscribe page with the email filled in,
- *    and the heading links to the publication itself. */
+/** The newsletter signup box beside a resource page's header (/events,
+ *  /training, /funding): signs the reader up on the site, through
+ *  /api/subscribe and the newsletter's ActiveCampaign form, and asks them to
+ *  confirm from their inbox. (Until the Funding move, /funding's box opened
+ *  Substack's subscribe page instead.) */
 export default function NewsletterSignup({
   heading,
   newsletter,
-  subscribeUrl,
   trackingPage,
 }: {
   heading?: string
   /** Sign up through ActiveCampaign for this newsletter. */
   newsletter?: SignupNewsletter
-  /** Or: the Substack subscribe page the box opens. */
-  subscribeUrl?: string
   /** Analytics page name (e.g. 'Events'). When set, a submit records a
    *  newsletter_signup event under this page, plus how it ended
-   *  (newsletter_signup_success / _error) in ActiveCampaign mode, or a
-   *  newsletter_view for a click on the card's link in Substack mode. */
+   *  (newsletter_signup_success / _error). */
   trackingPage?: string
 }) {
   if (!heading) throw new Error('NewsletterSignup needs a heading')
-  if (newsletter) {
-    return (
-      <ActiveCampaignSignup
-        heading={heading}
-        newsletter={newsletter}
-        trackingPage={trackingPage}
-      />
-    )
-  }
-  if (subscribeUrl) {
-    return (
-      <SubstackSignup
-        heading={heading}
-        subscribeUrl={subscribeUrl}
-        trackingPage={trackingPage}
-      />
-    )
-  }
-  throw new Error('NewsletterSignup needs a newsletter or a subscribeUrl')
+  if (!newsletter) throw new Error('NewsletterSignup needs a newsletter')
+  return (
+    <ActiveCampaignSignup
+      heading={heading}
+      newsletter={newsletter}
+      trackingPage={trackingPage}
+    />
+  )
 }
 
 const SUCCESS = 'Check your inbox to confirm your subscription.'
@@ -216,69 +196,6 @@ function ActiveCampaignSignup({
           onChange={e => setHp(e.target.value)}
         />
       </div>
-    </form>
-  )
-}
-
-/** Hands off to Substack's own subscribe page with the email filled in. */
-function SubstackSignup({
-  heading,
-  subscribeUrl,
-  trackingPage,
-}: {
-  heading: string
-  subscribeUrl: string
-  trackingPage?: string
-}) {
-  const [email, setEmail] = useState('')
-  // The publication's homepage — where the card link goes, so visitors can
-  // read the newsletter before handing over an email.
-  const homepageUrl = subscribeUrl.replace(/\/subscribe\/?$/, '')
-
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    // On the form, not the button, so Enter submits count the same as clicks.
-    if (trackingPage) trackNewsletterSignup(trackingPage)
-    const trimmed = email.trim()
-    const url = trimmed
-      ? `${subscribeUrl}?email=${encodeURIComponent(trimmed)}`
-      : subscribeUrl
-    window.open(url, '_blank', 'noopener,noreferrer')
-  }
-
-  return (
-    <form className={`width-4-col ${styles.card}`} onSubmit={handleSubmit}>
-      {/* The heading is a link stretched over the whole card, so clicking
-          anywhere outside the email pill opens the newsletter itself —
-          letting visitors read it without entering an email. */}
-      <a
-        href={trackingPage ? withUtm(homepageUrl, trackingPage) : homepageUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className={`paragraph-small ${styles.heading} ${styles.headingLink}`}
-        onClick={() => {
-          if (trackingPage) trackNewsletterView(trackingPage)
-        }}
-      >
-        {heading}
-      </a>
-      {/* A label so clicks anywhere on the pill focus the input. */}
-      <label className={styles.field}>
-        <input
-          type="email"
-          className={`paragraph-small ${styles.input}`}
-          placeholder="Your email"
-          value={email}
-          onChange={e => setEmail(e.target.value)}
-        />
-        <button type="submit" className={styles.submit} aria-label="Subscribe">
-          <Icon
-            src="/images/icons/arrow-right.svg"
-            size={16}
-            className="color-white"
-          />
-        </button>
-      </label>
     </form>
   )
 }

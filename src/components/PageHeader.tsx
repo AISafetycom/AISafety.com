@@ -12,15 +12,13 @@ interface PageHeaderProps {
   id?: string
   topPadding?: string
   /** Show the newsletter signup beside the header (stacked below on mobile).
-   *  Needs a heading and either `newsletterKey` or `newsletterSubscribeUrl`. */
+   *  Needs a heading and `newsletterKey`. */
   newsletter?: boolean
   /** Heading for the signup box. */
   newsletterHeading?: string
   /** The newsletter the box signs people up to on the site, through
-   *  ActiveCampaign (/events, /training). */
+   *  ActiveCampaign (/events, /training, /funding). */
   newsletterKey?: SignupNewsletter
-  /** Or: the Substack subscribe page the box opens (/funding). */
-  newsletterSubscribeUrl?: string
   /** Analytics page name for the signup box's submits (e.g. 'Events'). */
   newsletterTrackingPage?: string
   /** Extra content under the description, e.g. a cross-link to a sister page. */
@@ -36,7 +34,6 @@ export default function PageHeader({
   newsletter,
   newsletterHeading,
   newsletterKey,
-  newsletterSubscribeUrl,
   newsletterTrackingPage,
   children,
 }: PageHeaderProps) {
@@ -65,7 +62,6 @@ export default function PageHeader({
         <NewsletterSignup
           heading={newsletterHeading}
           newsletter={newsletterKey}
-          subscribeUrl={newsletterSubscribeUrl}
           trackingPage={newsletterTrackingPage}
         />
       </div>

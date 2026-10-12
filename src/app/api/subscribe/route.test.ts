@@ -37,12 +37,13 @@ vi.mock('@/lib/newsletter-signup-limits', async importOriginal => ({
   countSignupToday: h.countSignupToday,
   alertOwner: h.alertOwner,
 }))
-// Events' form filled in, Training's still at its placeholders.
+// Events' form filled in, Training's and Funding's still at their placeholders.
 vi.mock('@/lib/newsletter-signup', async importOriginal => ({
   ...(await importOriginal<typeof import('@/lib/newsletter-signup')>()),
   AC_FORMS: {
     events: { formId: 12, orKey: 'a1b2c3d4e5f6' },
     training: { formId: 0, orKey: '' },
+    funding: { formId: 0, orKey: '' },
   },
 }))
 
@@ -148,8 +149,8 @@ describe('POST /api/subscribe', () => {
     )
   })
 
-  it('only takes Events and Training', async () => {
-    for (const newsletter of ['funding', 'updates', '', undefined, 7]) {
+  it('only takes Events, Training and Funding', async () => {
+    for (const newsletter of ['updates', '', undefined, 7]) {
       const res = await post({ email: EMAIL, newsletter })
       expect(res.status).toBe(400)
       expect((await json(res)).reason).toBe('unknown_newsletter')

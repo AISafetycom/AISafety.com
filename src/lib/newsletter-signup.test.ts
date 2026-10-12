@@ -57,10 +57,11 @@ afterEach(() => {
 })
 
 describe('which newsletters sign up here', () => {
-  it('takes Events and Training only', () => {
+  it('takes Events, Training and Funding only', () => {
     expect(isSignupNewsletter('events')).toBe(true)
     expect(isSignupNewsletter('training')).toBe(true)
-    for (const other of ['funding', 'updates', 'Events', '', null, 6]) {
+    expect(isSignupNewsletter('funding')).toBe(true)
+    for (const other of ['updates', 'Events', '', null, 6]) {
       expect(isSignupNewsletter(other)).toBe(false)
     }
   })
@@ -75,8 +76,12 @@ describe('which newsletters sign up here', () => {
     expect(isFormConfigured({ ...FORM, u: 3 })).toBe(true)
   })
 
-  it('ships with both forms keyed, however they are filled in', () => {
-    expect(Object.keys(AC_FORMS).sort()).toEqual(['events', 'training'])
+  it('ships with every form keyed, however they are filled in', () => {
+    expect(Object.keys(AC_FORMS).sort()).toEqual([
+      'events',
+      'funding',
+      'training',
+    ])
   })
 })
 
@@ -159,11 +164,23 @@ describe('readAcAnswer', () => {
         "window.top.location.href = 'https://www.aisafety.com/subscribed/training';"
       )
     ).toEqual({ kind: 'already' })
+    expect(
+      readAcAnswer(
+        200,
+        'window.top.location.href = "https://aisafety.com/subscribed/funding";'
+      )
+    ).toEqual({ kind: 'already' })
   })
 
   it('treats a jump anywhere else as unclear', () => {
     expect(
       readAcAnswer(200, 'window.top.location.href = "https://example.com/";')
+    ).toEqual({ kind: 'unknown' })
+    expect(
+      readAcAnswer(
+        200,
+        'window.top.location.href = "https://aisafety.com/subscribed/updates";'
+      )
     ).toEqual({ kind: 'unknown' })
     expect(
       readAcAnswer(

@@ -1,7 +1,7 @@
 /*
-  Newsletter signups through ActiveCampaign: the signup boxes on /events and
-  /training (and their past issues pages, /newsletter/events and
-  /newsletter/training) post to /api/subscribe, which hands the address to the list's
+  Newsletter signups through ActiveCampaign: the signup boxes on /events,
+  /training and /funding (and their past issues pages, /newsletter/<key>)
+  post to /api/subscribe, which hands the address to the list's
   double opt-in form. ActiveCampaign then emails the reader a confirmation
   link, and only a confirmed reader joins the list.
 
@@ -12,12 +12,12 @@
   live endpoint ever refuses server-side posts, swap `postSignup` here and
   nothing else changes. Pure: no Next, no Upstash.
 
-  /funding's box still opens Substack (the Funding newsletter moves later)
-  and never comes through here.
+  Funding joined on its move day (its first ActiveCampaign issue); the
+  Updates newsletter is still on Substack and never comes through here.
 */
 
 /** The newsletters whose boxes sign people up on the site. */
-export const SIGNUP_NEWSLETTERS = ['events', 'training'] as const
+export const SIGNUP_NEWSLETTERS = ['events', 'training', 'funding'] as const
 export type SignupNewsletter = (typeof SIGNUP_NEWSLETTERS)[number]
 
 export function isSignupNewsletter(v: unknown): v is SignupNewsletter {
@@ -34,7 +34,8 @@ export interface AcForm {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  THE TWO ACTIVECAMPAIGN FORMS (made 8 October 2026).
+//  THE ACTIVECAMPAIGN FORMS (Events and Training made 8 October 2026,
+//  Funding 12 October 2026).
 //
 //  One double opt-in form per list, made in ActiveCampaign (Website → Forms).
 //  Open the form's hosted page, https://alignment23684.activehosted.com/f/<id>,
@@ -51,6 +52,8 @@ export const AC_FORMS: Record<SignupNewsletter, AcForm> = {
   events: { formId: 4, orKey: '6a982046-09ff-443b-9e8a-2f5d5dde2ae6' },
   // AI Safety Training (list 7): form 6, "AI Safety Training signup (aisafety.com)".
   training: { formId: 6, orKey: 'baffe016-955b-42bc-be9e-711a2d0d44bf' },
+  // AI Safety Funding (list 8): form 8, "AI Safety Funding signup (aisafety.com)".
+  funding: { formId: 8, orKey: 'c895d3e7-eb90-4022-a904-01f90a9fa8c0' },
 }
 
 /** The account's form endpoint. `jsonp=true` asks for the short JavaScript
@@ -141,7 +144,7 @@ const HTML_PAGE = /<(?:!doctype|html|head|body)\b/i
  *  address already confirmed on the list:
  *  `window.top.location.href = "https://aisafety.com/subscribed/events";` */
 const ALREADY_REDIRECT =
-  /location\.href\s*=\s*["']https:\/\/(?:www\.)?aisafety\.com\/subscribed\/(?:events|training)\/?["']/
+  /location\.href\s*=\s*["']https:\/\/(?:www\.)?aisafety\.com\/subscribed\/(?:events|training|funding)\/?["']/
 const CLOUDFLARE =
   /cf-chl|challenge-platform|cf_chl_opt|cdn-cgi\/challenge|Just a moment\.\.\.|Attention Required! \| Cloudflare/i
 

@@ -1760,8 +1760,8 @@ function PastIssuesPanel({
 }
 
 /** The Newsletters tab's results of the signups made on the site: the
- *  /events and /training boxes sign people up through ActiveCampaign (from 8
- *  October 2026). Per page, how many went through and how many showed the
+ *  boxes sign people up through ActiveCampaign (/events and /training from 8
+ *  October 2026, /funding from its move day). Per page, how many went through and how many showed the
  *  visitor an error, then what the errors were. */
 function SignupResultsPanel({
   results,
@@ -1816,11 +1816,12 @@ function SignupResultsPanel({
       <p className={styles.caption}>
         Since 8 October 2026 the boxes on /events and /training (and, since
         October 2026, on their past issues pages) sign people up on the site,
-        through ActiveCampaign. Signed up = ActiveCampaign took the address and
+        through ActiveCampaign; /funding&apos;s box does too since the Funding
+        newsletter moved (before that it opened Substack, so its signups
+        don&apos;t show here). Signed up = ActiveCampaign took the address and
         emailed a link to confirm it (whether the reader confirmed shows in
         ActiveCampaign, not here). Errors = the visitor saw an error message
-        instead. /funding&apos;s box still opens Substack, so its signups finish
-        there and don&apos;t show here.
+        instead.
       </p>
     </Panel>
   )

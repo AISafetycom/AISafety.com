@@ -234,11 +234,10 @@ export function trackContributeClick(
 
 /**
  * Track a submit of the newsletter signup box (arrow click or Enter — both
- * fire the form's submit). Counts the attempt. On /events and /training the
- * box signs the reader up on the site (through ActiveCampaign), and how that
- * ended is tracked too (trackNewsletterSignupSuccess / …Error); on /funding
- * it opens Substack's subscribe page, so completion happens off-site. The
- * email itself is never recorded.
+ * fire the form's submit). Counts the attempt. The box signs the reader up
+ * on the site (through ActiveCampaign), and how that ended is tracked too
+ * (trackNewsletterSignupSuccess / …Error). The email itself is never
+ * recorded.
  */
 export function trackNewsletterSignup(page: string): void {
   if (typeof window === 'undefined') return
@@ -253,7 +252,7 @@ export function trackNewsletterSignup(page: string): void {
 
 /**
  * Track a signup through the box that went through: ActiveCampaign took the
- * address and emailed the reader a link to confirm (/events, /training). The
+ * address and emailed the reader a link to confirm. The
  * email itself is never recorded.
  */
 export function trackNewsletterSignupSuccess(page: string): void {
@@ -269,7 +268,7 @@ export function trackNewsletterSignupSuccess(page: string): void {
 
 /**
  * Track a signup through the box that showed the visitor an error instead
- * (/events, /training). `reason` is the short code /api/subscribe answered
+ * instead. `reason` is the short code /api/subscribe answered
  * with ('invalid_email', 'rate_limited', 'upstream', …), 'network' when the
  * site couldn't be reached, or 'http_<status>' for an answer without one.
  * The email itself is never recorded.
@@ -288,22 +287,6 @@ export function trackNewsletterSignupError(page: string, reason: string): void {
     page,
     label: 'Newsletter signup error',
     source: reason,
-  })
-}
-
-/**
- * Track a click on the newsletter signup box outside the email pill — in the
- * Substack mode (/funding) the card doubles as a link to the newsletter's own
- * page, for visitors who want to read it before subscribing.
- */
-export function trackNewsletterView(page: string): void {
-  if (typeof window === 'undefined') return
-  if (isTrackingOptedOut()) return
-  window._paq?.push(['trackEvent', `Newsletter - ${page}`, 'View'])
-  sendTrackEvent({
-    type: 'newsletter_view',
-    page,
-    label: 'Newsletter view',
   })
 }
 

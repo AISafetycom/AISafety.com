@@ -17,7 +17,7 @@ import type { SitePage } from './site-pages'
 export function pageMetadata(
   { path, title, description }: SitePage,
   /** A feed to announce, so a feed reader given the page's address finds
-   *  it (/events and /training: their newsletter's). */
+   *  it (/events, /training and /funding: their newsletter's). */
   feed?: { url: string; title: string }
 ): Metadata {
   return {
