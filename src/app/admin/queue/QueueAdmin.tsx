@@ -3847,10 +3847,53 @@ function Detail({
         ].filter(
           k =>
             !proposedFields.has(k) &&
+            !fableFields.has(k) &&
             !UNPICKABLE_TYPES.has(types.get(k)?.type ?? '')
         )
   const extraWas = (k: string): unknown =>
     isOpen(item) ? live?.fields[k] : item.before?.[k]
+  // A field Fable changed from the chat: its picture is shown as it is;
+  // anything else can be edited like a field picked with E, from Fable's
+  // value. A decided change shows the edit that went out with it.
+  const fableRow = (c: FableChange) => {
+    if (touchesPicture(c)) {
+      return (
+        <FableChangeRow
+          key={`fable:${c.field}`}
+          change={c}
+          page={item.page}
+          live={live?.fields[c.field]}
+          cap={c.field === cap.field ? cap.cap : undefined}
+        />
+      )
+    }
+    const edit = isOpen(item)
+      ? d.edits[c.field]
+      : item.status === 'Applied'
+        ? editsAsText(item.edits ?? {})[c.field]
+        : undefined
+    return (
+      <ExtraChangeRow
+        key={`fable:${c.field}`}
+        field={c.field}
+        page={item.page}
+        info={types.get(c.field)}
+        was={c.from}
+        fable={c}
+        edit={edit}
+        editing={d.editing === c.field}
+        canEdit={!revising && isOpen(item)}
+        cap={c.field === cap.field ? cap.cap : undefined}
+        onEditing={on => setD({ editing: on ? c.field : null })}
+        onEdit={text => {
+          const edits = { ...d.edits }
+          if (text === null) delete edits[c.field]
+          else edits[c.field] = text
+          setD({ editing: null, edits })
+        }}
+      />
+    )
+  }
   // What the picker offers: the record's other fields that can be typed
   // into, in the table's order.
   const pickable =
@@ -4379,13 +4422,7 @@ function Detail({
                 // A proposed field Fable has since changed on the record
                 // shows Fable's value in its place, once; Accept keeps it.
                 fableFields.has(c.field) ? (
-                  <FableChangeRow
-                    key={`fable:${c.field}`}
-                    change={fableFields.get(c.field)!}
-                    page={item.page}
-                    live={live?.fields[c.field]}
-                    cap={c.field === cap.field ? cap.cap : undefined}
-                  />
+                  fableRow(fableFields.get(c.field)!)
                 ) : (
                   <div key={c.field} className={styles.diffRow}>
                     <span className={styles.label}>
@@ -4472,15 +4509,7 @@ function Detail({
               )}
               {fableChanges
                 .filter(c => !proposedFields.has(c.field))
-                .map(c => (
-                  <FableChangeRow
-                    key={`fable:${c.field}`}
-                    change={c}
-                    page={item.page}
-                    live={live?.fields[c.field]}
-                    cap={c.field === cap.field ? cap.cap : undefined}
-                  />
-                ))}
+                .map(fableRow)}
               {extraFields.map(k => (
                 <ExtraChangeRow
                   key={`extra:${k}`}
@@ -4984,10 +5013,11 @@ function ByFable({ change }: { change?: FableChange }) {
   )
 }
 
-/** A field Fable changed on the listing from the chat, among a change's
+/** A picture Fable changed on the listing from the chat, among a change's
  *  fields (in the place of the proposed one when the proposal names it):
  *  it is on the record already, so it is shown, not edited, and Accept
- *  neither writes it again nor writes the proposal over it. */
+ *  neither writes it again nor writes the proposal over it. Fable's other
+ *  fields are ExtraChangeRows, which can be edited. */
 function FableChangeRow({
   change,
   page,
@@ -5054,12 +5084,16 @@ function editText(v: unknown): string {
 
 /** A field edited beyond what a change proposes: what the record holds,
  *  the arrow, and the edit, which opens its field's own editor on a click
- *  and can be dropped again with the cross. */
+ *  and can be dropped again with the cross. A field Fable changed from the
+ *  chat is one too, from what it held before Fable to Fable's value, which
+ *  can be edited the same way (Bryce, 12 Oct 2026: "I'm unable to edit
+ *  these fields created by Fable"). */
 function ExtraChangeRow({
   field,
   page,
   info,
   was,
+  fable,
   edit,
   editing,
   canEdit,
@@ -5070,8 +5104,11 @@ function ExtraChangeRow({
   field: string
   page: string | null
   info: FieldInfo | undefined
-  /** The record's value now (before Accept, on a decided change). */
+  /** The record's value now (before Accept, on a decided change); for a
+   *  field Fable changed, what it held before Fable. */
   was: unknown
+  /** Fable's change to the field, whose value the edit starts from. */
+  fable?: FableChange
   /** The edit as text; undefined while the field is only open. */
   edit: string | undefined
   editing: boolean
@@ -5083,7 +5120,8 @@ function ExtraChangeRow({
   onEdit: (text: string | null) => void
 }) {
   const box = info?.type === 'checkbox'
-  const base = box ? (was === true ? 'true' : 'false') : editText(was)
+  const now = fable ? fable.to : was
+  const base = box ? (now === true ? 'true' : 'false') : editText(now)
   const value = edit ?? base
   // Back to what the record holds is not an edit.
   const save = (text: string) => onEdit(text === base ? null : text)
@@ -5135,6 +5173,14 @@ function ExtraChangeRow({
       </span>
       <span className={styles.to}>
         {to}
+        {fable && edit === undefined && !editing && (
+          <em
+            className={styles.byFable}
+            title="Fable changed this in Airtable from the chat, so it is on the record already. Apply keeps it, unless you edit it."
+          >
+            by Fable
+          </em>
+        )}
         {cap !== undefined && !editing && <Counted text={value} cap={cap} />}
         {canEdit && edit !== undefined && !editing && (
           <button

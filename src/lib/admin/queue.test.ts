@@ -427,6 +427,25 @@ describe('picture fields on Apply and Undo', () => {
     expect(patches[1].fields[EDITS]).toBeNull()
   })
 
+  // Algoverse, 12 Oct 2026: Fable's rows could not be edited at all.
+  it('writes a field Fable changed when it was edited on the page', async () => {
+    const twoFields = logoChange({
+      changes: [
+        { field: 'Logo', from: 'old.jpg', to: 'dark version of the new mark' },
+        { field: 'Host name', from: 'Mangrove', to: 'Mangrove Games' },
+      ],
+    })
+    await acceptItem(twoFields, { 'Host name': 'Mangrove Studio' }, null, [
+      'Logo',
+      'Host name',
+    ])
+    expect(patches[0].fields).toEqual({ 'Host name': 'Mangrove Studio' })
+    expect(JSON.parse(String(patches[1].fields[EDITS]))).toEqual({
+      'Host name': 'Mangrove Studio',
+      '(kept by Fable)': ['Logo'],
+    })
+  })
+
   it('clears the flag and writes nothing when Fable changed every proposed field', async () => {
     await acceptItem(logoChange({ issueRow: rid('issue') }), {}, null, ['Logo'])
     expect(patches.map(p => p.path)).toEqual([`${QUEUE}/${rid('q1')}`])

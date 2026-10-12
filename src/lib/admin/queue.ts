@@ -1684,8 +1684,11 @@ export async function acceptItem(
       // place: Accept leaves it, so the older proposal never lands over it
       // (Threading the Needle, 7 Oct 2026: Broom's raw logo and a "dark
       // version of the same new mark" placeholder sat above Fable's
-      // finished logos, and Apply would have written them back).
-      const kept = item.changes.map(c => c.field).filter(k => keep.includes(k))
+      // finished logos, and Apply would have written them back). One the
+      // admin edited on the page is written as edited (Bryce, 12 Oct 2026).
+      const kept = item.changes
+        .map(c => c.field)
+        .filter(k => keep.includes(k) && !(k in edits))
       if (kept.length > 0) saved[KEPT_KEY] = kept
       for (const c of item.changes) {
         if (c.field.length > 100 || kept.includes(c.field)) continue
