@@ -1198,22 +1198,34 @@ describe('runWatch: the account', () => {
     expect((await run(later(30 * MIN + 3 * DAY + MIN))).alerts).toEqual([])
   })
 
-  it('alerts at 4,950 contacts, and again at the limit itself', async () => {
+  it('says to move up a plan at 4,800, alerts at 4,950, and again at the limit itself', async () => {
     const { sent, run } = setup()
-    ac.account.subscriber_total = '4949'
-    ac.contactsTotal = 4949
+    ac.account.subscriber_total = '4799'
+    ac.contactsTotal = 4799
     expect((await run()).alerts).toEqual([])
-    ac.contactsTotal = 4950
-    expect(ids(await run(later(10 * MIN)))).toEqual(['contacts-cap'])
+    ac.contactsTotal = 4800
+    let s = await run(later(5 * MIN))
+    expect(ids(s)).toEqual(['contacts-cap'])
+    expect(s.alerts[0].severity).toBe('amber')
     expect(sent[0].subject).toBe(
+      'Newsletter: ActiveCampaign is at 4,800 of 5,000 contacts – time to move up a plan'
+    )
+    ac.contactsTotal = 4900
+    await run(later(8 * MIN))
+    expect(sent).toHaveLength(1)
+    ac.contactsTotal = 4950
+    s = await run(later(10 * MIN))
+    expect(ids(s)).toEqual(['contacts-cap'])
+    expect(s.alerts[0].severity).toBe('red')
+    expect(sent[1].subject).toBe(
       'Newsletter: ActiveCampaign is at 4,950 of 5,000 contacts – sends stop at 5,000'
     )
     ac.contactsTotal = 4990
     await run(later(20 * MIN))
-    expect(sent).toHaveLength(1)
+    expect(sent).toHaveLength(2)
     ac.account.subscriber_total = '5000'
     await run(later(30 * MIN))
-    expect(sent[1].subject).toBe(
+    expect(sent[2].subject).toBe(
       'Newsletter: ActiveCampaign is at its 5,000-contact limit – sends have stopped'
     )
   })
