@@ -4252,14 +4252,22 @@ function Detail({
         </div>
 
         {/* The record as the site shows it, with the proposed change laid
-            over it, so the effect of Accept is visible. */}
+            over it, so the effect of Accept is visible. A field Fable already
+            changed is left as the record holds it – Apply keeps Fable's – so
+            the card does not show a proposal that will never land (12 Oct
+            2026: AI Safety Purdue's card kept the proposed wordmark after
+            Fable had put the bare mark on the listing). */}
         {hasCard && (
           <div className={styles.cardRow}>
             <SitePreview
               table={item.targetTable ?? ''}
               record={item.targetRecord ?? ''}
               edits={{
-                ...Object.fromEntries(item.changes.map(c => [c.field, c.to])),
+                ...Object.fromEntries(
+                  item.changes
+                    .filter(c => !fableFields.has(c.field))
+                    .map(c => [c.field, c.to])
+                ),
                 ...editsToSave(),
               }}
             />
