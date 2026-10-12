@@ -6095,10 +6095,6 @@ function DoneList({
         </span>
         Done today
       </h2>
-      <p className={styles.note}>
-        Published listings and field changes reach the site within about three
-        minutes.
-      </p>
       {search && (
         <p className={styles.note}>
           {items.length
