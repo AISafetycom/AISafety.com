@@ -942,9 +942,10 @@ function acceptLabel(
   if (item.type === 'Add') return 'Publish'
   if (item.type === 'Change') {
     // a field edited beyond the (empty) proposal makes it a change too
-    return item.changes.length || Object.keys(edits).length
-      ? 'Apply change'
-      : 'Accept flag'
+    if (item.changes.length || Object.keys(edits).length) return 'Apply change'
+    // Nothing to apply: a Broom flag is accepted as a flag; anything else
+    // (a correction that needed the owner) is just marked done.
+    return item.source === 'Broom' ? 'Accept flag' : 'Mark done'
   }
   return 'Apply rule'
 }
@@ -1031,7 +1032,7 @@ function doneLabel(item: QueueItem): string {
   if (item.type === 'Add') return 'Published'
   if (item.type === 'Change') {
     const n = item.changes.length
-    if (n === 0) return 'Flag cleared'
+    if (n === 0) return item.source === 'Broom' ? 'Flag cleared' : 'Done'
     return `Changed ${n} field${n === 1 ? '' : 's'}`
   }
   return 'Applied'
@@ -1069,7 +1070,7 @@ function workingLabel(item: QueueItem, action: Decision): string {
   if (action === 'later') return 'Setting it aside…'
   const label = acceptLabel(item)
   if (label === 'Publish') return 'Publishing…'
-  if (label === 'Accept flag') return 'Accepting…'
+  if (label === 'Accept flag' || label === 'Mark done') return 'Accepting…'
   return 'Applying…'
 }
 
@@ -4344,9 +4345,11 @@ function Detail({
           fableChanges.length === 0 &&
           extraFields.length === 0 ? (
             <p className={styles.note}>
-              No field change proposed. Accept says the flag was right and you
-              have dealt with it, and clears it in Airtable; Reject clears it as
-              wrong; edit a field yourself; or ask Fable for a change.
+              {item.source === 'Broom'
+                ? 'No field change proposed. Accept says the flag was right and you have dealt with it, and clears it in Airtable; Reject clears it as wrong; edit a field yourself; or ask Fable for a change.'
+                : item.targetRecord
+                  ? 'No field change proposed. Edit a field yourself or ask Fable for a change; Mark done once you have dealt with it another way; Reject if nothing needs doing.'
+                  : 'No listing matched, so there is nothing to change here. Ask Fable which listing it is and to fix it, or fix it in Airtable, then Mark done; Reject if nothing needs doing.'}
             </p>
           ) : (
             <div className={styles.diff}>
@@ -4479,7 +4482,8 @@ function Detail({
             </div>
           ))}
 
-        {item.type === 'Change' && (
+        {/* A correction no listing matched has no fields to pick from. */}
+        {item.type === 'Change' && Boolean(item.targetRecord) && (
           <FieldPicker
             key={item.id}
             fields={pickable}
