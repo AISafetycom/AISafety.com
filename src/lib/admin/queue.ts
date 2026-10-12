@@ -392,12 +392,9 @@ async function targetLogos(
               const v = r.fields[f.name]
               const first: unknown = Array.isArray(v) ? v[0] : null
               if (!isRecord(first)) continue
-              const large =
-                isRecord(first.thumbnails) && isRecord(first.thumbnails.large)
-                  ? first.thumbnails.large.url
-                  : first.url
-              if (typeof large === 'string') {
-                url = large
+              const shown = pictureUrl(first)
+              if (typeof shown === 'string') {
+                url = shown
                 break
               }
             }
@@ -797,14 +794,25 @@ export interface AttachmentInfo {
   type: string | null
 }
 
-function attachmentInfo(x: Record<string, unknown>): AttachmentInfo | null {
-  if (typeof x.url !== 'string') return null
+/** Airtable's "large" thumbnail is a JPEG, so a transparent logo (PNG,
+ *  WebP, GIF, SVG) comes back on a black square – on 12 Oct 2026 AI Safety
+ *  Purdue's prepared WebP showed that way on its card. For those types the
+ *  page shows the file itself; anything else keeps the thumbnail. */
+const TRANSPARENT_TYPES = /^image\/(png|webp|gif|svg\+xml)$/
+export function pictureUrl(x: Record<string, unknown>): unknown {
   const large =
     isRecord(x.thumbnails) && isRecord(x.thumbnails.large)
       ? x.thumbnails.large.url
       : null
+  if (typeof x.type === 'string' && TRANSPARENT_TYPES.test(x.type)) return x.url
+  return typeof large === 'string' ? large : x.url
+}
+
+function attachmentInfo(x: Record<string, unknown>): AttachmentInfo | null {
+  if (typeof x.url !== 'string') return null
+  const shown = pictureUrl(x)
   return {
-    url: typeof large === 'string' ? large : x.url,
+    url: typeof shown === 'string' ? shown : x.url,
     filename: typeof x.filename === 'string' ? x.filename : null,
     width: typeof x.width === 'number' ? x.width : null,
     height: typeof x.height === 'number' ? x.height : null,
