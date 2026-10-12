@@ -123,8 +123,12 @@ const API_DOWN_AFTER = HOUR
 const EVENT_ALERT_FOR = 3 * DAY
 /** Sent campaigns older than this are no longer looked at. */
 const RECENT = 7 * DAY
-/** Contacts short of the plan's limit at which the cap alert fires. */
+/** Contacts short of the plan's limit at which the cap alert turns red. */
 const CAP_MARGIN = 50
+/** Contacts short of the limit at which it's time to move up a plan: 4,800
+ *  on the 5,000-contact plan (Bryce, 12 October 2026: "Let's go up once we
+ *  hit 4,800 contacts"). The cap alert's first, amber stage. */
+const UPGRADE_MARGIN = 200
 const DEFAULT_CONTACT_LIMIT = 5000
 /** "More people than expected": over expected × 1.2 + 10. */
 const OVERSEND_FACTOR = 1.2
@@ -1276,6 +1280,22 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
         count(acct.subscriber_total),
         count(contacts.meta?.total)
       )
+      if (total >= limit - UPGRADE_MARGIN && total < limit - CAP_MARGIN) {
+        // Same alert, an earlier stage: each stage has its own sig, so each
+        // one emails once.
+        raised.push({
+          id: 'contacts-cap',
+          sig: `upgrade:${limit}`,
+          severity: 'amber',
+          title: `ActiveCampaign is at ${num(total)} of ${num(limit)} contacts – time to move up a plan`,
+          detail: [
+            `The account holds ${num(total)} contacts. The plan is to move up to the next contact size once it's within ${num(UPGRADE_MARGIN)} of the limit (decided 12 October 2026), well before ActiveCampaign stops every campaign at ${num(limit)}. Unsubscribed contacts count too.`,
+            'Change the plan on ActiveCampaign’s billing page. In October 2026 the next size, 7,500 contacts, was about $109 a month on the current terms (monthly, with the nonprofit discount). Never delete real unsubscribed readers to make room – their record is what stops a later import from subscribing them again.',
+          ],
+          campaignId: null,
+          source: 'account',
+        })
+      }
       if (total >= limit - CAP_MARGIN) {
         const atCap = total >= limit
         raised.push({
