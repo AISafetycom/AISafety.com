@@ -139,9 +139,16 @@ export async function buildCatalog(): Promise<Catalog> {
       meta: compact({
         skillSet: j.skillSet,
         minimumExperience: j.minimumExperience,
+        // Mirrors the /jobs card: "Undergraduate degree or less" is the
+        // no-op baseline the card hides, so only higher degrees are kept.
+        requiredDegree:
+          j.requiredDegree !== 'Undergraduate degree or less'
+            ? j.requiredDegree
+            : null,
         roleType: j.roleType,
         workLocation: j.workLocation,
         location: j.location,
+        salary: j.salary,
         datePublished: j.datePublished,
       }),
     })
