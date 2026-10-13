@@ -26,7 +26,7 @@ ARGUMENTS:
 • \`filters\` — optional object of meta-field constraints. Values can be a string OR an array of strings (array means OR semantics: matches if ANY value substring matches). Substring match is case-insensitive.
 
   Per type:
-    job: skillSet ("Policy"|"Research"|"Software engineering"|"Operations"|"Outreach"|"Strategy"|"Legal"|"Data"|"Information security"|"Management"), minimumExperience ("Entry-level"|"Junior"|"Mid"|"Senior"), roleType ("Full-time"|"Part-time"|"Internship"), workLocation ("Remote"|"On-site"), location (city or country)
+    job: skillSet ("Policy"|"Research"|"Software engineering"|"Operations"|"Outreach"|"Strategy"|"Legal"|"Data"|"Information security"|"Management"), minimumExperience ("Entry-level"|"Junior"|"Mid"|"Senior"), requiredDegree ("Master's degree"|"Doctoral degree" — only set when a role asks for more than an undergraduate degree), roleType ("Full-time"|"Part-time"|"Internship"), workLocation ("Remote"|"On-site"), location (city or country)
     funder: type ("Fund"|"Grant program"|"Platform"), recipientType ("Individuals"|"Organizations"), applicationStatus ("Open"|"Closed" — use this to filter open/closed funders; acceptingApplications holds display text like "Applications close 31 October 2026" and is NOT reliably filterable)
     community: platform ("Slack"|"Discord"|"In-person"), type, activityLevel ("Active"|"Quiet"), location
     course: category, courseType
@@ -67,6 +67,9 @@ EXAMPLES:
 
   // Junior or mid-level remote policy + research roles
   search_listings({ type: 'job', filters: { skillSet: ['Policy', 'Research'], minimumExperience: ['Junior', 'Mid'], workLocation: 'Remote' } })
+
+  // PhD-level research roles
+  search_listings({ type: 'job', filters: { skillSet: 'Research', requiredDegree: 'Doctoral degree' } })
 
   // Browse all advisors
   search_listings({ type: 'advisor' })
