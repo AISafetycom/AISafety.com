@@ -49,6 +49,7 @@ import { getFounderResources } from '@/lib/data/founders'
 import { getJobs } from '@/lib/data/jobs'
 import { getMapData, type MapOrg } from '@/lib/data/map'
 import { getProjects } from '@/lib/data/projects'
+import { requireAccess } from '@/lib/admin/auth'
 import {
   isNewsletterConfigured,
   readSendStats,
@@ -503,6 +504,9 @@ export default async function AnalyticsPage({
 }: {
   searchParams: Promise<SearchParams>
 }) {
+  // Before anything is read. The layout checks too, but a tab click asks for
+  // this page without rendering the layout again (see requireAccess).
+  await requireAccess('analytics')
   const sp = await searchParams
   const range = resolveRange(sp)
   // Count each visitor once per listing per day by default; ?clicks=total counts

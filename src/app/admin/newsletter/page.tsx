@@ -2,6 +2,7 @@ import {
   canReviewQueue,
   canSendNewsletter,
   currentAdmin,
+  requireAccess,
 } from '@/lib/admin/auth'
 import NewsletterAdmin from './NewsletterAdmin'
 
@@ -11,6 +12,8 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 export default async function NewsletterAdminPage() {
+  // Checked here, not only in the layout: see requireAccess.
+  await requireAccess('newsletter')
   // Whether this session may approve is known from the cookie alone, so the
   // page shows the right notice at first paint instead of waiting for the
   // ActiveCampaign read (preview-only reviewers used to see the amber
