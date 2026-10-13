@@ -1,4 +1,4 @@
-import { canReviewQueue } from '@/lib/admin/auth'
+import { canReviewQueue, requireAccess } from '@/lib/admin/auth'
 import QueueAdmin from './QueueAdmin'
 
 // Nothing here is prerendered: the page reads the queue live in the browser
@@ -7,6 +7,8 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 export default async function QueueAdminPage() {
+  // Checked here, not only in the layout: see requireAccess.
+  await requireAccess('queue')
   // View-only sessions get the same page without the deciding parts; the
   // API refuses their writes regardless.
   // The base id lets Q open the shown listing's record in Airtable.

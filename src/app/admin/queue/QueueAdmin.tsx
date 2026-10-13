@@ -128,7 +128,7 @@ const URGENT_WHY: Record<Kind, string> = {
   rules: '',
 }
 const SECTION_LABEL: Record<Section, string> = {
-  fable: 'Fable replying',
+  fable: 'Fable chats',
   urgent: 'Urgent',
   requests: 'Requests',
   broom: 'Broom',
@@ -1698,26 +1698,35 @@ export default function QueueAdmin({
     return marks
   }, [chatOn, chatRows, chatSeen, openId])
 
-  // The items in the "Fable replying" section, newest arrival first. One joins when
-  // Fable is answering it or has answered unread while it is not the open
-  // one (so a row never moves from under the item being chatted on), and
-  // stays while it is open (so clicking it there does not send it back
-  // down); it goes back to its place once it is left with nothing unread.
-  // The section shows only on the item's own tab (Additions, Changes or
-  // Rules), like every other section.
+  // The items in the "Fable chats" section, newest arrival first: every
+  // open item Bryce has chatted with Fable on, until it is decided. Reading
+  // the reply no longer sends it back to its place (13 Oct 2026: "a listing
+  // shouldn't leave Fable Replying when I read the message"; the section
+  // was renamed from "Fable replying" the same day to match). One joins
+  // once Fable is answering it or has answered and it is not the open one,
+  // so a row never moves from under the item being chatted on. The section
+  // shows only on the item's own tab (Additions, Changes or Rules), like
+  // every other section.
   const [fableTop, setFableTop] = useState<string[]>([])
   useEffect(() => {
+    const rows = chatOn ? chatRows : {}
+    // Oldest reply first, so the newest ends up on top (a fresh load fills
+    // the section in one go); a reply still being written counts as newest.
+    const older = (a: string, b: string) =>
+      Number(!!rows[a].answering) - Number(!!rows[b].answering) ||
+      ((rows[a].last ?? '') < (rows[b].last ?? '') ? -1 : 1)
     setFableTop(prev => {
-      const next = prev.filter(id => id === openId || fableMarks[id])
-      for (const id of Object.keys(fableMarks)) {
-        if (id !== openId && !next.includes(id)) next.unshift(id)
-      }
+      const next = prev.filter(id => rows[id])
+      const joining = Object.keys(rows)
+        .filter(id => id !== openId && !next.includes(id))
+        .sort(older)
+      for (const id of joining) next.unshift(id)
       return next.length === prev.length &&
         next.every((id, i) => id === prev[i])
         ? prev
         : next
     })
-  }, [fableMarks, openId])
+  }, [chatOn, chatRows, openId])
 
   /** The strongest mark among `list`, for a folded heading's dot. */
   const markAmong = (list: QueueItem[]): FableMark | null => {
@@ -2987,7 +2996,7 @@ export default function QueueAdmin({
                     {ordered.urgentPerKind[k.key]}
                   </span>
                 )}
-                {/* Fable at work on another tab: its "Fable replying"
+                {/* Fable at work on another tab: its "Fable chats"
                     items show only there, so the dot points the way. */}
                 {!searching && kind !== k.key && (
                   <FableDot

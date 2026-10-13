@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { canViewAnalytics } from '@/lib/admin/auth'
+import { canViewAnalytics, cronAuthorized } from '@/lib/admin/auth'
 import { refreshQuestionThemes } from '@/lib/analytics/themes'
 
 export const runtime = 'nodejs'
@@ -28,15 +28,15 @@ export async function POST() {
   return refresh()
 }
 
-/** The weekly Vercel cron (see vercel.json). Same auth pattern as the other
- *  cron routes: enforced only when CRON_SECRET is configured. */
+/** The weekly Vercel cron (see vercel.json). Refuses every request unless
+ *  CRON_SECRET is set and matches (`cronAuthorized`), like every admin cron
+ *  route. */
 export async function GET(request: Request) {
   const cronSecret = process.env.CRON_SECRET
-  if (cronSecret) {
-    const authHeader = request.headers.get('authorization')
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+  if (!cronAuthorized(request.headers.get('authorization'), cronSecret)) {
+    if (!cronSecret)
+      console.error('[analytics] CRON_SECRET is not set; not running')
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   return refresh()
 }

@@ -26,6 +26,29 @@
   border-radius: 999px;
 }
 
+/* A saved copy on show while the server reads the latest events (page.tsx):
+   muted, and breathing gently until the live figures replace it. */
+.badgeUpdating {
+  color: var(--teal-300);
+  background-color: var(--teal-800);
+  animation: updatingPulse 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes updatingPulse {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.5;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .badgeUpdating {
+    animation: none;
+  }
+}
+
 .total {
   font-size: 12px;
   color: var(--teal-300);
@@ -605,6 +628,7 @@
   background-color: transparent;
   border: 1px solid var(--teal-800);
   border-radius: 999px;
+  text-decoration: none;
   cursor: pointer;
   transition:
     color var(--hover-transition),
@@ -743,22 +767,25 @@
 /* New figures take a moment to work out, so a click shows at once: the
    clicked tab or pill lights up (PendingMark gives it a data-pending child
    while its page loads), the one it replaces steps back, and the figures
-   below fade until the new ones arrive. The date presets do the same in
-   DateRangePicker. The fade waits a beat so quick loads don't flicker. */
+   below fade until the new ones arrive. The date presets do the same, and
+   DateRangePicker's custom range. The fade waits a beat so quick loads don't
+   flicker; a preloaded view arrives before it starts. */
 .dashboard:has([data-pending]) :is(.panel, .empty) {
   opacity: 0.45;
   transition: opacity 0.2s 0.15s;
 }
 
 .pageTabs:has([data-pending]) .pageTabActive,
-.clickToggle:has([data-pending]) .clickToggleBtnActive {
+.clickToggle:has([data-pending]) .clickToggleBtnActive,
+.presets:has([data-pending]) .presetBtnActive {
   color: var(--teal-300);
   background-color: transparent;
   border-color: var(--teal-800);
 }
 
 .pageTabs .pageTab:has([data-pending]),
-.clickToggle .clickToggleBtn:has([data-pending]) {
+.clickToggle .clickToggleBtn:has([data-pending]),
+.presets .presetBtn:has([data-pending]) {
   color: var(--teal-900);
   background-color: var(--bright-teal-300);
   border-color: var(--bright-teal-300);
@@ -790,4 +817,246 @@
   .sourceStat:has([data-pending])
   :is(.sourceStatName, .sourceStatCount, .sourceStatPct) {
   color: var(--teal-900);
+}
+
+/* ─── Org lookup ──────────────────────────────────────────────────────── */
+
+.orgSearch {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.orgSearchInput {
+  height: 32px;
+  width: 340px;
+  max-width: 100%;
+  padding: 0 12px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--white);
+  background-color: var(--teal-900);
+  border: 1px solid var(--teal-800);
+  border-radius: 6px;
+  outline: none;
+}
+
+.orgSearchInput:focus {
+  border-color: var(--teal-500);
+}
+
+.orgSearchInput::placeholder {
+  color: var(--teal-500);
+}
+
+.orgSearch .applyBtn {
+  height: 32px;
+  padding: 0 16px;
+  font-size: 13px;
+}
+
+/* The summary sentence to quote back to an org, with its Copy button. */
+.copySentence {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  background-color: var(--teal-900);
+  border: 1px solid var(--teal-800);
+  border-radius: 8px;
+}
+
+.copySentenceText {
+  flex: 1;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--white);
+  user-select: all;
+}
+
+.copyBtn {
+  flex: none;
+  padding: 3px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--teal-300);
+  background-color: transparent;
+  border: 1px solid var(--teal-700);
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color var(--hover-transition),
+    background-color var(--hover-transition);
+}
+
+.copyBtn:hover {
+  color: var(--white);
+  background-color: var(--teal-800);
+}
+
+/* A listing's small notes under its name (featured, why it matched, no
+   longer listed). */
+.orgName {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.orgNotes {
+  font-size: 11px;
+  color: var(--teal-400);
+}
+
+.leaveOut {
+  font-size: 12px;
+  color: var(--teal-400);
+  white-space: nowrap;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.leaveOut:hover {
+  color: var(--white);
+}
+
+.leftOutList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--teal-300);
+}
+
+.leftOutList li {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.orgWarning {
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: var(--teal-300);
+}
+
+/* Clicks over time: one series, so no legend. Each day (or week) is a slot
+   the full height of the plot, so the whole slot answers the pointer; its
+   column sits on the baseline, at most 24px wide, rounded only at the top,
+   with a 2px gap between slots. */
+.chart {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chartReadout {
+  min-height: 20px;
+  font-size: 12px;
+  color: var(--teal-400);
+}
+
+.chartReadout strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--white);
+  margin-right: 6px;
+}
+
+.chartBody {
+  display: flex;
+  gap: 8px;
+  height: 160px;
+}
+
+.chartAxis {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  width: 40px;
+  margin: -7px 0;
+  font-size: 11px;
+  color: var(--teal-400);
+  font-variant-numeric: tabular-nums;
+}
+
+.chartPlot {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  border-bottom: 1px solid var(--teal-700);
+}
+
+.chartGrid {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background-color: var(--teal-800);
+  pointer-events: none;
+}
+
+.chartCol {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 1px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: default;
+}
+
+.chartCol:focus-visible {
+  outline: 1px solid var(--teal-500);
+  outline-offset: 1px;
+}
+
+.chartBar {
+  width: 100%;
+  max-width: 24px;
+  min-height: 2px;
+  background-color: var(--bright-teal-300);
+  border-radius: 4px 4px 0 0;
+  transition: background-color var(--hover-transition);
+}
+
+.chartColActive .chartBar {
+  background-color: var(--white);
+}
+
+/* Lines up under the plot: the axis's 40px plus the 8px gap. */
+.chartDates {
+  display: flex;
+  justify-content: space-between;
+  margin-left: 48px;
+  font-size: 11px;
+  color: var(--teal-400);
+}
+
+.chartTable {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--teal-300);
+}
+
+.chartTable summary {
+  cursor: pointer;
+}
+
+.chartTable .table {
+  margin-top: 8px;
+  max-width: 360px;
 }

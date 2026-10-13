@@ -1,12 +1,11 @@
-import { redirect } from 'next/navigation'
 import { isConversationsTableConfigured } from '@/lib/admin/airtable'
-import { canViewConversationLog } from '@/lib/admin/auth'
+import { requireAccess } from '@/lib/admin/auth'
 import ConversationList from '../ConversationList'
 import styles from '../../admin.module.css'
 
 export default async function ConversationsPage() {
   // The section layout let us in on either chatbot tab; this page needs its own.
-  if (!(await canViewConversationLog())) redirect('/admin/chatbot/playground')
+  await requireAccess('conversationLog')
   const configured = isConversationsTableConfigured()
   return (
     <div className={styles.convPage}>

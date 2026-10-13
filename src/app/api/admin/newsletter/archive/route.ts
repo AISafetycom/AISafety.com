@@ -12,7 +12,7 @@
 */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { cronAuthorized } from '@/lib/admin/newsletter-watch'
+import { cronAuthorized } from '@/lib/admin/auth'
 import { WEB_NEWSLETTERS, type WebKey } from '@/lib/newsletter-web'
 import { sentEmail } from '@/lib/newsletter-web-copy'
 import { archiveIssues } from '@/lib/newsletter-archive-store'

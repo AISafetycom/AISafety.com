@@ -59,6 +59,56 @@ interface Pending {
 const MAX_FILES = 8
 const MAX_FILE_BYTES = 15 * 1024 * 1024
 
+// A message half typed when Bryce moves to another item waits in the box
+// for him when he comes back (13 Oct 2026: "when I start typing then switch
+// listings, please make it save my text"). The words and a picked quote are
+// kept in this browser per item, so a reload keeps them too; files can't
+// be, so those wait only while the page stays open. Drafts untouched for a
+// month drop out.
+const DRAFTS_KEY = 'aisafety-admin-queue:chat-drafts'
+const DRAFT_DAYS = 30
+
+interface Draft {
+  text: string
+  quote: string | null
+  at: number
+}
+
+function readDrafts(): Record<string, Draft> {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(DRAFTS_KEY) ?? '{}')
+    if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+      return saved as Record<string, Draft>
+    }
+  } catch {
+    // storage refused or garbled: no drafts
+  }
+  return {}
+}
+
+function draftOf(id: string): Draft | null {
+  const d = readDrafts()[id]
+  return d && typeof d.text === 'string' ? d : null
+}
+
+function saveDraft(id: string, text: string, quote: string | null) {
+  const drafts = readDrafts()
+  const cutoff = Date.now() - DRAFT_DAYS * 86_400_000
+  for (const [k, d] of Object.entries(drafts)) {
+    if (!(d?.at > cutoff)) delete drafts[k]
+  }
+  if (text.trim() || quote) drafts[id] = { text, quote, at: Date.now() }
+  else delete drafts[id]
+  try {
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify(drafts))
+  } catch {
+    // storage refused: the draft lasts only while the item stays open
+  }
+}
+
+// Files waiting to go, per item, while the page stays open.
+const draftFiles = new Map<string, Pending[]>()
+
 interface Msg {
   role: 'you' | 'fable' | 'error'
   text?: string
@@ -239,7 +289,8 @@ export default function Chat({
   // The reply being streamed now.
   const [live, setLive] = useState<Part[] | null>(null)
   const [note, setNote] = useState<string | null>(null)
-  const [text, setText] = useState('')
+  // What was typed here before, if Bryce left this item mid-message.
+  const [text, setText] = useState(() => draftOf(item.id)?.text ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Text picked out of the panel to answer to: the Reply button that
@@ -249,7 +300,9 @@ export default function Chat({
     x: number
     y: number
   } | null>(null)
-  const [quote, setQuote] = useState<string | null>(null)
+  const [quote, setQuote] = useState<string | null>(
+    () => draftOf(item.id)?.quote ?? null
+  )
   // Messages typed while Fable was still answering. Sending one stops the
   // reply being written (the Mac kills that call; what it wrote stays, with
   // a note) and this goes as soon as its stream ends – like the Claude Code
@@ -258,7 +311,9 @@ export default function Chat({
   const [queued, setQueued] = useState<{ text: string; files: Pending[] }[]>([])
   // Files waiting to go with the next message, and whether one is being
   // dragged over the panel right now.
-  const [files, setFiles] = useState<Pending[]>([])
+  const [files, setFiles] = useState<Pending[]>(
+    () => draftFiles.get(item.id) ?? []
+  )
   const [dragging, setDragging] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const dragDepth = useRef(0)
@@ -740,7 +795,7 @@ export default function Chat({
 
   // Messages still waiting when the panel closes – Bryce moved to another
   // item before the stopped reply ended – go anyway, as one message. The Mac
-  // answers in the background and the item shows under "Fable replying".
+  // answers in the background and the item shows under "Fable chats".
   // Before, they were thrown away, and the reply they had stopped was never
   // answered (8 Oct 2026, Mexico Tech Policy Panel).
   const callRef = useRef(call)
@@ -797,6 +852,19 @@ export default function Chat({
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 180)}px`
   }
+
+  // Keep the half-typed message for this item; sending it clears the box
+  // and so the draft.
+  const itemId = item.id
+  useEffect(() => saveDraft(itemId, text, quote), [itemId, text, quote])
+  useEffect(() => {
+    if (files.length) draftFiles.set(itemId, files)
+    else draftFiles.delete(itemId)
+  }, [itemId, files])
+  // A draft brought back is as tall as it was.
+  useEffect(() => {
+    if (inputRef.current?.value) grow(inputRef.current)
+  }, [])
 
   const thread = messages ?? []
   const hasThread = thread.length > 0 || live !== null
