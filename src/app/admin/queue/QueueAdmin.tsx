@@ -1833,6 +1833,18 @@ export default function QueueAdmin({
       changes: 0,
       rules: 0,
     }
+    // Each tab's waiting and done-today counts for the progress bar, which
+    // shows the open tab only and ignores the search.
+    const openPerKind: Record<Kind, number> = {
+      additions: 0,
+      changes: 0,
+      rules: 0,
+    }
+    const donePerKind: Record<Kind, number> = {
+      additions: 0,
+      changes: 0,
+      rules: 0,
+    }
     const urgencies = new Map<string, Urgency>()
     const today = isoDate(dayStart)
     let open = 0
@@ -1843,15 +1855,16 @@ export default function QueueAdmin({
       const hit = search && doc ? matchDoc(doc, search) : null
       if (hit) hits.set(item.id, hit)
       if (!isOpen(item)) {
+        const decidedToday = decidedSince(item, dayStart)
+        if (decidedToday) donePerKind[kindOf(item)]++
         // Today's decisions, plus one linked from the address bar however
         // old: that link promised to show it.
-        if (decidedSince(item, dayStart) || item.id === selectedId) {
-          done.push(item)
-        }
+        if (decidedToday || item.id === selectedId) done.push(item)
         continue
       }
       open++
       const k = kindOf(item)
+      openPerKind[k]++
       if (search) {
         // Every kind at once; the segments count the matches of each.
         if (!hit) continue
@@ -1963,6 +1976,8 @@ export default function QueueAdmin({
       foldOf,
       open,
       perKind,
+      openPerKind,
+      donePerKind,
       urgentPerKind,
       urgencies,
     }
@@ -3060,7 +3075,10 @@ export default function QueueAdmin({
 
   const waiting = ordered.open
   const doneToday = ordered.done.length
-  const total = waiting + doneToday
+  // The bar under the top is the open tab's day (Bryce, 13 Oct 2026: "make
+  // it for each tab instead of overall").
+  const tabDone = ordered.donePerKind[kind]
+  const tabTotal = ordered.openPerKind[kind] + tabDone
   const toastRetry = toast?.retry ?? null
 
   return (
@@ -3158,11 +3176,11 @@ export default function QueueAdmin({
             <Icon src={ICON.question} />
           </button>
         </div>
-        {total > 0 && (
+        {tabTotal > 0 && (
           <div className={styles.progress} aria-hidden>
             <div
               className={styles.progressBar}
-              style={{ width: `${Math.round((doneToday / total) * 100)}%` }}
+              style={{ width: `${Math.round((tabDone / tabTotal) * 100)}%` }}
             />
           </div>
         )}
