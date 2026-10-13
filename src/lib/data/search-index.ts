@@ -429,8 +429,10 @@ function jobKeywords(j: Job): string {
     .filter(level => level && level !== 'Multiple experience levels')
     .join(', ')
   const remote =
-    j.workLocation === 'Remote' &&
-    !j.locations.some(l => l.startsWith('Remote'))
+    j.workLocation
+      .split(',')
+      .map(w => w.trim())
+      .includes('Remote') && !j.locations.some(l => l.startsWith('Remote'))
   return [
     levels,
     j.requiredDegree !== 'Undergraduate degree or less' ? j.requiredDegree : '',
