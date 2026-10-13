@@ -4672,8 +4672,10 @@ function Detail({
       </div>
 
       {showAside && (
+        // Colored only by a verdict: a Rule's bullets are the lessons it was
+        // learned from, not a "Don't publish" (Bryce, 13 Oct 2026).
         <aside
-          className={`${styles.detailAside} ${hasVerdict ? verdictClass(item) : ''}`}
+          className={`${styles.detailAside} ${item.verdict ? verdictClass(item) : ''}`}
           data-chat-scroll
         >
           {found && (
