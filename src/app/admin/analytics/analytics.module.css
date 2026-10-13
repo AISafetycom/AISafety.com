@@ -92,9 +92,14 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  /* On a phone a table scrolls sideways before a name gets this narrow. */
+  /* On a phone a table scrolls sideways before a name gets this narrow,
+     and headings like "% of visitors" wrap so the figures fit beside it. */
   .nameCell {
-    min-width: 140px;
+    min-width: 128px;
+  }
+
+  .table th {
+    white-space: normal;
   }
 }
 

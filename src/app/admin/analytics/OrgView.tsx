@@ -510,7 +510,9 @@ function newsletterEmpty(n: OrgNewsletter, shared: boolean): string {
       ? 'No counted newsletter issue went out in these dates.'
       : 'No newsletter went out through the site in this range.'
   if (!n.complete)
-    return `No clicks on ${their} links in the ${count.toLocaleString()} ${count === 1 ? 'issue' : 'issues'} sent ${inRange}.`
+    return count === 1
+      ? `No clicks on ${their} links in the one issue sent ${inRange}.`
+      : `No clicks on ${their} links in the ${count.toLocaleString()} issues sent ${inRange}.`
   // Named only when there are one or two: the names hold commas ("Events ·
   // Week 41, 2026"), and a quarter holds two dozen.
   if (count === 1)
