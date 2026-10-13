@@ -61,6 +61,7 @@ function item(over: Partial<QueueItem>): QueueItem {
     appliedAt: null,
     error: null,
     reviewAgainOn: null,
+    flagUndo: false,
     ...over,
   }
 }

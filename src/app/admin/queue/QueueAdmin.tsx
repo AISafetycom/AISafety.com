@@ -14,6 +14,7 @@ import type {
 } from '@/lib/admin/queue'
 import { missingFields } from '@/lib/admin/queue-needed'
 import { laterSince, laterUntil } from '@/lib/admin/queue-later'
+import { verdictWords, type FlagUpdate } from '@/lib/admin/queue-flag'
 import { rejectReplyFor, shownDeclineChip } from '@/lib/admin/queue-decline'
 import {
   alreadyRepliedOf,
@@ -951,12 +952,7 @@ function acceptLabel(
 }
 
 function verdictWord(item: QueueItem): string {
-  if (item.verdict === 'Publish') return 'Publish it'
-  if (item.verdict === "Don't publish") return "Don't publish"
-  if (item.verdict === 'Fix') return 'Fix it'
-  if (item.verdict === 'Dismiss') return 'Dismiss the flag'
-  if (item.verdict === 'Unsure') return 'Unsure'
-  return item.verdict ?? ''
+  return verdictWords(item.verdict)
 }
 
 /** An emailed request whose reply draft still has to reach Gmail. */
@@ -2402,6 +2398,39 @@ export default function QueueAdmin({
     [agent]
   )
 
+  // "Update flag" from the chat (queue-flag.ts): the new verdict, reasons
+  // and reject buttons go onto the row, and the item on the page becomes
+  // the row as written. The page's edits and reply draft stay as they are.
+  const updateFlag = useCallback(
+    async (
+      item: QueueItem,
+      body: { flag: FlagUpdate } | { undo: true }
+    ): Promise<string | null> => {
+      if (!canEdit) return 'View only: the flag stays as it is.'
+      try {
+        const res = await fetch(API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: item.id, action: 'flag', ...body }),
+        })
+        const data = (await res.json()) as { item?: QueueItem; error?: string }
+        if (!res.ok || !data.item) return data.error ?? `HTTP ${res.status}`
+        // A read of the list that began before this landed is stale now.
+        loadSeq.current++
+        const updated = { ...data.item, logo: data.item.logo ?? item.logo }
+        // A new list of field changes makes the card built before it stale.
+        forgetCard(updated)
+        setItems(prev =>
+          prev ? prev.map(i => (i.id === updated.id ? updated : i)) : prev
+        )
+        return null
+      } catch {
+        return 'No answer from the site; the flag is as it was.'
+      }
+    },
+    [canEdit]
+  )
+
   const act = useCallback(
     async (
       item: QueueItem,
@@ -3362,6 +3391,7 @@ export default function QueueAdmin({
                     }
                   : {})}
                 item={selected}
+                onFlag={body => updateFlag(selected, body)}
                 live={live[selected.id] ?? null}
                 onImage={(field, urls) => {
                   setLiveField(selected.id, field, urls)
@@ -3795,6 +3825,7 @@ function Detail({
   fieldFocus,
   readOnly,
   onFable,
+  onFlag,
   onBack,
   onUndo,
   undoing = false,
@@ -3807,6 +3838,11 @@ function Detail({
   /** The chat shows Fable changed the listing: the page reads it live. */
   /** Fable changed fields on the record from the chat: their names. */
   onFable?: (fields: string[]) => void
+  /** Write a flag update from the chat onto the row, or undo it; resolves
+   *  to an error to show, or null. */
+  onFlag: (
+    body: { flag: FlagUpdate } | { undo: true }
+  ) => Promise<string | null>
   /** A decision opened from Done today: back to that list. */
   onBack?: () => void
   /** A decision opened from Done today: take it back (null: view only). */
@@ -4719,6 +4755,7 @@ function Detail({
                 if (isOpen(item)) setD({ reply: text })
               }}
               onWrote={onWrote}
+              onFlag={onFlag}
               onFableChanges={list => {
                 // The same list again (every history load sends one) keeps
                 // the state as it is, so the page does not re-render for it.
