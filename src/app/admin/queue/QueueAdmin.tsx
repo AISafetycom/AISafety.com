@@ -128,7 +128,7 @@ const URGENT_WHY: Record<Kind, string> = {
   rules: '',
 }
 const SECTION_LABEL: Record<Section, string> = {
-  fable: 'Fable replying',
+  fable: 'Fable chats',
   urgent: 'Urgent',
   requests: 'Requests',
   broom: 'Broom',
@@ -1698,10 +1698,11 @@ export default function QueueAdmin({
     return marks
   }, [chatOn, chatRows, chatSeen, openId])
 
-  // The items in the "Fable replying" section, newest arrival first: every
+  // The items in the "Fable chats" section, newest arrival first: every
   // open item Bryce has chatted with Fable on, until it is decided. Reading
   // the reply no longer sends it back to its place (13 Oct 2026: "a listing
-  // shouldn't leave Fable Replying when I read the message"). One joins
+  // shouldn't leave Fable Replying when I read the message"; the section
+  // was renamed from "Fable replying" the same day to match). One joins
   // once Fable is answering it or has answered and it is not the open one,
   // so a row never moves from under the item being chatted on. The section
   // shows only on the item's own tab (Additions, Changes or Rules), like
@@ -2995,7 +2996,7 @@ export default function QueueAdmin({
                     {ordered.urgentPerKind[k.key]}
                   </span>
                 )}
-                {/* Fable at work on another tab: its "Fable replying"
+                {/* Fable at work on another tab: its "Fable chats"
                     items show only there, so the dot points the way. */}
                 {!searching && kind !== k.key && (
                   <FableDot

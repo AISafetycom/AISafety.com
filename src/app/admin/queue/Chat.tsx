@@ -795,7 +795,7 @@ export default function Chat({
 
   // Messages still waiting when the panel closes – Bryce moved to another
   // item before the stopped reply ended – go anyway, as one message. The Mac
-  // answers in the background and the item shows under "Fable replying".
+  // answers in the background and the item shows under "Fable chats".
   // Before, they were thrown away, and the reply they had stopped was never
   // answered (8 Oct 2026, Mexico Tech Policy Panel).
   const callRef = useRef(call)
