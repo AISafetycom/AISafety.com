@@ -4,6 +4,7 @@ import {
   type LabelThinning,
   chartDateLabels,
   labelStep,
+  scaleTop,
 } from './chart-dates'
 
 const DAY_MS = 86_400_000
@@ -218,5 +219,28 @@ describe('chartDateLabels', () => {
       /isn't a YYYY-MM-DD day/
     )
     expect(() => chartDateLabels(['2026-13-01'])).toThrow()
+  })
+})
+
+describe('scaleTop', () => {
+  it('rounds the busiest column up to a round number close above it', () => {
+    expect(scaleTop(0)).toBe(0)
+    expect(scaleTop(1)).toBe(1)
+    expect(scaleTop(3)).toBe(3)
+    expect(scaleTop(7)).toBe(8)
+    expect(scaleTop(9)).toBe(10)
+    expect(scaleTop(61)).toBe(80)
+    expect(scaleTop(100)).toBe(100)
+    expect(scaleTop(130)).toBe(150)
+    expect(scaleTop(211)).toBe(250)
+    expect(scaleTop(901)).toBe(1000)
+  })
+
+  it('keeps the tallest bar at two thirds of the height or more', () => {
+    for (let max = 1; max <= 5000; max++) {
+      const top = scaleTop(max)
+      expect(top).toBeGreaterThanOrEqual(max)
+      expect(max / top).toBeGreaterThanOrEqual(2 / 3)
+    }
   })
 })

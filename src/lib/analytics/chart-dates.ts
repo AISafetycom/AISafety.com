@@ -6,6 +6,18 @@
 /** Roughly how many dates a full-width chart shows. */
 export const DATE_LABEL_TARGET = 13
 
+/** The top of the chart's scale: the smallest round number at or above the
+ *  busiest column (0 stays 0), from 1, 1.5, 2, 2.5, 3, 4, 5, 6 and 8 × 10ⁿ,
+ *  so the tallest bar always fills at least two thirds of the height (211 →
+ *  250, where 1, 2 and 5 alone gave 500 and less than half). */
+export function scaleTop(max: number): number {
+  if (max <= 0) return 0
+  const p = 10 ** Math.floor(Math.log10(max))
+  for (const m of [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8])
+    if (m * p >= max) return m * p
+  return 10 * p
+}
+
 /** A full-width chart shows every label, a narrower one every 2nd, a
  *  phone-width one every 4th and the narrowest phones every 8th, always
  *  counting back from the newest so the last column keeps its date. */
