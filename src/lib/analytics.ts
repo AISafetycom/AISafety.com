@@ -99,13 +99,24 @@ function getVisitorId(): string | undefined {
   }
 }
 
+/** An org's page (/stats/<token>) is a private link, so its token never goes
+ *  into either analytics system, the chatbot's log, or the footer's feedback
+ *  form: every one is recorded as '/stats'. */
+export function trackedPath(pathname: string): string {
+  return pathname.startsWith('/stats/') ? '/stats' : pathname
+}
+
 /** Fire a first-party event to /api/track. Prefers sendBeacon so it survives the
  *  navigation a click triggers; falls back to keepalive fetch. */
 function sendTrackEvent(payload: TrackPayload): void {
   // The owner can exclude their own browser from the stats.
   if (isTrackingOptedOut()) return
   try {
-    const body = JSON.stringify({ ...payload, vid: getVisitorId() })
+    const body = JSON.stringify({
+      ...payload,
+      ...(payload.page != null && { page: trackedPath(payload.page) }),
+      vid: getVisitorId(),
+    })
     if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
       const queued = navigator.sendBeacon(
         '/api/track',

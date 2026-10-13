@@ -77,9 +77,11 @@
   border-radius: 8px;
 }
 
+/* minmax(0, …) so a wide table scrolls inside its panel rather than
+   stretching the column. */
 .grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 20px;
   align-items: start;
   margin-bottom: 20px;
@@ -87,7 +89,17 @@
 
 @media (max-width: 991px) {
   .grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* On a phone a table scrolls sideways before a name gets this narrow,
+     and headings like "% of visitors" wrap so the figures fit beside it. */
+  .nameCell {
+    min-width: 128px;
+  }
+
+  .table th {
+    white-space: normal;
   }
 }
 
@@ -110,6 +122,10 @@
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+}
+
+.tableScroll {
+  overflow-x: auto;
 }
 
 .table th {
@@ -615,6 +631,7 @@
 
 .presets {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
 }
 
@@ -629,6 +646,7 @@
   border: 1px solid var(--teal-800);
   border-radius: 999px;
   text-decoration: none;
+  white-space: nowrap;
   cursor: pointer;
   transition:
     color var(--hover-transition),
@@ -649,6 +667,7 @@
 
 .custom {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
@@ -857,25 +876,125 @@
   font-size: 13px;
 }
 
-/* The summary sentence to quote back to an org, with its Copy button. */
-.copySentence {
+/* The Org lookup's "Share with the org" box: the button that makes the org's
+   page, or that page's link with Copy, Open, and Stop sharing. */
+.shareBox {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  margin-top: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 20px;
   padding: 12px 14px;
   background-color: var(--teal-900);
   border: 1px solid var(--teal-800);
   border-radius: 8px;
 }
 
-.copySentenceText {
-  flex: 1;
+.shareText {
+  flex: 1 1 320px;
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.5;
+  color: var(--teal-300);
+}
+
+.shareLabel {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.shareLink {
+  flex: 1 1 260px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 13px;
+  font-family: inherit;
   color: var(--white);
-  user-select: all;
+  background-color: var(--teal-850);
+  border: 1px solid var(--teal-800);
+  border-radius: 6px;
+  outline: none;
+}
+
+.shareLink:focus {
+  border-color: var(--teal-500);
+}
+
+.shareNote {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--teal-400);
+}
+
+/* A button that reads as a link inside a sentence. */
+.shareInline {
+  padding: 0;
+  font: inherit;
+  color: var(--teal-300);
+  background: none;
+  border: none;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.shareInline:hover:not(:disabled) {
+  color: var(--white);
+}
+
+.shareName {
+  display: flex;
+  flex: 1 1 260px;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--teal-400);
+  white-space: nowrap;
+}
+
+.shareConfirm {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--teal-300);
+}
+
+/* The org pages shared so far, before a search: name, how often opened,
+   and each page's own Copy link and Stop sharing. */
+.sharedPages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.sharedPages li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.sharedPagesNote {
+  font-size: 12px;
+  color: var(--teal-400);
+}
+
+.sharedPagesActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.empty + .panel {
+  margin-top: 20px;
 }
 
 .copyBtn {
@@ -887,6 +1006,7 @@
   background-color: transparent;
   border: 1px solid var(--teal-700);
   border-radius: 999px;
+  text-decoration: none;
   cursor: pointer;
   white-space: nowrap;
   transition:
@@ -894,9 +1014,14 @@
     background-color var(--hover-transition);
 }
 
-.copyBtn:hover {
+.copyBtn:hover:not(:disabled) {
   color: var(--white);
   background-color: var(--teal-800);
+}
+
+.copyBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* A listing's small notes under its name (featured, why it matched, no
@@ -993,7 +1118,8 @@
   flex: 1;
   display: flex;
   align-items: stretch;
-  gap: 2px;
+  /* 2px between columns, less on a phone, so 91 days still fit. */
+  gap: min(2px, 0.3%);
   border-bottom: 1px solid var(--teal-700);
 }
 
@@ -1037,13 +1163,90 @@
   background-color: var(--white);
 }
 
-/* Lines up under the plot: the axis's 40px plus the 8px gap. */
+/* A week only partly inside the range: lighter, so its shorter count isn't
+   read as a dip. */
+.chartBarPartial {
+  opacity: 0.45;
+}
+
+/* Lines up under the plot: the axis's 40px plus the 8px gap. Its labels
+   (chart-dates.ts picks them) are positioned, so it holds one line's height
+   itself, and it is the container they thin out against. */
 .chartDates {
-  display: flex;
-  justify-content: space-between;
+  container-type: inline-size;
+  position: relative;
+  height: 1lh;
   margin-left: 48px;
   font-size: 11px;
   color: var(--teal-400);
+}
+
+/* A box exactly as wide as its column, so the date centers under the bar;
+   a date wider than its column spills evenly both ways (the oldest one can
+   reach into the empty space under the axis, never past the panel). */
+.chartDate {
+  position: absolute;
+  top: 0;
+  display: flex;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+/* The newest date centers under its column while it fits there, and
+   otherwise ends flush with the plot rather than running past the panel's
+   edge: auto margins take any spare room and drop to zero when there's
+   none, leaving flex-end in charge. */
+.chartDate:last-child {
+  justify-content: flex-end;
+}
+
+.chartDate:last-child > span {
+  margin: 0 auto;
+}
+
+.chartDateYear {
+  display: none;
+}
+
+.chartDateYear[data-year-from='1'] {
+  display: inline;
+}
+
+/* Fewer dates as the plot narrows: every other one, then every fourth,
+   always keeping the newest. A date is up to ~35px wide and ~61px with its
+   year; the breakpoints (the plot's width) are measured so plain neighbors
+   keep 20px apart and a dated one 12px, even when the newest date carries
+   a year and ends flush: up to 13 labels from 990px, 7 from 535px, 4 from
+   270px, and 2 below that (the narrowest phones). A label hidden here may
+   have carried the year, so the next one shown takes it on. */
+@container (max-width: 989px) {
+  .chartDate[data-keep='1'] {
+    display: none;
+  }
+
+  .chartDateYear[data-year-from='2'] {
+    display: inline;
+  }
+}
+
+@container (max-width: 534px) {
+  .chartDate[data-keep='2'] {
+    display: none;
+  }
+
+  .chartDateYear[data-year-from='4'] {
+    display: inline;
+  }
+}
+
+@container (max-width: 269px) {
+  .chartDate[data-keep='4'] {
+    display: none;
+  }
+
+  .chartDateYear[data-year-from='8'] {
+    display: inline;
+  }
 }
 
 .chartTable {

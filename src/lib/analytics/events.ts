@@ -1896,10 +1896,8 @@ export interface OrgLookupData {
    *  resource page, site search, or the chatbot); vid-less clicks count once
    *  each. Ignores the count mode. */
   visitors: number
-  /** Those clicks, following the count mode, and every click regardless of
-   *  it (the summary sentence quotes the latter). */
+  /** Those clicks, following the count mode. */
   clicks: number
-  allClicks: number
   rows: OrgListingRow[]
   /** Rows (and catalog listings) Bryce left out, for the Put back links. */
   leftOut: { hash: string; page: string; name: string }[]
@@ -1909,15 +1907,17 @@ export interface OrgLookupData {
   searches: OrgSearchRow[]
   /** Clicks (count mode) per UTC day, or per week from Monday when the range
    *  is longer than SERIES_DAILY_MAX_DAYS. `start` is the bucket's first
-   *  day, YYYY-MM-DD. */
-  series: { start: string; count: number }[]
+   *  day, YYYY-MM-DD; `days` is set on a week only partly inside the range
+   *  (the first and the current one, usually): how many of its days are. */
+  series: { start: string; count: number; days?: number }[]
   seriesUnit: 'day' | 'week'
   /** Pages with resource-page clicks, busiest first. */
   clickedPages: string[]
 }
 
-/** Longest range drawn one bar per day; longer ranges get a bar per week. */
-const SERIES_DAILY_MAX_DAYS = 92
+/** Longest range drawn one bar per day (a month, 30 days, or less); longer
+ *  ranges get a bar per week, since 90 bars a quarter read as noise. */
+const SERIES_DAILY_MAX_DAYS = 31
 
 const ORG_REACHED_ORDER = [
   'Cards',
@@ -1952,7 +1952,6 @@ export function orgLookup(
       ...base,
       visitors: 0,
       clicks: 0,
-      allClicks: 0,
       rows: [],
       leftOut: [],
       reached: [],
@@ -2101,14 +2100,11 @@ export function orgLookup(
   const bump = (bucket: string) =>
     reached.set(bucket, (reached.get(bucket) ?? 0) + 1)
   const counted: AnalyticsEvent[] = []
-  // Every click before the count mode's dedupe, for the visitor count and
-  // the sentence. Counted, not kept: a flood on one listing mustn't cost
-  // memory twice.
-  let allClicks = 0
+  // Every click before the count mode's dedupe, for the visitor count.
+  // Counted, not kept: a flood on one listing mustn't cost memory twice.
   const visitorIds = new Set<string>()
   let anonClicks = 0
   const seeClick = (e: AnalyticsEvent) => {
-    allClicks++
     if (e.vid) visitorIds.add(e.vid)
     else anonClicks++
   }
@@ -2274,7 +2270,6 @@ export function orgLookup(
     ...base,
     visitors: visitorIds.size + anonClicks,
     clicks: counted.length,
-    allClicks,
     rows,
     leftOut: [...leftOut.values()],
     reached: ORG_REACHED_ORDER.filter(b => reached.has(b)).map(name => ({
@@ -2311,7 +2306,10 @@ function orgSeries(
   { startMs, endMs }: DateRange,
   now: number,
   oldest: number
-): { series: { start: string; count: number }[]; unit: 'day' | 'week' } {
+): {
+  series: { start: string; count: number; days?: number }[]
+  unit: 'day' | 'week'
+} {
   // Nothing read in range means nothing to draw.
   if (!Number.isFinite(oldest)) return { series: [], unit: 'day' }
   const end = Math.min(endMs ?? now, now)
@@ -2338,9 +2336,21 @@ function orgSeries(
     counts.set(b, (counts.get(b) ?? 0) + 1)
   }
   const step = unit === 'day' ? 86_400_000 : 7 * 86_400_000
-  const series: { start: string; count: number }[] = []
-  for (let b = bucketOf(firstDay); b <= lastDay; b += step)
-    series.push({ start: dashboardDay(b), count: counts.get(b) ?? 0 })
+  const series: { start: string; count: number; days?: number }[] = []
+  for (let b = bucketOf(firstDay); b <= lastDay; b += step) {
+    // A week cut off by the range's start or end (or by today).
+    const days =
+      unit === 'week'
+        ? (Math.min(b + 6 * 86_400_000, lastDay) - Math.max(b, firstDay)) /
+            86_400_000 +
+          1
+        : 1
+    series.push({
+      start: dashboardDay(b),
+      count: counts.get(b) ?? 0,
+      ...(unit === 'week' && days < 7 && { days }),
+    })
+  }
   return { series, unit }
 }
 

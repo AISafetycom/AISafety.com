@@ -1,16 +1,19 @@
 'use client'
 
 import { useState } from 'react'
+import { chartDateLabels } from '@/lib/analytics/chart-dates'
 import styles from './analytics.module.css'
 
 /** A small one-series column chart: clicks per day (or week). Each column is
  *  its own hover and focus target and shows its date and count; the same
- *  numbers are in the table underneath, so nothing hides behind a hover. */
+ *  numbers are in the table underneath, so nothing hides behind a hover. A
+ *  week only partly inside the range (`days` set) is drawn lighter and says
+ *  how many of its days count, so a short week doesn't read as a dip. */
 export default function ClicksChart({
   points,
   unit,
 }: {
-  points: { start: string; count: number }[]
+  points: { start: string; count: number; days?: number }[]
   unit: 'day' | 'week'
 }) {
   const [active, setActive] = useState<number | null>(null)
@@ -20,10 +23,13 @@ export default function ClicksChart({
   // Gridlines at the top, halfway (when that's a whole number) and zero.
   const ticks =
     top === 0 ? [0] : Number.isInteger(top / 2) ? [top, top / 2, 0] : [top, 0]
-  const when = (start: string) =>
-    unit === 'week' ? `Week of ${longDay(start)}` : longDay(start)
+  // "13 October 2026 (2 of its 7 days)": a week's first day, and how much
+  // of it counts when the range cuts it short.
+  const weekOf = ({ start, days }: { start: string; days?: number }) =>
+    days ? `${longDay(start)} (${days} of its 7 days)` : longDay(start)
+  const when = (p: { start: string; days?: number }) =>
+    unit === 'day' ? longDay(p.start) : `Week of ${weekOf(p)}`
   const shown = active == null ? null : points[active]
-  const middle = Math.floor((points.length - 1) / 2)
 
   return (
     <div className={styles.chart}>
@@ -31,7 +37,7 @@ export default function ClicksChart({
         {shown ? (
           <>
             <strong>{clicksLabel(shown.count)}</strong>{' '}
-            <span>{when(shown.start)}</span>
+            <span>{when(shown)}</span>
           </>
         ) : (
           <span>Point at a column for its date and count</span>
@@ -63,11 +69,11 @@ export default function ClicksChart({
               onPointerEnter={() => setActive(i)}
               onFocus={() => setActive(i)}
               onBlur={() => setActive(null)}
-              aria-label={`${when(p.start)}, ${clicksLabel(p.count)}`}
+              aria-label={`${when(p)}, ${clicksLabel(p.count)}`}
             >
               {p.count > 0 && (
                 <span
-                  className={styles.chartBar}
+                  className={`${styles.chartBar}${p.days ? ` ${styles.chartBarPartial}` : ''}`}
                   style={{ height: `${(p.count / top) * 100}%` }}
                 />
               )}
@@ -75,14 +81,33 @@ export default function ClicksChart({
           ))}
         </div>
       </div>
+      {/* Each date spans its own column; the CSS hides the data-keep 1s, then
+          the 2s, as the chart narrows, and shows a year from its
+          data-year-from thinning on. */}
       <div className={styles.chartDates} aria-hidden>
-        <span>{shortDay(points[0].start)}</span>
-        {/* The middle label sits at the centre, so only an odd count has a
-            column there. */}
-        {points.length > 2 && points.length % 2 === 1 && (
-          <span>{shortDay(points[middle].start)}</span>
-        )}
-        {points.length > 1 && <span>{shortDay(points.at(-1)!.start)}</span>}
+        {chartDateLabels(points.map(p => p.start)).map(l => (
+          <span
+            key={l.index}
+            className={styles.chartDate}
+            data-keep={l.keep}
+            style={{
+              left: `${(l.index / points.length) * 100}%`,
+              width: `${100 / points.length}%`,
+            }}
+          >
+            <span>
+              {l.text}
+              {l.year && (
+                <span
+                  className={styles.chartDateYear}
+                  data-year-from={l.yearFrom}
+                >
+                  {` ${l.year}`}
+                </span>
+              )}
+            </span>
+          </span>
+        ))}
       </div>
       <details className={styles.chartTable}>
         <summary>Show as a table</summary>
@@ -96,7 +121,7 @@ export default function ClicksChart({
           <tbody>
             {points.map(p => (
               <tr key={p.start}>
-                <td>{longDay(p.start)}</td>
+                <td>{unit === 'week' ? weekOf(p) : longDay(p.start)}</td>
                 <td className={styles.numCol}>{p.count.toLocaleString()}</td>
               </tr>
             ))}
@@ -128,26 +153,4 @@ function longDay(day: string): string {
     month: 'long',
     year: 'numeric',
   })
-}
-
-const MONTHS = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-]
-
-/** 'YYYY-MM-DD' as "3 Oct": day first, American month abbreviations (en-GB
- *  would write "Sept"). */
-function shortDay(day: string): string {
-  const [, m, d] = day.split('-').map(Number)
-  return `${d} ${MONTHS[m - 1]}`
 }

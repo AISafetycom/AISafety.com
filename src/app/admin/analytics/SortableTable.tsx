@@ -11,6 +11,9 @@ export interface SortColumn {
   label: string
   className?: string
   sort?: 'text' | 'number' | 'rank'
+  /** What the column measures, in a sentence or two: the heading's tooltip,
+   *  before "Click to sort." */
+  hint?: string
 }
 
 /** What a cell sorts by. null = no value; those rows sort last either way. */
@@ -76,60 +79,67 @@ export default function SortableTable({
     )
   }
 
+  // A table wider than its panel (a phone, on an org's own page) scrolls
+  // sideways inside the panel rather than widening the page.
   return (
-    <table className={styles.table}>
-      <thead>
-        <tr>
-          {columns.map((c, i) => (
-            <th
-              key={i}
-              className={c.className}
-              aria-sort={
-                sort?.col === i
-                  ? sort.dir === 1
-                    ? 'ascending'
-                    : 'descending'
-                  : undefined
-              }
-            >
-              {c.sort ? (
+    <div className={styles.tableScroll}>
+      <table className={styles.table}>
+        <thead>
+          <tr>
+            {columns.map((c, i) => (
+              <th
+                key={i}
+                className={c.className}
+                title={c.sort ? undefined : c.hint}
+                aria-sort={
+                  sort?.col === i
+                    ? sort.dir === 1
+                      ? 'ascending'
+                      : 'descending'
+                    : undefined
+                }
+              >
+                {c.sort ? (
+                  <button
+                    type="button"
+                    className={styles.sortBtn}
+                    onClick={() => headerClick(i)}
+                    title={
+                      c.hint ? `${c.hint} Click to sort.` : `Sort by ${c.label}`
+                    }
+                  >
+                    {c.label}
+                    {sort?.col === i && (
+                      <span className={styles.sortArrow} aria-hidden="true">
+                        {sort.dir === 1 ? '▲' : '▼'}
+                      </span>
+                    )}
+                  </button>
+                ) : (
+                  c.label
+                )}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {shown.map(i => rows[i])}
+          {remaining > 0 && (
+            <tr className={styles.showMoreRow}>
+              <td colSpan={columns.length}>
                 <button
                   type="button"
-                  className={styles.sortBtn}
-                  onClick={() => headerClick(i)}
-                  title={`Sort by ${c.label}`}
+                  className={styles.showMoreBtn}
+                  onClick={() => setVisible(v => v + step)}
                 >
-                  {c.label}
-                  {sort?.col === i && (
-                    <span className={styles.sortArrow} aria-hidden="true">
-                      {sort.dir === 1 ? '▲' : '▼'}
-                    </span>
-                  )}
+                  Show {Math.min(step, remaining)} more · {remaining} hidden
                 </button>
-              ) : (
-                c.label
-              )}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {shown.map(i => rows[i])}
-        {remaining > 0 && (
-          <tr className={styles.showMoreRow}>
-            <td colSpan={columns.length}>
-              <button
-                type="button"
-                className={styles.showMoreBtn}
-                onClick={() => setVisible(v => v + step)}
-              >
-                Show {Math.min(step, remaining)} more · {remaining} hidden
-              </button>
-            </td>
-          </tr>
-        )}
-      </tbody>
-      {foot && <tfoot>{foot}</tfoot>}
-    </table>
+              </td>
+            </tr>
+          )}
+        </tbody>
+        {foot && <tfoot>{foot}</tfoot>}
+      </table>
+    </div>
   )
 }
