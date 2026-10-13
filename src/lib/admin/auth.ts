@@ -1,6 +1,15 @@
+import { timingSafeEqual } from 'node:crypto'
 import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
 import { cache } from 'react'
-import { canEdit, canOpen, NO_ACCESS, type AccessFlags } from './access'
+import { adminHomeHref } from '@/app/admin/nav'
+import {
+  canEdit,
+  canOpen,
+  NO_ACCESS,
+  type AccessArea,
+  type AccessFlags,
+} from './access'
 import { openToken, sealToken } from './session'
 import { findAdminUser } from './users'
 
@@ -138,6 +147,19 @@ export async function currentAccess(): Promise<AccessFlags> {
   return (await currentSession())?.access ?? NO_ACCESS
 }
 
+/** The first line of every admin page: carries on when this session can open
+ *  `area`, else sends it to the first area it can open (the login page when
+ *  signed out). The section layouts check too, but that is not enough on its
+ *  own: a client navigation (a tab click, a preload) asks the server for the
+ *  page without rendering the layouts the browser already has, so a page
+ *  that relied on its layout would hand its data to anyone replaying that
+ *  request without a cookie. page-guards.test.ts holds every page to it. */
+export async function requireAccess(area: AccessArea): Promise<AccessFlags> {
+  const access = await currentAccess()
+  if (!canOpen(access, area)) redirect(adminHomeHref(access))
+  return access
+}
+
 /** Who is signed in, for attribution and the header. Null when signed out. */
 export async function currentAdmin(): Promise<AdminIdentity | null> {
   return currentSession()
@@ -227,6 +249,23 @@ export async function canViewUsers(): Promise<boolean> {
  *  hasFreshSession(SENSITIVE_FRESH_SECONDS). */
 export async function canManageUsers(): Promise<boolean> {
   return canEdit(await currentAccess(), 'manageUsers')
+}
+
+/** A cron route's check: Vercel sends `Authorization: Bearer <CRON_SECRET>`.
+ *  Refuses outright when CRON_SECRET isn't set. Preview deployments have
+ *  none and are open to anyone, yet share the production database and the
+ *  owner's mail script, so a route that waved requests through without the
+ *  secret could be set off from any preview URL. Vercel only runs crons on
+ *  production, where the secret is set; to try one on a laptop, set
+ *  CRON_SECRET in .env.local and send the same header. */
+export function cronAuthorized(
+  header: string | null,
+  secret: string | undefined
+): boolean {
+  if (!secret) return false
+  const got = Buffer.from(header ?? '')
+  const want = Buffer.from(`Bearer ${secret}`)
+  return got.length === want.length && timingSafeEqual(got, want)
 }
 
 /** True when the session was minted by Google within the last

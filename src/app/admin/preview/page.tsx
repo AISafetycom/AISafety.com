@@ -1,4 +1,4 @@
-import { previewPillsShown } from '@/lib/admin/auth'
+import { previewPillsShown, requireAccess } from '@/lib/admin/auth'
 import { isPreviewRequest } from '@/lib/preview'
 import { formatTimeAgo } from '@/lib/format-date'
 import adminStyles from '../admin.module.css'
@@ -11,6 +11,8 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 export default async function PreviewAdminPage() {
+  // Checked here, not only in the layout: see requireAccess.
+  await requireAccess('preview')
   const pillsShown = await previewPillsShown()
   const previewOn = await isPreviewRequest()
   const buildTime = process.env.BUILD_TIME

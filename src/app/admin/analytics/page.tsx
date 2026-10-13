@@ -1,9 +1,6 @@
 import { Fragment, Suspense } from 'react'
 import { after } from 'next/server'
 import { headers } from 'next/headers'
-import { redirect } from 'next/navigation'
-import { currentAccess } from '@/lib/admin/auth'
-import { adminHomeHref } from '../nav'
 import Image from 'next/image'
 import Icon from '@/components/Icon'
 import {
@@ -57,6 +54,7 @@ import { getFounderResources } from '@/lib/data/founders'
 import { getJobs } from '@/lib/data/jobs'
 import { getMapData, type MapOrg } from '@/lib/data/map'
 import { getProjects } from '@/lib/data/projects'
+import { requireAccess } from '@/lib/admin/auth'
 import {
   isNewsletterConfigured,
   readSendStats,
@@ -567,11 +565,9 @@ export default async function AnalyticsPage({
 }: {
   searchParams: Promise<SearchParams>
 }) {
-  // The layout's sign-in check isn't enough on its own: a client navigation
-  // can ask for this page without the layout being rendered again. So the
-  // page checks too, before reading anything.
-  const access = await currentAccess()
-  if (!access.analytics) redirect(adminHomeHref(access))
+  // Before anything is read. The layout checks too, but a tab click asks for
+  // this page without rendering the layout again (see requireAccess).
+  await requireAccess('analytics')
 
   const sp = await searchParams
   const query = readQuery(sp)
