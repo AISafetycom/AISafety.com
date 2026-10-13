@@ -2212,15 +2212,58 @@ export default function QueueAdmin({
     [ordered.foldOf, foldedPages, foldPage, select]
   )
 
+  // After a jump to a finished Fable reply: the reply jumped to (`at`) and
+  // the item list order would have given instead (`next`), where the walk
+  // picks up again once the replies are read.
+  const resumeRef = useRef<{ at: string; next: string | null } | null>(null)
+
+  /** Where moving on from `fromId` goes (Tab, the down arrow and
+   *  auto-advance). A listing Fable has finished replying on, not read
+   *  yet, comes first, the one waiting longest of them (Bryce, 13 Oct
+   *  2026: "when fable has finished replying, when I go to the next
+   *  listing it should move to the one that has finished replying"); with
+   *  none left, the walk carries on from where it was. `inOrder` is the
+   *  item list order gives; `free` passes over items that can't be gone
+   *  to. A reply Fable is still writing waits its turn. */
+  const fableFirst = useCallback(
+    (
+      fromId: string | null,
+      inOrder: QueueItem | undefined,
+      free: (x: QueueItem) => boolean
+    ) => {
+      const ok = (x: QueueItem) => x.id !== fromId && free(x)
+      const finished = (x: QueueItem) => chatRows[x.id]?.last ?? ''
+      const ready = ordered.walk
+        .filter(x => fableMarks[x.id] === 'new' && ok(x))
+        .sort((a, b) => (finished(a) < finished(b) ? -1 : 1))[0]
+      const resume =
+        resumeRef.current && resumeRef.current.at === fromId
+          ? resumeRef.current
+          : null
+      if (ready) {
+        resumeRef.current = {
+          at: ready.id,
+          next: resume ? resume.next : (inOrder?.id ?? null),
+        }
+        return ready
+      }
+      resumeRef.current = null
+      const back = resume && ordered.walk.find(x => x.id === resume.next)
+      return back && ok(back) ? back : inOrder
+    },
+    [ordered.walk, fableMarks, chatRows]
+  )
+
   const move = useCallback(
     (delta: number) => {
       const walk = ordered.walk
       if (walk.length === 0) return
       const i = walk.findIndex(x => x.id === selectedId)
-      const next = walk[Math.min(walk.length - 1, Math.max(0, i + delta))]
+      const step = walk[Math.min(walk.length - 1, Math.max(0, i + delta))]
+      const next = delta > 0 ? fableFirst(selectedId, step, () => true) : step
       if (next) reveal(next)
     },
-    [ordered.walk, selectedId, reveal]
+    [ordered.walk, selectedId, reveal, fableFirst]
   )
 
   /** Leave the search. The item in focus stays in focus, shown among its
@@ -2390,14 +2433,17 @@ export default function QueueAdmin({
           text: workingLabel(item, action),
         })
         // Auto-advance to the next open item that is not itself on its way,
-        // opening its page if that is folded.
+        // opening its page if that is folded; a finished Fable reply first.
         const walk = ordered.walk
         const i = walk.findIndex(x => x.id === item.id)
         const free = (x: QueueItem) =>
           x.id !== item.id && !pendingRef.current[x.id]
-        const next =
+        const next = fableFirst(
+          item.id,
           walk.slice(i + 1).find(free) ??
-          walk.slice(0, Math.max(0, i)).reverse().find(free)
+            walk.slice(0, Math.max(0, i)).reverse().find(free),
+          free
+        )
         if (next) reveal(next)
       } else if (action === 'undo') {
         // The write takes a second or two: the toast says so straight away,
@@ -2573,6 +2619,7 @@ export default function QueueAdmin({
     [
       ordered.walk,
       reveal,
+      fableFirst,
       select,
       setDraft,
       drafts,
@@ -3472,7 +3519,10 @@ export default function QueueAdmin({
               <dt>
                 <kbd>Tab</kbd> / <kbd>⇧</kbd> <kbd>Tab</kbd>
               </dt>
-              <dd>next / previous item</dd>
+              <dd>
+                next / previous item; next goes to a reply Fable has finished
+                first
+              </dd>
               <dt>
                 <kbd>/</kbd>
               </dt>
