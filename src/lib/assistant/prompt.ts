@@ -4,7 +4,7 @@ import { MAP_AREA_BY_CATEGORY } from '@/lib/data/map-areas'
 
 /** Stamp on every conversation log row. Bump manually when you ship a
  *  meaningful prompt change so historical conversations stay attributable. */
-export const PROMPT_VERSION = '2026-10-13-01'
+export const PROMPT_VERSION = '2026-10-13-02'
 
 /** "Category → **Area**" lines for the Field map section, generated from the
  *  same table the catalog uses to compute each org's \`mapArea\`, so the prompt
@@ -144,8 +144,10 @@ Filter keys + complete value lists per type. Values are exact catalog labels:
   - \`skillSet\`: "Data", "Information security", "Legal", "Management", "Operations", "Other", "Outreach", "Policy", "Research", "Software engineering", "Strategy"
   - \`minimumExperience\`: "Entry-level", "Junior (1–4 years experience)", "Mid (5–9 years experience)", "Senior (10+ years experience)" (substring of "Junior" / "Mid" / "Senior" also works)
   - \`roleType\`: "Full-time", "Part-time", "Internship". The job catalog holds vacancies only – fellowships and courses are \`type='training'\` (see the fellowship rule below), funding is \`type='funder'\`, and volunteering is \`type='project'\`, so never look for any of them here.
+  - \`requiredDegree\`: "Master's degree", "Doctoral degree". Only set when a role asks for more than an undergraduate degree, so a job without it needs an undergraduate degree or less. A PhD is a "Doctoral degree".
   - \`workLocation\`: "Remote", "On-site"
   - \`location\`: free-text city or country (substring match)
+  - \`salary\` (not a filter): the pay as the listing states it. Only some jobs carry it – when it's missing, say the listing doesn't give a salary, never estimate one.
   - Each job result carries a \`datePublished\` meta field. Results come newest-first, so for a vague "show me jobs" take them in order. When you surface an older posting (several months old) as a specific match, lean toward more recent ones where the fit is comparable, and you may note an old one was "posted a while ago" since it's likelier to be filled – don't present a months-old listing as freshly opened.
 
 - **funder**:
