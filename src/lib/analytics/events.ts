@@ -3454,6 +3454,57 @@ export async function readLastMonthVisitors(
   }
 }
 
+// The same once-a-month figure per resource page, kept under its own key:
+// the Queue puts urgent items on busier pages first (Bryce, 13 Oct 2026).
+const MONTHLY_PAGE_VISITORS_KEY_PREFIX =
+  'aisafety:analytics:monthly-page-visitors:' // + 'YYYY-MM'
+
+export interface MonthlyPageVisitors {
+  /** The month the figures cover, 'YYYY-MM' (UTC). */
+  month: string
+  /** Distinct visitors among each resource page's views, by path ('/jobs').
+   *  Pages with no views that month are left out. */
+  pages: Record<string, number>
+}
+
+/** Visitors per resource page in the last complete calendar month, or null
+ *  when there is nothing to show (no analytics store, no page views that
+ *  month, or the store couldn't be read). Worked out once per month, like
+ *  readLastMonthVisitors. */
+export async function readLastMonthPageVisitors(
+  now = Date.now()
+): Promise<MonthlyPageVisitors | null> {
+  const { month, range } = lastCompleteMonth(now)
+  const key = MONTHLY_PAGE_VISITORS_KEY_PREFIX + month
+  try {
+    if (store) {
+      const kept = await store.get<MonthlyPageVisitors>(key)
+      if (kept && kept.month === month && Object.keys(kept.pages ?? {}).length)
+        return kept
+    }
+    const data = await readDashboard(range)
+    if (data.error) return null
+    const pathOf = new Map(
+      Object.entries(PAGE_NAME_BY_PATH).map(([path, name]) => [name, path])
+    )
+    const pages: Record<string, number> = {}
+    for (const { name, count } of data.visits.byPage) {
+      const path = pathOf.get(name)
+      if (path && count > 0) pages[path] = count
+    }
+    if (!Object.keys(pages).length) return null
+    const figures: MonthlyPageVisitors = { month, pages }
+    if (store) await store.set(key, figures)
+    return figures
+  } catch (err) {
+    // Recoverable: the Queue keeps its date-only order.
+    console.warn(
+      `[analytics] last month's page visitors unavailable: ${err instanceof Error ? err.message : String(err)}`
+    )
+    return null
+  }
+}
+
 export interface FirstSeenBackfillResult {
   /** Distinct visitors found across every stored month. */
   visitors: number
