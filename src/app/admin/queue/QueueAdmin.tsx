@@ -52,6 +52,7 @@ import Chat, { CharCount, descriptionCap, type Decided } from './Chat'
 import FieldPicker from './FieldPicker'
 import type { FableChange } from '@/lib/admin/queue-fable'
 import Position, { forgetOrder } from './Position'
+import Fireworks from './Fireworks'
 import { SORT_FIELD, sortValue } from '@/lib/admin/queue-place'
 import {
   byUrgency,
@@ -1261,6 +1262,13 @@ export default function QueueAdmin({
   const [toast, setToast] = useState<Toast | null>(null)
   // True for the last moments of a toast, while it slides back down.
   const [toastLeaving, setToastLeaving] = useState(false)
+  // The decision that emptied a tab: fireworks once it lands. `at` tells
+  // one round from the next.
+  const [cheer, setCheer] = useState<{
+    kind: Kind
+    id: string
+    at: number
+  } | null>(null)
   // The last decision, kept for U after the toast has gone.
   const [undoable, setUndoable] = useState<QueueItem | null>(null)
   // Decisions still being written to Airtable, by item id. The page moves
@@ -2517,6 +2525,17 @@ export default function QueueAdmin({
         setUndoable(null)
         pendingRef.current = { ...pendingRef.current, [item.id]: action }
         setPending(pendingRef.current)
+        // The last item on the open tab: fireworks (Bryce, 13 Oct 2026).
+        const k = kindOf(item)
+        if (
+          k === kind &&
+          !searching &&
+          !(itemsRef.current ?? []).some(
+            x => isOpen(x) && kindOf(x) === k && !pendingRef.current[x.id]
+          )
+        ) {
+          setCheer({ kind: k, id: item.id, at: Date.now() })
+        }
         setToast({
           item,
           no: action === 'reject',
@@ -2600,7 +2619,9 @@ export default function QueueAdmin({
                 : 'Rejected'
               : doneLabel(updated)
           if (undoAfterRef.current.delete(item.id)) {
-            // U was pressed while it was on its way: straight back.
+            // U was pressed while it was on its way: straight back, and
+            // the tab is not done after all.
+            setCheer(c => (c?.id === item.id ? null : c))
             setToast(prev =>
               prev && prev.item.id === item.id
                 ? {
@@ -2685,6 +2706,7 @@ export default function QueueAdmin({
         if (decision) {
           forget()
           undoAfterRef.current.delete(item.id)
+          setCheer(c => (c?.id === item.id ? null : c))
           // A failure takes the toast whatever it shows, and keeps it up
           // until Retry, Dismiss or the next decision. The item is still in
           // the list, with the error on it, unless it was closed.
@@ -2721,6 +2743,8 @@ export default function QueueAdmin({
       canEdit,
       forgetLive,
       load,
+      kind,
+      searching,
     ]
   )
   actRef.current = act
@@ -3481,13 +3505,21 @@ export default function QueueAdmin({
                 fieldFocus={fieldFocus}
                 readOnly={!canEdit || !isOpen(selected)}
               />
+            ) : !searching && ordered.openPerKind[kind] === 0 ? (
+              <TabDone
+                kind={kind}
+                done={tabDone}
+                waiting={ordered.openPerKind}
+                cheer={cheer?.kind === kind ? cheer.at : null}
+                onCheered={() => setCheer(null)}
+                onAgain={() => setCheer({ kind, id: '', at: Date.now() })}
+                onNext={chooseKind}
+              />
             ) : (
               <div className={styles.emptyDetail}>
                 {searching && ordered.flat.length === 0
                   ? 'Nothing waiting matches the search.'
-                  : waiting === 0
-                    ? 'All clear.'
-                    : 'Pick an item on the left.'}
+                  : 'Pick an item on the left.'}
               </div>
             )}
           </div>
@@ -6390,6 +6422,67 @@ function RuleTestLine({ result: r }: { result: RuleTestResult }) {
         {r.why}
       </span>
     </li>
+  )
+}
+
+/** A tab with nothing left: "You're done!", with fireworks when the last
+ *  decision has just landed, and the way on to a tab that still has some.
+ *  The heading sets off another round. */
+function TabDone({
+  kind,
+  done,
+  waiting,
+  cheer,
+  onCheered,
+  onAgain,
+  onNext,
+}: {
+  kind: Kind
+  /** Decided today on this tab. */
+  done: number
+  waiting: Record<Kind, number>
+  /** The round of fireworks to play, if any. */
+  cheer: number | null
+  onCheered: () => void
+  onAgain: () => void
+  onNext: (kind: Kind) => void
+}) {
+  const at = KINDS.findIndex(k => k.key === kind)
+  const next = [...KINDS.slice(at + 1), ...KINDS.slice(0, at)].find(
+    k => waiting[k.key] > 0
+  )
+  const label = KINDS[at].label.toLowerCase()
+  return (
+    <div className={styles.tabDone}>
+      {cheer !== null && <Fireworks key={`fw-${cheer}`} onDone={onCheered} />}
+      {done > 0 ? (
+        <button
+          key={`title-${cheer ?? 'still'}`}
+          className={`${styles.tabDoneTitle} ${cheer !== null ? styles.tabDonePop : ''}`}
+          onClick={onAgain}
+          title="Again!"
+        >
+          You&rsquo;re done!
+        </button>
+      ) : (
+        <p className={styles.tabDoneTitle}>All clear</p>
+      )}
+      <p className={styles.tabDoneNote}>
+        No {label} waiting
+        {done > 0 && ` \u00b7 ${done} decided today`}
+      </p>
+      {next ? (
+        <button
+          className={`${styles.button} ${styles.primary}`}
+          onClick={() => onNext(next.key)}
+        >
+          On to {next.label}
+          <span className={styles.segCount}>{waiting[next.key]}</span>
+        </button>
+      ) : (
+        <p className={styles.tabDoneNote}>The whole queue is clear.</p>
+      )}
+    </div>
   )
 }
 
