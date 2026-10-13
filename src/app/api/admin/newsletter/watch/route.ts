@@ -6,7 +6,7 @@
   that is still scheduled after a red verdict, or about to start without a
   verdict on the wave before it, and deleting an issue's draft once every
   wave of it has gone. The rules are in src/lib/admin/newsletter-watch.ts.
-  Unlike the other cron routes, it refuses every request unless CRON_SECRET
+  Like every admin cron route, it refuses every request unless CRON_SECRET
   is set and matches (`cronAuthorized`); to try it on a laptop, set
   CRON_SECRET in .env.local and send the same Bearer header.
 
@@ -18,7 +18,8 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { publicOrigin } from '@/lib/admin/origin'
-import { cronAuthorized, runWatch } from '@/lib/admin/newsletter-watch'
+import { cronAuthorized } from '@/lib/admin/auth'
+import { runWatch } from '@/lib/admin/newsletter-watch'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'

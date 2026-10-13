@@ -1,5 +1,4 @@
-import { redirect } from 'next/navigation'
-import { canViewDonationGuide } from '@/lib/admin/auth'
+import { requireAccess } from '@/lib/admin/auth'
 import DonationGuideClient from '@/app/donation-guide/DonationGuideClient'
 import { readLiveGuide } from '@/lib/donation-guide/live'
 import { guideStore } from '@/lib/donation-guide/store'
@@ -18,7 +17,7 @@ export default async function DonationGuidePreviewPage({
 }: {
   searchParams: Promise<{ tab?: string }>
 }) {
-  if (!(await canViewDonationGuide())) redirect('/admin/login')
+  await requireAccess('donationGuide')
   const [draft, live, params] = await Promise.all([
     guideStore.getDraft(),
     readLiveGuide(),

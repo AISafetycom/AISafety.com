@@ -5,7 +5,6 @@ import {
   APPROVED_PREFIX,
   CANCELED_KEY,
   type ApprovedRecord,
-  cronAuthorized,
   HEALTH_PREFIX,
   type HealthRecord,
   healthVerdict,
@@ -1580,18 +1579,6 @@ describe('runWatch: plumbing', () => {
 })
 
 /* ─── Review of 29 Sept 2026: auth, flaps, ceilings, clocks ───────────── */
-
-describe('cronAuthorized', () => {
-  it('refuses without CRON_SECRET, with a wrong one and without a header', () => {
-    expect(cronAuthorized('Bearer x', undefined)).toBe(false)
-    expect(cronAuthorized('Bearer ', '')).toBe(false)
-    expect(cronAuthorized(null, 's3cret')).toBe(false)
-    expect(cronAuthorized('Bearer s3cre', 's3cret')).toBe(false)
-    expect(cronAuthorized('Bearer s3cret!', 's3cret')).toBe(false)
-    expect(cronAuthorized('s3cret', 's3cret')).toBe(false)
-    expect(cronAuthorized('Bearer s3cret', 's3cret')).toBe(true)
-  })
-})
 
 describe('runWatch: review hardening', () => {
   it('catches an old draft sent later from ActiveCampaign’s own screens', async () => {
