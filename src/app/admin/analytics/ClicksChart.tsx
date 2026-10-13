@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { chartDateLabels } from '@/lib/analytics/chart-dates'
+import { chartDateLabels, scaleTop } from '@/lib/analytics/chart-dates'
 import styles from './analytics.module.css'
 
 /** A small one-series column chart: clicks per day (or week). Each column is
@@ -19,7 +19,7 @@ export default function ClicksChart({
   const [active, setActive] = useState<number | null>(null)
   if (points.length === 0) return null
   const max = Math.max(...points.map(p => p.count))
-  const top = niceCeil(max)
+  const top = scaleTop(max)
   // Gridlines at the top, halfway (when that's a whole number) and zero.
   const ticks =
     top === 0 ? [0] : Number.isInteger(top / 2) ? [top, top / 2, 0] : [top, 0]
@@ -130,15 +130,6 @@ export default function ClicksChart({
       </details>
     </div>
   )
-}
-
-/** The smallest 1, 2 or 5 × 10ⁿ at or above n (0 stays 0), so the axis
- *  reads in round numbers. */
-function niceCeil(n: number): number {
-  if (n <= 0) return 0
-  const p = 10 ** Math.floor(Math.log10(n))
-  for (const m of [1, 2, 5, 10]) if (m * p >= n) return m * p
-  return 10 * p
 }
 
 function clicksLabel(n: number): string {

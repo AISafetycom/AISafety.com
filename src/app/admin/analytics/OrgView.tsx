@@ -18,6 +18,7 @@ import {
 import type { IssueClicksRead } from '@/lib/analytics/org-newsletter'
 import ClicksChart from './ClicksChart'
 import Logo from './Logo'
+import PendingMark from './PendingMark'
 import SortableTable, { type SortColumn, type SortValue } from './SortableTable'
 import { navOrder } from './page-nav'
 import {
@@ -339,6 +340,7 @@ export function OrgView({
                   className={styles.leaveOut}
                 >
                   Put back
+                  <PendingMark />
                 </Link>
               </li>
             ))}
@@ -725,6 +727,7 @@ function OrgListingsTable({
             title="Not theirs? Leave it out of every figure on this tab"
           >
             Leave out
+            <PendingMark />
           </Link>
         )}
       </td>
@@ -750,7 +753,7 @@ function OrgListingsTable({
         }
       >
         {rows.map(r => (
-          <tr key={r.key}>
+          <tr key={r.key} className={r.live ? undefined : styles.pastRow}>
             {columns.map((c, i) => (
               <Fragment key={i}>{c.cell(r)}</Fragment>
             ))}
