@@ -295,6 +295,31 @@ function formatElapsed(ms: number): string {
   return `${m}m ${s - m * 60}s`
 }
 
+/** A reply that failed and then arrived in full on a retry (Try again, or the
+ *  same message sent again) carries both outcomes, because every report for
+ *  one reply position merges into the same entry. Only a re-send at that
+ *  position can follow a failure, so `received` next to an error, stop or
+ *  page-leave means the retry worked. Returns a note on the failed try, or
+ *  undefined when the reply wasn't retried. */
+function failedTryBeforeRetry(d: TurnDelivery): string | undefined {
+  if (d.received == null) return undefined
+  if (d.error != null) {
+    const hidden =
+      d.tabHidden != null && d.tabHidden < d.error
+        ? `, after the tab was hidden at ${formatElapsed(d.tabHidden)}`
+        : ''
+    const what = d.errorText ? ` — ${d.errorText}` : ''
+    return `an earlier try failed at ${formatElapsed(d.error)}${hidden}${what}`
+  }
+  if (d.left != null) {
+    return `an earlier try was cut off when the page was left at ${formatElapsed(d.left)}`
+  }
+  if (d.stopped != null) {
+    return `an earlier try was stopped at ${formatElapsed(d.stopped)}`
+  }
+  return undefined
+}
+
 /** The visitor-side story of one reply, for the transcript and row badge:
  *  a short label, whether it deserves attention (`warn`), and a longer
  *  tooltip. Undefined when the browser reported nothing for the turn (older
@@ -303,6 +328,27 @@ function describeDelivery(
   d: TurnDelivery | undefined
 ): { label: string; warn: boolean; title: string } | undefined {
   if (!d) return undefined
+  const failedTry = failedTryBeforeRetry(d)
+  if (failedTry) {
+    const base = `received in ${formatElapsed(d.received!)} on a retry · ${failedTry}`
+    if ((d.panelOpen === false || d.tabVisible === false) && d.seen == null) {
+      return {
+        label: `${base} · not seen`,
+        warn: true,
+        title:
+          'An earlier try failed and the visitor tried again. The retry arrived in full, but while the chat panel was closed or the tab was in the background, and they had not come back to it as of their last report',
+      }
+    }
+    return {
+      label: base,
+      warn: false,
+      title:
+        'An earlier try failed (the visitor saw an error, pressed Stop, or left the page) and they tried again. The retry arrived in full — its time is measured from when they re-sent the message' +
+        (d.errorText
+          ? `\n\nWhat the browser reported on the failed try: ${d.errorText}`
+          : ''),
+    }
+  }
   if (d.left != null) {
     return {
       label: `left the page at ${formatElapsed(d.left)}`,
@@ -396,17 +442,20 @@ function deliveryBadge(
   d: TurnDelivery | undefined
 ): { text: string; title: string } | undefined {
   if (!d) return undefined
-  if (d.left != null) {
+  // A failed try the visitor retried successfully isn't worth a badge: they
+  // got the reply. Only an unseen retry (the check further down) still is.
+  const retried = failedTryBeforeRetry(d) != null
+  if (d.left != null && !retried) {
     return {
       text: 'LEFT MID-REPLY',
       title:
         'The visitor closed the tab or navigated away while the reply was still streaming',
     }
   }
-  if (d.stopped != null) {
+  if (d.stopped != null && !retried) {
     return { text: 'STOPPED', title: 'The visitor pressed Stop mid-reply' }
   }
-  if (d.error != null) {
+  if (d.error != null && !retried) {
     return {
       text: 'NOT DELIVERED',
       title:
