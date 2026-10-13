@@ -243,3 +243,40 @@ describe('clicks on pages the live site does not have', () => {
     expect(after.recent).toEqual(before.recent)
   })
 })
+
+describe('events sent from a preview deployment or a laptop', () => {
+  it('stay stored but count nowhere', async () => {
+    const SINCE = { startMs: Date.UTC(2026, 8, 1), endMs: null }
+    const before = await readDashboard(SINCE)
+    n += 1
+    const ts = new Date(Date.UTC(2026, 8, 1) + n * 60_000).toISOString()
+    const preview =
+      'https://ai-safety-com-git-hire-page-alignmentdevs-projects.vercel.app'
+    const view = { type: 'page_view', vid: 'p1', ts }
+    lists
+      .get(KEY)!
+      .unshift(
+        { ...view, page: '/hire', ref: `${preview}/hire` },
+        { ...click(), vid: 'p1', ref: `${preview}/events` },
+        { ...view, page: '/map', ref: 'http://localhost:3000/map' }
+      )
+    const stored = lists.get(KEY)!.length
+
+    const after = await readDashboard(SINCE)
+    expect(after.visits).toEqual(before.visits)
+    expect(after.byPage).toEqual(before.byPage)
+    expect(after.recent).toEqual(before.recent)
+    expect(lists.get(KEY)!.length).toBe(stored)
+
+    // A view on the live site still counts.
+    lists.get(KEY)!.unshift({
+      type: 'page_view',
+      page: '/map',
+      vid: 'live1',
+      ts,
+      ref: 'https://aisafety.com/map',
+    })
+    const live = await readDashboard(SINCE)
+    expect(live.visits.totalViews).toBe(before.visits.totalViews + 1)
+  })
+})
