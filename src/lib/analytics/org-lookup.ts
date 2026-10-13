@@ -9,9 +9,10 @@
 //    organizer, map long and short names), contains the search as whole
 //    words. Jobs match on their org only, never their title.
 // 2. Websites: a seed's website pulls in the other listings on it when the
-//    seeds make up at least half of that website's listings, so shared hosts
-//    (discord.gg, lesswrong.com, luma.com) never spread. Jobs never spread a
-//    website or get pulled in by one, and aisafety.com never spreads.
+//    org's live listings make up at least half of that website's, and it
+//    isn't a host many groups share (discord.gg, lesswrong.com, luma.com,
+//    airtable.com). Jobs never spread a website or get pulled in by one, and
+//    aisafety.com never spreads. See step 2 in orgSpec.
 // 3. Events then match by record id, exact web address, a spread website,
 //    or (for listings that have left the site) their tracked label.
 
@@ -214,6 +215,9 @@ export function quickHost(url: string | undefined): string | null {
   let host = url.slice(scheme[0].length)
   const end = host.search(/[/?#\\]/)
   if (end !== -1) host = host.slice(0, end)
+  // Non-ASCII (an internationalized name) or %-escaped hosts: let the URL
+  // parser turn them into the form hostOf gives.
+  if (/[^\x21-\x7e]|%/.test(host)) return hostOf(url)
   host = host
     .slice(host.lastIndexOf('@') + 1)
     .replace(/:\d*$/, '')
@@ -242,56 +246,86 @@ export function cleanUrl(url: string | undefined): string | null {
   }
 }
 
-/** Hosts many unrelated groups share (forms, job boards, chat, video,
- *  social, blogging and event platforms): a listing there says nothing
- *  about who else there belongs to the org, so they never spread. */
-const SHARED_HOSTS = new Set([
+/** Platforms where many unrelated groups share one host and are told apart
+ *  by the path (forms, job boards, chat, video, social, forums, events): a
+ *  listing there says nothing about who else there belongs to the org, so
+ *  the host and every subdomain of it never spread. */
+const PATH_SHARED_HOSTS = new Set([
   'airtable.com',
-  'docs.google.com',
-  'drive.google.com',
-  'forms.gle',
   'google.com',
+  'forms.gle',
   'tally.so',
-  'typeform.com',
   'jotform.com',
-  'notion.site',
-  'notion.so',
   'greenhouse.io',
   'lever.co',
   'ashbyhq.com',
-  'workable.com',
   'gem.com',
   'discord.gg',
   'discord.com',
-  'slack.com',
   't.me',
   'whatsapp.com',
   'luma.com',
   'lu.ma',
   'eventbrite.com',
+  'eventbrite.co.uk',
   'meetup.com',
+  'gather.town',
   'youtube.com',
   'youtu.be',
   'spotify.com',
   'apple.com',
+  'twitch.tv',
   'x.com',
   'twitter.com',
+  'bsky.app',
+  'mastodon.social',
   'linkedin.com',
   'facebook.com',
   'instagram.com',
+  'reddit.com',
   'github.com',
-  'substack.com',
-  'medium.com',
   'lesswrong.com',
   'alignmentforum.org',
   'forum.effectivealtruism.org',
-  'itch.io',
+  'goodreads.com',
+  'linktr.ee',
+  'manifund.org',
+  'patreon.com',
+  'gofundme.com',
+  'mailchi.mp',
   'calendly.com',
-  'zoom.us',
   'bit.ly',
   'is.gd',
   'tinyurl.com',
 ])
+
+/** Platforms that give each group a subdomain of its own
+ *  (helentoner.substack.com): the platform's own hosts are shared, but a
+ *  group's subdomain is theirs and goes through the usual vote. */
+const TENANT_PLATFORM_HOSTS = new Set([
+  'substack.com',
+  'open.substack.com',
+  'medium.com',
+  'wordpress.com',
+  'blogspot.com',
+  'beehiiv.com',
+  'ghost.io',
+  'notion.site',
+  'notion.so',
+  'itch.io',
+  'slack.com',
+  'join.slack.com',
+  'typeform.com',
+  'form.typeform.com',
+  'workable.com',
+  'apply.workable.com',
+  'zoom.us',
+])
+
+/** Is a website one many unrelated groups share? */
+function isSharedHost(h: string): boolean {
+  return onHosts(h, PATH_SHARED_HOSTS) || TENANT_PLATFORM_HOSTS.has(h)
+}
 
 /** Does a spread website cover `host` (itself, or a subdomain that wasn't
  *  kept out)? */
@@ -540,6 +574,7 @@ export function orgSpec(
   // 1. Seeds.
   const seeds: { e: CatalogEntry; why: MatchReason }[] = []
   const leftOutSeen = new Set<string>()
+  const leftOutMapSeeds: CatalogEntry[] = []
   for (const e of catalog) {
     const byName =
       e.page !== 'Jobs' && matchesNorm(normText(e.name), norm, compact)
@@ -548,6 +583,7 @@ export function orgSpec(
     if (!byName && !byOrg) continue
     if (leftOut.has(rowHash(e.page, e.name))) {
       noteLeftOut(spec, e, leftOutSeen)
+      if (e.page === 'Map') leftOutMapSeeds.push(e)
       continue
     }
     seeds.push({ e, why: byName ? 'name' : 'organizer' })
@@ -556,7 +592,7 @@ export function orgSpec(
   // 2. Websites that spread. Each website is judged on its own listings:
   //    it spreads when the org's live listings are at least half of the live
   //    (non-Jobs) listings on it, and it isn't a host many groups share
-  //    (SHARED_HOSTS, or live jobs from two or more employers). Past rounds
+  //    (isSharedHost, or live jobs from two or more employers). Past rounds
   //    don't vote, so an old round that once linked somewhere can't pull in
   //    whoever is there now. A subdomain of a spread website comes along
   //    unless it carries listings of its own that fail the same vote and
@@ -583,7 +619,7 @@ export function orgSpec(
     if (h) seedOn.set(h, (seedOn.get(h) ?? 0) + 1)
   }
   const shared = (h: string) =>
-    onHosts(h, SHARED_HOSTS) || (employersOn.get(h)?.size ?? 0) >= 2
+    isSharedHost(h) || (employersOn.get(h)?.size ?? 0) >= 2
   const passes = (h: string) => {
     const n = seedOn.get(h) ?? 0
     return n > 0 && n * 2 >= (liveOn.get(h) ?? 0) && !shared(h)
@@ -649,10 +685,21 @@ export function orgSpec(
   }
 
   // The org's name for the summary sentence: the one Field map org matched
-  // by name, when there's exactly one.
+  // by name, when there's exactly one. Leaving that row out of the figures
+  // doesn't rename the org, as long as a kept listing still carries its name
+  // (Lens Academy's courses do).
   const mapOrgs = matched.filter(m => m.e.page === 'Map' && m.why !== 'website')
-  if (mapOrgs.length === 1)
-    spec.orgName = mapOrgs[0].e.orgText[0] || mapOrgs[0].e.name
+  const mapName = (e: CatalogEntry) => e.orgText[0] || e.name
+  if (mapOrgs.length === 1) spec.orgName = mapName(mapOrgs[0].e)
+  else if (mapOrgs.length === 0 && leftOutMapSeeds.length === 1) {
+    const name = normText(mapName(leftOutMapSeeds[0]))
+    const backed = seeds.some(({ e }) =>
+      [e.name, ...e.orgText].some(t =>
+        matchesNorm(normText(t), name, name.replace(/ /g, ''))
+      )
+    )
+    if (backed) spec.orgName = mapName(leftOutMapSeeds[0])
+  }
   return spec
 }
 

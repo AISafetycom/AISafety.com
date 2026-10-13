@@ -187,6 +187,8 @@ describe('matching', () => {
       'mailto:a@b.org',
       '/jobs',
       '#',
+      'https://ki-sicherheit-münchen.de/kurs',
+      'https://exa%6Dple.org/',
     ])
       expect(quickHost(u)).toBe(hostOf(u))
   })
@@ -300,6 +302,56 @@ describe('orgSpec', () => {
       'BlueDot AGI Strategy Fund',
       'BlueDot Impact',
     ])
+  })
+
+  it('treats a group’s own blog subdomain as its website, but never a shared forum', () => {
+    const c = [
+      entry('Map', 'Google DeepMind', 'recGdm', 'https://deepmind.google/'),
+      entry(
+        'Map',
+        'DeepMind Safety Research',
+        'recDsr',
+        'https://deepmindsafetyresearch.medium.com/'
+      ),
+      entry(
+        'Self-study',
+        'DeepMind AGI Safety Short Course',
+        'recCourse',
+        'https://deepmindsafetyresearch.medium.com/course',
+        {
+          orgText: ['Google DeepMind'],
+        }
+      ),
+      entry(
+        'Communities',
+        'r/EffectiveAltruism',
+        'recReddit1',
+        'https://www.reddit.com/r/EffectiveAltruism/'
+      ),
+      entry(
+        'Communities',
+        'r/ControlProblem',
+        'recReddit2',
+        'https://www.reddit.com/r/ControlProblem/'
+      ),
+    ]
+    const gdm = orgSpec(c, 'Google DeepMind', new Set())
+    expect(gdm.hosts.has('deepmindsafetyresearch.medium.com')).toBe(true)
+    expect([...gdm.entries.values()].map(e => e.name).sort()).toEqual([
+      'DeepMind AGI Safety Short Course',
+      'DeepMind Safety Research',
+      'Google DeepMind',
+    ])
+    const ea = orgSpec(c, 'Effective Altruism', new Set())
+    expect(ea.hosts.has('reddit.com')).toBe(false)
+    expect([...ea.entries.values()].map(e => e.name)).toEqual([
+      'r/EffectiveAltruism',
+    ])
+  })
+
+  it('keeps the org’s name when its Field map row is left out', () => {
+    const s = spec('Lens', rowHash('Map', 'Lens Academy'))
+    expect(s.orgName).toBe('Lens Academy')
   })
 
   it('brings a sub-brand on a subdomain along with its parent website', () => {

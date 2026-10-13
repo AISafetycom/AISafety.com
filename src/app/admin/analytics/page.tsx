@@ -869,7 +869,13 @@ export default async function AnalyticsPage({
         </div>
       )}
 
-      <DateRangePicker activeKey={range.key} from={range.from} to={range.to} />
+      {/* Keyed by the range, so Back and Forward refill the date boxes. */}
+      <DateRangePicker
+        key={`${range.key}|${range.from ?? ''}|${range.to ?? ''}`}
+        activeKey={range.key}
+        from={range.from}
+        to={range.to}
+      />
 
       <ClickModeToggle unique={unique} params={sp} />
 
@@ -2826,12 +2832,15 @@ function OrgView({
 
   // Nothing matched at all (a search that matches only past listings with
   // no activity in range still shows its panels, with a note in the table).
+  // (Left-out rows in the address keep the panels, so they stay visible and
+  // can be put back.)
   if (
     org.matched === 0 &&
     org.rows.length === 0 &&
     org.leftOut.length === 0 &&
     org.destinations.length === 0 &&
-    org.searches.length === 0
+    org.searches.length === 0 &&
+    parseLeftOut(first(params.x)).size === 0
   )
     return (
       <>
@@ -2840,7 +2849,9 @@ function OrgView({
         <div className={styles.empty}>
           {org.failedPages.length > 0
             ? `Nothing found for “${org.query}”, but some listings couldn’t be read just now, so reload the page to try again.`
-            : `Nothing on the site matches “${org.query}”. Try the org’s full name or another spelling.`}
+            : range.key === 'all'
+              ? `Nothing on the site matches “${org.query}”. Try the org’s full name or another spelling.`
+              : `Nothing on the site matches “${org.query}” now, and nothing by that name had activity in this range. Try a longer range, like All time, or another spelling.`}
         </div>
       </>
     )
@@ -2910,13 +2921,15 @@ function OrgView({
           badgeFor={badgeFor}
           leaveOutHref={canLeaveOut ? leaveOutHref : undefined}
           empty={
-            org.leftOut.length > 0
+            org.leftOut.length > 0 || hiddenLeftOut > 0
               ? 'Every listing this search found is left out.'
-              : org.matched === 0
-                ? `No listing on the site matches “${org.query}”; the panels below show only searches and clicks that name it.`
-                : range.key === 'all'
-                  ? 'None of their listings had any activity since tracking began, and none are on the site now.'
-                  : 'None of their listings had any activity in this range, and none are on the site now. Try a longer range, like All time.'
+              : org.failedPages.length > 0
+                ? `No listings found, but the ${joinList(org.failedPages)} listings couldn’t be read just now; reload the page to try again.`
+                : org.matched === 0
+                  ? `No listing on the site matches “${org.query}”; the panels below show only searches that name it.`
+                  : range.key === 'all'
+                    ? 'None of their listings had any activity since tracking began, and none are on the site now.'
+                    : 'None of their listings had any activity in this range, and none are on the site now. Try a longer range, like All time.'
           }
         />
         {!canLeaveOut && (
