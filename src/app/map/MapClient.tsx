@@ -135,8 +135,11 @@ export default function MapClient({
       if (org.isMagic) return false
       if (!searchQuery) return true
       const query = searchQuery.toLowerCase()
+      // The pin label ("EA Forum") and pin tooltip name count as names too.
       return (
         org.title.toLowerCase().includes(query) ||
+        (org.shortName ?? '').toLowerCase().includes(query) ||
+        org.tooltipTitle.toLowerCase().includes(query) ||
         org.description.toLowerCase().includes(query)
       )
     },
