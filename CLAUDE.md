@@ -80,7 +80,7 @@ Read `docs/css-guidelines.md` (Melissa's rules) before writing any styles. In sh
 
 ## Admin area
 
-- People sign in with Google; each has one boolean per area (`src/lib/admin/access.ts`). A new admin page must check the specific capability it needs (`src/lib/admin/auth.ts`), not just `isAdmin()`.
+- People sign in with Google; each has one boolean per area (`src/lib/admin/access.ts`). A new admin page must start with `await requireAccess('<area>')` (`src/lib/admin/auth.ts`) even though its layout checks too: a client navigation renders the page without the layout. API routes check the specific capability themselves, never just `isAdmin()`.
 - `/admin/queue` is the owner's review inbox for proposed directory changes (docs/architecture.md, "Queue"). Bots write the rows on the owner's Mac; the site only decides them. Nothing there may ever auto-apply.
 - Keep admin writes narrow and explicit. The map editor accepts only x, y and Scale and rejects any other key; follow that pattern.
 

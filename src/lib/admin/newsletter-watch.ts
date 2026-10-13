@@ -66,7 +66,6 @@
   open alerts are carried over unchanged rather than cleared.
 */
 
-import { timingSafeEqual } from 'node:crypto'
 import { Redis } from '@upstash/redis'
 import { longDate, type Mail, sendAdminMail } from '@/lib/admin/mail'
 import {
@@ -909,20 +908,6 @@ async function mailOwner(mail: Mail): Promise<boolean> {
 }
 
 // ─── The run ────────────────────────────────────────────────────────────────
-
-/** The cron route's check: Vercel sends `Authorization: Bearer <CRON_SECRET>`.
- *  Unlike the other cron routes this one refuses outright when CRON_SECRET
- *  isn't set (Preview has none): a run reads the account with the full key,
- *  can email and answers with what it found. */
-export function cronAuthorized(
-  header: string | null,
-  secret: string | undefined
-): boolean {
-  if (!secret) return false
-  const got = Buffer.from(header ?? '')
-  const want = Buffer.from(`Bearer ${secret}`)
-  return got.length === want.length && timingSafeEqual(got, want)
-}
 
 export interface WatchOptions {
   now?: Date
