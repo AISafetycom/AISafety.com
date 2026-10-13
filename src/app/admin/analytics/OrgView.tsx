@@ -505,7 +505,10 @@ export function OrgView({
         <p className={styles.caption}>
           Every click counted above, from resource pages, site search, and the
           chatbot, by UTC day
-          {org.seriesUnit === 'week' ? ', grouped into weeks from Monday' : ''}.
+          {org.seriesUnit === 'week'
+            ? `, grouped into weeks from Monday. A lighter column is a week only partly inside ${dates}`
+            : ''}
+          .
         </p>
       </Panel>
 

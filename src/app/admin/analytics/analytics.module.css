@@ -1163,6 +1163,12 @@
   background-color: var(--white);
 }
 
+/* A week only partly inside the range: lighter, so its shorter count isn't
+   read as a dip. */
+.chartBarPartial {
+  opacity: 0.45;
+}
+
 /* Lines up under the plot: the axis's 40px plus the 8px gap. Its labels
    (chart-dates.ts picks them) are positioned, so it holds one line's height
    itself, and it is the container they thin out against. */

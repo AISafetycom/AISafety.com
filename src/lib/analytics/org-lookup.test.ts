@@ -783,6 +783,39 @@ describe('orgLookup', () => {
     expect(allTime.series.at(-1)?.start).toBe('2026-10-13')
   })
 
+  it('draws a bar per week past a month, marking weeks the range cuts short', () => {
+    // Wednesday 15 July to Tuesday 13 October 2026: 91 days.
+    const quarter = newestFirst([
+      click('Training', 'Lens Academy courses', 'v1', '2026-07-15T10:00:00Z'),
+      click('Training', 'Lens Academy courses', 'v2', '2026-07-20T10:00:00Z'),
+      click('Training', 'Lens Academy courses', 'v3', '2026-10-13T09:00:00Z'),
+    ])
+    const range = { startMs: Date.parse('2026-07-15T00:00:00Z'), endMs: null }
+    const d = orgLookup(quarter, spec('Lens'), true, views, range, NOW)
+    expect(d.seriesUnit).toBe('week')
+    expect(d.series).toHaveLength(14)
+    // The first week (from Monday 13 July) only has 15–19 July in range;
+    // the last (from Monday 12 October) has 12–13 October so far.
+    expect(d.series[0]).toEqual({ start: '2026-07-13', count: 1, days: 5 })
+    expect(d.series[1]).toEqual({ start: '2026-07-20', count: 1 })
+    expect(d.series.at(-1)).toEqual({ start: '2026-10-12', count: 1, days: 2 })
+    expect(d.series.slice(1, -1).every(b => b.days === undefined)).toBe(true)
+    // A month stays one bar per day.
+    const month = { startMs: Date.parse('2026-09-13T00:00:00Z'), endMs: null }
+    const m = orgLookup(
+      newestFirst([
+        click('Training', 'Lens Academy courses', 'v1', '2026-09-13T10:00:00Z'),
+      ]),
+      spec('Lens'),
+      true,
+      views,
+      month,
+      NOW
+    )
+    expect(m.seriesUnit).toBe('day')
+    expect(m.series).toHaveLength(31)
+  })
+
   it('draws nothing when nothing was read, however early the range', () => {
     const early = {
       startMs: Date.parse('0999-01-01T00:00:00Z'),
