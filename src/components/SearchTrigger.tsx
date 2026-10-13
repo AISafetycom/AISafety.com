@@ -11,7 +11,12 @@ import {
 } from 'react'
 import type { ReactNode } from 'react'
 import { usePathname } from 'next/navigation'
-import { typeForPath, withLiveEntries, type LoadState } from '@/lib/search'
+import {
+  prepareSearch,
+  typeForPath,
+  withLiveEntries,
+  type LoadState,
+} from '@/lib/search'
 import type { SearchEntry, SearchType } from '@/lib/data/search-index'
 import { trackSearchOpen, type SearchOpenMethod } from '@/lib/analytics'
 import {
@@ -136,6 +141,8 @@ export function SearchProvider({
       }
       fetchedAtRef.current = Date.now()
       setLoad({ status: 'ready', index: body as SearchEntry[] })
+      // Before the visitor's first keystroke rather than on it.
+      setTimeout(() => prepareSearch(body as SearchEntry[]), 0)
     } catch (err) {
       if (refreshing) {
         // The index already loaded stays searchable; the next open tries again.
