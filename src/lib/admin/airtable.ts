@@ -253,7 +253,10 @@ export interface ConversationData {
 /** What the visitor's browser reported about one reply — the signals the
  *  server can't see. Every duration is milliseconds from the moment the
  *  visitor sent their message. Exactly one of received/stopped/error/left is
- *  expected per turn (the outcome); the rest are context around it. Absent
+ *  expected per send (the outcome); the rest are context around it. A failed
+ *  reply the visitor retried (Try again, or the same message re-sent) gets a
+ *  second outcome on the same entry, so an error, stop or page-leave next to
+ *  `received` means the retry worked; its times are from the re-send. Absent
  *  entirely on turns from before this was tracked, on browsers the owner
  *  excluded from logging, and when the report never reached us (e.g. the tab
  *  was closed and the browser dropped the final request). */
