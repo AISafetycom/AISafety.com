@@ -81,6 +81,7 @@ Each page adds its own bar, and seriousness is a separate gate: on topic isn't t
 - Individual projects or streams within a larger program aren't listed, only the round itself.
 - Rationalist or effective altruism programs that aren't labeled AI safety can be listed if the link to the field is real.
 - Standing programs live under the Recurring tab, but each new cohort generally still gets its own dated listing. Courses that re-run every few weeks are the exception: only the first cohort gets a dated listing, and the Recurring entry covers the rest.
+- A program earns a Recurring listing once it has at least two rounds run or announced. One finished round plus an announced next round is enough. A first round on its own gets a dated listing only.
 
 **/funding** – funders, grant programs, and funding platforms.
 - The funder must explicitly and demonstrably fund AI x-risk work. Theoretical openness doesn't count, so general funders are out, though their dedicated safety programs are listed.
