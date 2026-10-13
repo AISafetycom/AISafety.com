@@ -19,6 +19,9 @@
                       review it again when it is due (queue-later.ts)
     undo            → reverse an accept or reject made in the last day, or
                       bring back an item set aside
+    flag            → the verdict, reasons and reject buttons Fable gave in
+                      the chat onto the row ("Update flag", queue-flag.ts);
+                      its Undo puts back what they replaced
 
   Writes to the resource tables go through the raw admin client (no cache);
   after a publish or a field change the public cache tag is revalidated so
@@ -43,6 +46,7 @@ import type { ListingDates } from './queue-urgent'
 import { reviewAgainAt } from './queue-later'
 import { ruleTestOf, type RuleTest } from './queue-rule-test'
 import { alreadyRepliedOf, type AlreadyReplied } from './queue-already'
+import { reasonsText, type FlagUpdate } from './queue-flag'
 
 export const QUEUE_TABLE_ID = 'tblonlKwIFJ7Aa8QN'
 const BROOM_ISSUES_TABLE_ID = 'tblntD3WITPEgjHRK'
@@ -190,6 +194,9 @@ export interface QueueItem {
   /** Set aside with "Review again in a week": when it comes back. The Mac
    *  worker clears it once Fable has looked again. */
   reviewAgainOn: string | null
+  /** The flag was updated from the chat (queue-flag.ts) and what it said
+   *  before is kept, so Undo can put it back. */
+  flagUndo: boolean
 }
 
 export type NoReply = 'no email' | 'no notification'
@@ -241,6 +248,12 @@ const BEFORE_KEY = '(before)'
  *  applied, the proposed fields Accept did not write because Fable had
  *  changed them on the record already; never a field name. */
 const KEPT_KEY = '(kept by Fable)'
+
+/** The key in a row's Proposal (JSON) that keeps the verdict, reasons,
+ *  reject buttons and title – and the field changes, when those were
+ *  replaced too – as they were before the flag was updated from the chat,
+ *  for Undo. Raw, as the row held them. */
+const FLAG_BEFORE_KEY = 'flag_before'
 
 /** Columns Airtable fills itself, and ones the page has no editor for
  *  (pictures, links to other records): never written as an extra field. */
@@ -553,7 +566,13 @@ function rowToItem(
     } else if (changes.length === 0 && !diff) {
       const rest: Record<string, unknown> = {}
       for (const [k, v] of Object.entries(proposal)) {
-        if (k !== 'name' && k !== 'url' && k !== 'no_reply') rest[k] = v
+        if (
+          k !== 'name' &&
+          k !== 'url' &&
+          k !== 'no_reply' &&
+          k !== FLAG_BEFORE_KEY
+        )
+          rest[k] = v
       }
       fields = rest
     }
@@ -625,6 +644,7 @@ function rowToItem(
     appliedAt: str(f[F.appliedAt]),
     error: str(f[F.error]),
     reviewAgainOn: str(f[F.reviewAgainOn]),
+    flagUndo: isRecord(proposal) && isRecord(proposal[FLAG_BEFORE_KEY]),
   }
 }
 
@@ -1835,6 +1855,92 @@ export async function rejectItem(
 export async function laterItem(item: QueueItem): Promise<void> {
   requireOpen(item)
   await patchQueueRow(item.id, { [F.reviewAgainOn]: reviewAgainAt(Date.now()) })
+}
+
+/** The row's fields as Airtable holds them, for a write that must keep
+ *  what it does not change (the Proposal JSON). */
+async function rawQueueFields(id: string): Promise<RawFields> {
+  const res = await airtableRequest(
+    `${QUEUE_TABLE_ID}/${id}?returnFieldsByFieldId=true`
+  )
+  if (!res.ok) {
+    throw new QueueError(
+      `Airtable read failed: ${res.status} ${await res.text()}`,
+      502
+    )
+  }
+  return ((await res.json()) as { fields: RawFields }).fields
+}
+
+/** "Update flag" from the chat (queue-flag.ts): Fable's new verdict,
+ *  reasons and reject buttons – and title and field changes, when it gave
+ *  them – onto the row, keeping what they replace for Undo. Reply draft,
+ *  Reply status and the page's edits stay as they are, and nothing is
+ *  written to the listing. */
+export async function flagItem(
+  item: QueueItem,
+  flag: FlagUpdate
+): Promise<void> {
+  requireOpen(item)
+  const f = await rawQueueFields(item.id)
+  const proposal = parseJson(f[F.proposal])
+  const next: Record<string, unknown> = isRecord(proposal)
+    ? { ...proposal }
+    : {}
+  // What the row says now – Undo goes back one step, so a review that ran
+  // again in between is what comes back, not an older one.
+  const before: Record<string, unknown> = {
+    verdict: f[F.verdict] ?? null,
+    reasons: f[F.reasons] ?? null,
+    chips: f[F.rejectChips] ?? null,
+    title: f[F.title] ?? null,
+  }
+  const fields: Record<string, unknown> = {
+    [F.verdict]: flag.verdict,
+    [F.reasons]: reasonsText(flag.reasons),
+    [F.rejectChips]: flag.chips ? flag.chips.join('\n') : null,
+  }
+  if (flag.title) fields[F.title] = flag.title
+  if (flag.changes) {
+    before.changes = next.changes ?? null
+    // The shape the Mac writes: each change names its record.
+    next.changes = flag.changes.map(c => ({
+      ...(item.targetTable && item.targetRecord
+        ? { table: item.targetTable, record: item.targetRecord }
+        : {}),
+      field: c.field,
+      from: c.from,
+      to: c.to,
+    }))
+  }
+  next[FLAG_BEFORE_KEY] = before
+  fields[F.proposal] = JSON.stringify(next, null, 1)
+  await patchQueueRow(item.id, fields)
+}
+
+/** Undo for "Update flag": the row says again what it said before. */
+export async function unflagItem(item: QueueItem): Promise<void> {
+  requireOpen(item)
+  const f = await rawQueueFields(item.id)
+  const proposal = parseJson(f[F.proposal])
+  const before = isRecord(proposal) ? proposal[FLAG_BEFORE_KEY] : null
+  if (!isRecord(proposal) || !isRecord(before)) {
+    throw new QueueError('Nothing to undo: the flag has not been updated.', 409)
+  }
+  const next: Record<string, unknown> = { ...proposal }
+  delete next[FLAG_BEFORE_KEY]
+  if ('changes' in before) {
+    if (before.changes === null) delete next.changes
+    else next.changes = before.changes
+  }
+  const fields: Record<string, unknown> = {
+    [F.verdict]: before.verdict ?? null,
+    [F.reasons]: before.reasons ?? null,
+    [F.rejectChips]: before.chips ?? null,
+    [F.proposal]: JSON.stringify(next, null, 1),
+  }
+  if (typeof before.title === 'string') fields[F.title] = before.title
+  await patchQueueRow(item.id, fields)
 }
 
 /** What one save changes on the row: with `keys` (the fields the page

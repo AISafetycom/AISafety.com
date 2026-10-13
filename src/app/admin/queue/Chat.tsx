@@ -7,6 +7,12 @@ import {
   wentOutNote,
   type FableChange,
 } from '@/lib/admin/queue-fable'
+import {
+  flagShown,
+  parseFlag,
+  verdictWords,
+  type FlagUpdate,
+} from '@/lib/admin/queue-flag'
 import Icon from '@/components/Icon'
 import type { AgentInfo, QueueItem } from '@/lib/admin/queue'
 import styles from './queue.module.css'
@@ -122,6 +128,10 @@ interface Msg {
   /** What that reply changed on this item's own listing, read by the Mac
    *  before and after it. */
   changed?: FableChange[]
+  /** A new verdict and reasons for the item, when the reply found the flag
+   *  out of date (the ```flag block, taken off the text on the Mac;
+   *  queue-flag.ts). Shown as a card with an Update flag button. */
+  flag?: unknown
 }
 
 interface Event {
@@ -257,6 +267,7 @@ export default function Chat({
   onSetEdits,
   onSetReply,
   onWrote,
+  onFlag,
   onFableChanges,
   focusTick,
 }: {
@@ -277,6 +288,11 @@ export default function Chat({
   onSetReply: (text: string | null) => void
   /** A reply that changed Airtable has landed: re-read the live record. */
   onWrote?: () => void
+  /** Write a flag update onto the row, or undo it; resolves to an error
+   *  to show, or null. */
+  onFlag: (
+    body: { flag: FlagUpdate } | { undo: true }
+  ) => Promise<string | null>
   /** The fields Fable has changed on the listing so far in this thread. */
   onFableChanges?: (changes: FableChange[]) => void
   /** Bumped by the F key: focus the box. */
@@ -908,6 +924,14 @@ export default function Chat({
                   undo={undoFor(m)}
                   cap={cap}
                 />
+                {m.flag !== undefined && (
+                  <FlagCard
+                    raw={m.flag}
+                    item={item}
+                    decided={decided}
+                    onFlag={onFlag}
+                  />
+                )}
               </div>
             )
           )}
@@ -1499,6 +1523,126 @@ function ReplyCard({
   )
 }
 
+/** A field change's new value, as the card shows it. */
+function shownValue(v: unknown): string {
+  if (v === true) return 'ticked'
+  if (v === false) return 'unticked'
+  if (v === null || v === '') return 'empty'
+  if (Array.isArray(v)) return v.map(x => String(x)).join(', ')
+  return typeof v === 'string' ? v : JSON.stringify(v)
+}
+
+/** The flag as Fable now sees it (queue-flag.ts; Bryce, 13 Oct 2026: "the
+ *  chat should end with an 'update flag' button"). Unlike edits it is not
+ *  applied when the reply lands: the button writes it onto the row, and
+ *  Undo puts back what the row said before. On a decided item it only
+ *  says whether the decision was made on it. */
+function FlagCard({
+  raw,
+  item,
+  decided,
+  onFlag,
+}: {
+  raw: unknown
+  item: QueueItem
+  decided: Decided | null
+  onFlag: (
+    body: { flag: FlagUpdate } | { undo: true }
+  ) => Promise<string | null>
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const parsed = parseFlag(raw, item.type)
+  if ('error' in parsed) {
+    return (
+      <p className={styles.chatTool}>
+        Fable&apos;s new flag could not be used: {parsed.error}
+      </p>
+    )
+  }
+  const flag = parsed.flag
+  const shown = flagShown(item, flag)
+  const noun = item.type === 'Add' ? 'verdict' : 'flag'
+  const run = async (body: { flag: FlagUpdate } | { undo: true }) => {
+    setBusy(true)
+    setError(null)
+    const failed = await onFlag(body)
+    setBusy(false)
+    if (failed) setError(failed)
+  }
+  return (
+    <div className={styles.chatEdits}>
+      <span className={styles.chatWho}>
+        {shown
+          ? `${noun === 'flag' ? 'Flag' : 'Verdict'} updated`
+          : `New ${noun}`}
+      </span>
+      <div className={styles.chatEditRow}>
+        <span className={styles.label}>Verdict</span>
+        <span>{verdictWords(flag.verdict)}</span>
+      </div>
+      <div className={styles.chatEditRow}>
+        <span className={styles.label}>Reasons</span>
+        <ul className={styles.reasons}>
+          {flag.reasons.map((r, i) => (
+            <li key={i}>{r}</li>
+          ))}
+        </ul>
+      </div>
+      {flag.title && (
+        <div className={styles.chatEditRow}>
+          <span className={styles.label}>Title</span>
+          <span>{flag.title}</span>
+        </div>
+      )}
+      {flag.changes && (
+        <div className={styles.chatEditRow}>
+          <span className={styles.label}>Changes</span>
+          {flag.changes.length ? (
+            <ul className={styles.reasons}>
+              {flag.changes.map((c, i) => (
+                <li key={i}>
+                  {c.field} → {shownValue(c.to)}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <span>None</span>
+          )}
+        </div>
+      )}
+      {flag.chips && (
+        <div className={styles.chatEditRow}>
+          <span className={styles.label}>Reject reasons</span>
+          <ul className={styles.reasons}>
+            {flag.chips.map((c, i) => (
+              <li key={i}>{c}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {decided ? (
+        <DecidedFoot
+          done={shown}
+          text={shown ? `Decided on this ${noun}` : 'Not used'}
+        />
+      ) : (
+        <CardFoot
+          applied={shown}
+          appliedText={`The item shows this ${noun}`}
+          applyText={busy ? 'Updating…' : `Update ${noun}`}
+          onApply={() => void run({ flag })}
+          undo={
+            item.flagUndo && !busy ? () => void run({ undo: true }) : undefined
+          }
+          busy={busy}
+        />
+      )}
+      {error && <p className={styles.chatError}>{error}</p>}
+    </div>
+  )
+}
+
 /** A card's foot on a decided item: what became of it, nothing to click. */
 function DecidedFoot({ done, text }: { done: boolean; text: string }) {
   return (
@@ -1518,12 +1662,15 @@ function CardFoot({
   applyText,
   onApply,
   undo,
+  busy = false,
 }: {
   applied: boolean
   appliedText: string
   applyText: string
   onApply: () => void
   undo?: () => void
+  /** A write is on its way: the button waits. */
+  busy?: boolean
 }) {
   return (
     <div className={styles.chatCardFoot}>
@@ -1540,6 +1687,7 @@ function CardFoot({
         <button
           type="button"
           className={`${styles.button} ${styles.primary}`}
+          disabled={busy}
           onClick={onApply}
         >
           {applyText}

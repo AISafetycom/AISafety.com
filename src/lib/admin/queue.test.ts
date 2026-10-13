@@ -28,12 +28,15 @@ import {
   asAttachmentWrite,
   closeHandledRows,
   extraEdits,
+  flagItem,
+  getQueueItem,
   handledOutside,
   mergeEdits,
   queueTargets,
   noReplyOf,
   rejectReplyOf,
   undoItem,
+  unflagItem,
   type QueueItem,
 } from './queue'
 
@@ -89,6 +92,7 @@ function item(over: Partial<QueueItem>): QueueItem {
     appliedAt: null,
     error: null,
     reviewAgainOn: null,
+    flagUndo: false,
     ...over,
   }
 }
@@ -809,5 +813,167 @@ describe('noReplyOf', () => {
     expect(noReplyOf({ no_reply: 'mailbox full' })).toBeNull()
     expect(warn).toHaveBeenCalledOnce()
     warn.mockRestore()
+  })
+})
+
+// "Update flag" from the chat (queue-flag.ts): against a stand-in Queue row
+// that reads and patches like Airtable.
+describe('flagItem / unflagItem', () => {
+  const ID = rid('bruin')
+  const FLD = {
+    title: 'fldeRsOE3DM3R2vbX',
+    type: 'fldBc9YIDhjmu58f3',
+    status: 'fldTXGYOoXcUApaI2',
+    proposal: 'fldgl9Ny2jnu8T0Da',
+    verdict: 'fld835yJytaSRAuvB',
+    reasons: 'fldvEp4bscGNzBcSJ',
+    chips: 'fldw42wRz08vO5Xzq',
+    targetTable: 'fld45SUjstUZROuXl',
+    targetRecord: 'fldszXtLdUijgFG4l',
+  }
+  const proposal = {
+    kind: 'change',
+    table: 'tblvzbGL9q9dOO9Nc',
+    record: rid('club'),
+    page: '/map',
+    changes: [
+      {
+        table: 'tblvzbGL9q9dOO9Nc',
+        record: rid('club'),
+        field: 'Logo',
+        from: null,
+        to: 'x.png',
+      },
+    ],
+  }
+  const original: Record<string, unknown> = {
+    [FLD.title]: 'Bruin AI Safety: logo changed',
+    [FLD.type]: 'Change',
+    [FLD.status]: 'Pending',
+    [FLD.proposal]: JSON.stringify(proposal),
+    [FLD.verdict]: 'Dismiss',
+    [FLD.reasons]: '– Recolored logo, same mark.',
+    [FLD.chips]: 'Same mark, recolored',
+    [FLD.targetTable]: 'tblvzbGL9q9dOO9Nc',
+    [FLD.targetRecord]: rid('club'),
+  }
+  let row: Record<string, unknown>
+
+  beforeEach(() => {
+    row = { ...original }
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(
+      async (path: string, init?: RequestInit) => {
+        if (!path.startsWith(`${QUEUE}/${ID}`)) {
+          return new Response('not here', { status: 404 })
+        }
+        if (init?.method === 'PATCH') {
+          const body = JSON.parse(String(init.body)) as {
+            fields: Record<string, unknown>
+          }
+          for (const [k, v] of Object.entries(body.fields)) {
+            if (v === null) delete row[k]
+            else row[k] = v
+          }
+        }
+        return new Response(
+          JSON.stringify({
+            id: ID,
+            createdTime: '2026-10-12T00:00:00.000Z',
+            fields: row,
+          }),
+          { status: 200 }
+        )
+      }
+    )
+  })
+
+  const current = async () => {
+    const i = await getQueueItem(ID)
+    if (!i) throw new Error('row gone')
+    return i
+  }
+
+  it('writes the new flag and puts back exactly what it replaced', async () => {
+    await flagItem(await current(), {
+      verdict: 'Unsure',
+      reasons: ['The domain expired.', 'The logo cannot be checked.'],
+      chips: ['The club renews the domain soon'],
+      title: 'Bruin AI Safety: domain expired',
+      changes: [{ field: 'Hide?', from: false, to: true }],
+    })
+    const flagged = await current()
+    expect(flagged.verdict).toBe('Unsure')
+    expect(flagged.reasons).toEqual([
+      'The domain expired.',
+      'The logo cannot be checked.',
+    ])
+    expect(row[FLD.reasons]).toBe(
+      '– The domain expired.\n– The logo cannot be checked.'
+    )
+    expect(flagged.rejectChips).toEqual(['The club renews the domain soon'])
+    expect(flagged.title).toBe('Bruin AI Safety: domain expired')
+    expect(flagged.changes).toEqual([{ field: 'Hide?', from: false, to: true }])
+    expect(JSON.parse(String(row[FLD.proposal])).changes[0]).toMatchObject({
+      table: 'tblvzbGL9q9dOO9Nc',
+      record: rid('club'),
+    })
+    expect(flagged.flagUndo).toBe(true)
+
+    await unflagItem(flagged)
+    expect(row).toEqual({
+      ...original,
+      [FLD.proposal]: JSON.stringify(proposal, null, 1),
+    })
+    expect((await current()).flagUndo).toBe(false)
+  })
+
+  it('clears the reject buttons when Fable gave none, keeps the rest', async () => {
+    await flagItem(await current(), {
+      verdict: 'Fix',
+      reasons: ['The new logo is theirs.'],
+      chips: null,
+      title: null,
+      changes: null,
+    })
+    const flagged = await current()
+    expect(flagged.rejectChips).toEqual([])
+    expect(flagged.title).toBe('Bruin AI Safety: logo changed')
+    expect(flagged.changes).toEqual([
+      { field: 'Logo', from: null, to: 'x.png' },
+    ])
+    await unflagItem(flagged)
+    expect(row[FLD.chips]).toBe('Same mark, recolored')
+    expect(JSON.parse(String(row[FLD.proposal]))).toEqual(proposal)
+  })
+
+  it('keeps the saved flag out of a no-change proposal shown as fields', async () => {
+    row[FLD.proposal] = JSON.stringify({ kind: 'change', page: '/map' })
+    await flagItem(await current(), {
+      verdict: 'Dismiss',
+      reasons: ['Nothing to fix.'],
+      chips: null,
+      title: null,
+      changes: null,
+    })
+    expect(Object.keys((await current()).fields ?? {})).not.toContain(
+      'flag_before'
+    )
+  })
+
+  it('refuses a decided item, and an undo with nothing to undo', async () => {
+    await expect(unflagItem(await current())).rejects.toMatchObject({
+      status: 409,
+    })
+    row[FLD.status] = 'Rejected'
+    await expect(
+      flagItem(await current(), {
+        verdict: 'Fix',
+        reasons: ['x'],
+        chips: null,
+        title: null,
+        changes: null,
+      })
+    ).rejects.toMatchObject({ status: 409 })
   })
 })
