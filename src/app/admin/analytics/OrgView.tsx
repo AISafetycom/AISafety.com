@@ -750,7 +750,7 @@ function OrgListingsTable({
         }
       >
         {rows.map(r => (
-          <tr key={r.key}>
+          <tr key={r.key} className={r.live ? undefined : styles.pastRow}>
             {columns.map((c, i) => (
               <Fragment key={i}>{c.cell(r)}</Fragment>
             ))}
