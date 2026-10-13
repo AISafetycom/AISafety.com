@@ -11,6 +11,7 @@ const PRESETS = [
   { key: '7d', label: '7 days' },
   { key: '30d', label: '30 days' },
   { key: '90d', label: '90 days' },
+  { key: 'lastmonth', label: 'Last month' },
   { key: 'all', label: 'All time' },
 ]
 // The presets are preloaded like the dashboard's tabs, so a click shows the
@@ -18,6 +19,17 @@ const PRESETS = [
 // the shorter ranges don't, and preloading them on every visit would have the
 // server download and hold the whole store each time.
 const PRELOAD_ON_HOVER = new Set(['90d', 'all'])
+
+/** The previous calendar month in the dashboard's zone (UTC), as the from/to
+ *  days a custom range uses — the page reads it back as 'lastmonth'. */
+function lastMonthDays(now = new Date()): { from: string; to: string } {
+  const y = now.getUTCFullYear()
+  const m = now.getUTCMonth()
+  return {
+    from: new Date(Date.UTC(y, m - 1, 1)).toISOString().slice(0, 10),
+    to: new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10),
+  }
+}
 
 export default function DateRangePicker({
   activeKey,
@@ -56,7 +68,14 @@ export default function DateRangePicker({
 
   const presetHref = (key: string) => {
     const params = carryOver()
-    params.set('range', key)
+    if (key === 'lastmonth') {
+      // A whole month is a custom range underneath, so the date boxes show it.
+      const { from, to } = lastMonthDays()
+      params.set('from', from)
+      params.set('to', to)
+    } else {
+      params.set('range', key)
+    }
     return `${pathname}?${params.toString()}`
   }
   const applyCustom = () => {
@@ -84,8 +103,9 @@ export default function DateRangePicker({
                   : 'hover'
             }
             onClick={() => {
-              setCustomFrom('')
-              setCustomTo('')
+              const days = p.key === 'lastmonth' ? lastMonthDays() : null
+              setCustomFrom(days?.from ?? '')
+              setCustomTo(days?.to ?? '')
             }}
             className={`${styles.presetBtn} ${shownKey === p.key ? styles.presetBtnActive : ''}`}
           >

@@ -69,6 +69,16 @@ async function recorded(key: WebKey): Promise<ArchiveIssue[]> {
   }))
 }
 
+/** The site's record of this newsletter's sent issues alone, with no
+ *  ActiveCampaign read: what /admin/analytics' Org lookup reads to find the
+ *  issues whose link clicks to count. Null when there's no store (a laptop
+ *  without the Upstash keys); throws when the store can't be read. */
+export async function recordedIssues(
+  key: WebKey
+): Promise<ArchiveIssue[] | null> {
+  return store ? recorded(key) : null
+}
+
 /** ActiveCampaign's sent issues of this newsletter, as addresses: those
  *  that have gone to at least MIN_READERS people. */
 async function live(key: WebKey): Promise<ArchiveIssue[]> {
