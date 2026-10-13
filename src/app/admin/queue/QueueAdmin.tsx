@@ -78,6 +78,7 @@ import styles from './queue.module.css'
 
 const API = '/api/admin/queue'
 const UPLOAD_API = '/api/admin/queue/upload'
+const VISITORS_API = '/api/admin/queue/visitors'
 
 // The list reads Airtable again this often while the tab is in view, and
 // the moment it comes back into view. Two refreshes closer together than
@@ -1317,6 +1318,13 @@ export default function QueueAdmin({
   const [listingDates, setListingDates] = useState<
     Record<string, ListingDates>
   >({})
+  // How many people saw each resource page last month, so the Urgent
+  // section can put the busier pages' items first (queue-urgent.ts). Null
+  // until known, or when this session can't see the analytics.
+  const [pageVisitors, setPageVisitors] = useState<{
+    month: string
+    pages: Record<string, number>
+  } | null>(null)
   const [showDone, setShowDone] = useState(false)
   // A decision opened from Done today: the item itself in place of the
   // list, with a way back (Bryce, 4 Oct 2026).
@@ -1532,6 +1540,22 @@ export default function QueueAdmin({
     wantedRef.current = hashId()
     void load().then(() => load({ sync: true }))
   }, [load])
+
+  // Last month's visitors per page: a figure that changes once a month, so
+  // one read per visit. Without it the Urgent list stays in date order.
+  useEffect(() => {
+    void fetch(VISITORS_API, { cache: 'no-store' })
+      .then(res => (res.ok ? res.json() : null))
+      .then((data: { month?: string | null; pages?: unknown } | null) => {
+        if (!data?.month || !data.pages || typeof data.pages !== 'object')
+          return
+        setPageVisitors({
+          month: data.month,
+          pages: data.pages as Record<string, number>,
+        })
+      })
+      .catch(e => console.warn('[queue] page visitors unavailable', e))
+  }, [])
 
   // The list keeps itself current: again the moment the tab or window
   // comes back into view (Bryce, 17 Sept 2026: he deletes suggestions in
@@ -1766,6 +1790,28 @@ export default function QueueAdmin({
     return docs
   }, [items])
 
+  // How many people saw an item's page last month, for the Urgent order;
+  // a page with none recorded counts as the quietest one. Null while the
+  // figures are unknown, which keeps the date-only order.
+  const visitorsOf = useMemo(() => {
+    if (!pageVisitors) return () => null
+    const { pages } = pageVisitors
+    const quietest = Math.min(...Object.values(pages))
+    return (item: QueueItem): number | null =>
+      (item.page ? pages[item.page] : undefined) ?? quietest
+  }, [pageVisitors])
+
+  // The Urgent row's tooltip: the figure behind its place in the list.
+  const visitorsNote = (item: QueueItem): string | undefined => {
+    const n = item.page ? pageVisitors?.pages[item.page] : undefined
+    if (!pageVisitors || n === undefined) return undefined
+    const month = new Date(`${pageVisitors.month}-01T00:00:00Z`).toLocaleString(
+      'en-US',
+      { month: 'long', timeZone: 'UTC' }
+    )
+    return `${item.page}: ${n.toLocaleString('en-US')} visitors in ${month}`
+  }
+
   const ordered = useMemo(() => {
     const groups: Record<Section, QueueItem[]> = {
       fable: [],
@@ -1834,6 +1880,7 @@ export default function QueueAdmin({
     const urgentAt = (i: QueueItem) => ({
       urgency: urgencies.get(i.id) ?? { days: null, label: '' },
       createdAt: i.createdAt,
+      visitors: visitorsOf(i),
     })
     groups.urgent.sort((a, b) => byUrgency(urgentAt(a), urgentAt(b)))
     groups.fable.sort((a, b) => fableTop.indexOf(a.id) - fableTop.indexOf(b.id))
@@ -1930,6 +1977,7 @@ export default function QueueAdmin({
     searchDocs,
     listingDates,
     fableTop,
+    visitorsOf,
   ])
 
   const selected = useMemo(() => {
@@ -3348,6 +3396,11 @@ export default function QueueAdmin({
                                 ? ordered.urgencies.get(item.id)
                                 : undefined
                             }
+                            urgencyNote={
+                              section === 'urgent'
+                                ? visitorsNote(item)
+                                : undefined
+                            }
                             onClick={() => select(item.id)}
                             onLogoError={() => logoDied(item)}
                           />
@@ -3667,6 +3720,7 @@ function Row({
   search = null,
   hit,
   urgency,
+  urgencyNote,
   onClick,
   onLogoError,
 }: {
@@ -3688,6 +3742,8 @@ function Row({
   hit?: SearchHit
   /** In the Urgent section: why it can't wait ("Closes 10 Oct"). */
   urgency?: Urgency
+  /** Its tooltip: the page's visitors behind its place in the list. */
+  urgencyNote?: string
   onClick: () => void
   /** The picture's link has stopped working. */
   onLogoError: () => void
@@ -3719,7 +3775,10 @@ function Row({
         </span>
         <span className={styles.rowMeta}>
           {urgency && (
-            <span className={`${styles.withIcon} ${styles.urgentTag}`}>
+            <span
+              className={`${styles.withIcon} ${styles.urgentTag}`}
+              title={urgencyNote}
+            >
               <Icon src={ICON.clock} size={12} />
               {urgency.label}
             </span>
