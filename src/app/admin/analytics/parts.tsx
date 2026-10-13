@@ -67,6 +67,7 @@ export function CountTable({
   shareHead = '% of visitors',
   total,
   totalShare,
+  hints,
 }: {
   rows: Counted[]
   labelHead: string
@@ -99,6 +100,9 @@ export function CountTable({
    *  distinct visitors, not by summing the rows — a visitor who did several
    *  things counts once. Blank when unset. */
   totalShare?: VisitorShare
+  /** What the label, count, and % columns mean, for their headings'
+   *  tooltips (SortColumn.hint). */
+  hints?: { label?: string; count?: string; pct?: string }
 }) {
   if (allRows.length === 0) return <p className={styles.dim}>No data yet.</p>
   const rows = allRows.slice(0, MAX_TABLE_ROWS)
@@ -107,11 +111,23 @@ export function CountTable({
     ...(rankFor
       ? [{ label: rankHead, className: styles.rankCol, sort: 'rank' as const }]
       : []),
-    { label: labelHead, sort: 'text' as const },
+    { label: labelHead, sort: 'text' as const, hint: hints?.label },
     ...(pageFor ? [{ label: 'Page', sort: 'text' as const }] : []),
-    { label: countHead, className: styles.numCol, sort: 'number' as const },
+    {
+      label: countHead,
+      className: styles.numCol,
+      sort: 'number' as const,
+      hint: hints?.count,
+    },
     ...(showPct
-      ? [{ label: '%', className: styles.pctCol, sort: 'number' as const }]
+      ? [
+          {
+            label: '%',
+            className: styles.pctCol,
+            sort: 'number' as const,
+            hint: hints?.pct,
+          },
+        ]
       : []),
     ...(shareFor
       ? [
@@ -256,6 +272,7 @@ export function KeyedTable({
   whereHead = 'Where',
   countHead,
   empty,
+  hints,
 }: {
   rows: {
     key: string
@@ -269,6 +286,8 @@ export function KeyedTable({
   whereHead?: string
   countHead: string
   empty: string
+  /** What each column means, for its heading's tooltip (SortColumn.hint). */
+  hints?: { label?: string; where?: string; count?: string; pct?: string }
 }) {
   if (allRows.length === 0) return <p className={styles.dim}>{empty}</p>
   // The total covers every row; only the busiest MAX_TABLE_ROWS are sent to
@@ -277,10 +296,15 @@ export function KeyedTable({
   const rows = allRows.slice(0, MAX_TABLE_ROWS)
   const withLogos = rows.some(r => r.logo)
   const columns: SortColumn[] = [
-    { label: labelHead, sort: 'text' },
-    { label: whereHead, sort: 'text' },
-    { label: countHead, className: styles.numCol, sort: 'number' },
-    { label: '%', className: styles.pctCol, sort: 'number' },
+    { label: labelHead, sort: 'text', hint: hints?.label },
+    { label: whereHead, sort: 'text', hint: hints?.where },
+    {
+      label: countHead,
+      className: styles.numCol,
+      sort: 'number',
+      hint: hints?.count,
+    },
+    { label: '%', className: styles.pctCol, sort: 'number', hint: hints?.pct },
   ]
   return (
     <>

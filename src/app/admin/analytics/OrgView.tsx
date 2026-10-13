@@ -233,6 +233,9 @@ export function OrgView({
   const newsletterClicks =
     newsletter?.rows.reduce((n, r) => n + r.clicks, 0) ?? 0
   const them = shared ? 'you' : 'them'
+  // The column headings' tooltips: what each column measures.
+  const dates = shared ? 'these dates' : 'this range'
+  const onceADay = unique ? ', each visitor counted once a day' : ''
 
   return (
     <>
@@ -286,6 +289,18 @@ export function OrgView({
           badgeFor={badgeFor}
           matchNotes={!shared}
           pageLast={shared}
+          hints={{
+            listing: shared
+              ? 'Your listing as it appears on AISafety.com. “No longer listed” means it has since come off the site, and “Featured slot” means it held one of its page’s two featured spots for some of these clicks.'
+              : 'The listing as it appears on the site. “No longer listed” means it has since come off the site, “Featured slot” that it held one of its page’s two featured spots for some of these clicks, and “Matched by organizer” or “by website” how the search found it.',
+            clicks: unique
+              ? `Clicks through to the listing from its own page (its card, featured slot, or map pin)${onceADay}.`
+              : 'Every click through to the listing from its own page (its card, featured slot, or map pin).',
+            pct: `The share of that page’s visitors in ${dates} who clicked this listing at least once.`,
+            page: 'The AISafety.com page the listing is on.',
+            hovers: `Times a visitor rested the pointer on the listing’s map pin for half a second, or tapped it on a phone${onceADay}.`,
+            picks: `Times a visitor picked the listing from the Field map’s search box${onceADay}.`,
+          }}
           leaveOutHref={canLeaveOut ? leaveOutHref : undefined}
           leaveOutColumn={!shared}
           empty={
@@ -372,6 +387,12 @@ export function OrgView({
               rows={org.reached}
               labelHead="Way in"
               total={org.clicks}
+              hints={{
+                label:
+                  'Where on AISafety.com the click came from, such as a listing’s card, a featured slot, a map pin, the homepage, the site search, or the chatbot.',
+                count: `Clicks that came this way${onceADay}.`,
+                pct: 'This way’s share of all the clicks.',
+              }}
             />
           )}
           <p className={styles.caption}>
@@ -394,6 +415,13 @@ export function OrgView({
             }))}
             labelHead="Result"
             countHead="Clicks"
+            hints={{
+              label: `The listing ${shared ? 'of yours ' : ''}a visitor opened from a site search result or a chatbot reply.`,
+              where:
+                'Whether it was opened from the site search or the chatbot.',
+              count: `Clicks on it from there${unique ? ', each visitor counted once a day' : ''}.`,
+              pct: 'Its share of the clicks in this table.',
+            }}
             empty={`No clicks from site search or the chatbot ${inRange}.`}
           />
           <p className={styles.caption}>
@@ -431,6 +459,13 @@ export function OrgView({
               labelHead="Link"
               whereHead="Issue"
               countHead="Clicks"
+              hints={{
+                label: `${shared ? 'Your' : 'Their'} link as it appeared in the newsletter email.`,
+                where: 'The newsletter issue the link was in.',
+                count:
+                  'Every click on the link since the issue went out. Readers can’t be told apart, so one person clicking twice counts twice.',
+                pct: 'Its share of the clicks in this table.',
+              }}
               empty={newsletterEmpty(newsletter, shared)}
             />
           )}
@@ -484,6 +519,14 @@ export function OrgView({
           }))}
           labelHead="Search"
           countHead={shared ? 'Visitors' : (usersHead ?? 'Searches')}
+          hints={{
+            label: 'What the visitor typed, recorded once they paused typing.',
+            where: 'The site search, or the Field map’s search box.',
+            count: unique
+              ? 'Visitors who searched for this, each counted once.'
+              : 'Every time this was searched for.',
+            pct: 'Its share of these searches.',
+          }}
           empty={`Nobody searched for ${them} ${inRange}.`}
         />
         <p className={styles.caption}>
@@ -530,6 +573,7 @@ function OrgListingsTable({
   badgeFor,
   matchNotes,
   pageLast,
+  hints,
   leaveOutHref,
   leaveOutColumn,
   empty,
@@ -541,6 +585,11 @@ function OrgListingsTable({
   /** The Page column after the figures (the org's page): on a phone the
    *  figures then show without scrolling sideways. */
   pageLast: boolean
+  /** What each column measures, for its heading's tooltip. */
+  hints: Record<
+    'listing' | 'clicks' | 'pct' | 'page' | 'hovers' | 'picks',
+    string
+  >
   /** Unset once the leave-out cap is reached. */
   leaveOutHref?: (hash: string) => string
   /** Keep the Leave out column, even while its links are withheld. */
@@ -567,15 +616,16 @@ function OrgListingsTable({
   }
   const count = (
     label: string,
+    hint: string,
     pick: (r: OrgListingRow) => number
   ): Column => ({
-    head: { label, className: styles.numCol, sort: 'number' },
+    head: { label, className: styles.numCol, sort: 'number', hint },
     value: pick,
     cell: r => <td className={styles.numCol}>{pick(r).toLocaleString()}</td>,
     foot: <td className={styles.numCol}>{total(pick)}</td>,
   })
   const listing: Column = {
-    head: { label: 'Listing', sort: 'text' },
+    head: { label: 'Listing', sort: 'text', hint: hints.listing },
     value: r => r.name,
     cell: r => {
       const href = safeHref(r.url)
@@ -619,7 +669,7 @@ function OrgListingsTable({
   }
   const page: Column = {
     // Sorts by the pages' tab order, not alphabetically.
-    head: { label: 'Page', sort: 'rank' },
+    head: { label: 'Page', sort: 'rank', hint: hints.page },
     value: r => navOrder(r.page),
     cell: r => {
       const badge = badgeFor(r.page)
@@ -639,12 +689,13 @@ function OrgListingsTable({
     foot: <td />,
   }
   const figures: Column[] = [
-    count('Clicks', r => r.clicks),
+    count('Clicks', hints.clicks, r => r.clicks),
     {
       head: {
         label: '% of visitors',
         className: styles.pctCol,
         sort: 'number',
+        hint: hints.pct,
       },
       value: r =>
         r.share.visitors > 0 ? r.share.active / r.share.visitors : null,
@@ -652,10 +703,10 @@ function OrgListingsTable({
       foot: <td className={styles.pctCol} />,
     },
     ...(allRows.some(r => r.hovers > 0)
-      ? [count('Map hovers', r => r.hovers)]
+      ? [count('Map hovers', hints.hovers, r => r.hovers)]
       : []),
     ...(allRows.some(r => r.picks > 0)
-      ? [count('Map search picks', r => r.picks)]
+      ? [count('Map search picks', hints.picks, r => r.picks)]
       : []),
   ]
   const leaveOut: Column = {

@@ -11,6 +11,9 @@ export interface SortColumn {
   label: string
   className?: string
   sort?: 'text' | 'number' | 'rank'
+  /** What the column measures, in a sentence or two: the heading's tooltip,
+   *  before "Click to sort." */
+  hint?: string
 }
 
 /** What a cell sorts by. null = no value; those rows sort last either way. */
@@ -87,6 +90,7 @@ export default function SortableTable({
               <th
                 key={i}
                 className={c.className}
+                title={c.sort ? undefined : c.hint}
                 aria-sort={
                   sort?.col === i
                     ? sort.dir === 1
@@ -100,7 +104,9 @@ export default function SortableTable({
                     type="button"
                     className={styles.sortBtn}
                     onClick={() => headerClick(i)}
-                    title={`Sort by ${c.label}`}
+                    title={
+                      c.hint ? `${c.hint} Click to sort.` : `Sort by ${c.label}`
+                    }
                   >
                     {c.label}
                     {sort?.col === i && (
