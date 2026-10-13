@@ -26,6 +26,29 @@
   border-radius: 999px;
 }
 
+/* A saved copy on show while the server reads the latest events (page.tsx):
+   muted, and breathing gently until the live figures replace it. */
+.badgeUpdating {
+  color: var(--teal-300);
+  background-color: var(--teal-800);
+  animation: updatingPulse 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes updatingPulse {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.5;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .badgeUpdating {
+    animation: none;
+  }
+}
+
 .total {
   font-size: 12px;
   color: var(--teal-300);
@@ -605,6 +628,7 @@
   background-color: transparent;
   border: 1px solid var(--teal-800);
   border-radius: 999px;
+  text-decoration: none;
   cursor: pointer;
   transition:
     color var(--hover-transition),
@@ -743,22 +767,25 @@
 /* New figures take a moment to work out, so a click shows at once: the
    clicked tab or pill lights up (PendingMark gives it a data-pending child
    while its page loads), the one it replaces steps back, and the figures
-   below fade until the new ones arrive. The date presets do the same in
-   DateRangePicker. The fade waits a beat so quick loads don't flicker. */
+   below fade until the new ones arrive. The date presets do the same, and
+   DateRangePicker's custom range. The fade waits a beat so quick loads don't
+   flicker; a preloaded view arrives before it starts. */
 .dashboard:has([data-pending]) :is(.panel, .empty) {
   opacity: 0.45;
   transition: opacity 0.2s 0.15s;
 }
 
 .pageTabs:has([data-pending]) .pageTabActive,
-.clickToggle:has([data-pending]) .clickToggleBtnActive {
+.clickToggle:has([data-pending]) .clickToggleBtnActive,
+.presets:has([data-pending]) .presetBtnActive {
   color: var(--teal-300);
   background-color: transparent;
   border-color: var(--teal-800);
 }
 
 .pageTabs .pageTab:has([data-pending]),
-.clickToggle .clickToggleBtn:has([data-pending]) {
+.clickToggle .clickToggleBtn:has([data-pending]),
+.presets .presetBtn:has([data-pending]) {
   color: var(--teal-900);
   background-color: var(--bright-teal-300);
   border-color: var(--bright-teal-300);

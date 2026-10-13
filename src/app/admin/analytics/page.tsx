@@ -1,13 +1,18 @@
-import { Fragment } from 'react'
+import { Fragment, Suspense } from 'react'
+import { after } from 'next/server'
+import { headers } from 'next/headers'
 import Image from 'next/image'
 import Link from 'next/link'
 import Icon from '@/components/Icon'
 import {
   readDashboard,
+  saveViewCopy,
+  savedViewWhileCold,
   sourceSlug,
   newsletterErrorLabel,
   PAGE_NAME_BY_PATH,
   type Counted,
+  type DashboardData,
   type DateRange,
   type ChatbotFunnel,
   type ChatbotRepeatUse,
@@ -40,6 +45,7 @@ import {
   type SearchType,
 } from '@/lib/data/search-index'
 import { TYPE_ICON, TYPE_LABEL, TYPE_PATH } from '@/lib/search'
+import { isPreviewRequest } from '@/lib/preview'
 import RefreshThemesButton from './RefreshThemesButton'
 import { getFunders } from '@/lib/data/funding'
 import { getEvents, getEventRounds } from '@/lib/data/events'
@@ -89,6 +95,8 @@ import OrgSearch from './OrgSearch'
 import ExcludeToggle from './ExcludeToggle'
 import Logo from './Logo'
 import PendingMark from './PendingMark'
+import RefreshIfStale from './RefreshIfStale'
+import PreloadLink, { type Preload } from './PreloadLink'
 import SortableTable, { type SortColumn, type SortValue } from './SortableTable'
 import admin from '../admin.module.css'
 import styles from './analytics.module.css'
@@ -147,6 +155,22 @@ const OVERVIEW_TABS: { key: string; label: string }[] = [
   { key: 'correlations', label: 'Correlations' },
 ]
 const OVERVIEW_KEYS = new Set(OVERVIEW_TABS.map(t => t.key))
+// Tabs whose views read more than the event store: the Chatbot tab the
+// Airtable conversation log, Newsletters ActiveCampaign, Search the whole
+// search index, Org lookup the listing catalog and the newsletter clicks.
+// Their links preload only once the pointer is on them.
+const COSTLY_TABS = new Set(['chatbot', 'newsletters', 'search', 'orgs'])
+// The resource pages the site really has. Tab names otherwise come from the
+// events, which anyone can send to /api/track, so only these are preloaded
+// and kept in the saved copy.
+const KNOWN_PAGES = new Set([...PAGE_NAV.map(p => p.name), 'Home'])
+// The ranges whose months stay in the store's memory between loads, so their
+// views are cheap enough to preload all at once. Last month too: a finished
+// month never changes, so its figures are worked out once and kept.
+const SHORT_RANGES = new Set(['today', '7d', '30d', 'lastmonth'])
+// The range the dashboard opens on. It's the one view saved for servers that
+// haven't read the store yet (savedViewWhileCold).
+const DEFAULT_RANGE = '30d'
 
 // Pages with a map (mirrors MAP_PAGES in the events store). Only these emit
 // listing_hover events, so only their tabs get the hovered-listings panel —
@@ -156,6 +180,7 @@ const MAP_PAGES = new Set(['Map', 'Communities'])
 // Day boundaries and displayed times use the dashboard's fixed reporting zone
 // (DASHBOARD_TZ in events.ts, UTC) — the same for every viewer.
 const DAY = 86_400_000
+const MINUTE = 60_000
 
 interface ResolvedRange extends DateRange {
   key: string // active preset key ('lastmonth' included), or 'custom'
@@ -195,7 +220,10 @@ function resolveRange(sp: SearchParams): ResolvedRange {
     }
   }
   const range = first(sp.range) ?? '30d'
-  const now = Date.now()
+  // Rolling ranges end now but start on a whole minute, so every load within
+  // that minute (a tab switch, the other tabs preloading) asks for the same
+  // range and can share the figures the store has already worked out.
+  const now = Math.floor(Date.now() / MINUTE) * MINUTE
   switch (range) {
     case 'today': {
       const today = dashboardDay(now)
@@ -215,6 +243,16 @@ function resolveRange(sp: SearchParams): ResolvedRange {
     default:
       return { startMs: now - 30 * DAY, endMs: null, key: '30d' }
   }
+}
+
+/** How long ago a saved copy was made, for the "figures from …" note. */
+function savedAgo(at: number): string {
+  const minutes = Math.round((Date.now() - at) / MINUTE)
+  if (minutes < 1) return 'a moment ago'
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 48) return `${hours} hour${hours === 1 ? '' : 's'} ago`
+  return `${Math.round(hours / 24)} days ago`
 }
 
 /** Real Airtable logos for the selected page's listings, keyed by the exact
@@ -610,6 +648,32 @@ function formatMonth(month: string): string {
   }
 }
 
+/** What the query string asks for. */
+interface Query {
+  range: ResolvedRange
+  /** Count each visitor once per listing per day (the default); ?clicks=total
+   *  counts every click. */
+  unique: boolean
+  tabReq?: string
+  onResourceTab: boolean
+}
+
+function readQuery(sp: SearchParams): Query {
+  // The dashboard is tabbed: two overview tabs (the chatbot and the by-page
+  // table) plus one tab per resource page. `tab` holds the active tab — an
+  // overview key, or a resource page's analytics name. A resource tab is the
+  // page we ask the store to drill into; the overview tabs need no page.
+  // 'funnel' is the Chatbot tab's old key, kept working for bookmarked urls.
+  const tabRaw = first(sp.tab)
+  const tabReq = tabRaw === 'funnel' ? 'chatbot' : tabRaw
+  return {
+    range: resolveRange(sp),
+    unique: first(sp.clicks) !== 'total',
+    tabReq,
+    onResourceTab: tabReq != null && !OVERVIEW_KEYS.has(tabReq),
+  }
+}
+
 export default async function AnalyticsPage({
   searchParams,
 }: {
@@ -618,21 +682,57 @@ export default async function AnalyticsPage({
   // Before anything is read. The layout checks too, but a tab click asks for
   // this page without rendering the layout again (see requireAccess).
   await requireAccess('analytics')
+
   const sp = await searchParams
-  const range = resolveRange(sp)
-  // Count each visitor once per listing per day by default; ?clicks=total counts
-  // every click.
-  const unique = first(sp.clicks) !== 'total'
+  const query = readQuery(sp)
+  // A server that hasn't read the range's events yet (each deploy starts
+  // fresh ones) needs seconds to. When the page is opened or reloaded on the
+  // default view, it shows the copy saved on an earlier load straight away
+  // and streams the live figures in to replace it. Only when the browser
+  // says it's loading the page itself (Next hides its own navigation headers
+  // from pages): not for navigations within the dashboard (tab clicks,
+  // preloads, refreshes), which are preloaded anyway, and a refresh must
+  // never step back to older figures.
+  // Nor on the tabs that read Airtable or ActiveCampaign: those reads would
+  // hold the copy up anyway.
+  const saved =
+    query.range.key === DEFAULT_RANGE &&
+    !COSTLY_TABS.has(query.tabReq ?? '') &&
+    (await headers()).get('sec-fetch-dest') === 'document'
+      ? await savedViewWhileCold(
+          query.range,
+          query.range.key,
+          query.unique,
+          query.onResourceTab ? query.tabReq : undefined,
+          first(sp.source)
+        )
+      : null
+  const live = <AnalyticsView sp={sp} query={query} />
+  if (!saved) return live
+  return (
+    <Suspense fallback={<AnalyticsView sp={sp} query={query} saved={saved} />}>
+      {live}
+    </Suspense>
+  )
+}
 
-  // The dashboard is tabbed: two overview tabs (the chatbot and the by-page
-  // table) plus one tab per resource page. `tab` holds the active tab — an
-  // overview key, or a resource page's analytics name. A resource tab is the
-  // page we ask the store to drill into; the overview tabs need no page.
-  // 'funnel' is the Chatbot tab's old key, kept working for bookmarked urls.
-  const tabRaw = first(sp.tab)
-  const tabReq = tabRaw === 'funnel' ? 'chatbot' : tabRaw
-  const onResourceTab = tabReq != null && !OVERVIEW_KEYS.has(tabReq)
+/** The dashboard for one view: live, or `saved`, an earlier copy shown while
+ *  the live one loads. */
+async function AnalyticsView({
+  sp,
+  query,
+  saved,
+}: {
+  sp: SearchParams
+  query: Query
+  saved?: { at: number; data: DashboardData }
+}) {
+  const { range, unique, tabReq, onResourceTab } = query
 
+  // When these figures were worked out, so a preloaded copy shown later can
+  // tell how old it is (RefreshIfStale).
+  // eslint-disable-next-line react-hooks/purity -- a server component renders once per request; this stamps that request
+  const renderedAt = saved ? saved.at : Date.now()
   // The Org lookup tab's search (?q=) and the rows left out of it (?x=). Only
   // that tab, and only a real search, reads the listing catalog.
   const orgQuery = (first(sp.q) ?? '').trim().slice(0, MAX_QUERY)
@@ -652,13 +752,15 @@ export default async function AnalyticsPage({
     feeds,
     issueClicks,
   ] = await Promise.all([
-    readDashboard(
-      range,
-      onResourceTab ? tabReq : undefined,
-      unique,
-      first(sp.source),
-      orgSearch
-    ),
+    saved
+      ? saved.data
+      : readDashboard(
+          range,
+          onResourceTab ? tabReq : undefined,
+          unique,
+          first(sp.source),
+          orgSearch
+        ),
     getFunders().catch(() => []),
     // The transcript-derived stats only render on the Chatbot tab, so only
     // fetch the (ever-growing) conversation log when it's the active tab.
@@ -718,6 +820,38 @@ export default async function AnalyticsPage({
   const tabKeys = new Set<string>([...OVERVIEW_KEYS, ...resourceNames])
   const activeTab = tabReq && tabKeys.has(tabReq) ? tabReq : 'pages'
   const onResourceView = !OVERVIEW_KEYS.has(activeTab)
+
+  // The dashboard preloads the views its links lead to, so a click shows at
+  // once. Every view at once only while that's cheap: a short range, a tab
+  // that reads only the event store, and not in preview mode (where every
+  // Airtable read goes live). Otherwise a link preloads once the pointer is
+  // on it, which still gives the server a head start.
+  // Not from a saved copy either: the server is still reading, and the live
+  // view that replaces it preloads.
+  const preloadAll =
+    !saved &&
+    SHORT_RANGES.has(range.key) &&
+    !COSTLY_TABS.has(activeTab) &&
+    !(await isPreviewRequest())
+
+  // Keep the saved copy of the default view (30 days, unique counts) current
+  // for the next server that starts cold (saveViewCopy does it at most every
+  // few minutes). After the response, so it never slows this one.
+  if (!saved && range.key === DEFAULT_RANGE && unique && !data.error)
+    after(() =>
+      saveViewCopy(
+        range,
+        range.key,
+        unique,
+        resourceNames.filter(name => KNOWN_PAGES.has(name))
+      )
+    )
+  const preloadTo = (tab: string): Preload =>
+    preloadAll &&
+    !COSTLY_TABS.has(tab) &&
+    (OVERVIEW_KEYS.has(tab) || KNOWN_PAGES.has(tab))
+      ? 'now'
+      : 'hover'
 
   // The Map tab needs the live map records twice — the by-area panel joins
   // clicks and hovers back to them, and the logo maps below read from them —
@@ -881,9 +1015,23 @@ export default async function AnalyticsPage({
       <div className={styles.headerRow}>
         <h1 className={admin.pageTitle}>Analytics</h1>
         <div className={styles.meta}>
-          <span className={styles.badge}>
-            {SOURCE_LABEL[data.source] ?? data.source}
-          </span>
+          {saved ? (
+            <>
+              <span className={`${styles.badge} ${styles.badgeUpdating}`}>
+                Updating
+              </span>
+              <span
+                className={styles.coverage}
+                title="This server has just started, so it's reading the latest events. Until it's done you see the figures saved the last time the dashboard was open; they swap for the live ones by themselves."
+              >
+                figures from {savedAgo(saved.at)}
+              </span>
+            </>
+          ) : (
+            <span className={styles.badge}>
+              {SOURCE_LABEL[data.source] ?? data.source}
+            </span>
+          )}
           <span className={styles.total}>
             {data.totalEvents.toLocaleString()} events
           </span>
@@ -922,9 +1070,18 @@ export default async function AnalyticsPage({
         activeKey={range.key}
         from={range.from}
         to={range.to}
+        preloadAll={preloadAll}
       />
 
-      <ClickModeToggle unique={unique} params={sp} />
+      {!saved && (
+        <RefreshIfStale renderedAt={renderedAt} failed={data.error === true} />
+      )}
+
+      <ClickModeToggle
+        unique={unique}
+        params={sp}
+        preload={preloadTo(activeTab)}
+      />
 
       {data.error ? (
         <div className={styles.empty}>
@@ -943,6 +1100,7 @@ export default async function AnalyticsPage({
             pages={resourceTabs}
             active={activeTab}
             params={sp}
+            preloadTo={preloadTo}
           />
 
           {activeTab === 'orgs' && (
@@ -1150,6 +1308,7 @@ export default async function AnalyticsPage({
                 rows={data.bySource}
                 active={data.selectedSource}
                 params={sp}
+                preload={preloadTo(activeTab)}
                 label={
                   MAP_PAGES.has(data.selectedPage ?? '')
                     ? 'Clicks by source'
@@ -1588,13 +1747,17 @@ export default async function AnalyticsPage({
 
 /** Switches the click tables between unique counts (one per visitor per listing
  *  per day) and total counts. Unique is the default, so its link drops the param
- *  for a clean url; both links preserve the rest of the query. */
+ *  for a clean url; both links preserve the rest of the query. The mode not
+ *  showing is preloaded, like the tabs (PreloadLink). */
 function ClickModeToggle({
   unique,
   params,
+  preload,
 }: {
   unique: boolean
   params: SearchParams
+  /** How the mode not showing preloads. */
+  preload: Preload
 }) {
   const base = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) {
@@ -1607,26 +1770,28 @@ function ClickModeToggle({
   return (
     <div className={styles.clickToggle}>
       <span className={styles.clickToggleLabel}>Count</span>
-      <Link
+      <PreloadLink
         href={uniqueQ ? `?${uniqueQ}` : '?'}
         scroll={false}
+        preload={unique ? 'off' : preload}
         className={`${styles.clickToggleBtn}${
           unique ? ` ${styles.clickToggleBtnActive}` : ''
         }`}
       >
         Unique
         <PendingMark />
-      </Link>
-      <Link
+      </PreloadLink>
+      <PreloadLink
         href={`?${totalParams.toString()}`}
         scroll={false}
+        preload={unique ? preload : 'off'}
         className={`${styles.clickToggleBtn}${
           !unique ? ` ${styles.clickToggleBtnActive}` : ''
         }`}
       >
         Total
         <PendingMark />
-      </Link>
+      </PreloadLink>
     </div>
   )
 }
@@ -1634,16 +1799,19 @@ function ClickModeToggle({
 /** For pages with a map, shows how the selected page's clicks split between the
  *  map and the cards. Each split is a link that filters the listing panels below
  *  to that source; "Total" clears the filter. Renders nothing for pages without
- *  a map. */
+ *  a map. The splits not showing are preloaded, like the tabs (PreloadLink). */
 function SourceSplit({
   rows,
   active,
   params,
+  preload,
   label,
 }: {
   rows: Counted[]
   active: string | null
   params: SearchParams
+  /** How the splits not showing preload. */
+  preload: Preload
   /** Heading for the pill row — 'Clicks by source' on map pages (map vs
    *  cards), 'Clicks by view' on pages with a view toggle. */
   label: string
@@ -1663,9 +1831,10 @@ function SourceSplit({
       <div className={styles.sourceSplit}>
         <span className={styles.sourceSplitLabel}>{label}</span>
         {rows.length > 1 && (
-          <Link
+          <PreloadLink
             href={totalHref}
             scroll={false}
+            preload={active == null ? 'off' : preload}
             className={`${styles.sourceStat} ${styles.sourceStatLink}${
               active == null ? ` ${styles.sourceStatActive}` : ''
             }`}
@@ -1675,17 +1844,18 @@ function SourceSplit({
               {total.toLocaleString()}
             </span>
             <PendingMark />
-          </Link>
+          </PreloadLink>
         )}
         {rows.map(r => {
           const key = sourceSlug(r.name)
           const q = new URLSearchParams(base)
           q.set('source', key)
           return (
-            <Link
+            <PreloadLink
               key={r.name}
               href={`?${q.toString()}`}
               scroll={false}
+              preload={active === key ? 'off' : preload}
               className={`${styles.sourceStat} ${styles.sourceStatLink}${
                 active === key ? ` ${styles.sourceStatActive}` : ''
               }`}
@@ -1700,7 +1870,7 @@ function SourceSplit({
                 </span>
               )}
               <PendingMark />
-            </Link>
+            </PreloadLink>
           )
         })}
       </div>
@@ -1719,17 +1889,25 @@ function SourceSplit({
 /** The dashboard's top tab bar: the overview tabs on one row, then a row with
  *  one tab per resource page. Each tab swaps the `tab` query param (and drops
  *  any active source filter) while preserving the date range and count mode.
- *  Resource tabs show the site's page name and nav icon. */
+ *  Resource tabs show the site's page name and nav icon. The other tabs are
+ *  preloaded in the background (Next keeps a preload for five minutes), so a
+ *  click shows one at once instead of waiting on the server; the store shares
+ *  its site-wide figures between them, so this is cheap. `preloadTo` says
+ *  which preload straight away and which on hover. RefreshIfStale freshens a
+ *  tab whose preload has aged. */
 function DashboardTabs({
   overview,
   pages,
   active,
   params,
+  preloadTo,
 }: {
   overview: { key: string; label: string }[]
   pages: { key: string; label: string; icon?: string }[]
   active: string
   params: SearchParams
+  /** How the link to a tab preloads. */
+  preloadTo: (tab: string) => Preload
 }) {
   // Preserve everything except the tab itself and the per-page source filter
   // (which is meaningless once you switch tabs); `page` is the old param name.
@@ -1749,23 +1927,25 @@ function DashboardTabs({
     <div className={styles.pageTabs}>
       <div className={styles.tabRow}>
         {overview.map(t => (
-          <Link
+          <PreloadLink
             key={t.key}
             href={hrefFor(t.key)}
             scroll={false}
+            preload={t.key === active ? 'off' : preloadTo(t.key)}
             className={tabClass(t.key)}
           >
             {t.label}
             <PendingMark />
-          </Link>
+          </PreloadLink>
         ))}
       </div>
       <div className={styles.tabRow}>
         {pages.map(t => (
-          <Link
+          <PreloadLink
             key={t.key}
             href={hrefFor(t.key)}
             scroll={false}
+            preload={t.key === active ? 'off' : preloadTo(t.key)}
             className={tabClass(t.key)}
           >
             {t.icon && (
@@ -1779,7 +1959,7 @@ function DashboardTabs({
             )}
             {t.label}
             <PendingMark />
-          </Link>
+          </PreloadLink>
         ))}
       </div>
     </div>
