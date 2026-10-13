@@ -1055,6 +1055,23 @@
   color: var(--white);
 }
 
+/* Clicked, while the figures without it (or with it back) load: the link
+   lights up at once and its row fades away. */
+.leaveOut:has([data-pending]) {
+  color: var(--white);
+  text-decoration-style: solid;
+}
+
+.table tr:has(.leaveOut [data-pending]) > td:not(:has(.leaveOut)) {
+  opacity: 0.25;
+  transition: opacity 0.15s;
+}
+
+/* Full strength even on a faded "No longer listed" row. */
+.table tr:has(.leaveOut [data-pending]) > td:has(.leaveOut) {
+  opacity: 1;
+}
+
 .leftOutList {
   display: flex;
   flex-wrap: wrap;
