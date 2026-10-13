@@ -227,3 +227,19 @@ describe('saved copy of the default view', () => {
     ).toBeNull()
   })
 })
+
+describe('clicks on pages the live site does not have', () => {
+  it('leaves the team’s test clicks out: no tab, no share of the counts', async () => {
+    const SINCE = { startMs: Date.UTC(2026, 8, 1), endMs: null }
+    const before = await readDashboard(SINCE)
+    // The admin Queue's preview, and the unreleased /hire page on a preview
+    // deployment, which writes to the same store.
+    for (const page of ['admin-queue', 'Hire'])
+      lists.get(KEY)!.unshift({ ...click(), page })
+
+    const after = await readDashboard(SINCE)
+    expect(after.byPage).toEqual(before.byPage)
+    expect(after.topListings).toEqual(before.topListings)
+    expect(after.recent).toEqual(before.recent)
+  })
+})

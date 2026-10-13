@@ -919,6 +919,26 @@ const EMPTY: Omit<DashboardData, 'source'> = {
   highTraffic: null,
 }
 
+/** The pages listing clicks are tracked under on the live site. Clicks under
+ *  any other name are the team testing, not visitors: the admin Queue's
+ *  preview ('admin-queue'), or the unreleased /hire page ('Hire') on preview
+ *  deployments, which write to the same store. The dashboard leaves those out,
+ *  so they get no tab and no share of the click counts. */
+const LISTING_PAGES = new Set([
+  'Home',
+  'Training',
+  'Events',
+  'Map',
+  'Communities',
+  'Self-study',
+  'Jobs',
+  'Funding',
+  'Media channels',
+  'Advisors',
+  'Founders',
+  'Projects',
+])
+
 /** Source filters offered on map pages. 'untracked' = neither map nor cards. */
 /** Resource pages that have a map above their card list, so a click can come
  *  from either surface. Gates the hover panels (only maps emit hovers). */
@@ -1235,8 +1255,12 @@ function aggregateSite(
   // to one click per visitor per listing per day, so repeat clicks don't inflate
   // the counts; in total mode every click is counted. Filtered by type, not by
   // "has a page": chatbot events also carry the page they happened on, and must
-  // not count as listing clicks.
-  const pageHits = inRange.filter(e => e.type === 'listing_click' && e.page)
+  // not count as listing clicks. Only the live site's pages (LISTING_PAGES):
+  // the team's test clicks get no tab and no share of the counts.
+  const pageHits = inRange.filter(
+    e =>
+      e.type === 'listing_click' && e.page != null && LISTING_PAGES.has(e.page)
+  )
   const clicks = unique ? uniqueClicks(pageHits) : pageHits
   const usersOf = (type: string) =>
     uniqueUsers(inRange.filter(e => e.type === type))
@@ -1421,7 +1445,9 @@ function aggregateSite(
           e =>
             e.type !== 'page_view' &&
             e.type !== 'listing_hover' &&
-            e.type !== 'cards_view'
+            e.type !== 'cards_view' &&
+            // The team's test clicks (see LISTING_PAGES) stay out here too.
+            (e.type !== 'listing_click' || LISTING_PAGES.has(e.page ?? ''))
         )
         .slice(0, 50),
     },
@@ -1871,23 +1897,6 @@ export interface OrgLookupData {
   clickedPages: string[]
 }
 
-/** The pages listing clicks are tracked under. Anything else (the admin
- *  Queue's preview, 'admin-queue') is the team, not visitors. */
-const ORG_LISTING_PAGES = new Set([
-  'Home',
-  'Training',
-  'Events',
-  'Map',
-  'Communities',
-  'Self-study',
-  'Jobs',
-  'Funding',
-  'Media channels',
-  'Advisors',
-  'Founders',
-  'Projects',
-])
-
 /** Longest range drawn one bar per day; longer ranges get a bar per week. */
 const SERIES_DAILY_MAX_DAYS = 92
 
@@ -1960,9 +1969,7 @@ export function orgLookup(
   const queryCands: AnalyticsEvent[] = []
   for (const e of inRange) {
     const isRow =
-      (e.type === 'listing_click' &&
-        !!e.page &&
-        ORG_LISTING_PAGES.has(e.page)) ||
+      (e.type === 'listing_click' && !!e.page && LISTING_PAGES.has(e.page)) ||
       (e.type === 'listing_hover' && !!e.page) ||
       e.type === 'map_search_pick'
     if (isRow) {
@@ -2453,7 +2460,8 @@ function interestOf(e: AnalyticsEvent): string | undefined {
     return e.page && e.page !== '/'
       ? (PAGE_NAME_BY_PATH[e.page] ?? e.page)
       : undefined
-  if (e.type === 'listing_click') return e.page
+  if (e.type === 'listing_click')
+    return e.page && LISTING_PAGES.has(e.page) ? e.page : undefined
   if (e.type.startsWith('chatbot')) return 'Chatbot'
   if (e.type.startsWith('search')) return 'Search'
   // Using the map's search box is engaging with the map.
