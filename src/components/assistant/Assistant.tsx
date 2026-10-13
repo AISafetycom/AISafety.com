@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation'
 import { chipsFor, greetingFor } from '@/lib/assistant/pages'
 import { getPageContext } from '@/lib/assistant/page-context'
 import { suggestFormUrl } from '@/lib/assistant/constants'
-import { trackEvent, isTrackingOptedOut } from '@/lib/analytics'
+import { trackEvent, trackedPath, isTrackingOptedOut } from '@/lib/analytics'
 import type { CitationRef } from '@/lib/assistant/types'
 import ChatBody, {
   type ChatBodyHandle,
@@ -151,7 +151,8 @@ export default function Assistant() {
   const [hasMessages, setHasMessages] = useState(false)
   const chatRef = useRef<ChatBodyHandle>(null)
 
-  const currentPage = pathname || '/'
+  // An org's private page is logged as '/stats', never its token.
+  const currentPage = trackedPath(pathname || '/')
   const chips = useMemo(() => chipsFor(currentPage), [currentPage])
   const greeting = useMemo(() => greetingFor(currentPage), [currentPage])
 

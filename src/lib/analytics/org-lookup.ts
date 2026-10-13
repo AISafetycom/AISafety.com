@@ -730,10 +730,12 @@ export interface OrgNewsletterRow {
   clicks: number
 }
 
-/** The org's links among the newsletters' counted clicks: a link is theirs
+/** The org's links in the sent issues, with their clicks: a link is theirs
  *  when its address is one of their listings' (tracking tags aside), it's on
  *  a website that spread, or its card title names them. A link only on
- *  listings left out stays out. Busiest first. Pure. */
+ *  listings left out stays out. A link nobody clicked is a row with 0 (an
+ *  issue whose link list couldn't be read only has its clicked links; see
+ *  readIssueClicks). Busiest first. Pure. */
 export function orgNewsletterClicks(
   spec: OrgSpec,
   issues: {
@@ -745,7 +747,6 @@ export function orgNewsletterClicks(
   const rows: OrgNewsletterRow[] = []
   for (const issue of issues)
     for (const link of issue.links) {
-      if (link.clicks <= 0) continue
       const c = cleanUrl(link.url)
       const known = c != null && spec.urls.has(c)
       if (c != null && spec.leftOutUrls.has(c) && !known) continue

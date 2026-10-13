@@ -47,6 +47,7 @@ export function proxy(request: NextRequest, event: NextFetchEvent) {
 
 export const config = {
   // Page routes only: skip API routes, Next.js internals/assets, the internal
-  // admin area, and anything with a file extension (favicon, sitemap, images).
-  matcher: ['/((?!api|_next|admin|.*\\..*).*)'],
+  // admin area, orgs' private pages (/stats/<token>: the token never goes to
+  // Matomo), and anything with a file extension (favicon, sitemap, images).
+  matcher: ['/((?!api|_next|admin|stats/|.*\\..*).*)'],
 }

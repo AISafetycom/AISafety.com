@@ -1,8 +1,6 @@
 import { Fragment, Suspense } from 'react'
 import { after } from 'next/server'
 import { headers } from 'next/headers'
-import Image from 'next/image'
-import Link from 'next/link'
 import Icon from '@/components/Icon'
 import {
   readDashboard,
@@ -13,7 +11,6 @@ import {
   PAGE_NAME_BY_PATH,
   type Counted,
   type DashboardData,
-  type DateRange,
   type ChatbotFunnel,
   type ChatbotRepeatUse,
   type ClickDestination,
@@ -24,13 +21,8 @@ import {
   type MapSearchPanelData,
   type NewsletterArchiveRow,
   type NewsletterSignupResults,
-  type OrgLookupData,
-  type OrgListingRow,
   type VisitorShare,
   DASHBOARD_TZ,
-  dashboardDay,
-  dashboardOffset,
-  lastCompleteMonth,
 } from '@/lib/analytics/events'
 import {
   readConversationStats,
@@ -48,12 +40,8 @@ import { TYPE_ICON, TYPE_LABEL, TYPE_PATH } from '@/lib/search'
 import { isPreviewRequest } from '@/lib/preview'
 import RefreshThemesButton from './RefreshThemesButton'
 import { getFunders } from '@/lib/data/funding'
-import { getEvents, getEventRounds } from '@/lib/data/events'
-import {
-  getTrainingPrograms,
-  getRecurringPrograms,
-  getTrainingRounds,
-} from '@/lib/data/training'
+import { getEvents } from '@/lib/data/events'
+import { getTrainingPrograms, getRecurringPrograms } from '@/lib/data/training'
 import { getCourses } from '@/lib/data/self-study'
 import { getAdvisors } from '@/lib/data/advisors'
 import { getCommunities } from '@/lib/data/communities'
@@ -72,32 +60,52 @@ import {
   readFeedReaders,
   type FeedReaders,
 } from '@/lib/newsletter-archive-store'
+import { MAX_QUERY, normText, parseLeftOut } from '@/lib/analytics/org-lookup'
+import { readIssueClicks } from '@/lib/analytics/org-newsletter'
 import {
-  MAX_LEFT_OUT,
-  MAX_QUERY,
-  catalogFrom,
-  normText,
-  orgSpec,
-  parseLeftOut,
-  orgNewsletterClicks,
-  type CatalogSources,
-  type OrgNewsletterRow,
-  type OrgSpec,
-} from '@/lib/analytics/org-lookup'
-import {
-  readIssueClicks,
-  type IssueClicksRead,
-} from '@/lib/analytics/org-newsletter'
-import ClicksChart from './ClicksChart'
-import CopySentence from './CopySentence'
+  listShares,
+  sameLeftOut,
+  shareForQuery,
+} from '@/lib/analytics/org-shares'
+import { canEdit } from '@/lib/admin/access'
+import { requestOrigin } from '@/lib/admin/origin'
 import DateRangePicker from './DateRangePicker'
 import OrgSearch from './OrgSearch'
+import ShareOrgLink, { type ShareState } from './ShareOrgLink'
 import ExcludeToggle from './ExcludeToggle'
 import Logo from './Logo'
 import PendingMark from './PendingMark'
 import RefreshIfStale from './RefreshIfStale'
 import PreloadLink, { type Preload } from './PreloadLink'
 import SortableTable, { type SortColumn, type SortValue } from './SortableTable'
+import {
+  OrgView,
+  openedWords,
+  orgNewsletterPanel,
+  type OrgAdmin,
+  type OrgNewsletter,
+} from './OrgView'
+import { orgSearchSpec } from './org-search'
+import { PAGE_NAV, navOrder } from './page-nav'
+import {
+  CountTable,
+  MAX_TABLE_ROWS,
+  Panel,
+  Stat,
+  TruncationNote,
+  faviconFor,
+  pct1,
+  prettyUrl,
+  shareCell,
+  type PageBadge,
+} from './parts'
+import {
+  MINUTE,
+  first,
+  resolveRange,
+  type ResolvedRange,
+  type SearchParams,
+} from './range'
 import admin from '../admin.module.css'
 import styles from './analytics.module.css'
 import { displayFilterGroup, displayFilterValue } from '@/lib/filter-tracking'
@@ -111,37 +119,6 @@ const SOURCE_LABEL: Record<string, string> = {
   redis: 'Live',
   'local-file': 'Local dev',
   none: 'No data yet',
-}
-
-// Resource pages in the same order as the site nav. `name` is the analytics
-// `page` value (the string passed to trackListingClick) and the tab key; `label`
-// is the page's name on the live site (from Navigation.tsx) so the tabs read the
-// way visitors see them — e.g. the 'Founders' page is labelled "Founder toolkit".
-// Drives the order, labels, and icons of the page tabs; every page listed here
-// always gets a tab (even with no clicks yet). Pages not listed (e.g. Home) sort
-// after these, keeping their by-clicks order and showing their raw name.
-const PAGE_NAV: { name: string; label: string; icon: string }[] = [
-  { name: 'Training', label: 'Training programs', icon: 'grad-cap.svg' },
-  { name: 'Events', label: 'Events', icon: 'calendar.svg' },
-  { name: 'Map', label: 'Field map', icon: 'map.svg' },
-  { name: 'Communities', label: 'Communities', icon: 'globe.svg' },
-  { name: 'Self-study', label: 'Self-study', icon: 'book.svg' },
-  { name: 'Jobs', label: 'Jobs', icon: 'briefcase.svg' },
-  { name: 'Funding', label: 'Funding', icon: 'coins.svg' },
-  { name: 'Media channels', label: 'Media channels', icon: 'megaphone.svg' },
-  { name: 'Advisors', label: 'Advisors', icon: 'person.svg' },
-  // Volunteer projects has no trackable clicks (its cards are plain text with no
-  // links), so it gets no tab. If it's ever tracked, add it back here.
-  { name: 'Founders', label: 'Founder toolkit', icon: 'rocket.svg' },
-]
-
-const NAV_INDEX = new Map(PAGE_NAV.map((p, i) => [p.name, i]))
-
-/** Where a page sorts among the resource pages: Home first, then site-nav
- *  order, then anything else. The page tabs and the Org lookup's listings
- *  share it. */
-function navOrder(name: string): number {
-  return name === 'Home' ? -1 : (NAV_INDEX.get(name) ?? 999)
 }
 
 // The non-page tabs that lead the tab bar. Their keys are reserved (and
@@ -176,74 +153,6 @@ const DEFAULT_RANGE = '30d'
 // listing_hover events, so only their tabs get the hovered-listings panel —
 // and only Map has areas, so the by-area rollup is Map-only.
 const MAP_PAGES = new Set(['Map', 'Communities'])
-
-// Day boundaries and displayed times use the dashboard's fixed reporting zone
-// (DASHBOARD_TZ in events.ts, UTC) — the same for every viewer.
-const DAY = 86_400_000
-const MINUTE = 60_000
-
-interface ResolvedRange extends DateRange {
-  key: string // active preset key ('lastmonth' included), or 'custom'
-  from?: string
-  to?: string
-}
-
-type SearchParams = Record<string, string | string[] | undefined>
-
-function first(v: string | string[] | undefined): string | undefined {
-  return Array.isArray(v) ? v[0] : v
-}
-
-/** Translate the query string into concrete epoch-ms bounds. Defaults to the
- *  last 30 days. A custom from/to (inclusive, dashboard-zone day boundaries) wins. */
-function resolveRange(sp: SearchParams): ResolvedRange {
-  const from = first(sp.from)
-  const to = first(sp.to)
-  if (from || to) {
-    const s = from
-      ? Date.parse(`${from}T00:00:00${dashboardOffset(from)}`)
-      : NaN
-    const e = to ? Date.parse(`${to}T23:59:59.999${dashboardOffset(to)}`) : NaN
-    // The previous calendar month lights up its own preset.
-    const last = lastCompleteMonth(Date.now()).range
-    const isLastMonth =
-      !Number.isNaN(s) &&
-      !Number.isNaN(e) &&
-      s === last.startMs &&
-      e === last.endMs
-    return {
-      startMs: Number.isNaN(s) ? null : s,
-      endMs: Number.isNaN(e) ? null : e,
-      key: isLastMonth ? 'lastmonth' : 'custom',
-      from,
-      to,
-    }
-  }
-  const range = first(sp.range) ?? '30d'
-  // Rolling ranges end now but start on a whole minute, so every load within
-  // that minute (a tab switch, the other tabs preloading) asks for the same
-  // range and can share the figures the store has already worked out.
-  const now = Math.floor(Date.now() / MINUTE) * MINUTE
-  switch (range) {
-    case 'today': {
-      const today = dashboardDay(now)
-      return {
-        startMs: Date.parse(`${today}T00:00:00${dashboardOffset(today)}`),
-        endMs: null,
-        key: 'today',
-      }
-    }
-    case '7d':
-      return { startMs: now - 7 * DAY, endMs: null, key: '7d' }
-    case '90d':
-      return { startMs: now - 90 * DAY, endMs: null, key: '90d' }
-    case 'all':
-      return { startMs: null, endMs: null, key: 'all' }
-    case '30d':
-    default:
-      return { startMs: now - 30 * DAY, endMs: null, key: '30d' }
-  }
-}
 
 /** How long ago a saved copy was made, for the "figures from …" note. */
 function savedAgo(at: number): string {
@@ -304,87 +213,6 @@ async function logosForPage(
   }
 }
 
-/** A favicon for any outbound URL — the universal fallback when a listing has
- *  no Airtable logo (or the event isn't a funding listing). */
-function faviconFor(url?: string): string | undefined {
-  if (!url || url === '#') return undefined
-  try {
-    const host = new URL(url).hostname
-    if (!host) return undefined
-    return `https://www.google.com/s2/favicons?domain=${host}&sz=64`
-  } catch {
-    return undefined
-  }
-}
-
-/** The Org lookup's newsletter panel: whether the counts could be read, how
- *  many issues went out in the range, and the org's links among them. */
-interface OrgNewsletter {
-  status: IssueClicksRead['status']
-  issues: number
-  rows: OrgNewsletterRow[]
-}
-
-/** Which page each catalog source fills, for the "couldn't read" note. */
-const CATALOG_SOURCE_PAGE: Record<keyof CatalogSources, string> = {
-  training: 'Training programs',
-  recurring: 'Training programs',
-  trainingRounds: 'Training programs',
-  events: 'Events',
-  eventRounds: 'Events',
-  map: 'Field map',
-  communities: 'Communities',
-  courses: 'Self-study',
-  jobs: 'Jobs',
-  funders: 'Funding',
-  media: 'Media channels',
-  advisors: 'Advisors',
-  founders: 'Founder toolkit',
-}
-
-/** The Org lookup tab's search matched against every listing the site knows
- *  (the cached page getters, plus past training and event rounds). Never
- *  rejects, so it can load alongside the events: a page that can't be read
- *  is logged and named in failedPages, and the rest still match. */
-async function orgSearchSpec(
-  query: string,
-  leftOut: Set<string>
-): Promise<OrgSpec> {
-  const loads: { [K in keyof CatalogSources]-?: Promise<CatalogSources[K]> } = {
-    training: getTrainingPrograms(),
-    recurring: getRecurringPrograms(),
-    trainingRounds: getTrainingRounds(),
-    events: getEvents(),
-    eventRounds: getEventRounds(),
-    map: getMapData().then(d => d.records),
-    communities: getCommunities(),
-    courses: getCourses(),
-    jobs: getJobs(),
-    funders: getFunders(),
-    media: getMediaChannels(),
-    advisors: getAdvisors(),
-    founders: getFounderResources(),
-  }
-  const keys = Object.keys(loads) as (keyof CatalogSources)[]
-  const settled = await Promise.allSettled(keys.map(k => loads[k]))
-  const sources: Record<string, unknown> = {}
-  const failed = new Set<string>()
-  settled.forEach((r, i) => {
-    if (r.status === 'fulfilled') sources[keys[i]] = r.value
-    else {
-      failed.add(CATALOG_SOURCE_PAGE[keys[i]])
-      console.warn(
-        `[analytics] org lookup couldn't read ${keys[i]}: ${
-          r.reason instanceof Error ? r.reason.message : String(r.reason)
-        }`
-      )
-    }
-  })
-  return orgSpec(catalogFrom(sources as CatalogSources), query, leftOut, [
-    ...failed,
-  ])
-}
-
 /** The Map tab's per-area rollups: the page's clicks and hovers bucketed by
  *  map area — one list per metric, each sorted by its own count. Newer events
  *  carry their area stamped at click/hover time (what the visitor actually
@@ -431,13 +259,6 @@ function areaBreakdown(
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
   }
   return { clicks: tally(clicks), hovers: tally(hovers) }
-}
-
-/** A row's resource-page marker in the clicked-from-search table: the page's
- *  nav icon plus its name. */
-interface PageBadge {
-  icon: string | null
-  label: string
 }
 
 /** '/jobs' → 'job', '/funding' → 'funder', … — so a click on a resource page
@@ -526,16 +347,6 @@ function formatTime(iso: string): string {
   }
 }
 
-function prettyUrl(url: string): string {
-  try {
-    const u = new URL(url)
-    const path = u.pathname === '/' ? '' : u.pathname
-    return u.hostname.replace(/^www\./, '') + path
-  } catch {
-    return url
-  }
-}
-
 const EVENT_LABELS: Record<string, string> = {
   chatbot_open: 'Opened the chatbot',
   chatbot_message: 'Sent a message',
@@ -616,11 +427,6 @@ function pct(part: number, whole: number): string {
   return whole > 0 ? `${Math.round((100 * part) / whole)}%` : '—'
 }
 
-/** A share of `total` to one decimal place, e.g. "43.2%". */
-function pct1(part: number, total: number): string {
-  return `${((100 * part) / total).toFixed(1)}%`
-}
-
 /** "1 July 2026" in the dashboard's timezone, for the coverage note. */
 function formatDay(iso: string): string {
   try {
@@ -681,7 +487,10 @@ export default async function AnalyticsPage({
 }) {
   // Before anything is read. The layout checks too, but a tab click asks for
   // this page without rendering the layout again (see requireAccess).
-  await requireAccess('analytics')
+  const access = await requireAccess('analytics')
+  // Org pages put figures outside the admin, so only Admin admin's editors
+  // make them (the API checks the same).
+  const canShare = canEdit(access, 'manageUsers')
 
   const sp = await searchParams
   const query = readQuery(sp)
@@ -707,10 +516,19 @@ export default async function AnalyticsPage({
           first(sp.source)
         )
       : null
-  const live = <AnalyticsView sp={sp} query={query} />
+  const live = <AnalyticsView sp={sp} query={query} canShare={canShare} />
   if (!saved) return live
   return (
-    <Suspense fallback={<AnalyticsView sp={sp} query={query} saved={saved} />}>
+    <Suspense
+      fallback={
+        <AnalyticsView
+          sp={sp}
+          query={query}
+          canShare={canShare}
+          saved={saved}
+        />
+      }
+    >
       {live}
     </Suspense>
   )
@@ -721,10 +539,13 @@ export default async function AnalyticsPage({
 async function AnalyticsView({
   sp,
   query,
+  canShare,
   saved,
 }: {
   sp: SearchParams
   query: Query
+  /** May make org pages from the Org lookup tab. */
+  canShare: boolean
   saved?: { at: number; data: DashboardData }
 }) {
   const { range, unique, tabReq, onResourceTab } = query
@@ -751,6 +572,7 @@ async function AnalyticsView({
     sendStats,
     feeds,
     issueClicks,
+    shares,
   ] = await Promise.all([
     saved
       ? saved.data
@@ -787,19 +609,50 @@ async function AnalyticsView({
     // The Org lookup's newsletter panel: the sent issues' link clicks
     // (Upstash, live site only). Never rejects.
     orgSearch ? readIssueClicks(range) : null,
+    // The org pages already made, for the Org lookup's share box and its
+    // list of them. 'failed' = couldn't read them; the box says so.
+    tabReq === 'orgs' && canShare
+      ? listShares().catch(err => {
+          console.warn(
+            `[analytics] org pages unavailable: ${err instanceof Error ? err.message : String(err)}`
+          )
+          return 'failed' as const
+        })
+      : null,
   ])
 
   // Which of those newsletter links are the searched org's.
   const orgNewsletter: OrgNewsletter | null =
     orgSearch && issueClicks
-      ? issueClicks.status === 'ok'
-        ? {
-            status: 'ok',
-            issues: issueClicks.issues.length,
-            rows: orgNewsletterClicks(await orgSearch, issueClicks.issues),
-          }
-        : { status: issueClicks.status, issues: 0, rows: [] }
+      ? await orgNewsletterPanel(orgSearch, issueClicks)
       : null
+
+  // The share box: this search's page, if it has one.
+  const shareOrigin = canShare ? requestOrigin(await headers()) : ''
+  const shared =
+    shares && shares !== 'failed' ? shareForQuery(shares, orgQuery) : undefined
+  const shareState: ShareState | null | 'unknown' =
+    shares === 'failed'
+      ? 'unknown'
+      : shared
+        ? {
+            token: shared.token,
+            leftOutDiffers: !sameLeftOut(shared.leftOut, [...orgLeftOut]),
+            opened: openedWords(shared.views, shared.lastViewedAt),
+          }
+        : null
+  const shareBox: OrgAdmin['shareBox'] =
+    shares == null
+      ? null
+      : (orgName, leftOut) => (
+          <ShareOrgLink
+            query={orgQuery}
+            orgName={orgName}
+            leftOut={leftOut}
+            origin={shareOrigin}
+            share={shareState}
+          />
+        )
 
   // Resource-page tabs: every page in PAGE_NAV always gets one (so quiet pages
   // like Projects still appear), plus any other page that has clicks (e.g.
@@ -1106,14 +959,20 @@ async function AnalyticsView({
           {activeTab === 'orgs' && (
             <OrgView
               org={data.org}
-              query={orgQuery}
-              params={sp}
               range={range}
-              oldestTs={data.oldestTs}
               labelByPage={labelByPage}
               iconByPage={iconByPage}
-              unique={unique}
               newsletter={orgNewsletter}
+              admin={{
+                query: orgQuery,
+                params: sp,
+                unique,
+                // Keyed by the search, so Back and Forward refill the box
+                // with the search the page is showing.
+                searchBox: <OrgSearch key={orgQuery} query={orgQuery} />,
+                shareBox,
+                pages: shares && shares !== 'failed' ? shares : null,
+              }}
             />
           )}
 
@@ -2330,236 +2189,6 @@ function NewsletterView({
   )
 }
 
-function Panel({
-  title,
-  children,
-}: {
-  title: string
-  children: React.ReactNode
-}) {
-  return (
-    <section className={styles.panel}>
-      <h2 className={styles.panelTitle}>{title}</h2>
-      {children}
-    </section>
-  )
-}
-
-// Hard ceiling on rows a listings table sends to the browser. Real catalogs
-// are a few hundred listings, so organic data never comes near it; it exists
-// so a flood of fabricated distinct labels through the public track endpoint
-// can't balloon the page payload (every row crosses the server→client
-// boundary, hidden rows included). Truncation is announced, never silent.
-const MAX_TABLE_ROWS = 1000
-
-function TruncationNote({ shown, of }: { shown: number; of: number }) {
-  return (
-    <p className={styles.dim}>
-      Showing the {shown.toLocaleString()} most-clicked of {of.toLocaleString()}{' '}
-      listings.
-    </p>
-  )
-}
-
-/** What a slot label or range ('F1', '3', '3–5') sorts by: featured slots
- *  first, then numeric by the range's lowest slot. null (no slot recorded)
- *  sorts last. */
-function rankSortValue(rank: string | undefined): number | null {
-  if (!rank) return null
-  const lo = rank.split('–')[0]
-  const n = lo.startsWith('F') ? Number(lo.slice(1)) - 1000 : Number(lo)
-  return Number.isFinite(n) ? n : null
-}
-
-/** "% of visitors" cell text: the share of the page's visitors who did the
- *  thing, or a dash when the range has no page-view visitors to divide by. */
-function shareCell(share: VisitorShare | undefined): string {
-  return share && share.visitors > 0 ? pct1(share.active, share.visitors) : '—'
-}
-
-function CountTable({
-  rows: allRows,
-  labelHead,
-  countHead = 'Clicks',
-  rankHead = '#',
-  logoFor,
-  linkFor,
-  rankFor,
-  pageFor,
-  shareFor,
-  shareHead = '% of visitors',
-  total,
-  totalShare,
-}: {
-  rows: Counted[]
-  labelHead: string
-  /** Heading for the count column — 'Clicks' unless the rows count something
-   *  else (opens, conversations, …). */
-  countHead?: string
-  rankHead?: string
-  logoFor?: (name: string) => string | undefined
-  /** Destination url for a row's logo. When set, the logo becomes a link to the
-   *  listing; the name text is deliberately left unlinked so it stays
-   *  selectable/copyable. */
-  linkFor?: (name: string) => string | undefined
-  rankFor?: (name: string) => string | undefined
-  /** When set, adds a Page column: the resource page each row belongs to,
-   *  shown as the page's nav icon and name. */
-  pageFor?: (name: string) => PageBadge | undefined
-  /** When set, adds a "% of visitors" column: the share of each page's
-   *  distinct visitors who did the thing at least once — always per-visitor,
-   *  whichever count mode is on. Looked up by the row's displayed name. */
-  shareFor?: (name: string) => VisitorShare | undefined
-  /** Heading for the `shareFor` column, when it measures something other than
-   *  "did the thing" — e.g. '% returning'. */
-  shareHead?: string
-  /** When set, adds a % column (each row's share of this total) and a Total
-   *  footer row. The total is the denominator, so for a sliced "top N" table it
-   *  can exceed the sum of the visible rows. */
-  total?: number
-  /** The Total row's "% of visitors" cell: the share of visitors who did the
-   *  thing at least once, counted across the whole table. Computed from
-   *  distinct visitors, not by summing the rows — a visitor who did several
-   *  things counts once. Blank when unset. */
-  totalShare?: VisitorShare
-}) {
-  if (allRows.length === 0) return <p className={styles.dim}>No data yet.</p>
-  const rows = allRows.slice(0, MAX_TABLE_ROWS)
-  const showPct = total != null && total > 0
-  const columns: SortColumn[] = [
-    ...(rankFor
-      ? [{ label: rankHead, className: styles.rankCol, sort: 'rank' as const }]
-      : []),
-    { label: labelHead, sort: 'text' as const },
-    ...(pageFor ? [{ label: 'Page', sort: 'text' as const }] : []),
-    { label: countHead, className: styles.numCol, sort: 'number' as const },
-    ...(showPct
-      ? [{ label: '%', className: styles.pctCol, sort: 'number' as const }]
-      : []),
-    ...(shareFor
-      ? [
-          {
-            label: shareHead,
-            className: styles.pctCol,
-            sort: 'number' as const,
-          },
-        ]
-      : []),
-  ]
-  const values: SortValue[][] = rows.map(r => {
-    const share = shareFor?.(r.name)
-    return [
-      ...(rankFor ? [rankSortValue(rankFor(r.name))] : []),
-      r.name,
-      ...(pageFor ? [pageFor(r.name)?.label ?? null] : []),
-      r.count,
-      ...(showPct ? [r.count] : []),
-      ...(shareFor
-        ? [share && share.visitors > 0 ? share.active / share.visitors : null]
-        : []),
-    ]
-  })
-  return (
-    <>
-      <SortableTable
-        columns={columns}
-        values={values}
-        foot={
-          total != null ? (
-            <tr className={styles.totalRow}>
-              {rankFor && <td className={styles.rankCol} />}
-              <td className={styles.totalLabel}>Total</td>
-              {pageFor && <td />}
-              <td className={styles.numCol}>{total.toLocaleString()}</td>
-              {showPct && (
-                <td className={styles.pctCol}>{pct1(total, total)}</td>
-              )}
-              {shareFor && (
-                <td className={styles.pctCol}>
-                  {/* active 0 means the range's clicks predate visitor ids
-                      (or all came from private browsing) — that's unknown,
-                      not a true 0%, so it gets the same dash as the rows. */}
-                  {totalShare
-                    ? totalShare.active > 0
-                      ? shareCell(totalShare)
-                      : '—'
-                    : null}
-                </td>
-              )}
-            </tr>
-          ) : undefined
-        }
-      >
-        {rows.map((r, i) => {
-          const rank = rankFor?.(r.name)
-          const featured = rank?.startsWith('F')
-          const href = linkFor?.(r.name)
-          const badge = pageFor?.(r.name)
-          return (
-            <tr key={i}>
-              {rankFor && (
-                <td
-                  className={`${styles.rankCol}${
-                    featured ? ` ${styles.rankFeatured}` : ''
-                  }`}
-                >
-                  {rank ?? '—'}
-                </td>
-              )}
-              <td className={styles.nameCell}>
-                {logoFor &&
-                  (href && href !== '#' ? (
-                    <a
-                      className={styles.logoLink}
-                      href={href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title={`Open ${r.name}`}
-                    >
-                      <Logo src={logoFor(r.name)} />
-                    </a>
-                  ) : (
-                    <Logo src={logoFor(r.name)} />
-                  ))}
-                <span>{r.name}</span>
-              </td>
-              {pageFor && (
-                <td>
-                  {badge && (
-                    <span className={styles.pageBadge}>
-                      {badge.icon && (
-                        <span className={styles.pageTabIcon}>
-                          <Image
-                            src={badge.icon}
-                            alt=""
-                            width={12}
-                            height={12}
-                          />
-                        </span>
-                      )}
-                      {badge.label}
-                    </span>
-                  )}
-                </td>
-              )}
-              <td className={styles.numCol}>{r.count.toLocaleString()}</td>
-              {showPct && (
-                <td className={styles.pctCol}>{pct1(r.count, total)}</td>
-              )}
-              {shareFor && (
-                <td className={styles.pctCol}>{shareCell(shareFor(r.name))}</td>
-              )}
-            </tr>
-          )
-        })}
-      </SortableTable>
-      {allRows.length > rows.length && (
-        <TruncationNote shown={rows.length} of={allRows.length} />
-      )}
-    </>
-  )
-}
-
 /** The Map tab's per-area table: one row per map area with clicks and hovers
  *  side by side. Two count columns, so CountTable doesn't fit; area counts are
  *  bounded by the map's category list, so no show-more truncation either. */
@@ -3001,707 +2630,6 @@ function SearchView({
   )
 }
 
-/** The Org lookup tab: a search box, then everything the dashboard holds on
- *  the org's listings across every page, following the date range and the
- *  count mode like the other tabs. */
-function OrgView({
-  org,
-  query,
-  params,
-  range,
-  oldestTs,
-  labelByPage,
-  iconByPage,
-  unique,
-  newsletter,
-}: {
-  org: OrgLookupData | undefined
-  query: string
-  params: SearchParams
-  range: ResolvedRange
-  oldestTs: string | undefined
-  labelByPage: Map<string, string>
-  iconByPage: Map<string, string>
-  unique: boolean
-  newsletter: OrgNewsletter | null
-}) {
-  // Keyed by the search, so Back and Forward refill the box with the search
-  // the page is showing.
-  const box = <OrgSearch key={query} query={query} />
-  if (!org)
-    return (
-      <>
-        {box}
-        <div className={styles.empty}>
-          Type an org&apos;s name, like Lens Academy, BlueDot, or 80,000 Hours,
-          to see every listing of theirs on the site and how each one is doing.
-        </div>
-      </>
-    )
-  // When a page's listings couldn't be read, say so on every outcome: it may
-  // be why the search found little or nothing.
-  const failed = org.failedPages.length > 0 && (
-    <p className={styles.orgWarning}>
-      ⚠ Couldn&apos;t read the {joinList(org.failedPages)} listings just now, so
-      some of this org&apos;s listings may be missing. Reload the page to try
-      again.
-    </p>
-  )
-  if (org.tooBroad)
-    return (
-      <>
-        {box}
-        {failed}
-        <div className={styles.empty}>
-          “{org.query}” matches {org.tooBroad.listings.toLocaleString()}{' '}
-          listings from {org.tooBroad.websites.toLocaleString()} websites, so it
-          isn&apos;t one org. Try a fuller name, like Lens Academy.
-        </div>
-      </>
-    )
-
-  // Nothing matched at all (a search that matches only past listings with
-  // no activity in range still shows its panels, with a note in the table).
-  // (Left-out rows in the address keep the panels, so they stay visible and
-  // can be put back.)
-  if (
-    org.matched === 0 &&
-    org.rows.length === 0 &&
-    org.leftOut.length === 0 &&
-    org.destinations.length === 0 &&
-    org.searches.length === 0 &&
-    (newsletter?.rows.length ?? 0) === 0 &&
-    parseLeftOut(first(params.x)).size === 0
-  )
-    return (
-      <>
-        {box}
-        {failed}
-        <div className={styles.empty}>
-          {org.failedPages.length > 0
-            ? `Nothing found for “${org.query}”, but some listings couldn’t be read just now, so reload the page to try again.`
-            : range.key === 'all'
-              ? `Nothing on the site matches “${org.query}”. Try the org’s full name or another spelling.`
-              : `Nothing on the site matches “${org.query}” now, and nothing by that name had activity in this range. Try a longer range, like All time, or another spelling.`}
-        </div>
-      </>
-    )
-
-  const pageLabel = (page: string) => labelByPage.get(page) ?? page
-  const badgeFor = (page: string): PageBadge => {
-    const icon = iconByPage.get(page)
-    return {
-      icon: icon ? `/images/icons/${icon}` : null,
-      label: pageLabel(page),
-    }
-  }
-  // Leave out / Put back links: the same address with one row hash added to
-  // or taken off ?x=. Built from the rows actually left out, so stale hashes
-  // drop away; past the cap, Leave out is withheld rather than ignored.
-  // The rows left out here, plus any in ?x= with no activity in this range
-  // (they'd come back on a longer one, so they're kept).
-  const shownLeftOut = new Set(org.leftOut.map(l => l.hash))
-  const leftOut = [
-    ...new Set([...shownLeftOut, ...parseLeftOut(first(params.x))]),
-  ]
-  const hiddenLeftOut = leftOut.filter(h => !shownLeftOut.has(h)).length
-  const canLeaveOut = leftOut.length < MAX_LEFT_OUT
-  const hrefWithLeftOut = (hashes: string[]) => {
-    const q = new URLSearchParams()
-    for (const [k, v] of Object.entries(params)) {
-      if (k === 'x' || v == null) continue
-      q.set(k, Array.isArray(v) ? (v[0] ?? '') : v)
-    }
-    if (hashes.length) q.set('x', hashes.join(','))
-    return `?${q.toString()}`
-  }
-  const leaveOutHref = (hash: string) => hrefWithLeftOut([...leftOut, hash])
-  const putBackHref = (hash: string) =>
-    hrefWithLeftOut(leftOut.filter(h => h !== hash))
-  const usersHead = unique ? 'Users' : undefined
-  const newsletterClicks =
-    newsletter?.rows.reduce((n, r) => n + r.clicks, 0) ?? 0
-
-  return (
-    <>
-      {box}
-      {failed}
-
-      <Panel title="Summary">
-        <div className={styles.funnel}>
-          <Stat
-            label="visitors sent to them"
-            value={org.visitors.toLocaleString()}
-          />
-          <Stat label="clicks" value={org.clicks.toLocaleString()} />
-          <Stat label="listings" value={org.rows.length.toLocaleString()} />
-          {newsletter?.status === 'ok' && (
-            <Stat
-              label="newsletter clicks"
-              value={newsletterClicks.toLocaleString()}
-            />
-          )}
-        </div>
-        <CopySentence
-          text={orgSentence(
-            org,
-            range,
-            oldestTs,
-            pageLabel,
-            newsletter?.status === 'ok' ? newsletterClicks : 0
-          )}
-        />
-        <p className={styles.caption}>
-          Visitors = browsers that clicked through to one of these listings from
-          a resource page, site search, or the chatbot, counted once each
-          whichever count mode is on. One person on two devices counts twice.
-          Since 24 August 2026, links from resource pages reach the org tagged
-          as coming from AISafety.com; earlier clicks, and links from search and
-          the chatbot, aren&apos;t tagged, so the org&apos;s own analytics will
-          likely show fewer. The sentence always quotes every click. Newsletter
-          clicks are counted apart (below): they can&apos;t be told apart by
-          reader, so they&apos;re never in the visitors.
-        </p>
-      </Panel>
-
-      <Panel title="Listings">
-        <OrgListingsTable
-          rows={org.rows}
-          badgeFor={badgeFor}
-          leaveOutHref={canLeaveOut ? leaveOutHref : undefined}
-          empty={
-            org.leftOut.length > 0 || hiddenLeftOut > 0
-              ? 'Every listing this search found is left out.'
-              : org.failedPages.length > 0
-                ? `No listings found, but the ${joinList(org.failedPages)} listings couldn’t be read just now; reload the page to try again.`
-                : org.matched === 0
-                  ? `No listing on the site matches “${org.query}”; the panels below show only searches that name it.`
-                  : range.key === 'all'
-                    ? 'None of their listings had any activity since tracking began, and none are on the site now.'
-                    : 'None of their listings had any activity in this range, and none are on the site now. Try a longer range, like All time.'
-          }
-        />
-        {!canLeaveOut && (
-          <p className={styles.dim}>
-            Up to {MAX_LEFT_OUT} listings can be left out. Put one back to leave
-            out another.
-          </p>
-        )}
-        {(org.leftOut.length > 0 || hiddenLeftOut > 0) && (
-          <ul className={styles.leftOutList}>
-            <li>Left out</li>
-            {org.leftOut.map(l => (
-              <li key={l.hash}>
-                <span>
-                  {l.name} ({pageLabel(l.page)})
-                </span>
-                <Link
-                  href={putBackHref(l.hash)}
-                  scroll={false}
-                  className={styles.leaveOut}
-                >
-                  Put back
-                </Link>
-              </li>
-            ))}
-            {hiddenLeftOut > 0 && (
-              <li>
-                {org.leftOut.length > 0 ? 'and ' : ''}
-                {hiddenLeftOut.toLocaleString()}{' '}
-                {hiddenLeftOut === 1 ? 'listing' : 'listings'} with no activity
-                in this range
-              </li>
-            )}
-          </ul>
-        )}
-        <p className={styles.caption}>
-          Every live listing of theirs, plus past ones with activity in this
-          range, matched by name, by organizer (an event&apos;s host, or the org
-          behind a job or course), or by website. Clicks = clicks on the listing
-          on its own page (cards, featured slots, and map pins), counted the
-          same way as that page&apos;s tab. % of visitors = the share of that
-          page&apos;s visitors who clicked it.
-          {org.rows.some(r => r.hovers || r.picks) &&
-            ' Map hovers = the cursor rested on the pin for half a second, or a tap on a phone opened its tooltip; map search picks = picked from the Field map’s search box.'}{' '}
-          Leave out anything that isn&apos;t theirs; the choice stays in the
-          address, so a bookmark keeps it.
-        </p>
-      </Panel>
-
-      <div className={styles.grid}>
-        <Panel title="How visitors reached them">
-          {org.clicks === 0 ? (
-            <p className={styles.dim}>No clicks in this range.</p>
-          ) : (
-            <CountTable
-              rows={org.reached}
-              labelHead="Way in"
-              total={org.clicks}
-            />
-          )}
-          <p className={styles.caption}>
-            Featured slot = clicks on a listing while it held one of the
-            page&apos;s two featured slots (its featured card at the top, or its
-            card in the list when a filter is on). Homepage = the
-            homepage&apos;s own cards.
-            {unique &&
-              ' Site search and chatbot clicks count once per visitor per link per day, so they won’t match the Search and Chatbot tabs, which count once per visitor over the whole range.'}
-          </p>
-        </Panel>
-        <Panel title="Clicked from site search and the chatbot">
-          <KeyedTable
-            rows={org.destinations.map(d => ({
-              key: d.key,
-              name: d.name === d.url ? prettyUrl(d.url) : d.name,
-              href: d.url,
-              logo: faviconFor(d.url),
-              where: d.where,
-              count: d.count,
-            }))}
-            labelHead="Result"
-            countHead="Clicks"
-            empty="No clicks from site search or the chatbot in this range."
-          />
-          <p className={styles.caption}>
-            The listings visitors opened from a site search result or a chatbot
-            reply, matched by their web address.
-          </p>
-        </Panel>
-      </div>
-
-      {newsletter && (
-        <Panel title="Newsletter clicks">
-          {newsletter.status === 'local' ? (
-            <p className={styles.dim}>
-              Newsletter clicks are counted on the live site only, so
-              there&apos;s nothing to show here.
-            </p>
-          ) : newsletter.status === 'error' ? (
-            <p className={styles.dim}>
-              Couldn&apos;t read the newsletter click counts just now. Reload
-              the page to try again.
-            </p>
-          ) : (
-            <KeyedTable
-              rows={newsletter.rows.map(r => ({
-                key: r.key,
-                name: r.label,
-                // Opened from here, a link shouldn't count as a newsletter
-                // visit in the org's own analytics.
-                href: withoutUtm(r.url),
-                logo: faviconFor(r.url),
-                where: r.issue,
-                count: r.clicks,
-              }))}
-              labelHead="Link"
-              whereHead="Issue"
-              countHead="Clicks"
-              empty={
-                newsletter.issues === 0
-                  ? 'No newsletter went out through the site in this range.'
-                  : `No clicks on their links in the ${newsletter.issues.toLocaleString()} ${newsletter.issues === 1 ? 'issue' : 'issues'} sent in this range.`
-              }
-            />
-          )}
-          <p className={styles.caption}>
-            Clicks on their links in the newsletters sent through the site, for
-            the issues that went out in this range. Each count covers the
-            issue&apos;s whole life so far and every click, not unique readers.
-            Counting began with the issues sent from 8 October 2026; issues sent
-            through Substack aren&apos;t counted. A newly sent issue shows here
-            once the site has filed it, which can take up to a day.
-          </p>
-        </Panel>
-      )}
-
-      <Panel
-        title={`Clicks over time · per ${org.seriesUnit === 'week' ? 'week' : 'day'}`}
-      >
-        {org.clicks === 0 ? (
-          <p className={styles.dim}>No clicks in this range.</p>
-        ) : (
-          <ClicksChart points={org.series} unit={org.seriesUnit} />
-        )}
-        <p className={styles.caption}>
-          Every click counted above, from resource pages, site search, and the
-          chatbot, by UTC day
-          {org.seriesUnit === 'week' ? ', grouped into weeks from Monday' : ''}.
-        </p>
-      </Panel>
-
-      <Panel title="What people searched for">
-        <KeyedTable
-          rows={org.searches.map(r => ({
-            key: r.key,
-            name: r.term,
-            where: r.where,
-            count: r.count,
-          }))}
-          labelHead="Search"
-          countHead={usersHead ?? 'Searches'}
-          empty="Nobody searched for them in this range."
-        />
-        <p className={styles.caption}>
-          Searches in the site search and the Field map&apos;s search box that
-          name them. A search is recorded once the visitor pauses typing.
-          Recording since 16 July 2026 (the map&apos;s box since 5 September
-          2026).
-        </p>
-      </Panel>
-    </>
-  )
-}
-
-/** The Org lookup's listings table. Rows span pages, and one name can be on
- *  two (Lens Academy is on the Field map and Communities), so every detail
- *  comes off the row itself, keyed by page + name, never by name. */
-function OrgListingsTable({
-  rows: allRows,
-  badgeFor,
-  leaveOutHref,
-  empty,
-}: {
-  rows: OrgListingRow[]
-  badgeFor: (page: string) => PageBadge
-  /** Unset once the leave-out cap is reached. */
-  leaveOutHref?: (hash: string) => string
-  empty: string
-}) {
-  if (allRows.length === 0) return <p className={styles.dim}>{empty}</p>
-  // Grouped by resource page in the tabs' order, busiest first within each
-  // page (the order the rows arrive in; the sort is stable). The cap keeps
-  // the busiest rows, so it's applied before grouping.
-  const rows = allRows
-    .slice(0, MAX_TABLE_ROWS)
-    .sort((a, b) => navOrder(a.page) - navOrder(b.page))
-  const showHovers = allRows.some(r => r.hovers > 0)
-  const showPicks = allRows.some(r => r.picks > 0)
-  const columns: SortColumn[] = [
-    { label: 'Listing', sort: 'text' },
-    // Sorts by the pages' tab order, not alphabetically.
-    { label: 'Page', sort: 'rank' },
-    { label: 'Clicks', className: styles.numCol, sort: 'number' },
-    { label: '% of visitors', className: styles.pctCol, sort: 'number' },
-    ...(showHovers
-      ? [
-          {
-            label: 'Map hovers',
-            className: styles.numCol,
-            sort: 'number' as const,
-          },
-        ]
-      : []),
-    ...(showPicks
-      ? [
-          {
-            label: 'Map search picks',
-            className: styles.numCol,
-            sort: 'number' as const,
-          },
-        ]
-      : []),
-    { label: '' },
-  ]
-  const values: SortValue[][] = rows.map(r => [
-    r.name,
-    navOrder(r.page),
-    r.clicks,
-    r.share.visitors > 0 ? r.share.active / r.share.visitors : null,
-    ...(showHovers ? [r.hovers] : []),
-    ...(showPicks ? [r.picks] : []),
-    null,
-  ])
-  // Totals cover every row, including any past the display cap.
-  const total = (pick: (r: OrgListingRow) => number) =>
-    allRows.reduce((n, r) => n + pick(r), 0).toLocaleString()
-  return (
-    <>
-      <SortableTable
-        columns={columns}
-        values={values}
-        foot={
-          <tr className={styles.totalRow}>
-            <td className={styles.totalLabel}>Total</td>
-            <td />
-            <td className={styles.numCol}>{total(r => r.clicks)}</td>
-            <td className={styles.pctCol} />
-            {showHovers && (
-              <td className={styles.numCol}>{total(r => r.hovers)}</td>
-            )}
-            {showPicks && (
-              <td className={styles.numCol}>{total(r => r.picks)}</td>
-            )}
-            <td />
-          </tr>
-        }
-      >
-        {rows.map(r => {
-          const href = safeHref(r.url)
-          const badge = badgeFor(r.page)
-          const notes = [
-            r.featured ? 'Featured slot' : null,
-            r.why === 'organizer'
-              ? 'Matched by organizer'
-              : r.why === 'website'
-                ? 'Matched by website'
-                : null,
-            r.live ? null : 'No longer listed',
-          ].filter(Boolean)
-          const logo = r.logo ?? faviconFor(href)
-          return (
-            <tr key={r.key}>
-              <td className={styles.nameCell}>
-                {href ? (
-                  <a
-                    className={styles.logoLink}
-                    href={href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title={`Open ${r.name}`}
-                  >
-                    <Logo src={logo} />
-                  </a>
-                ) : (
-                  <Logo src={logo} />
-                )}
-                <span className={styles.orgName}>
-                  <span>{r.name}</span>
-                  {notes.length > 0 && (
-                    <span className={styles.orgNotes}>{notes.join(' · ')}</span>
-                  )}
-                </span>
-              </td>
-              <td>
-                <span className={styles.pageBadge}>
-                  {badge.icon && (
-                    <span className={styles.pageTabIcon}>
-                      <Image src={badge.icon} alt="" width={12} height={12} />
-                    </span>
-                  )}
-                  {badge.label}
-                </span>
-              </td>
-              <td className={styles.numCol}>{r.clicks.toLocaleString()}</td>
-              <td className={styles.pctCol}>{shareCell(r.share)}</td>
-              {showHovers && (
-                <td className={styles.numCol}>{r.hovers.toLocaleString()}</td>
-              )}
-              {showPicks && (
-                <td className={styles.numCol}>{r.picks.toLocaleString()}</td>
-              )}
-              <td>
-                {leaveOutHref && (
-                  <Link
-                    href={leaveOutHref(r.hash)}
-                    scroll={false}
-                    className={styles.leaveOut}
-                    title="Not theirs? Leave it out of every figure on this tab"
-                  >
-                    Leave out
-                  </Link>
-                )}
-              </td>
-            </tr>
-          )
-        })}
-      </SortableTable>
-      {allRows.length > rows.length && (
-        <TruncationNote shown={rows.length} of={allRows.length} />
-      )}
-    </>
-  )
-}
-
-/** A small table for rows with their own keys: a name (with an optional
- *  favicon linking out), where it happened, and a count with its share. */
-function KeyedTable({
-  rows: allRows,
-  labelHead,
-  whereHead = 'Where',
-  countHead,
-  empty,
-}: {
-  rows: {
-    key: string
-    name: string
-    href?: string
-    logo?: string
-    where: string
-    count: number
-  }[]
-  labelHead: string
-  whereHead?: string
-  countHead: string
-  empty: string
-}) {
-  if (allRows.length === 0) return <p className={styles.dim}>{empty}</p>
-  // The total covers every row; only the busiest MAX_TABLE_ROWS are sent to
-  // the browser (the rows' text comes from the public beacon).
-  const total = allRows.reduce((n, r) => n + r.count, 0)
-  const rows = allRows.slice(0, MAX_TABLE_ROWS)
-  const withLogos = rows.some(r => r.logo)
-  const columns: SortColumn[] = [
-    { label: labelHead, sort: 'text' },
-    { label: whereHead, sort: 'text' },
-    { label: countHead, className: styles.numCol, sort: 'number' },
-    { label: '%', className: styles.pctCol, sort: 'number' },
-  ]
-  return (
-    <>
-      <SortableTable
-        columns={columns}
-        values={rows.map(r => [r.name, r.where, r.count, r.count])}
-        foot={
-          <tr className={styles.totalRow}>
-            <td className={styles.totalLabel}>Total</td>
-            <td />
-            <td className={styles.numCol}>{total.toLocaleString()}</td>
-            <td className={styles.pctCol}>{pct1(total, total)}</td>
-          </tr>
-        }
-      >
-        {rows.map(r => {
-          const href = safeHref(r.href)
-          return (
-            <tr key={r.key}>
-              <td className={styles.nameCell}>
-                {withLogos &&
-                  (href ? (
-                    <a
-                      className={styles.logoLink}
-                      href={href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title={`Open ${r.name}`}
-                    >
-                      <Logo src={r.logo} />
-                    </a>
-                  ) : (
-                    <Logo src={r.logo} />
-                  ))}
-                <span>{r.name}</span>
-              </td>
-              <td>
-                <span className={styles.pill}>{r.where}</span>
-              </td>
-              <td className={styles.numCol}>{r.count.toLocaleString()}</td>
-              <td className={styles.pctCol}>{pct1(r.count, total)}</td>
-            </tr>
-          )
-        })}
-      </SortableTable>
-      {allRows.length > rows.length && (
-        <p className={styles.dim}>
-          Showing the busiest {rows.length.toLocaleString()} of{' '}
-          {allRows.length.toLocaleString()}.
-        </p>
-      )}
-    </>
-  )
-}
-
-/** An address with its utm_ tracking tags removed. */
-function withoutUtm(url: string): string {
-  try {
-    const u = new URL(url)
-    for (const k of [...u.searchParams.keys()])
-      if (k.toLowerCase().startsWith('utm_')) u.searchParams.delete(k)
-    return u.toString()
-  } catch {
-    return url
-  }
-}
-
-/** Only http(s) addresses become links: event urls come from the public
- *  beacon and could be anything. */
-function safeHref(url: string | undefined): string | undefined {
-  return url && /^https?:\/\//i.test(url) ? url : undefined
-}
-
-/** "A", "A and B", "A, B, and C" (Oxford comma). */
-function joinList(items: string[]): string {
-  if (items.length <= 2) return items.join(' and ')
-  return `${items.slice(0, -1).join(', ')}, and ${items.at(-1)}`
-}
-
-/** The range in words for the summary sentence: "In September 2026" for a
- *  whole calendar month that's over, "Since 1 July 2026" for All time, "On
- *  13 October 2026" for one day, otherwise "From 14 September to 13 October
- *  2026". The start never goes back before the oldest stored event, so the
- *  period quoted is the one the figures cover. */
-function rangeWords(
-  range: ResolvedRange,
-  oldestTs: string | undefined
-): string {
-  const now = Date.now()
-  const iso = (ms: number) => new Date(ms).toISOString()
-  const oldest = oldestTs ? Date.parse(oldestTs) : NaN
-  const end = Math.min(range.endMs ?? now, now)
-  let start = range.startMs ?? (Number.isNaN(oldest) ? null : oldest)
-  if (start != null && !Number.isNaN(oldest) && oldest > start && oldest <= end)
-    start = oldest
-  if (start == null) return `Up to ${formatDay(iso(end))}`
-  if (range.startMs == null && end === now)
-    return `Since ${formatDay(iso(start))}`
-  const s = new Date(start)
-  const monthStart = Date.UTC(s.getUTCFullYear(), s.getUTCMonth(), 1)
-  const monthEnd = Date.UTC(s.getUTCFullYear(), s.getUTCMonth() + 1, 1) - 1
-  if (start === monthStart && range.endMs === monthEnd && monthEnd < now)
-    return `In ${formatMonth(iso(start).slice(0, 7))}`
-  const startDay = dashboardDay(start)
-  const endDay = dashboardDay(end)
-  const endWords = formatDay(iso(end))
-  if (startDay === endDay) return `On ${endWords}`
-  const sameYear = startDay.slice(0, 4) === endDay.slice(0, 4)
-  const sameMonth = sameYear && startDay.slice(5, 7) === endDay.slice(5, 7)
-  const startWords = s.toLocaleDateString('en-GB', {
-    timeZone: DASHBOARD_TZ,
-    day: 'numeric',
-    ...(sameMonth ? {} : { month: 'long' }),
-    ...(sameYear ? {} : { year: 'numeric' }),
-  })
-  return `From ${startWords} to ${endWords}`
-}
-
-/** One sentence to quote back to the org, e.g. "In September 2026, 214
- *  visitors clicked through from AISafety.com to Lens Academy listings on the
- *  Training programs, Field map, and Communities pages (380 clicks in all),
- *  plus 42 clicks so far on their links in the AISafety.com newsletters sent
- *  in that period." Always every click, whichever count mode is on. The
- *  newsletter counts have no dates of their own, so they're tied to the
- *  issues sent in the period, not the clicks made in it. */
-function orgSentence(
-  org: OrgLookupData,
-  range: ResolvedRange,
-  oldestTs: string | undefined,
-  pageLabel: (page: string) => string,
-  newsletterClicks = 0
-): string {
-  const when = rangeWords(range, oldestTs)
-  const fromNewsletters = `${newsletterClicks.toLocaleString()} ${newsletterClicks === 1 ? 'click' : 'clicks'}`
-  if (org.visitors === 0)
-    return newsletterClicks > 0
-      ? `${when}, no visitors clicked through from AISafety.com to ${org.orgName} listings, but their links in the AISafety.com newsletters sent in that period have had ${fromNewsletters} so far.`
-      : `${when}, no visitors clicked through from AISafety.com to ${org.orgName} listings.`
-  const people = `${org.visitors.toLocaleString()} ${org.visitors === 1 ? 'visitor' : 'visitors'}`
-  // The homepage reads as itself, ahead of the resource pages.
-  const pages = org.clickedPages.filter(p => p !== 'Home').map(pageLabel)
-  const resource = pages.length
-    ? `the ${joinList(pages)} ${pages.length === 1 ? 'page' : 'pages'}`
-    : ''
-  const places = [
-    ...(org.clickedPages.includes('Home') ? ['the homepage'] : []),
-    ...(resource ? [resource] : []),
-  ]
-  const on = places.length ? ` on ${places.join(' and ')}` : ''
-  const clicks = `${org.allClicks.toLocaleString()} ${org.allClicks === 1 ? 'click' : 'clicks'} in all`
-  const plus =
-    newsletterClicks > 0
-      ? `, plus ${fromNewsletters} so far on their links in the AISafety.com newsletters sent in that period`
-      : ''
-  return `${when}, ${people} clicked through from AISafety.com to ${org.orgName} listings${on} (${clicks})${plus}.`
-}
-
 /** The Map tab's search-box panels: the funnel from opening the box to
  *  picking a result, how it's opened, what's searched for, and which
  *  listings get picked. Only the Field map has the box, so only the Map tab
@@ -3798,17 +2726,6 @@ function MapSearchPanels({
         </p>
       </Panel>
     </>
-  )
-}
-
-/** One stat in the Conversations row — reuses the funnel-stage styling so the
- *  row reads like the funnel above it. */
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className={styles.funnelStage}>
-      <div className={styles.funnelValue}>{value}</div>
-      <div className={styles.funnelLabel}>{label}</div>
-    </div>
   )
 }
 

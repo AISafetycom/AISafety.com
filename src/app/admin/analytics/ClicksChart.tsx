@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { chartDateLabels } from '@/lib/analytics/chart-dates'
 import styles from './analytics.module.css'
 
 /** A small one-series column chart: clicks per day (or week). Each column is
@@ -23,7 +24,6 @@ export default function ClicksChart({
   const when = (start: string) =>
     unit === 'week' ? `Week of ${longDay(start)}` : longDay(start)
   const shown = active == null ? null : points[active]
-  const middle = Math.floor((points.length - 1) / 2)
 
   return (
     <div className={styles.chart}>
@@ -75,14 +75,33 @@ export default function ClicksChart({
           ))}
         </div>
       </div>
+      {/* Each date spans its own column; the CSS hides the data-keep 1s, then
+          the 2s, as the chart narrows, and shows a year from its
+          data-year-from thinning on. */}
       <div className={styles.chartDates} aria-hidden>
-        <span>{shortDay(points[0].start)}</span>
-        {/* The middle label sits at the centre, so only an odd count has a
-            column there. */}
-        {points.length > 2 && points.length % 2 === 1 && (
-          <span>{shortDay(points[middle].start)}</span>
-        )}
-        {points.length > 1 && <span>{shortDay(points.at(-1)!.start)}</span>}
+        {chartDateLabels(points.map(p => p.start)).map(l => (
+          <span
+            key={l.index}
+            className={styles.chartDate}
+            data-keep={l.keep}
+            style={{
+              left: `${(l.index / points.length) * 100}%`,
+              width: `${100 / points.length}%`,
+            }}
+          >
+            <span>
+              {l.text}
+              {l.year && (
+                <span
+                  className={styles.chartDateYear}
+                  data-year-from={l.yearFrom}
+                >
+                  {` ${l.year}`}
+                </span>
+              )}
+            </span>
+          </span>
+        ))}
       </div>
       <details className={styles.chartTable}>
         <summary>Show as a table</summary>
@@ -128,26 +147,4 @@ function longDay(day: string): string {
     month: 'long',
     year: 'numeric',
   })
-}
-
-const MONTHS = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-]
-
-/** 'YYYY-MM-DD' as "3 Oct": day first, American month abbreviations (en-GB
- *  would write "Sept"). */
-function shortDay(day: string): string {
-  const [, m, d] = day.split('-').map(Number)
-  return `${d} ${MONTHS[m - 1]}`
 }
