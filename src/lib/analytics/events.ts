@@ -11,9 +11,10 @@
 //     everything older than ~10 days — including all of 20–30 June 2026, the
 //     first stretch after launch. The migrate endpoint copied that list's
 //     survivors into their month lists on 10 July 2026.)
-//   • Local dev (no Redis env vars set): an append-only NDJSON file under
-//     .analytics-dev/ so the whole loop works on a laptop without touching
-//     production data.
+//   • Local dev: an append-only NDJSON file under .analytics-dev/ so the whole
+//     loop works on a laptop without touching production data. A dev server
+//     writes there even with the Redis env vars set, and a preview deployment
+//     records nothing (see writesSharedStore).
 //
 // Aggregation happens per-query in JS over the raw events: this keeps storage
 // simple, makes the dashboard fully date-range aware (every event carries a
@@ -229,6 +230,20 @@ const bulkStore =
       })
     : null
 
+/** Whether this copy of the site adds events to the shared store. Vercel gives
+ *  the Upstash keys to Preview and Development as well as Production, so until
+ *  13 October 2026 every visit to a preview deployment counted as a real
+ *  visitor on /admin/analytics. A preview now records nothing (its disk is
+ *  read-only, so there's no file to fall back to), and a dev server keeps to
+ *  its own file even with the keys pulled into .env.local. Unlike the
+ *  newsletter's checks this fails open: a production server that somehow lacks
+ *  VERCEL_ENV still records, since losing real visitors is the worse mistake. */
+function writesSharedStore(): boolean {
+  const env = process.env.VERCEL_ENV
+  if (env === 'preview' || env === 'development') return false
+  return process.env.NODE_ENV !== 'development'
+}
+
 const trackLimiter = store
   ? new Ratelimit({
       redis: store,
@@ -376,9 +391,10 @@ async function readDevEvents(): Promise<AnalyticsEvent[]> {
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /** Whether to accept another event from this IP right now. Fails open (returns
- *  true) when Redis is unavailable, so dev and a Redis outage don't drop data. */
+ *  true) when Redis is unavailable, so dev and a Redis outage don't drop data.
+ *  A copy that doesn't write to the shared store doesn't touch it here either. */
 export async function allowTrack(ip: string): Promise<boolean> {
-  if (!trackLimiter) return true
+  if (!trackLimiter || !writesSharedStore()) return true
   try {
     const { success } = await trackLimiter.limit(ip)
     return success
@@ -404,7 +420,9 @@ const FIRST_SEEN_CACHE_CAP = 50_000
  *  not break the user's request (it is fired via after() from the route). */
 export async function recordEvent(event: AnalyticsEvent): Promise<void> {
   try {
-    if (store) {
+    // A preview deployment keeps nothing (see writesSharedStore).
+    if (process.env.VERCEL_ENV === 'preview') return
+    if (store && writesSharedStore()) {
       const month = monthOf(event.ts)
       if (!month) {
         console.warn(
@@ -431,7 +449,7 @@ export async function recordEvent(event: AnalyticsEvent): Promise<void> {
       }
       return
     }
-    // No Redis configured (local dev) — fall back to the on-disk log.
+    // Local dev, or no Redis configured: the on-disk log.
     await writeDevEvent(event)
   } catch (err) {
     console.warn(
@@ -922,8 +940,9 @@ const EMPTY: Omit<DashboardData, 'source'> = {
 /** The pages listing clicks are tracked under on the live site. Clicks under
  *  any other name are the team testing, not visitors: the admin Queue's
  *  preview ('admin-queue'), or the unreleased /hire page ('Hire') on preview
- *  deployments, which write to the same store. The dashboard leaves those out,
- *  so they get no tab and no share of the click counts. */
+ *  deployments, which wrote to the same store until 13 October 2026. The
+ *  dashboard leaves those out, so they get no tab and no share of the click
+ *  counts. */
 const LISTING_PAGES = new Set([
   'Home',
   'Training',
@@ -3156,6 +3175,28 @@ type ViewMeta = Pick<
   'oldestTs' | 'highTraffic' | 'firstSeenBackfilled'
 >
 
+/** Whether an event came from a preview deployment or a laptop rather than the
+ *  live site, judged by the address of the page that sent it (`ref`). Until
+ *  writesSharedStore existed (13 October 2026) those landed in the shared
+ *  store too: about 770 events in July to September 2026. They stay stored and
+ *  are left out of every count. The live site's own *.vercel.app address goes
+ *  with them, since no visitor uses it. */
+export function fromTestCopy(ref: string | undefined): boolean {
+  if (!ref || ref.startsWith('https://aisafety.com/')) return false
+  const host = /^https?:\/\/([^/?#]+)/i
+    .exec(ref)?.[1]
+    .replace(/:\d*$/, '')
+    .toLowerCase()
+  if (!host) return false
+  return (
+    host.endsWith('.vercel.app') ||
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host === '127.0.0.1' ||
+    host === '[::1]'
+  )
+}
+
 /** The site view for a range and count mode from the Redis store, through
  *  the month cache and the site view cache, plus the store-wide fields. */
 async function loadSiteView(
@@ -3182,7 +3223,8 @@ async function loadSiteView(
     db.exists(FIRST_SEEN_BACKFILLED_KEY),
   ])
   const site = await cachedSiteView(wanted, parts, range, unique, async () => {
-    const all = parts.flat()
+    // Only here, on the shared store: a laptop's own file is all localhost.
+    const all = parts.flat().filter(e => !fromTestCopy(e.ref))
     // Which of the range's visitors were around before it began. Skipped
     // for an open-ended range: nothing can predate "All time".
     const firstSeen =
