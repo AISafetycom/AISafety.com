@@ -6,7 +6,6 @@
 
 import { Fragment, type ReactNode } from 'react'
 import Image from 'next/image'
-import Link from 'next/link'
 import type { OrgListingRow, OrgLookupData } from '@/lib/analytics/events'
 import {
   MAX_LEFT_OUT,
@@ -18,7 +17,6 @@ import {
 import type { IssueClicksRead } from '@/lib/analytics/org-newsletter'
 import ClicksChart from './ClicksChart'
 import Logo from './Logo'
-import PendingMark from './PendingMark'
 import SortableTable, { type SortColumn, type SortValue } from './SortableTable'
 import { navOrder } from './page-nav'
 import {
@@ -80,6 +78,14 @@ export interface OrgAdmin {
   /** Every org page made so far, listed before a search (SharedOrgPages);
    *  null when there are none, or for someone who can't make them. */
   sharedPages: ReactNode
+  /** Leave out and Put back (LeaveOutLink), which also update the search's
+   *  shared page when it has one. */
+  leaveOutLink: (link: {
+    href: string
+    leftOut: string[]
+    label: string
+    title?: string
+  }) => ReactNode
 }
 
 /** How often an org's page has been opened, for the share box and the list:
@@ -226,9 +232,21 @@ export function OrgView({
     if (hashes.length) q.set('x', hashes.join(','))
     return `?${q.toString()}`
   }
-  const leaveOutHref = (hash: string) => hrefWithLeftOut([...leftOut, hash])
-  const putBackHref = (hash: string) =>
-    hrefWithLeftOut(leftOut.filter(h => h !== hash))
+  const leaveOutLink = (hash: string) =>
+    admin?.leaveOutLink({
+      href: hrefWithLeftOut([...leftOut, hash]),
+      leftOut: [...leftOut, hash],
+      label: 'Leave out',
+      title: 'Not theirs? Leave it out of every figure on this tab',
+    })
+  const putBackLink = (hash: string) => {
+    const kept = leftOut.filter(h => h !== hash)
+    return admin?.leaveOutLink({
+      href: hrefWithLeftOut(kept),
+      leftOut: kept,
+      label: 'Put back',
+    })
+  }
   const unique = admin?.unique ?? true
   const usersHead = unique ? 'Users' : undefined
   const newsletterClicks =
@@ -302,7 +320,7 @@ export function OrgView({
             hovers: `Times a visitor rested the pointer on the listing’s map pin for half a second, or tapped it on a phone${onceADay}.`,
             picks: `Times a visitor picked the listing from the Field map’s search box${onceADay}.`,
           }}
-          leaveOutHref={canLeaveOut ? leaveOutHref : undefined}
+          leaveOutLink={canLeaveOut ? leaveOutLink : undefined}
           leaveOutColumn={!shared}
           empty={
             admin && (org.leftOut.length > 0 || hiddenLeftOut > 0)
@@ -334,14 +352,7 @@ export function OrgView({
                 <span>
                   {l.name} ({pageLabel(l.page)})
                 </span>
-                <Link
-                  href={putBackHref(l.hash)}
-                  scroll={false}
-                  className={styles.leaveOut}
-                >
-                  Put back
-                  <PendingMark />
-                </Link>
+                {putBackLink(l.hash)}
               </li>
             ))}
             {hiddenLeftOut > 0 && (
@@ -579,7 +590,7 @@ function OrgListingsTable({
   matchNotes,
   pageLast,
   hints,
-  leaveOutHref,
+  leaveOutLink,
   leaveOutColumn,
   empty,
 }: {
@@ -596,7 +607,7 @@ function OrgListingsTable({
     string
   >
   /** Unset once the leave-out cap is reached. */
-  leaveOutHref?: (hash: string) => string
+  leaveOutLink?: (hash: string) => ReactNode
   /** Keep the Leave out column, even while its links are withheld. */
   leaveOutColumn: boolean
   empty: string
@@ -717,21 +728,7 @@ function OrgListingsTable({
   const leaveOut: Column = {
     head: { label: '' },
     value: () => null,
-    cell: r => (
-      <td>
-        {leaveOutHref && (
-          <Link
-            href={leaveOutHref(r.hash)}
-            scroll={false}
-            className={styles.leaveOut}
-            title="Not theirs? Leave it out of every figure on this tab"
-          >
-            Leave out
-            <PendingMark />
-          </Link>
-        )}
-      </td>
-    ),
+    cell: r => <td>{leaveOutLink?.(r.hash)}</td>,
     foot: <td />,
   }
   const columns = [
