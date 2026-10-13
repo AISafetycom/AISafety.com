@@ -25,6 +25,19 @@ import { Ratelimit } from '@upstash/ratelimit'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { displayFilterGroup, displayFilterValue } from '@/lib/filter-tracking'
+import {
+  cleanUrl,
+  quickHost,
+  labelMatches,
+  matchesNorm,
+  normText,
+  spreadsTo,
+  rowHash,
+  rowKey,
+  stripIdPrefix,
+  type MatchReason,
+  type OrgSpec,
+} from './org-lookup'
 
 export interface AnalyticsEvent {
   /** Event kind, e.g. 'listing_click'. Must be in ALLOWED_EVENT_TYPES. */
@@ -774,6 +787,8 @@ export interface DashboardData {
   optOuts: { off: number; on: number }
   /** First-party page views (recorded from 15 July 2026). */
   visits: VisitsData
+  /** The Org lookup tab's figures, when it asked for them (a search). */
+  org?: OrgLookupData
   /** Cross-interest overlaps between pages (and the chatbot), from anonymous
    *  visitor ids: pairs ranked by how many visitors engaged with both. */
   correlations: CorrelationRow[]
@@ -1112,7 +1127,9 @@ function aggregate(
   /** Epoch ms each visitor was first seen (any event, whole store), for at
    *  least every visitor with a page view in range. What makes "returning"
    *  knowable without reading the months before the range. */
-  firstSeen: Map<string, number> = new Map()
+  firstSeen: Map<string, number> = new Map(),
+  /** The Org lookup tab's search, already matched against the catalog. */
+  org: OrgSpec | null = null
 ): Omit<
   DashboardData,
   'source' | 'error' | 'oldestTs' | 'highTraffic' | 'firstSeenBackfilled'
@@ -1514,6 +1531,9 @@ function aggregate(
     mapSearch,
     optOuts: optOutSplit(inRange),
     visits: visitsData(inRange, unique, firstSeen, startMs, viewVidsByPage),
+    org: org
+      ? orgLookup(inRange, org, unique, viewVidsByPage, { startMs, endMs })
+      : undefined,
     correlations: correlations(inRange),
     // Newest-first already; page views, map hovers and cards-section views
     // are left out so the feed stays a log of deliberate actions rather than
@@ -1647,6 +1667,534 @@ export function newsletterArchiveStats(
     }
   }
   return [...rows.values()].sort((a, b) => b.views - a.views)
+}
+
+// ---------------------------------------------------------------------------
+// Org lookup (the dashboard's Org lookup tab)
+// ---------------------------------------------------------------------------
+
+/** One of the org's listings: a dashboard row (page + label), as on the page
+ *  tabs, so its click count reconciles with that page's Top listings. */
+export interface OrgListingRow {
+  /** Row key (page + '\0' + label). */
+  key: string
+  /** Short id for leaving the row out (?x=). */
+  hash: string
+  name: string
+  page: string
+  /** Resource-page clicks on the listing (cards, featured slots, map pins),
+   *  following the count mode. */
+  clicks: number
+  /** Distinct visitors who clicked it on its page vs the page's visitors. */
+  share: VisitorShare
+  /** Map tooltip dwells (Map, Communities) and Field map search picks,
+   *  following the count mode. */
+  hovers: number
+  picks: number
+  /** Clicked at least once in a featured slot. */
+  featured: boolean
+  url?: string
+  /** Airtable logo when one is known, else null (the dashboard falls back to
+   *  the website's favicon). */
+  logo: string | null
+  why: MatchReason
+  /** On the site right now. */
+  live: boolean
+}
+
+export interface OrgDestinationRow {
+  key: string
+  /** The clicked result's title, or its url when none was recorded. */
+  name: string
+  url: string
+  where: 'Site search' | 'Chatbot'
+  count: number
+}
+
+export interface OrgSearchRow {
+  key: string
+  term: string
+  where: 'Site search' | 'Map search'
+  count: number
+}
+
+export interface OrgLookupData {
+  query: string
+  orgName: string
+  tooBroad: { listings: number; websites: number } | null
+  failedPages: string[]
+  /** Catalog listings the search matched, past ones included, whether or
+   *  not they had any activity in range. */
+  matched: number
+  /** Distinct visitors who clicked through to any of the listings (from a
+   *  resource page, site search, or the chatbot); vid-less clicks count once
+   *  each. Ignores the count mode. */
+  visitors: number
+  /** Those clicks, following the count mode, and every click regardless of
+   *  it (the summary sentence quotes the latter). */
+  clicks: number
+  allClicks: number
+  rows: OrgListingRow[]
+  /** Rows (and catalog listings) Bryce left out, for the Put back links. */
+  leftOut: { hash: string; page: string; name: string }[]
+  /** The clicks by how visitors reached the listing; sums to `clicks`. */
+  reached: Counted[]
+  destinations: OrgDestinationRow[]
+  searches: OrgSearchRow[]
+  /** Clicks (count mode) per UTC day, or per week from Monday when the range
+   *  is longer than SERIES_DAILY_MAX_DAYS. `start` is the bucket's first
+   *  day, YYYY-MM-DD. */
+  series: { start: string; count: number }[]
+  seriesUnit: 'day' | 'week'
+  /** Pages with resource-page clicks, busiest first. */
+  clickedPages: string[]
+}
+
+/** The pages listing clicks are tracked under. Anything else (the admin
+ *  Queue's preview, 'admin-queue') is the team, not visitors. */
+const ORG_LISTING_PAGES = new Set([
+  'Home',
+  'Training',
+  'Events',
+  'Map',
+  'Communities',
+  'Self-study',
+  'Jobs',
+  'Funding',
+  'Media channels',
+  'Advisors',
+  'Founders',
+  'Projects',
+])
+
+/** Longest range drawn one bar per day; longer ranges get a bar per week. */
+const SERIES_DAILY_MAX_DAYS = 92
+
+const ORG_REACHED_ORDER = [
+  'Cards',
+  'Featured slot',
+  'Map pins',
+  'Homepage',
+  'Site search',
+  'Chatbot',
+]
+
+/** Everything the dashboard holds on one org's listings. One pass to decide
+ *  which rows match and collect the candidates, one to count them; no extra
+ *  reads. Never mutates the (shared, cached) events. Exported for the unit
+ *  test. */
+export function orgLookup(
+  inRange: AnalyticsEvent[],
+  spec: OrgSpec,
+  unique: boolean,
+  viewVidsByPage: Map<string, Set<string>>,
+  range: DateRange,
+  now = Date.now()
+): OrgLookupData {
+  const base = {
+    query: spec.query,
+    orgName: spec.orgName,
+    tooBroad: spec.tooBroad,
+    failedPages: spec.failedPages,
+    matched: spec.entries.size,
+  }
+  if (spec.tooBroad || !spec.norm)
+    return {
+      ...base,
+      visitors: 0,
+      clicks: 0,
+      allClicks: 0,
+      rows: [],
+      leftOut: [],
+      reached: [],
+      destinations: [],
+      searches: [],
+      series: [],
+      seriesUnit: 'day',
+      clickedPages: [],
+    }
+
+  // Event addresses come from the public beacon (anything, up to 600
+  // characters), so only those on a host the org could own are parsed and
+  // remembered; quickHost is plain string work.
+  const urlHosts = new Set<string>()
+  for (const u of spec.urls) urlHosts.add(hostPart(u))
+  const cleanMemo = new Map<string, string | null>()
+  const clean = (url: string | undefined) => {
+    if (!url) return null
+    let c = cleanMemo.get(url)
+    if (c === undefined) {
+      c = cleanUrl(url)
+      cleanMemo.set(url, c)
+    }
+    return c
+  }
+  const onSpread = (host: string | null) =>
+    spec.hosts.size > 0 && spreadsTo(spec, host)
+
+  // Pass 1: which rows are the org's, and the candidate events.
+  const why = new Map<string, MatchReason | null>()
+  const rowCands: { e: AnalyticsEvent; key: string }[] = []
+  const destCands: AnalyticsEvent[] = []
+  const queryCands: AnalyticsEvent[] = []
+  for (const e of inRange) {
+    const isRow =
+      (e.type === 'listing_click' &&
+        !!e.page &&
+        ORG_LISTING_PAGES.has(e.page)) ||
+      (e.type === 'listing_hover' && !!e.page) ||
+      e.type === 'map_search_pick'
+    if (isRow) {
+      const page = e.page ?? 'Map'
+      const label = listingMember(e)
+      const key = rowKey(page, label)
+      rowCands.push({ e, key })
+      let w = why.get(key)
+      if (w === undefined) {
+        w =
+          spec.entries.get(key)?.why ??
+          (labelMatches(page, label, spec.norm, spec.compact) ? 'name' : null)
+        why.set(key, w)
+      }
+      if (w) continue
+      const byId = e.listingId ? spec.ids.get(e.listingId) : undefined
+      const host = quickHost(e.url)
+      const byUrl =
+        host != null &&
+        ((page !== 'Jobs' && onSpread(host)) ||
+          (urlHosts.has(host) && spec.urls.has(clean(e.url) ?? '')))
+      if (byId || byUrl) why.set(key, byId ?? 'website')
+    } else if (
+      (e.type === 'search_click' && e.source !== 'page') ||
+      e.type === 'chatbot_click'
+    ) {
+      if (quickHost(e.url)) destCands.push(e)
+    } else if (
+      (e.type === 'search_query' || e.type === 'map_search_query') &&
+      e.query
+    ) {
+      queryCands.push(e)
+    }
+  }
+
+  // Pass 2: count the matched rows.
+  interface Acc {
+    page: string
+    name: string
+    clicks: AnalyticsEvent[]
+    hovers: AnalyticsEvent[]
+    picks: AnalyticsEvent[]
+    url?: string
+    listingId?: string
+    live: boolean
+  }
+  const accs = new Map<string, Acc>()
+  const leftOut = new Map<
+    string,
+    { hash: string; page: string; name: string }
+  >()
+  const leftOutUrls = new Set(spec.leftOutUrls)
+  const leftOutIds = new Set(spec.leftOutIds)
+  const rowUrls = new Set<string>()
+  for (const { e, key } of rowCands) {
+    if (!why.get(key)) continue
+    const page = e.page ?? 'Map'
+    const name = listingMember(e)
+    if (spec.leftOut.has(rowHash(page, name))) {
+      if (!leftOut.has(key))
+        leftOut.set(key, { hash: rowHash(page, name), page, name })
+      const c = clean(e.url)
+      if (c) leftOutUrls.add(c)
+      // Unless a kept listing has the same record (a homepage card and its
+      // program): its chatbot cards still count.
+      if (e.listingId && !spec.ids.has(e.listingId)) leftOutIds.add(e.listingId)
+      continue
+    }
+    let acc = accs.get(key)
+    if (!acc) {
+      // The homepage's own cards are written into the page, not read from
+      // a getter, so the catalog can't say they've gone: never flag them.
+      acc = {
+        page,
+        name,
+        clicks: [],
+        hovers: [],
+        picks: [],
+        live: page === 'Home',
+      }
+      accs.set(key, acc)
+    }
+    if (e.type === 'listing_click') acc.clicks.push(e)
+    else if (e.type === 'listing_hover') acc.hovers.push(e)
+    else acc.picks.push(e)
+    // Newest first, so the first url / id seen is the most recent.
+    acc.url ??= e.url
+    acc.listingId ??= e.listingId
+    if (
+      (e.listingId && spec.liveIds.has(e.listingId)) ||
+      spec.liveKeys.has(key)
+    )
+      acc.live = true
+    const c = clean(e.url)
+    if (c) rowUrls.add(c)
+  }
+  for (const l of spec.leftOutEntries)
+    if (!leftOut.has(l.key))
+      leftOut.set(l.key, {
+        hash: rowHash(l.page, l.name),
+        page: l.page,
+        name: l.name,
+      })
+  const rowHosts = new Set<string>()
+  for (const u of rowUrls) rowHosts.add(hostPart(u))
+
+  const dedupe = (events: AnalyticsEvent[]) =>
+    unique ? uniqueClicks(events) : events
+  const reached = new Map<string, number>()
+  const bump = (bucket: string) =>
+    reached.set(bucket, (reached.get(bucket) ?? 0) + 1)
+  const counted: AnalyticsEvent[] = []
+  // Every click before the count mode's dedupe, for the visitor count and
+  // the sentence. Counted, not kept: a flood on one listing mustn't cost
+  // memory twice.
+  let allClicks = 0
+  const visitorIds = new Set<string>()
+  let anonClicks = 0
+  const seeClick = (e: AnalyticsEvent) => {
+    allClicks++
+    if (e.vid) visitorIds.add(e.vid)
+    else anonClicks++
+  }
+  const clicksByPage = new Map<string, number>()
+  const rows: OrgListingRow[] = []
+  for (const [key, a] of accs) {
+    const clicks = dedupe(a.clicks)
+    for (const e of clicks) {
+      bump(
+        e.page === 'Home'
+          ? 'Homepage'
+          : e.position?.startsWith('F')
+            ? 'Featured slot'
+            : e.source === 'map'
+              ? 'Map pins'
+              : 'Cards'
+      )
+      counted.push(e)
+    }
+    const vids = new Set<string>()
+    for (const e of a.clicks) {
+      seeClick(e)
+      if (e.vid) vids.add(e.vid)
+    }
+    if (clicks.length)
+      clicksByPage.set(a.page, (clicksByPage.get(a.page) ?? 0) + clicks.length)
+    const entry = spec.entries.get(key)
+    rows.push({
+      key,
+      hash: rowHash(a.page, a.name),
+      name: a.name,
+      page: a.page,
+      clicks: clicks.length,
+      share: {
+        name: key,
+        active: vids.size,
+        visitors: viewVidsByPage.get(a.page)?.size ?? 0,
+      },
+      hovers: dedupe(a.hovers).length,
+      picks: dedupe(a.picks).length,
+      featured: a.clicks.some(e => e.position?.startsWith('F')),
+      url: a.url ?? entry?.url,
+      logo:
+        entry?.logo ??
+        spec.logoByKey.get(key) ??
+        (a.listingId ? spec.logoById.get(a.listingId) : undefined) ??
+        null,
+      why: why.get(key) as MatchReason,
+      live: a.live,
+    })
+  }
+  // The org's live listings nobody clicked in range still belong in the list.
+  for (const [key, entry] of spec.entries) {
+    if (accs.has(key) || !entry.live) continue
+    rows.push({
+      key,
+      hash: rowHash(entry.page, entry.name),
+      name: entry.name,
+      page: entry.page,
+      clicks: 0,
+      share: {
+        name: key,
+        active: 0,
+        visitors: viewVidsByPage.get(entry.page)?.size ?? 0,
+      },
+      hovers: 0,
+      picks: 0,
+      featured: false,
+      url: entry.url,
+      logo: entry.logo,
+      why: entry.why,
+      live: true,
+    })
+  }
+  rows.sort(
+    (a, b) =>
+      b.clicks - a.clicks ||
+      b.hovers + b.picks - (a.hovers + a.picks) ||
+      a.name.localeCompare(b.name)
+  )
+
+  // Clicks through from site search and the chatbot. They carry the page the
+  // visitor was on, not the listing's, so they're matched by address (or a
+  // chatbot card's record id) and counted apart from the rows.
+  const seen = new Set<string>()
+  const dests = new Map<string, OrgDestinationRow>()
+  for (const e of destCands) {
+    const host = quickHost(e.url) as string
+    const cardId =
+      e.type === 'chatbot_click' && e.listingId
+        ? stripIdPrefix(e.listingId)
+        : null
+    // A card naming a left-out listing stays out, whatever its address.
+    if (cardId && leftOutIds.has(cardId)) continue
+    const byId = cardId != null && spec.ids.has(cardId)
+    const isJob =
+      e.type === 'search_click'
+        ? e.source === 'job'
+        : (e.listingId?.startsWith('job:') ?? false)
+    const ownHost = urlHosts.has(host) || rowHosts.has(host)
+    const spread = !isJob && onSpread(host)
+    if (!byId && !ownHost && !spread) continue
+    const c = clean(e.url)
+    if (!c) continue
+    const known = spec.urls.has(c) || rowUrls.has(c)
+    if (!byId && !known && !spread) continue
+    // An address only left-out listings have stays out; one a kept listing
+    // shares (the Field map org and its program on one homepage) stays in.
+    if (leftOutUrls.has(c) && !byId && !known) continue
+    const where = e.type === 'search_click' ? 'Site search' : 'Chatbot'
+    seeClick(e)
+    if (unique && e.vid) {
+      const t = Date.parse(e.ts)
+      const k = `${e.vid}\x00${Number.isNaN(t) ? '' : dashboardDay(t)}\x00${where}\x00${c}`
+      if (seen.has(k)) continue
+      seen.add(k)
+    }
+    counted.push(e)
+    bump(where)
+    const dk = `${where}\x00${c}`
+    const d = dests.get(dk)
+    if (d) d.count++
+    // Newest first: the first click names the row.
+    else
+      dests.set(dk, {
+        key: dk,
+        name: e.label || (e.url as string),
+        url: e.url as string,
+        where,
+        count: 1,
+      })
+  }
+
+  // What visitors typed into the two search boxes that names the org.
+  const queryCounts = new Map<string, OrgSearchRow>()
+  const queryMatch = new Map<string, boolean>()
+  const queryVids = new Set<string>()
+  for (const e of queryCands) {
+    const term = (e.query as string).trim().toLowerCase()
+    let m = queryMatch.get(term)
+    if (m === undefined) {
+      m = matchesNorm(normText(term), spec.norm, spec.compact)
+      queryMatch.set(term, m)
+    }
+    if (!m) continue
+    const where = e.type === 'search_query' ? 'Site search' : 'Map search'
+    const k = `${where}\x00${term}`
+    if (unique && e.vid) {
+      if (queryVids.has(`${k}\x00${e.vid}`)) continue
+      queryVids.add(`${k}\x00${e.vid}`)
+    }
+    const row = queryCounts.get(k)
+    if (row) row.count++
+    else queryCounts.set(k, { key: k, term, where, count: 1 })
+  }
+
+  // inRange is newest first, so its last event is the oldest data there is.
+  const oldest = inRange.length
+    ? Date.parse(inRange[inRange.length - 1].ts)
+    : NaN
+  const { series, unit } = orgSeries(counted, range, now, oldest)
+  return {
+    ...base,
+    visitors: visitorIds.size + anonClicks,
+    clicks: counted.length,
+    allClicks,
+    rows,
+    leftOut: [...leftOut.values()],
+    reached: ORG_REACHED_ORDER.filter(b => reached.has(b)).map(name => ({
+      name,
+      count: reached.get(name) as number,
+    })),
+    destinations: [...dests.values()].sort(
+      (a, b) => b.count - a.count || a.name.localeCompare(b.name)
+    ),
+    searches: [...queryCounts.values()].sort(
+      (a, b) => b.count - a.count || a.term.localeCompare(b.term)
+    ),
+    series,
+    seriesUnit: unit,
+    clickedPages: [...clicksByPage.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([page]) => page),
+  }
+}
+
+/** The host at the front of a cleanUrl() result. */
+function hostPart(cleaned: string): string {
+  const i = cleaned.search(/[/?]/)
+  return i === -1 ? cleaned : cleaned.slice(0, i)
+}
+
+/** Clicks per UTC day (or per week, from Monday, for long ranges), every
+ *  bucket from the range's start to the earlier of its end and now. The
+ *  start never goes back before the oldest event read (`oldest`), so an
+ *  open range, or a typed date far in the past, draws only days there's
+ *  data for. Empty when there's nothing to draw. */
+function orgSeries(
+  clicks: AnalyticsEvent[],
+  { startMs, endMs }: DateRange,
+  now: number,
+  oldest: number
+): { series: { start: string; count: number }[]; unit: 'day' | 'week' } {
+  // Nothing read in range means nothing to draw.
+  if (!Number.isFinite(oldest)) return { series: [], unit: 'day' }
+  const end = Math.min(endMs ?? now, now)
+  const start = startMs != null ? Math.max(startMs, oldest) : oldest
+  if (!Number.isFinite(end) || start > end) return { series: [], unit: 'day' }
+  // Day boundaries by arithmetic: the dashboard's zone is UTC (DASHBOARD_TZ).
+  const dayMs = (t: number) => Math.floor(t / 86_400_000) * 86_400_000
+  const firstDay = dayMs(start)
+  const lastDay = dayMs(end)
+  const unit =
+    (lastDay - firstDay) / 86_400_000 + 1 > SERIES_DAILY_MAX_DAYS
+      ? 'week'
+      : 'day'
+  const bucketOf = (t: number) => {
+    const d = dayMs(t)
+    if (unit === 'day') return d
+    return d - ((new Date(d).getUTCDay() + 6) % 7) * 86_400_000
+  }
+  const counts = new Map<number, number>()
+  for (const e of clicks) {
+    const t = Date.parse(e.ts)
+    if (Number.isNaN(t)) continue
+    const b = bucketOf(t)
+    counts.set(b, (counts.get(b) ?? 0) + 1)
+  }
+  const step = unit === 'day' ? 86_400_000 : 7 * 86_400_000
+  const series: { start: string; count: number }[] = []
+  for (let b = bucketOf(firstDay); b <= lastDay; b += step)
+    series.push({ start: dashboardDay(b), count: counts.get(b) ?? 0 })
+  return { series, unit }
 }
 
 /** What a newsletter_signup_error's reason (`source`) means, in words. */
@@ -2376,7 +2924,10 @@ export async function readDashboard(
   range: DateRange,
   page?: string,
   unique = true,
-  sourceFilter?: string
+  sourceFilter?: string,
+  /** The Org lookup tab's search. A promise, so the catalog it's matched
+   *  against (Airtable) loads while the events do; it must never reject. */
+  org?: Promise<OrgSpec | null>
 ): Promise<DashboardData> {
   if (store) {
     try {
@@ -2411,7 +2962,15 @@ export async function readDashboard(
           byMonth.map(b => ({ month: b.month, count: b.len }))
         ),
         firstSeenBackfilled: backfilled === 1,
-        ...aggregate(all, range, page, unique, sourceFilter, firstSeen),
+        ...aggregate(
+          all,
+          range,
+          page,
+          unique,
+          sourceFilter,
+          firstSeen,
+          (await org) ?? null
+        ),
       }
     } catch (err) {
       // Degrade gracefully — a Redis blip must not 500 the dashboard.
@@ -2436,7 +2995,15 @@ export async function readDashboard(
       [...devMonthCounts.entries()].map(([month, count]) => ({ month, count }))
     ),
     firstSeenBackfilled: true,
-    ...aggregate(all, range, page, unique, sourceFilter, earliestByVid(all)),
+    ...aggregate(
+      all,
+      range,
+      page,
+      unique,
+      sourceFilter,
+      earliestByVid(all),
+      (await org) ?? null
+    ),
   }
 }
 
