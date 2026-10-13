@@ -230,6 +230,29 @@ describe('the store', () => {
     expect(await store.listShares()).toHaveLength(1)
   })
 
+  it('stores only the link’s own fields when updating, never its view counts', async () => {
+    const made = await store.saveShare(
+      { query: 'Lens', leftOut: [], orgName: 'Lens Academy' },
+      'Bryce'
+    )
+    await store.countShareView(made.token)
+    await store.saveShare(
+      { query: 'Lens', leftOut: ['abc'], orgName: 'Lens Academy' },
+      'Bryce'
+    )
+    const stored = JSON.parse(
+      String(hashes.get('aisafety:analytics:org-shares')?.get(made.token))
+    )
+    expect(Object.keys(stored).sort()).toEqual([
+      'createdAt',
+      'createdBy',
+      'leftOut',
+      'orgName',
+      'query',
+      'updatedAt',
+    ])
+  })
+
   it('counts openings and lists them with each link', async () => {
     const made = await store.saveShare(
       { query: 'Lens', leftOut: [], orgName: 'Lens Academy' },

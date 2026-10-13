@@ -99,15 +99,15 @@ function getVisitorId(): string | undefined {
   }
 }
 
-/** Fire a first-party event to /api/track. Prefers sendBeacon so it survives the
- *  navigation a click triggers; falls back to keepalive fetch. */
 /** An org's page (/stats/<token>) is a private link, so its token never goes
- *  into either analytics system or the chatbot's log: every one is recorded
- *  as '/stats'. */
+ *  into either analytics system, the chatbot's log, or the footer's feedback
+ *  form: every one is recorded as '/stats'. */
 export function trackedPath(pathname: string): string {
   return pathname.startsWith('/stats/') ? '/stats' : pathname
 }
 
+/** Fire a first-party event to /api/track. Prefers sendBeacon so it survives the
+ *  navigation a click triggers; falls back to keepalive fetch. */
 function sendTrackEvent(payload: TrackPayload): void {
   // The owner can exclude their own browser from the stats.
   if (isTrackingOptedOut()) return

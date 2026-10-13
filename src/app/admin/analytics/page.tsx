@@ -71,7 +71,7 @@ import { canEdit } from '@/lib/admin/access'
 import { requestOrigin } from '@/lib/admin/origin'
 import DateRangePicker from './DateRangePicker'
 import OrgSearch from './OrgSearch'
-import ShareOrgLink, { type ShareState } from './ShareOrgLink'
+import ShareOrgLink, { SharedOrgPages, type ShareState } from './ShareOrgLink'
 import ExcludeToggle from './ExcludeToggle'
 import Logo from './Logo'
 import PendingMark from './PendingMark'
@@ -637,6 +637,7 @@ async function AnalyticsView({
       : shared
         ? {
             token: shared.token,
+            orgName: shared.orgName,
             leftOutDiffers: !sameLeftOut(shared.leftOut, [...orgLeftOut]),
             opened: openedWords(shared.views, shared.lastViewedAt),
           }
@@ -646,6 +647,8 @@ async function AnalyticsView({
       ? null
       : (orgName, leftOut) => (
           <ShareOrgLink
+            // A new search starts the name field afresh.
+            key={orgQuery}
             query={orgQuery}
             orgName={orgName}
             leftOut={leftOut}
@@ -653,6 +656,29 @@ async function AnalyticsView({
             share={shareState}
           />
         )
+  // The list before a search: each page opens the lookup on its own search
+  // and left-out rows, in the current dates and count mode.
+  const lookupHref = (query: string, leftOut: string[]) => {
+    const q = new URLSearchParams()
+    for (const [k, v] of Object.entries(sp))
+      if (k !== 'q' && k !== 'x' && typeof v === 'string') q.set(k, v)
+    q.set('tab', 'orgs')
+    q.set('q', query)
+    if (leftOut.length) q.set('x', leftOut.join(','))
+    return `?${q.toString()}`
+  }
+  const sharedPages =
+    shares && shares !== 'failed' && shares.length > 0 ? (
+      <SharedOrgPages
+        origin={shareOrigin}
+        pages={shares.map(s => ({
+          token: s.token,
+          orgName: s.orgName,
+          lookupHref: lookupHref(s.query, s.leftOut),
+          note: `${openedWords(s.views, s.lastViewedAt)} · made by ${s.createdBy}`,
+        }))}
+      />
+    ) : null
 
   // Resource-page tabs: every page in PAGE_NAV always gets one (so quiet pages
   // like Projects still appear), plus any other page that has clicks (e.g.
@@ -971,7 +997,7 @@ async function AnalyticsView({
                 // with the search the page is showing.
                 searchBox: <OrgSearch key={orgQuery} query={orgQuery} />,
                 shareBox,
-                pages: shares && shares !== 'failed' ? shares : null,
+                sharedPages,
               }}
             />
           )}

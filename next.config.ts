@@ -85,6 +85,21 @@ const nextConfig: NextConfig = {
       },
     ]
   },
+  async headers() {
+    return [
+      // An org's private page (/stats/<token>): its address never goes out
+      // in a Referer, not even on the logo requests that start before the
+      // page's own meta tag is read, and it's never indexed, its 404s
+      // included.
+      {
+        source: '/stats/:path*',
+        headers: [
+          { key: 'Referrer-Policy', value: 'no-referrer' },
+          { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
+        ],
+      },
+    ]
+  },
 }
 
 export default nextConfig

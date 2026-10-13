@@ -23,6 +23,7 @@ import { orgSearchSpec } from '../../admin/analytics/org-search'
 import { PAGE_NAV } from '../../admin/analytics/page-nav'
 import { resolveRange, type SearchParams } from '../../admin/analytics/range'
 import analytics from '../../admin/analytics/analytics.module.css'
+import styles from './page.module.css'
 
 // Live figures, and a switched-off link must stop at once.
 export const dynamic = 'force-dynamic'
@@ -77,10 +78,12 @@ export default async function OrgStatsPage({
   if (h.get('sec-fetch-dest') === 'document' && !(await isAdmin()))
     after(() => countShareView(token))
 
-  const orgName = data.org?.orgName ?? share.orgName
   return (
     <div className="container-default padding-top-56px padding-bottom-80px">
-      <h1 className="padding-bottom-12px">{orgName} on AISafety.com</h1>
+      {/* The name the link was made with, checked by the admin who made it. */}
+      <h1 className={`padding-bottom-12px ${styles.title}`}>
+        {share.orgName} on AISafety.com
+      </h1>
       <p className="color-teal-300 margin-bottom-32px">
         How visitors to AISafety.com find your listings and click through to
         them. The figures are live, so pick any dates below. Only people with

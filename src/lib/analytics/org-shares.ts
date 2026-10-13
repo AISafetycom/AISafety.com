@@ -231,8 +231,17 @@ export async function saveShare(
 ): Promise<OrgShare> {
   const now = new Date().toISOString()
   const existing = shareForQuery(await listShares(), input.query)
+  // Only the link's own fields: the listing's view counts live apart.
   const share: OrgShare = existing
-    ? { ...existing, ...input, query: existing.query, updatedAt: now }
+    ? {
+        token: existing.token,
+        query: existing.query,
+        leftOut: input.leftOut,
+        orgName: input.orgName,
+        createdAt: existing.createdAt,
+        createdBy: existing.createdBy,
+        updatedAt: now,
+      }
     : {
         token: newToken(),
         ...input,

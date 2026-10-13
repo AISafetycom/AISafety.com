@@ -1,0 +1,5 @@
+/* "AISafety.com" alone is wider than the narrowest phones at the h1 size,
+   so the heading may break inside a word rather than widen the page. */
+.title {
+  overflow-wrap: break-word;
+}

@@ -91,6 +91,11 @@
   .grid {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  /* On a phone a table scrolls sideways before a name gets this narrow. */
+  .nameCell {
+    min-width: 140px;
+  }
 }
 
 .panel {
@@ -147,8 +152,6 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  /* On a phone the table scrolls sideways before a name gets this narrow. */
-  min-width: 140px;
   color: var(--white);
 }
 
@@ -937,6 +940,58 @@
   color: var(--white);
 }
 
+.shareName {
+  display: flex;
+  flex: 1 1 260px;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--teal-400);
+  white-space: nowrap;
+}
+
+.shareConfirm {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--teal-300);
+}
+
+/* The org pages shared so far, before a search: name, how often opened,
+   and each page's own Copy link and Stop sharing. */
+.sharedPages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.sharedPages li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.sharedPagesNote {
+  font-size: 12px;
+  color: var(--teal-400);
+}
+
+.sharedPagesActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.empty + .panel {
+  margin-top: 20px;
+}
+
 .copyBtn {
   flex: none;
   padding: 3px 12px;
@@ -1150,9 +1205,9 @@
    always keeping the newest. A date is up to ~35px wide and ~61px with its
    year; the breakpoints (the plot's width) are measured so plain neighbors
    keep 20px apart and a dated one 12px, even when the newest date carries
-   a year and ends flush: up to 13 labels from 990px, 7 from 535px, and 4
-   that stay clear down to 270px. A label hidden here may have carried the
-   year, so the next one shown takes it on. */
+   a year and ends flush: up to 13 labels from 990px, 7 from 535px, 4 from
+   270px, and 2 below that (the narrowest phones). A label hidden here may
+   have carried the year, so the next one shown takes it on. */
 @container (max-width: 989px) {
   .chartDate[data-keep='1'] {
     display: none;
@@ -1169,6 +1224,16 @@
   }
 
   .chartDateYear[data-year-from='4'] {
+    display: inline;
+  }
+}
+
+@container (max-width: 269px) {
+  .chartDate[data-keep='4'] {
+    display: none;
+  }
+
+  .chartDateYear[data-year-from='8'] {
     display: inline;
   }
 }

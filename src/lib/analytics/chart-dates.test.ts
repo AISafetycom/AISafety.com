@@ -49,7 +49,7 @@ describe('chartDateLabels', () => {
 
   it('labels a single column', () => {
     expect(chartDateLabels(['2026-10-13'])).toEqual([
-      { index: 0, text: '13 Oct', year: null, keep: 4, yearFrom: null },
+      { index: 0, text: '13 Oct', year: null, keep: 8, yearFrom: null },
     ])
   })
 
@@ -108,7 +108,7 @@ describe('chartDateLabels', () => {
   it('thins out from the newest label, which always stays', () => {
     const labels = chartDateLabels(series('2026-10-13', 91))
     expect(labels.map(l => l.keep)).toEqual([
-      4, 1, 2, 1, 4, 1, 2, 1, 4, 1, 2, 1, 4,
+      4, 1, 2, 1, 8, 1, 2, 1, 4, 1, 2, 1, 8,
     ])
     expect(shown(labels, 2)).toEqual([
       '21 Jul',
@@ -120,6 +120,7 @@ describe('chartDateLabels', () => {
       '13 Oct',
     ])
     expect(shown(labels, 4)).toEqual(['21 Jul', '18 Aug', '15 Sep', '13 Oct'])
+    expect(shown(labels, 8)).toEqual(['18 Aug', '13 Oct'])
     // Even when the count doesn't divide evenly.
     const short = chartDateLabels(series('2026-10-13', 30))
     expect(shown(short, 4)).toEqual(['19 Sep', '1 Oct', '13 Oct'])
@@ -203,7 +204,7 @@ describe('chartDateLabels', () => {
       const labels = chartDateLabels(series('2026-10-13', n))
       const step = labelStep(n)
       expect(labels.at(-1)!.index).toBe(n - 1)
-      expect(labels.at(-1)!.keep).toBe(4)
+      expect(labels.at(-1)!.keep).toBe(8)
       expect(labels.length).toBeLessThanOrEqual(13)
       if (n >= 7) expect(labels.length).toBeGreaterThanOrEqual(7)
       for (let k = 1; k < labels.length; k++)

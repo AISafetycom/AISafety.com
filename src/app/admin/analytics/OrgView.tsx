@@ -4,6 +4,7 @@
 // shared page (src/app/stats) shows the same panels with none of those, and
 // words them for the org.
 
+import { Fragment, type ReactNode } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import type { OrgListingRow, OrgLookupData } from '@/lib/analytics/events'
@@ -15,8 +16,6 @@ import {
   type OrgSpec,
 } from '@/lib/analytics/org-lookup'
 import type { IssueClicksRead } from '@/lib/analytics/org-newsletter'
-import type { ListedShare } from '@/lib/analytics/org-shares'
-import type { ReactNode } from 'react'
 import ClicksChart from './ClicksChart'
 import Logo from './Logo'
 import SortableTable, { type SortColumn, type SortValue } from './SortableTable'
@@ -77,9 +76,9 @@ export interface OrgAdmin {
   /** The "Share with the org" box for the org the search found, and the
    *  rows this view leaves out; null for someone who can't make links. */
   shareBox: ((orgName: string, leftOut: string[]) => ReactNode) | null
-  /** Every org page made so far, listed before a search; null for someone
-   *  who can't make them, or when they couldn't be read. */
-  pages: ListedShare[] | null
+  /** Every org page made so far, listed before a search (SharedOrgPages);
+   *  null when there are none, or for someone who can't make them. */
+  sharedPages: ReactNode
 }
 
 /** How often an org's page has been opened, for the share box and the list:
@@ -132,31 +131,11 @@ export function OrgView({
             ? 'There’s nothing to show here just now. Reload the page to try again.'
             : 'Type an org’s name, like Lens Academy, BlueDot, or 80,000 Hours, to see every listing of theirs on the site and how each one is doing.'}
         </div>
-        {admin?.pages && admin.pages.length > 0 && (
+        {admin?.sharedPages && (
           <Panel title="Org pages shared so far">
-            <ul className={styles.sharedPages}>
-              {admin.pages.map(p => {
-                const q = new URLSearchParams()
-                for (const [k, v] of Object.entries(admin.params))
-                  if (k !== 'q' && k !== 'x' && typeof v === 'string')
-                    q.set(k, v)
-                q.set('tab', 'orgs')
-                q.set('q', p.query)
-                if (p.leftOut.length) q.set('x', p.leftOut.join(','))
-                return (
-                  <li key={p.token}>
-                    <Link href={`?${q.toString()}`}>{p.orgName}</Link>
-                    <span>
-                      {openedWords(p.views, p.lastViewedAt)} · made by{' '}
-                      {p.createdBy}
-                    </span>
-                  </li>
-                )
-              })}
-            </ul>
+            {admin.sharedPages}
             <p className={styles.caption}>
-              Open one to copy its link, update what it leaves out, or stop
-              sharing it.
+              Open one to see its figures and update what it leaves out.
             </p>
           </Panel>
         )}
@@ -204,9 +183,13 @@ export function OrgView({
         {failed}
         <div className={styles.empty}>
           {org.failedPages.length > 0
-            ? `Nothing found for “${org.query}”, but some listings couldn’t be read just now, so reload the page to try again.`
+            ? shared
+              ? 'Some of your listings couldn’t be read just now, so reload the page to try again.'
+              : `Nothing found for “${org.query}”, but some listings couldn’t be read just now, so reload the page to try again.`
             : shared
-              ? `Nothing to show ${inRange}. Try a longer range, like All time.`
+              ? range.key === 'all'
+                ? 'Nothing to show yet.'
+                : `Nothing to show ${inRange}. Try a longer range, like All time.`
               : range.key === 'all'
                 ? `Nothing on the site matches “${org.query}”. Try the org’s full name or another spelling.`
                 : `Nothing on the site matches “${org.query}” now, and nothing by that name had activity in this range. Try a longer range, like All time, or another spelling.`}
@@ -302,6 +285,7 @@ export function OrgView({
           rows={org.rows}
           badgeFor={badgeFor}
           matchNotes={!shared}
+          pageLast={shared}
           leaveOutHref={canLeaveOut ? leaveOutHref : undefined}
           leaveOutColumn={!shared}
           empty={
@@ -310,7 +294,9 @@ export function OrgView({
               : org.failedPages.length > 0
                 ? `No listings found, but the ${joinList(org.failedPages)} listings couldn’t be read just now; reload the page to try again.`
                 : shared
-                  ? `None of your listings had any activity ${inRange}. Try a longer range, like All time.`
+                  ? range.key === 'all'
+                    ? 'None of your listings has had any activity yet.'
+                    : `None of your listings had any activity ${inRange}. Try a longer range, like All time.`
                   : org.matched === 0
                     ? `No listing on the site matches “${org.query}”; the panels below show only searches that name it.`
                     : range.key === 'all'
@@ -359,7 +345,7 @@ export function OrgView({
             day. % of visitors is the share of that page&apos;s visitors who
             clicked it.
             {org.rows.some(r => r.hovers || r.picks) &&
-              ' Map hovers count the times the pointer rested on your pin for half a second, or a tap on a phone opened its tooltip; map search picks count picks from the Field map’s search box.'}
+              ' Map hovers count a visitor resting the pointer on your pin for half a second (or tapping it on a phone), and map search picks count picks from the Field map’s search box, each once a visitor a day.'}
           </p>
         ) : (
           <p className={styles.caption}>
@@ -451,11 +437,12 @@ export function OrgView({
           <p className={styles.caption}>
             {shared ? (
               <>
-                Clicks on your links in the AISafety.com newsletters, for the
-                issues sent in these dates. Each count covers the issue&apos;s
-                whole life so far and every click, not unique readers. Counting
-                began with the issues sent on 8 October 2026, and a new issue
-                shows here within a day of going out.
+                Clicks on your links in the AISafety.com email newsletters, for
+                the issues sent in these dates. Each count covers the
+                issue&apos;s whole life so far and every click, not unique
+                readers. Counting began with the issues sent on 8 October 2026,
+                and a new issue shows here within a day of going out. Issues of
+                the newsletters still sent through Substack aren&apos;t counted.
               </>
             ) : (
               <>
@@ -496,7 +483,7 @@ export function OrgView({
             count: r.count,
           }))}
           labelHead="Search"
-          countHead={usersHead ?? 'Searches'}
+          countHead={shared ? 'Visitors' : (usersHead ?? 'Searches')}
           empty={`Nobody searched for ${them} ${inRange}.`}
         />
         <p className={styles.caption}>
@@ -524,10 +511,13 @@ function newsletterEmpty(n: OrgNewsletter, shared: boolean): string {
       : 'No newsletter went out through the site in this range.'
   if (!n.complete)
     return `No clicks on ${their} links in the ${count.toLocaleString()} ${count === 1 ? 'issue' : 'issues'} sent ${inRange}.`
-  const names = joinList(n.issues)
+  // Named only when there are one or two: the names hold commas ("Events ·
+  // Week 41, 2026"), and a quarter holds two dozen.
   if (count === 1)
-    return `The one issue sent ${inRange} (${names}) had no link to ${them}.`
-  return `None of the ${count.toLocaleString()} issues sent ${inRange} (${names}) linked to ${them}.`
+    return `The one issue sent ${inRange} (${n.issues[0]}) had no link to ${them}.`
+  if (count === 2)
+    return `Neither of the two issues sent ${inRange} (${n.issues[0]} and ${n.issues[1]}) linked to ${them}.`
+  return `None of the ${count.toLocaleString()} issues sent ${inRange} linked to ${them}.`
 }
 
 /** The Org lookup's listings table. Rows span pages, and one name can be on
@@ -537,6 +527,7 @@ function OrgListingsTable({
   rows: allRows,
   badgeFor,
   matchNotes,
+  pageLast,
   leaveOutHref,
   leaveOutColumn,
   empty,
@@ -545,6 +536,9 @@ function OrgListingsTable({
   badgeFor: (page: string) => PageBadge
   /** Say why each row matched the search (organizer, website). */
   matchNotes: boolean
+  /** The Page column after the figures (the org's page): on a phone the
+   *  figures then show without scrolling sideways. */
+  pageLast: boolean
   /** Unset once the leave-out cap is reached. */
   leaveOutHref?: (hash: string) => string
   /** Keep the Leave out column, even while its links are withheld. */
@@ -558,140 +552,154 @@ function OrgListingsTable({
   const rows = allRows
     .slice(0, MAX_TABLE_ROWS)
     .sort((a, b) => navOrder(a.page) - navOrder(b.page))
-  const showHovers = allRows.some(r => r.hovers > 0)
-  const showPicks = allRows.some(r => r.picks > 0)
-  const columns: SortColumn[] = [
-    { label: 'Listing', sort: 'text' },
-    // Sorts by the pages' tab order, not alphabetically.
-    { label: 'Page', sort: 'rank' },
-    { label: 'Clicks', className: styles.numCol, sort: 'number' },
-    { label: '% of visitors', className: styles.pctCol, sort: 'number' },
-    ...(showHovers
-      ? [
-          {
-            label: 'Map hovers',
-            className: styles.numCol,
-            sort: 'number' as const,
-          },
-        ]
-      : []),
-    ...(showPicks
-      ? [
-          {
-            label: 'Map search picks',
-            className: styles.numCol,
-            sort: 'number' as const,
-          },
-        ]
-      : []),
-    ...(leaveOutColumn ? [{ label: '' }] : []),
-  ]
-  const values: SortValue[][] = rows.map(r => [
-    r.name,
-    navOrder(r.page),
-    r.clicks,
-    r.share.visitors > 0 ? r.share.active / r.share.visitors : null,
-    ...(showHovers ? [r.hovers] : []),
-    ...(showPicks ? [r.picks] : []),
-    ...(leaveOutColumn ? [null] : []),
-  ])
   // Totals cover every row, including any past the display cap.
   const total = (pick: (r: OrgListingRow) => number) =>
     allRows.reduce((n, r) => n + pick(r), 0).toLocaleString()
+  // Each column's heading, sort value, cell, and Total cell, so the order
+  // can change without the four drifting apart.
+  interface Column {
+    head: SortColumn
+    value: (r: OrgListingRow) => SortValue
+    cell: (r: OrgListingRow) => ReactNode
+    foot: ReactNode
+  }
+  const count = (
+    label: string,
+    pick: (r: OrgListingRow) => number
+  ): Column => ({
+    head: { label, className: styles.numCol, sort: 'number' },
+    value: pick,
+    cell: r => <td className={styles.numCol}>{pick(r).toLocaleString()}</td>,
+    foot: <td className={styles.numCol}>{total(pick)}</td>,
+  })
+  const listing: Column = {
+    head: { label: 'Listing', sort: 'text' },
+    value: r => r.name,
+    cell: r => {
+      const href = safeHref(r.url)
+      const notes = [
+        r.featured ? 'Featured slot' : null,
+        !matchNotes
+          ? null
+          : r.why === 'organizer'
+            ? 'Matched by organizer'
+            : r.why === 'website'
+              ? 'Matched by website'
+              : null,
+        r.live ? null : 'No longer listed',
+      ].filter(Boolean)
+      const logo = r.logo ?? faviconFor(href)
+      return (
+        <td className={styles.nameCell}>
+          {href ? (
+            <a
+              className={styles.logoLink}
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={`Open ${r.name}`}
+            >
+              <Logo src={logo} />
+            </a>
+          ) : (
+            <Logo src={logo} />
+          )}
+          <span className={styles.orgName}>
+            <span>{r.name}</span>
+            {notes.length > 0 && (
+              <span className={styles.orgNotes}>{notes.join(' · ')}</span>
+            )}
+          </span>
+        </td>
+      )
+    },
+    foot: <td className={styles.totalLabel}>Total</td>,
+  }
+  const page: Column = {
+    // Sorts by the pages' tab order, not alphabetically.
+    head: { label: 'Page', sort: 'rank' },
+    value: r => navOrder(r.page),
+    cell: r => {
+      const badge = badgeFor(r.page)
+      return (
+        <td>
+          <span className={styles.pageBadge}>
+            {badge.icon && (
+              <span className={styles.pageTabIcon}>
+                <Image src={badge.icon} alt="" width={12} height={12} />
+              </span>
+            )}
+            {badge.label}
+          </span>
+        </td>
+      )
+    },
+    foot: <td />,
+  }
+  const figures: Column[] = [
+    count('Clicks', r => r.clicks),
+    {
+      head: {
+        label: '% of visitors',
+        className: styles.pctCol,
+        sort: 'number',
+      },
+      value: r =>
+        r.share.visitors > 0 ? r.share.active / r.share.visitors : null,
+      cell: r => <td className={styles.pctCol}>{shareCell(r.share)}</td>,
+      foot: <td className={styles.pctCol} />,
+    },
+    ...(allRows.some(r => r.hovers > 0)
+      ? [count('Map hovers', r => r.hovers)]
+      : []),
+    ...(allRows.some(r => r.picks > 0)
+      ? [count('Map search picks', r => r.picks)]
+      : []),
+  ]
+  const leaveOut: Column = {
+    head: { label: '' },
+    value: () => null,
+    cell: r => (
+      <td>
+        {leaveOutHref && (
+          <Link
+            href={leaveOutHref(r.hash)}
+            scroll={false}
+            className={styles.leaveOut}
+            title="Not theirs? Leave it out of every figure on this tab"
+          >
+            Leave out
+          </Link>
+        )}
+      </td>
+    ),
+    foot: <td />,
+  }
+  const columns = [
+    listing,
+    ...(pageLast ? [...figures, page] : [page, ...figures]),
+    ...(leaveOutColumn ? [leaveOut] : []),
+  ]
   return (
     <>
       <SortableTable
-        columns={columns}
-        values={values}
+        columns={columns.map(c => c.head)}
+        values={rows.map(r => columns.map(c => c.value(r)))}
         foot={
           <tr className={styles.totalRow}>
-            <td className={styles.totalLabel}>Total</td>
-            <td />
-            <td className={styles.numCol}>{total(r => r.clicks)}</td>
-            <td className={styles.pctCol} />
-            {showHovers && (
-              <td className={styles.numCol}>{total(r => r.hovers)}</td>
-            )}
-            {showPicks && (
-              <td className={styles.numCol}>{total(r => r.picks)}</td>
-            )}
-            {leaveOutColumn && <td />}
+            {columns.map((c, i) => (
+              <Fragment key={i}>{c.foot}</Fragment>
+            ))}
           </tr>
         }
       >
-        {rows.map(r => {
-          const href = safeHref(r.url)
-          const badge = badgeFor(r.page)
-          const notes = [
-            r.featured ? 'Featured slot' : null,
-            !matchNotes
-              ? null
-              : r.why === 'organizer'
-                ? 'Matched by organizer'
-                : r.why === 'website'
-                  ? 'Matched by website'
-                  : null,
-            r.live ? null : 'No longer listed',
-          ].filter(Boolean)
-          const logo = r.logo ?? faviconFor(href)
-          return (
-            <tr key={r.key}>
-              <td className={styles.nameCell}>
-                {href ? (
-                  <a
-                    className={styles.logoLink}
-                    href={href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title={`Open ${r.name}`}
-                  >
-                    <Logo src={logo} />
-                  </a>
-                ) : (
-                  <Logo src={logo} />
-                )}
-                <span className={styles.orgName}>
-                  <span>{r.name}</span>
-                  {notes.length > 0 && (
-                    <span className={styles.orgNotes}>{notes.join(' · ')}</span>
-                  )}
-                </span>
-              </td>
-              <td>
-                <span className={styles.pageBadge}>
-                  {badge.icon && (
-                    <span className={styles.pageTabIcon}>
-                      <Image src={badge.icon} alt="" width={12} height={12} />
-                    </span>
-                  )}
-                  {badge.label}
-                </span>
-              </td>
-              <td className={styles.numCol}>{r.clicks.toLocaleString()}</td>
-              <td className={styles.pctCol}>{shareCell(r.share)}</td>
-              {showHovers && (
-                <td className={styles.numCol}>{r.hovers.toLocaleString()}</td>
-              )}
-              {showPicks && (
-                <td className={styles.numCol}>{r.picks.toLocaleString()}</td>
-              )}
-              {leaveOutColumn && (
-                <td>
-                  {leaveOutHref && (
-                    <Link
-                      href={leaveOutHref(r.hash)}
-                      scroll={false}
-                      className={styles.leaveOut}
-                      title="Not theirs? Leave it out of every figure on this tab"
-                    >
-                      Leave out
-                    </Link>
-                  )}
-                </td>
-              )}
-            </tr>
-          )
-        })}
+        {rows.map(r => (
+          <tr key={r.key}>
+            {columns.map((c, i) => (
+              <Fragment key={i}>{c.cell(r)}</Fragment>
+            ))}
+          </tr>
+        ))}
       </SortableTable>
       {allRows.length > rows.length && (
         <TruncationNote shown={rows.length} of={allRows.length} />

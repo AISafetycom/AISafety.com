@@ -6,12 +6,12 @@
 /** Roughly how many dates a full-width chart shows. */
 export const DATE_LABEL_TARGET = 13
 
-/** A full-width chart shows every label, a narrower one every 2nd and a
- *  phone-width one every 4th, always counting back from the newest so the
- *  last column keeps its date. */
-export type LabelThinning = 1 | 2 | 4
+/** A full-width chart shows every label, a narrower one every 2nd, a
+ *  phone-width one every 4th and the narrowest phones every 8th, always
+ *  counting back from the newest so the last column keeps its date. */
+export type LabelThinning = 1 | 2 | 4 | 8
 
-const THINNINGS: readonly LabelThinning[] = [1, 2, 4]
+const THINNINGS: readonly LabelThinning[] = [1, 2, 4, 8]
 
 export type ChartDateLabel = {
   /** The column it sits under, from 0 (the oldest). */
@@ -20,8 +20,9 @@ export type ChartDateLabel = {
   text: string
   /** "2027" when the label carries its year at some width, else null. */
   year: string | null
-  /** The sparsest thinning that still shows it: 4 stays at every width, 2
-   *  hides on a phone-width chart, 1 shows only on a full-width one. */
+  /** The sparsest thinning that still shows it: 8 stays at every width, 4
+   *  hides on the narrowest phones, 2 on a phone-width chart, and 1 shows
+   *  only on a full-width one. */
   keep: LabelThinning
   /** The year shows once the chart thins to this or sparser (1 means at
    *  every width). Null when `year` is. */
@@ -53,7 +54,7 @@ export function chartDateLabels(days: readonly string[]): ChartDateLabel[] {
   return indices.map((index, k) => {
     const fromEnd = last - k
     const keep: LabelThinning =
-      fromEnd % 4 === 0 ? 4 : fromEnd % 2 === 0 ? 2 : 1
+      fromEnd % 8 === 0 ? 8 : fromEnd % 4 === 0 ? 4 : fromEnd % 2 === 0 ? 2 : 1
     const { year, month, day } = parsed[k]
     // At thinning t the label shown before this one is t labels back. Once
     // the year shows at one thinning it shows at every sparser one too (the

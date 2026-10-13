@@ -66,8 +66,9 @@ export interface OrgSpec {
   /** The search normalized (see normText) and with its spaces removed. */
   norm: string
   compact: string
-  /** What to call the org in the summary sentence: the long name of the one
-   *  matched Field map org, else the search as typed. */
+  /** What to call the org in the share box (which starts the org page's
+   *  name from it): the long name of the one matched Field map org, else the
+   *  search as typed. */
   orgName: string
   /** Matched catalog listings by row key (page + '\0' + name). */
   entries: Map<string, MatchedEntry>
@@ -684,7 +685,7 @@ export function orgSpec(
     if (u) spec.urls.add(u)
   }
 
-  // The org's name for the summary sentence: the one Field map org matched
+  // The org's name for the share box: the one Field map org matched
   // by name, when there's exactly one. Leaving that row out of the figures
   // doesn't rename the org, as long as a kept listing still carries its name
   // (Lens Academy's courses do).
