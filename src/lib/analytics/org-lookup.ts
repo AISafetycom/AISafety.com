@@ -716,3 +716,58 @@ function noteLeftOut(spec: OrgSpec, e: CatalogEntry, seen: Set<string>): void {
   seen.add(key)
   spec.leftOutEntries.push({ key, page: e.page, name: e.name })
 }
+
+/** The pages the newsletters' cards come from. */
+const NEWSLETTER_PAGES = ['Events', 'Training', 'Funding']
+
+/** One of the org's links in a sent newsletter, with its clicks. */
+export interface OrgNewsletterRow {
+  key: string
+  /** The issue's campaign name, "Training · Week 41, 2026". */
+  issue: string
+  label: string
+  url: string
+  clicks: number
+}
+
+/** The org's links among the newsletters' counted clicks: a link is theirs
+ *  when its address is one of their listings' (tracking tags aside), it's on
+ *  a website that spread, or its card title names them. A link only on
+ *  listings left out stays out. Busiest first. Pure. */
+export function orgNewsletterClicks(
+  spec: OrgSpec,
+  issues: {
+    name: string
+    links: { label: string; url: string; clicks: number }[]
+  }[]
+): OrgNewsletterRow[] {
+  if (spec.tooBroad || !spec.norm) return []
+  const rows: OrgNewsletterRow[] = []
+  for (const issue of issues)
+    for (const link of issue.links) {
+      if (link.clicks <= 0) continue
+      const c = cleanUrl(link.url)
+      const known = c != null && spec.urls.has(c)
+      if (c != null && spec.leftOutUrls.has(c) && !known) continue
+      // A card whose title is a left-out row stays out too, even when that
+      // listing has since left the catalog.
+      if (
+        !known &&
+        NEWSLETTER_PAGES.some(p => spec.leftOut.has(rowHash(p, link.label)))
+      )
+        continue
+      const byUrl = known || spreadsTo(spec, hostOf(link.url))
+      const byLabel = matchesNorm(normText(link.label), spec.norm, spec.compact)
+      if (!byUrl && !byLabel) continue
+      rows.push({
+        key: `${issue.name}\x00${link.url}\x00${link.label}`,
+        issue: issue.name,
+        label: link.label,
+        url: link.url,
+        clicks: link.clicks,
+      })
+    }
+  return rows.sort(
+    (a, b) => b.clicks - a.clicks || a.issue.localeCompare(b.issue)
+  )
+}

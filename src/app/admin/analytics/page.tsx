@@ -72,9 +72,15 @@ import {
   normText,
   orgSpec,
   parseLeftOut,
+  orgNewsletterClicks,
   type CatalogSources,
+  type OrgNewsletterRow,
   type OrgSpec,
 } from '@/lib/analytics/org-lookup'
+import {
+  readIssueClicks,
+  type IssueClicksRead,
+} from '@/lib/analytics/org-newsletter'
 import ClicksChart from './ClicksChart'
 import CopySentence from './CopySentence'
 import DateRangePicker from './DateRangePicker'
@@ -119,6 +125,15 @@ const PAGE_NAV: { name: string; label: string; icon: string }[] = [
   // links), so it gets no tab. If it's ever tracked, add it back here.
   { name: 'Founders', label: 'Founder toolkit', icon: 'rocket.svg' },
 ]
+
+const NAV_INDEX = new Map(PAGE_NAV.map((p, i) => [p.name, i]))
+
+/** Where a page sorts among the resource pages: Home first, then site-nav
+ *  order, then anything else. The page tabs and the Org lookup's listings
+ *  share it. */
+function navOrder(name: string): number {
+  return name === 'Home' ? -1 : (NAV_INDEX.get(name) ?? 999)
+}
 
 // The non-page tabs that lead the tab bar. Their keys are reserved (and
 // lowercase), so a resource page can never collide with them.
@@ -261,6 +276,14 @@ function faviconFor(url?: string): string | undefined {
   } catch {
     return undefined
   }
+}
+
+/** The Org lookup's newsletter panel: whether the counts could be read, how
+ *  many issues went out in the range, and the org's links among them. */
+interface OrgNewsletter {
+  status: IssueClicksRead['status']
+  issues: number
+  rows: OrgNewsletterRow[]
 }
 
 /** Which page each catalog source fills, for the "couldn't read" note. */
@@ -615,51 +638,71 @@ export default async function AnalyticsPage({
       ? orgSearchSpec(orgQuery, orgLeftOut)
       : undefined
 
-  const [data, funders, convStats, themes, searchIndex, sendStats, feeds] =
-    await Promise.all([
-      readDashboard(
-        range,
-        onResourceTab ? tabReq : undefined,
-        unique,
-        first(sp.source),
-        orgSearch
-      ),
-      getFunders().catch(() => []),
-      // The transcript-derived stats only render on the Chatbot tab, so only
-      // fetch the (ever-growing) conversation log when it's the active tab.
-      tabReq === 'chatbot' ? readConversationStats(range) : null,
-      tabReq === 'chatbot' ? readQuestionThemes() : null,
-      // Resolves clicked search results to their resource page; only the Search
-      // tab reads it. On error the page icons resolve from recorded types alone.
-      tabReq === 'search'
-        ? buildSearchIndex().catch(() => [] as SearchEntry[])
-        : ([] as SearchEntry[]),
-      // The Newsletters tab reads the sends from ActiveCampaign (slow, so only
-      // on that tab). null = couldn't read them; the tab says so.
-      tabReq === 'newsletters' && isNewsletterConfigured()
-        ? readSendStats(range).catch(err => {
-            console.warn(
-              `[analytics] newsletter sends unavailable: ${err instanceof Error ? err.message : String(err)}`
-            )
-            return null
-          })
-        : null,
-      // The feeds' readers yesterday and so far today (UTC days); null =
-      // couldn't read them.
-      tabReq === 'newsletters' ? readFeedDays() : null,
-    ])
+  const [
+    data,
+    funders,
+    convStats,
+    themes,
+    searchIndex,
+    sendStats,
+    feeds,
+    issueClicks,
+  ] = await Promise.all([
+    readDashboard(
+      range,
+      onResourceTab ? tabReq : undefined,
+      unique,
+      first(sp.source),
+      orgSearch
+    ),
+    getFunders().catch(() => []),
+    // The transcript-derived stats only render on the Chatbot tab, so only
+    // fetch the (ever-growing) conversation log when it's the active tab.
+    tabReq === 'chatbot' ? readConversationStats(range) : null,
+    tabReq === 'chatbot' ? readQuestionThemes() : null,
+    // Resolves clicked search results to their resource page; only the Search
+    // tab reads it. On error the page icons resolve from recorded types alone.
+    tabReq === 'search'
+      ? buildSearchIndex().catch(() => [] as SearchEntry[])
+      : ([] as SearchEntry[]),
+    // The Newsletters tab reads the sends from ActiveCampaign (slow, so only
+    // on that tab). null = couldn't read them; the tab says so.
+    tabReq === 'newsletters' && isNewsletterConfigured()
+      ? readSendStats(range).catch(err => {
+          console.warn(
+            `[analytics] newsletter sends unavailable: ${err instanceof Error ? err.message : String(err)}`
+          )
+          return null
+        })
+      : null,
+    // The feeds' readers yesterday and so far today (UTC days); null =
+    // couldn't read them.
+    tabReq === 'newsletters' ? readFeedDays() : null,
+    // The Org lookup's newsletter panel: the sent issues' link clicks
+    // (Upstash, live site only). Never rejects.
+    orgSearch ? readIssueClicks(range) : null,
+  ])
+
+  // Which of those newsletter links are the searched org's.
+  const orgNewsletter: OrgNewsletter | null =
+    orgSearch && issueClicks
+      ? issueClicks.status === 'ok'
+        ? {
+            status: 'ok',
+            issues: issueClicks.issues.length,
+            rows: orgNewsletterClicks(await orgSearch, issueClicks.issues),
+          }
+        : { status: issueClicks.status, issues: 0, rows: [] }
+      : null
 
   // Resource-page tabs: every page in PAGE_NAV always gets one (so quiet pages
   // like Projects still appear), plus any other page that has clicks (e.g.
   // Home). Ordered Home first, then site-nav order, then the rest.
-  const pageOrder = new Map(PAGE_NAV.map((p, i) => [p.name, i]))
   const labelByPage = new Map(PAGE_NAV.map(p => [p.name, p.label]))
   const iconByPage = new Map(PAGE_NAV.map(p => [p.name, p.icon]))
-  const orderOf = (name: string) =>
-    name === 'Home' ? -1 : (pageOrder.get(name) ?? 999)
   const resourceNames = [
     ...new Set([...PAGE_NAV.map(p => p.name), ...data.byPage.map(p => p.name)]),
-  ].sort((a, b) => orderOf(a) - orderOf(b))
+  ].sort((a, b) => navOrder(a) - navOrder(b))
   const resourceTabs = resourceNames.map(name => ({
     key: name,
     label: labelByPage.get(name) ?? name,
@@ -908,6 +951,7 @@ export default async function AnalyticsPage({
               labelByPage={labelByPage}
               iconByPage={iconByPage}
               unique={unique}
+              newsletter={orgNewsletter}
             />
           )}
 
@@ -2785,6 +2829,7 @@ function OrgView({
   labelByPage,
   iconByPage,
   unique,
+  newsletter,
 }: {
   org: OrgLookupData | undefined
   query: string
@@ -2794,6 +2839,7 @@ function OrgView({
   labelByPage: Map<string, string>
   iconByPage: Map<string, string>
   unique: boolean
+  newsletter: OrgNewsletter | null
 }) {
   // Keyed by the search, so Back and Forward refill the box with the search
   // the page is showing.
@@ -2840,6 +2886,7 @@ function OrgView({
     org.leftOut.length === 0 &&
     org.destinations.length === 0 &&
     org.searches.length === 0 &&
+    (newsletter?.rows.length ?? 0) === 0 &&
     parseLeftOut(first(params.x)).size === 0
   )
     return (
@@ -2888,6 +2935,8 @@ function OrgView({
   const putBackHref = (hash: string) =>
     hrefWithLeftOut(leftOut.filter(h => h !== hash))
   const usersHead = unique ? 'Users' : undefined
+  const newsletterClicks =
+    newsletter?.rows.reduce((n, r) => n + r.clicks, 0) ?? 0
 
   return (
     <>
@@ -2902,8 +2951,22 @@ function OrgView({
           />
           <Stat label="clicks" value={org.clicks.toLocaleString()} />
           <Stat label="listings" value={org.rows.length.toLocaleString()} />
+          {newsletter?.status === 'ok' && (
+            <Stat
+              label="newsletter clicks"
+              value={newsletterClicks.toLocaleString()}
+            />
+          )}
         </div>
-        <CopySentence text={orgSentence(org, range, oldestTs, pageLabel)} />
+        <CopySentence
+          text={orgSentence(
+            org,
+            range,
+            oldestTs,
+            pageLabel,
+            newsletter?.status === 'ok' ? newsletterClicks : 0
+          )}
+        />
         <p className={styles.caption}>
           Visitors = browsers that clicked through to one of these listings from
           a resource page, site search, or the chatbot, counted once each
@@ -2911,7 +2974,9 @@ function OrgView({
           Since 24 August 2026, links from resource pages reach the org tagged
           as coming from AISafety.com; earlier clicks, and links from search and
           the chatbot, aren&apos;t tagged, so the org&apos;s own analytics will
-          likely show fewer. The sentence always quotes every click.
+          likely show fewer. The sentence always quotes every click. Newsletter
+          clicks are counted apart (below): they can&apos;t be told apart by
+          reader, so they&apos;re never in the visitors.
         </p>
       </Panel>
 
@@ -3020,6 +3085,51 @@ function OrgView({
         </Panel>
       </div>
 
+      {newsletter && (
+        <Panel title="Newsletter clicks">
+          {newsletter.status === 'local' ? (
+            <p className={styles.dim}>
+              Newsletter clicks are counted on the live site only, so
+              there&apos;s nothing to show here.
+            </p>
+          ) : newsletter.status === 'error' ? (
+            <p className={styles.dim}>
+              Couldn&apos;t read the newsletter click counts just now. Reload
+              the page to try again.
+            </p>
+          ) : (
+            <KeyedTable
+              rows={newsletter.rows.map(r => ({
+                key: r.key,
+                name: r.label,
+                // Opened from here, a link shouldn't count as a newsletter
+                // visit in the org's own analytics.
+                href: withoutUtm(r.url),
+                logo: faviconFor(r.url),
+                where: r.issue,
+                count: r.clicks,
+              }))}
+              labelHead="Link"
+              whereHead="Issue"
+              countHead="Clicks"
+              empty={
+                newsletter.issues === 0
+                  ? 'No newsletter went out through the site in this range.'
+                  : `No clicks on their links in the ${newsletter.issues.toLocaleString()} ${newsletter.issues === 1 ? 'issue' : 'issues'} sent in this range.`
+              }
+            />
+          )}
+          <p className={styles.caption}>
+            Clicks on their links in the newsletters sent through the site, for
+            the issues that went out in this range. Each count covers the
+            issue&apos;s whole life so far and every click, not unique readers.
+            Counting began with the issues sent from 8 October 2026; issues sent
+            through Substack aren&apos;t counted. A newly sent issue shows here
+            once the site has filed it, which can take up to a day.
+          </p>
+        </Panel>
+      )}
+
       <Panel
         title={`Clicks over time · per ${org.seriesUnit === 'week' ? 'week' : 'day'}`}
       >
@@ -3074,12 +3184,18 @@ function OrgListingsTable({
   empty: string
 }) {
   if (allRows.length === 0) return <p className={styles.dim}>{empty}</p>
-  const rows = allRows.slice(0, MAX_TABLE_ROWS)
+  // Grouped by resource page in the tabs' order, busiest first within each
+  // page (the order the rows arrive in; the sort is stable). The cap keeps
+  // the busiest rows, so it's applied before grouping.
+  const rows = allRows
+    .slice(0, MAX_TABLE_ROWS)
+    .sort((a, b) => navOrder(a.page) - navOrder(b.page))
   const showHovers = allRows.some(r => r.hovers > 0)
   const showPicks = allRows.some(r => r.picks > 0)
   const columns: SortColumn[] = [
     { label: 'Listing', sort: 'text' },
-    { label: 'Page', sort: 'text' },
+    // Sorts by the pages' tab order, not alphabetically.
+    { label: 'Page', sort: 'rank' },
     { label: 'Clicks', className: styles.numCol, sort: 'number' },
     { label: '% of visitors', className: styles.pctCol, sort: 'number' },
     ...(showHovers
@@ -3104,7 +3220,7 @@ function OrgListingsTable({
   ]
   const values: SortValue[][] = rows.map(r => [
     r.name,
-    badgeFor(r.page).label,
+    navOrder(r.page),
     r.clicks,
     r.share.visitors > 0 ? r.share.active / r.share.visitors : null,
     ...(showHovers ? [r.hovers] : []),
@@ -3217,6 +3333,7 @@ function OrgListingsTable({
 function KeyedTable({
   rows: allRows,
   labelHead,
+  whereHead = 'Where',
   countHead,
   empty,
 }: {
@@ -3229,6 +3346,7 @@ function KeyedTable({
     count: number
   }[]
   labelHead: string
+  whereHead?: string
   countHead: string
   empty: string
 }) {
@@ -3240,7 +3358,7 @@ function KeyedTable({
   const withLogos = rows.some(r => r.logo)
   const columns: SortColumn[] = [
     { label: labelHead, sort: 'text' },
-    { label: 'Where', sort: 'text' },
+    { label: whereHead, sort: 'text' },
     { label: countHead, className: styles.numCol, sort: 'number' },
     { label: '%', className: styles.pctCol, sort: 'number' },
   ]
@@ -3298,6 +3416,18 @@ function KeyedTable({
   )
 }
 
+/** An address with its utm_ tracking tags removed. */
+function withoutUtm(url: string): string {
+  try {
+    const u = new URL(url)
+    for (const k of [...u.searchParams.keys()])
+      if (k.toLowerCase().startsWith('utm_')) u.searchParams.delete(k)
+    return u.toString()
+  } catch {
+    return url
+  }
+}
+
 /** Only http(s) addresses become links: event urls come from the public
  *  beacon and could be anything. */
 function safeHref(url: string | undefined): string | undefined {
@@ -3351,17 +3481,24 @@ function rangeWords(
 
 /** One sentence to quote back to the org, e.g. "In September 2026, 214
  *  visitors clicked through from AISafety.com to Lens Academy listings on the
- *  Training programs, Field map, and Communities pages (380 clicks in all)."
- *  Always every click, whichever count mode is on. */
+ *  Training programs, Field map, and Communities pages (380 clicks in all),
+ *  plus 42 clicks so far on their links in the AISafety.com newsletters sent
+ *  in that period." Always every click, whichever count mode is on. The
+ *  newsletter counts have no dates of their own, so they're tied to the
+ *  issues sent in the period, not the clicks made in it. */
 function orgSentence(
   org: OrgLookupData,
   range: ResolvedRange,
   oldestTs: string | undefined,
-  pageLabel: (page: string) => string
+  pageLabel: (page: string) => string,
+  newsletterClicks = 0
 ): string {
   const when = rangeWords(range, oldestTs)
+  const fromNewsletters = `${newsletterClicks.toLocaleString()} ${newsletterClicks === 1 ? 'click' : 'clicks'}`
   if (org.visitors === 0)
-    return `${when}, no visitors clicked through from AISafety.com to ${org.orgName} listings.`
+    return newsletterClicks > 0
+      ? `${when}, no visitors clicked through from AISafety.com to ${org.orgName} listings, but their links in the AISafety.com newsletters sent in that period have had ${fromNewsletters} so far.`
+      : `${when}, no visitors clicked through from AISafety.com to ${org.orgName} listings.`
   const people = `${org.visitors.toLocaleString()} ${org.visitors === 1 ? 'visitor' : 'visitors'}`
   // The homepage reads as itself, ahead of the resource pages.
   const pages = org.clickedPages.filter(p => p !== 'Home').map(pageLabel)
@@ -3374,7 +3511,11 @@ function orgSentence(
   ]
   const on = places.length ? ` on ${places.join(' and ')}` : ''
   const clicks = `${org.allClicks.toLocaleString()} ${org.allClicks === 1 ? 'click' : 'clicks'} in all`
-  return `${when}, ${people} clicked through from AISafety.com to ${org.orgName} listings${on} (${clicks}).`
+  const plus =
+    newsletterClicks > 0
+      ? `, plus ${fromNewsletters} so far on their links in the AISafety.com newsletters sent in that period`
+      : ''
+  return `${when}, ${people} clicked through from AISafety.com to ${org.orgName} listings${on} (${clicks})${plus}.`
 }
 
 /** The Map tab's search-box panels: the funnel from opening the box to
