@@ -71,7 +71,12 @@ import { canEdit } from '@/lib/admin/access'
 import { requestOrigin } from '@/lib/admin/origin'
 import DateRangePicker from './DateRangePicker'
 import OrgSearch from './OrgSearch'
-import ShareOrgLink, { SharedOrgPages, type ShareState } from './ShareOrgLink'
+import ShareOrgLink, {
+  LeaveOutLink,
+  SharedOrgPages,
+  type ShareState,
+  type ShareSync,
+} from './ShareOrgLink'
 import ExcludeToggle from './ExcludeToggle'
 import Logo from './Logo'
 import PendingMark from './PendingMark'
@@ -668,6 +673,16 @@ async function AnalyticsView({
     if (leftOut.length) q.set('x', leftOut.join(','))
     return `?${q.toString()}`
   }
+  // Leave out and Put back keep this search's shared page in step, for
+  // someone who may change it.
+  const shareSync: ShareSync | null = shared
+    ? { query: orgQuery, orgName: shared.orgName }
+    : null
+  const leaveOutLink: OrgAdmin['leaveOutLink'] = ({ label, ...link }) => (
+    <LeaveOutLink {...link} sync={shareSync}>
+      {label}
+    </LeaveOutLink>
+  )
   const sharedPages =
     shares && shares !== 'failed' && shares.length > 0 ? (
       <SharedOrgPages
@@ -999,6 +1014,7 @@ async function AnalyticsView({
                 searchBox: <OrgSearch key={orgQuery} query={orgQuery} />,
                 shareBox,
                 sharedPages,
+                leaveOutLink,
               }}
             />
           )}

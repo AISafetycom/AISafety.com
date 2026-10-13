@@ -2,7 +2,8 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState, useTransition } from 'react'
+import { useState, useTransition, type ReactNode } from 'react'
+import PendingMark from './PendingMark'
 import styles from './analytics.module.css'
 
 // The Org lookup's org pages (/stats/<token>, src/lib/analytics/org-shares.ts):
@@ -238,7 +239,7 @@ export default function ShareOrgLink({
           </a>
           <StopSharing token={share.token} />
           <p className={styles.shareNote}>
-            {share.opened}.
+            {share.opened}. Leave out and Put back here update their page too.
             {share.leftOutDiffers && (
               <>
                 {' '}
@@ -268,6 +269,84 @@ export default function ShareOrgLink({
         </p>
       )}
     </div>
+  )
+}
+
+/** The search's shared page, for Leave out and Put back to keep in step. */
+export interface ShareSync {
+  query: string
+  /** The name the page shows, kept as it is. */
+  orgName: string
+}
+
+/** The Org lookup's Leave out and Put back. When the search has a shared
+ *  page (and the viewer may change it), a click first saves the new left-out
+ *  rows to that page, then loads the view without (or with) the row, so the
+ *  org's page always matches. Otherwise it's a plain link. Either way the
+ *  link lights up and its row fades at once (data-pending). */
+export function LeaveOutLink({
+  href,
+  leftOut,
+  sync,
+  title,
+  children,
+}: {
+  href: string
+  /** The rows left out once this link is followed. */
+  leftOut: string[]
+  sync: ShareSync | null
+  title?: string
+  children: ReactNode
+}) {
+  const router = useRouter()
+  const [saving, setSaving] = useState(false)
+  const [loading, startTransition] = useTransition()
+  if (!sync)
+    return (
+      <Link
+        href={href}
+        scroll={false}
+        className={styles.leaveOut}
+        title={title}
+      >
+        {children}
+        <PendingMark />
+      </Link>
+    )
+  return (
+    <a
+      href={href}
+      className={styles.leaveOut}
+      title={title}
+      onClick={async e => {
+        // A new tab or window gets the plain view; only this one saves.
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
+          return
+        e.preventDefault()
+        if (saving || loading) return
+        setSaving(true)
+        try {
+          const res = await fetch('/api/admin/org-shares', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...sync, leftOut }),
+          })
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        } catch (err) {
+          // Their page keeps its old rows; the share box then says so and
+          // offers "Update their page to match".
+          console.warn(
+            `[analytics] org page not updated: ${err instanceof Error ? err.message : String(err)}`
+          )
+        } finally {
+          setSaving(false)
+        }
+        startTransition(() => router.push(href, { scroll: false }))
+      }}
+    >
+      {children}
+      <span hidden data-pending={saving || loading || undefined} />
+    </a>
   )
 }
 
