@@ -738,13 +738,12 @@ describe('orgLookup', () => {
     ])
   })
 
-  it('counts visitors whatever the mode, and every click for the sentence', () => {
+  it('counts visitors whatever the mode', () => {
     const u = run(true)
     const t = run(false)
     // v1, v2, v3, v4, v5, v6 + one vid-less click.
     expect(u.visitors).toBe(7)
     expect(t.visitors).toBe(7)
-    expect(u.allClicks).toBe(t.clicks)
     expect(t.clicks).toBe(11)
     expect(t.reached.find(r => r.name === 'Featured slot')?.count).toBe(1)
   })
@@ -893,7 +892,6 @@ describe('orgLookup', () => {
       })
     )
     const d = orgLookup(flood, spec('Lens'), false, views, RANGE, NOW)
-    expect(d.allClicks).toBe(130_000)
     expect(d.visitors).toBe(130_000)
   })
 

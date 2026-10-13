@@ -647,8 +647,9 @@ async function AnalyticsView({
       ? null
       : (orgName, leftOut) => (
           <ShareOrgLink
-            // A new search starts the name field afresh.
-            key={orgQuery}
+            // A new search starts the name field afresh. (Not the bare
+            // search: the search box beside it is keyed by that.)
+            key={`share:${orgQuery}`}
             query={orgQuery}
             orgName={orgName}
             leftOut={leftOut}

@@ -1896,10 +1896,8 @@ export interface OrgLookupData {
    *  resource page, site search, or the chatbot); vid-less clicks count once
    *  each. Ignores the count mode. */
   visitors: number
-  /** Those clicks, following the count mode, and every click regardless of
-   *  it (the summary sentence quotes the latter). */
+  /** Those clicks, following the count mode. */
   clicks: number
-  allClicks: number
   rows: OrgListingRow[]
   /** Rows (and catalog listings) Bryce left out, for the Put back links. */
   leftOut: { hash: string; page: string; name: string }[]
@@ -1952,7 +1950,6 @@ export function orgLookup(
       ...base,
       visitors: 0,
       clicks: 0,
-      allClicks: 0,
       rows: [],
       leftOut: [],
       reached: [],
@@ -2101,14 +2098,11 @@ export function orgLookup(
   const bump = (bucket: string) =>
     reached.set(bucket, (reached.get(bucket) ?? 0) + 1)
   const counted: AnalyticsEvent[] = []
-  // Every click before the count mode's dedupe, for the visitor count and
-  // the sentence. Counted, not kept: a flood on one listing mustn't cost
-  // memory twice.
-  let allClicks = 0
+  // Every click before the count mode's dedupe, for the visitor count.
+  // Counted, not kept: a flood on one listing mustn't cost memory twice.
   const visitorIds = new Set<string>()
   let anonClicks = 0
   const seeClick = (e: AnalyticsEvent) => {
-    allClicks++
     if (e.vid) visitorIds.add(e.vid)
     else anonClicks++
   }
@@ -2274,7 +2268,6 @@ export function orgLookup(
     ...base,
     visitors: visitorIds.size + anonClicks,
     clicks: counted.length,
-    allClicks,
     rows,
     leftOut: [...leftOut.values()],
     reached: ORG_REACHED_ORDER.filter(b => reached.has(b)).map(name => ({
