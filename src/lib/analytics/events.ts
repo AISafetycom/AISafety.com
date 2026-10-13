@@ -31,7 +31,7 @@ import {
   labelMatches,
   matchesNorm,
   normText,
-  onHosts,
+  spreadsTo,
   rowHash,
   rowKey,
   stripIdPrefix,
@@ -1830,7 +1830,7 @@ export function orgLookup(
     return c
   }
   const onSpread = (host: string | null) =>
-    spec.hosts.size > 0 && onHosts(host, spec.hosts)
+    spec.hosts.size > 0 && spreadsTo(spec, host)
 
   // Pass 1: which rows are the org's, and the candidate events.
   const why = new Map<string, MatchReason | null>()
@@ -1905,7 +1905,9 @@ export function orgLookup(
         leftOut.set(key, { hash: rowHash(page, name), page, name })
       const c = clean(e.url)
       if (c) leftOutUrls.add(c)
-      if (e.listingId) leftOutIds.add(e.listingId)
+      // Unless a kept listing has the same record (a homepage card and its
+      // program): its chatbot cards still count.
+      if (e.listingId && !spec.ids.has(e.listingId)) leftOutIds.add(e.listingId)
       continue
     }
     let acc = accs.get(key)
@@ -2163,14 +2165,13 @@ function orgSeries(
   now: number,
   oldest: number
 ): { series: { start: string; count: number }[]; unit: 'day' | 'week' } {
+  // Nothing read in range means nothing to draw.
+  if (!Number.isFinite(oldest)) return { series: [], unit: 'day' }
   const end = Math.min(endMs ?? now, now)
-  const start =
-    startMs != null && Number.isFinite(oldest)
-      ? Math.max(startMs, oldest)
-      : (startMs ?? oldest)
-  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end)
-    return { series: [], unit: 'day' }
-  const dayMs = (t: number) => Date.parse(`${dashboardDay(t)}T00:00:00Z`)
+  const start = startMs != null ? Math.max(startMs, oldest) : oldest
+  if (!Number.isFinite(end) || start > end) return { series: [], unit: 'day' }
+  // Day boundaries by arithmetic: the dashboard's zone is UTC (DASHBOARD_TZ).
+  const dayMs = (t: number) => Math.floor(t / 86_400_000) * 86_400_000
   const firstDay = dayMs(start)
   const lastDay = dayMs(end)
   const unit =

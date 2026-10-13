@@ -74,8 +74,10 @@ export interface OrgSpec {
   ids: Map<string, MatchReason>
   /** Cleaned web addresses of the matched listings. */
   urls: Set<string>
-  /** Websites that spread (hostnames without www). */
+  /** Websites that spread (hostnames without www), with their subdomains
+   *  except `excludedHosts` — see spreadsTo. */
   hosts: Set<string>
+  excludedHosts: Set<string>
   /** Row hashes Bryce left out (?x=), and the left-out listings' addresses
    *  and record ids, so search and chatbot clicks on them stay out too. */
   leftOut: Set<string>
@@ -238,6 +240,69 @@ export function cleanUrl(url: string | undefined): string | null {
   } catch {
     return null
   }
+}
+
+/** Hosts many unrelated groups share (forms, job boards, chat, video,
+ *  social, blogging and event platforms): a listing there says nothing
+ *  about who else there belongs to the org, so they never spread. */
+const SHARED_HOSTS = new Set([
+  'airtable.com',
+  'docs.google.com',
+  'drive.google.com',
+  'forms.gle',
+  'google.com',
+  'tally.so',
+  'typeform.com',
+  'jotform.com',
+  'notion.site',
+  'notion.so',
+  'greenhouse.io',
+  'lever.co',
+  'ashbyhq.com',
+  'workable.com',
+  'gem.com',
+  'discord.gg',
+  'discord.com',
+  'slack.com',
+  't.me',
+  'whatsapp.com',
+  'luma.com',
+  'lu.ma',
+  'eventbrite.com',
+  'meetup.com',
+  'youtube.com',
+  'youtu.be',
+  'spotify.com',
+  'apple.com',
+  'x.com',
+  'twitter.com',
+  'linkedin.com',
+  'facebook.com',
+  'instagram.com',
+  'github.com',
+  'substack.com',
+  'medium.com',
+  'lesswrong.com',
+  'alignmentforum.org',
+  'forum.effectivealtruism.org',
+  'itch.io',
+  'calendly.com',
+  'zoom.us',
+  'bit.ly',
+  'is.gd',
+  'tinyurl.com',
+])
+
+/** Does a spread website cover `host` (itself, or a subdomain that wasn't
+ *  kept out)? */
+export function spreadsTo(spec: OrgSpec, host: string | null): boolean {
+  return onHosts(host, spec.hosts) && !onHosts(host, spec.excludedHosts)
+}
+
+function addTo(map: Map<string, Set<string>>, key: string, value: string) {
+  const set = map.get(key) ?? new Set<string>()
+  set.add(value)
+  map.set(key, set)
 }
 
 /** Is `host` one of `hosts`, or a subdomain of one? */
@@ -458,6 +523,7 @@ export function orgSpec(
     ids: new Map(),
     urls: new Set(),
     hosts: new Set(),
+    excludedHosts: new Set(),
     leftOut,
     leftOutUrls: new Set(),
     leftOutIds: new Set(),
@@ -487,38 +553,56 @@ export function orgSpec(
     seeds.push({ e, why: byName ? 'name' : 'organizer' })
   }
 
-  // 2. Websites that spread: the org's live listings are at least half of
-  //    the live (non-Jobs) listings on the website and its subdomains, so a
-  //    shared host (discord.gg, lesswrong.com, luma.com) never spreads, nor
-  //    does a parent domain whose subdomains hold other groups' listings
-  //    (effectivealtruism.org vs the Forum and EA Funds). Past rounds don't
-  //    vote, so an old round that once linked elsewhere can't pull in
-  //    whoever is there now; they can still join through a spread website.
-  const liveListingHosts: string[] = []
+  // 2. Websites that spread. Each website is judged on its own listings:
+  //    it spreads when the org's live listings are at least half of the live
+  //    (non-Jobs) listings on it, and it isn't a host many groups share
+  //    (SHARED_HOSTS, or live jobs from two or more employers). Past rounds
+  //    don't vote, so an old round that once linked somewhere can't pull in
+  //    whoever is there now. A subdomain of a spread website comes along
+  //    unless it carries listings of its own that fail the same vote and
+  //    aren't one sub-brand (newsletter.safe.ai joins CAIS; the EA Forum's
+  //    many groups stay out of CEA).
+  const liveOn = new Map<string, number>()
+  const namesOn = new Map<string, Set<string>>()
+  const employersOn = new Map<string, Set<string>>()
   for (const e of catalog) {
-    if (e.page === 'Jobs' || !e.live) continue
+    if (!e.live) continue
     const h = hostOf(e.url)
-    if (h) liveListingHosts.push(h)
+    if (!h) continue
+    if (e.page === 'Jobs') {
+      addTo(employersOn, h, normText(e.orgText[0] ?? ''))
+      continue
+    }
+    liveOn.set(h, (liveOn.get(h) ?? 0) + 1)
+    addTo(namesOn, h, normText(e.name))
   }
-  const seedHosts: string[] = []
+  const seedOn = new Map<string, number>()
   for (const { e } of seeds) {
     if (e.page === 'Jobs' || !e.live) continue
     const h = hostOf(e.url)
-    if (h) seedHosts.push(h)
+    if (h) seedOn.set(h, (seedOn.get(h) ?? 0) + 1)
   }
-  for (const h of new Set(seedHosts)) {
-    const under = new Set([h])
-    const n = seedHosts.filter(s => onHosts(s, under)).length
-    const all = liveListingHosts.filter(s => onHosts(s, under)).length
-    if (n * 2 >= all) spec.hosts.add(h)
+  const shared = (h: string) =>
+    onHosts(h, SHARED_HOSTS) || (employersOn.get(h)?.size ?? 0) >= 2
+  const passes = (h: string) => {
+    const n = seedOn.get(h) ?? 0
+    return n > 0 && n * 2 >= (liveOn.get(h) ?? 0) && !shared(h)
+  }
+  for (const h of seedOn.keys()) if (passes(h)) spec.hosts.add(h)
+  for (const h of liveOn.keys()) {
+    if (spec.hosts.has(h) || !onHosts(h, spec.hosts)) continue
+    const subBrand = (namesOn.get(h)?.size ?? 0) === 1 && !shared(h)
+    if (!passes(h) && !subBrand) spec.excludedHosts.add(h)
   }
 
+  // Every listing on a spread website joins, past rounds included (they
+  // just don't count toward how broad the search is).
   const matched: { e: CatalogEntry; why: MatchReason }[] = [...seeds]
   const seeded = new Set(seeds.map(s => s.e))
   if (spec.hosts.size) {
     for (const e of catalog) {
       if (e.page === 'Jobs' || seeded.has(e)) continue
-      if (!onHosts(hostOf(e.url), spec.hosts)) continue
+      if (!spreadsTo(spec, hostOf(e.url))) continue
       if (leftOut.has(rowHash(e.page, e.name))) {
         noteLeftOut(spec, e, leftOutSeen)
         continue
@@ -537,7 +621,10 @@ export function orgSpec(
       .filter(m => m.e.page === 'Jobs')
       .map(m => normText(m.e.orgText[0] ?? m.e.name))
   )
-  const breadth = matched.filter(m => m.e.page !== 'Jobs').length + jobOrgs.size
+  // Past rounds are history, not breadth: an org that has run forty rounds
+  // is still one org.
+  const breadth =
+    matched.filter(m => m.e.page !== 'Jobs' && m.e.live).length + jobOrgs.size
   if (breadth > TOO_BROAD_LISTINGS || spec.hosts.size > TOO_BROAD_WEBSITES) {
     spec.tooBroad = { listings: matched.length, websites: websites.size }
     return spec

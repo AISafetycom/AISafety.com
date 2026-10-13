@@ -10,6 +10,7 @@ import {
   parseLeftOut,
   quickHost,
   rowHash,
+  spreadsTo,
   type CatalogEntry,
 } from './org-lookup'
 
@@ -224,7 +225,7 @@ describe('orgSpec', () => {
     )
   })
 
-  it('judges a website with its subdomains, so a parent domain never spreads to other groups', () => {
+  it('keeps a parent website’s subdomains of other groups out', () => {
     // Twelve CEA-hosted events on effectivealtruism.org; the Forum and EA
     // Funds hold other groups' listings on its subdomains.
     const cea = [
@@ -255,8 +256,81 @@ describe('orgSpec', () => {
       ),
     ]
     const s = orgSpec(cea, 'Centre for Effective Altruism', new Set())
-    expect(s.hosts.size).toBe(0)
     expect(s.entries.size).toBe(12)
+    expect(spreadsTo(s, 'effectivealtruism.org')).toBe(true)
+    expect(spreadsTo(s, 'forum.effectivealtruism.org')).toBe(false)
+    expect(spreadsTo(s, 'funds.effectivealtruism.org')).toBe(false)
+    // A deep link on the org's own site with no listing of its own still
+    // counts.
+    expect(spreadsTo(s, 'www2.effectivealtruism.org')).toBe(true)
+  })
+
+  it('never spreads a form or job-board host', () => {
+    const c = [
+      entry('Map', 'BlueDot Impact', 'recBd', 'https://bluedot.org/'),
+      entry(
+        'Funding',
+        'BlueDot AGI Strategy Fund',
+        'recBdFund',
+        'https://airtable.com/appX/form'
+      ),
+      entry(
+        'Advisors',
+        'AI Safety Hungary',
+        'recHu',
+        'https://airtable.com/appY/form'
+      ),
+      ...Array.from({ length: 50 }, (_, i) =>
+        entry(
+          'Training',
+          `Someone's round ${i}`,
+          `recPast${i}`,
+          `https://airtable.com/app${i}/form`,
+          {
+            live: false,
+            logo: null,
+          }
+        )
+      ),
+    ]
+    const s = orgSpec(c, 'BlueDot', new Set())
+    expect(s.tooBroad).toBeNull()
+    expect(s.hosts.has('airtable.com')).toBe(false)
+    expect([...s.entries.values()].map(e => e.name).sort()).toEqual([
+      'BlueDot AGI Strategy Fund',
+      'BlueDot Impact',
+    ])
+  })
+
+  it('brings a sub-brand on a subdomain along with its parent website', () => {
+    const c = [
+      entry(
+        'Map',
+        'Center for AI Safety (CAIS)',
+        'recCais',
+        'https://safe.ai/'
+      ),
+      entry(
+        'Map',
+        'AI Safety Newsletter',
+        'recAsnMap',
+        'https://newsletter.safe.ai/'
+      ),
+      entry(
+        'Media channels',
+        'AI Safety Newsletter',
+        'recAsnMedia',
+        'https://newsletter.safe.ai/'
+      ),
+    ]
+    const s = orgSpec(c, 'CAIS', new Set())
+    expect(
+      [...s.entries.values()].map(e => `${e.page}: ${e.name}`).sort()
+    ).toEqual([
+      'Map: AI Safety Newsletter',
+      'Map: Center for AI Safety (CAIS)',
+      'Media channels: AI Safety Newsletter',
+    ])
   })
 
   it('never lets a past round spread a website it once linked to', () => {
@@ -656,6 +730,41 @@ describe('orgLookup', () => {
     )
     expect(allTime.series[0].start).toBe('2026-10-10')
     expect(allTime.series.at(-1)?.start).toBe('2026-10-13')
+  })
+
+  it('draws nothing when nothing was read, however early the range', () => {
+    const early = {
+      startMs: Date.parse('0999-01-01T00:00:00Z'),
+      endMs: Date.parse('0999-03-01T00:00:00Z'),
+    }
+    expect(orgLookup([], spec('Lens'), true, views, early, NOW).series).toEqual(
+      []
+    )
+  })
+
+  it('keeps chatbot cards for a kept listing that shares a left-out row’s record', () => {
+    const ev = newestFirst([
+      click('Home', 'Lens Academy courses', 'v1', DAY1, {
+        listingId: 'rechpNtQUj1Xm5d9j',
+        url: 'https://lensacademy.org/',
+      }),
+      click('Training', 'Lens Academy courses', 'v2', DAY1, {
+        listingId: 'rechpNtQUj1Xm5d9j',
+        url: 'https://lensacademy.org/',
+      }),
+      {
+        type: 'chatbot_click',
+        page: '/',
+        listingId: 'training:rechpNtQUj1Xm5d9j',
+        url: 'https://lensacademy.org/',
+        source: 'card',
+        vid: 'v3',
+        ts: DAY1,
+      } as AnalyticsEvent,
+    ])
+    const x = rowHash('Home', 'Lens Academy courses')
+    const d = orgLookup(ev, spec('Lens', x), true, views, RANGE, NOW)
+    expect(d.reached.find(r => r.name === 'Chatbot')?.count).toBe(1)
   })
 
   it('never draws (or throws on) years with no data', () => {

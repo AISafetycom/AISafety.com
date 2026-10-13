@@ -2856,7 +2856,13 @@ function OrgView({
   // Leave out / Put back links: the same address with one row hash added to
   // or taken off ?x=. Built from the rows actually left out, so stale hashes
   // drop away; past the cap, Leave out is withheld rather than ignored.
-  const leftOut = org.leftOut.map(l => l.hash)
+  // The rows left out here, plus any in ?x= with no activity in this range
+  // (they'd come back on a longer one, so they're kept).
+  const shownLeftOut = new Set(org.leftOut.map(l => l.hash))
+  const leftOut = [
+    ...new Set([...shownLeftOut, ...parseLeftOut(first(params.x))]),
+  ]
+  const hiddenLeftOut = leftOut.filter(h => !shownLeftOut.has(h)).length
   const canLeaveOut = leftOut.length < MAX_LEFT_OUT
   const hrefWithLeftOut = (hashes: string[]) => {
     const q = new URLSearchParams()
@@ -2906,7 +2912,11 @@ function OrgView({
           empty={
             org.leftOut.length > 0
               ? 'Every listing this search found is left out.'
-              : 'None of their listings had any activity in this range, and none are on the site now. Try a longer range, like All time.'
+              : org.matched === 0
+                ? `No listing on the site matches “${org.query}”; the panels below show only searches and clicks that name it.`
+                : range.key === 'all'
+                  ? 'None of their listings had any activity since tracking began, and none are on the site now.'
+                  : 'None of their listings had any activity in this range, and none are on the site now. Try a longer range, like All time.'
           }
         />
         {!canLeaveOut && (
@@ -2915,7 +2925,7 @@ function OrgView({
             out another.
           </p>
         )}
-        {org.leftOut.length > 0 && (
+        {(org.leftOut.length > 0 || hiddenLeftOut > 0) && (
           <ul className={styles.leftOutList}>
             <li>Left out</li>
             {org.leftOut.map(l => (
@@ -2932,6 +2942,14 @@ function OrgView({
                 </Link>
               </li>
             ))}
+            {hiddenLeftOut > 0 && (
+              <li>
+                {org.leftOut.length > 0 ? 'and ' : ''}
+                {hiddenLeftOut.toLocaleString()}{' '}
+                {hiddenLeftOut === 1 ? 'listing' : 'listings'} with no activity
+                in this range
+              </li>
+            )}
           </ul>
         )}
         <p className={styles.caption}>
@@ -3044,8 +3062,8 @@ function OrgListingsTable({
 }) {
   if (allRows.length === 0) return <p className={styles.dim}>{empty}</p>
   const rows = allRows.slice(0, MAX_TABLE_ROWS)
-  const showHovers = rows.some(r => r.hovers > 0)
-  const showPicks = rows.some(r => r.picks > 0)
+  const showHovers = allRows.some(r => r.hovers > 0)
+  const showPicks = allRows.some(r => r.picks > 0)
   const columns: SortColumn[] = [
     { label: 'Listing', sort: 'text' },
     { label: 'Page', sort: 'text' },
@@ -3080,8 +3098,9 @@ function OrgListingsTable({
     ...(showPicks ? [r.picks] : []),
     null,
   ])
+  // Totals cover every row, including any past the display cap.
   const total = (pick: (r: OrgListingRow) => number) =>
-    rows.reduce((n, r) => n + pick(r), 0).toLocaleString()
+    allRows.reduce((n, r) => n + pick(r), 0).toLocaleString()
   return (
     <>
       <SortableTable
