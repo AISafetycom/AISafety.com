@@ -108,6 +108,8 @@ export function countsByType(
 
 const MAX_RESULTS = 50
 const BROWSE_LIMIT = 50
+// Words of a query that count; a pasted paragraph mustn't slow every keystroke.
+const MAX_WORDS = 12
 
 // Tuned so a whole-word title hit beats hits in other fields, but a
 // title prefix can lose to a whole-word hit elsewhere.
@@ -122,21 +124,24 @@ const SCORE = {
   SUBTITLE_WORD: 10,
   SUBTITLE_PREFIX: 6,
   CATEGORY_WORD: 4,
-  CATEGORY_PREFIX: 3,
   DESCRIPTION_PER_HIT: 2,
   DESCRIPTION_MAX: 10,
-  // "london jobs": a word naming the listing's type counts for little, and
-  // only next to a word that matches the listing's own text.
-  TYPE_WORD: 1,
-  // A small word ("in", "the") the listing happens to contain: a tiebreak.
+  // Below any hit the result row shows: the last word typed completing a
+  // category word ("venture capital"), and card text the row leaves out.
+  CATEGORY_PREFIX: 1,
+  KEYWORD_WORD: 1,
+  // "london events": the word naming a listing's type. Enough for that type
+  // to lead, never enough to match on its own.
+  TYPE_WORD: 20,
+  // An optional small word ("in", "the") the listing contains: a tiebreak.
   STOPWORD: 1,
-  // The words typed appear side by side in the listing, as in "what is AI
-  // safety" in the intro course's description.
+  // The words typed appear side by side in the listing.
   PHRASE: 20,
 }
 
-// Optional in a query with other words in it, so "fellowship in london"
-// isn't limited to listings that happen to contain "in".
+// Optional once a query has another word, so "fellowship in london" isn't
+// limited to listings that happen to contain "in". Question words stay
+// required: "what is alignment" should find what explains it.
 const STOPWORDS = new Set([
   'a',
   'an',
@@ -152,19 +157,8 @@ const STOPWORDS = new Set([
   'at',
   'by',
   'from',
-  'about',
   'near',
   'into',
-  'is',
-  'are',
-  'what',
-  'how',
-  'where',
-  'i',
-  'my',
-  'me',
-  'do',
-  'can',
 ])
 
 const TYPE_WORDS: Partial<Record<SearchType, string[]>> = {
@@ -195,6 +189,30 @@ const MONTHS = [
   'december',
 ]
 
+// Words ending in s whose singular means something else ("times" isn't
+// "time", which every "Full-time" job has).
+const NOT_PLURALS = new Set([
+  'analyses',
+  'customs',
+  'dynamics',
+  'economics',
+  'ethics',
+  'goods',
+  'humanities',
+  'internals',
+  'means',
+  'news',
+  'physics',
+  'politics',
+  'posts',
+  'savings',
+  'series',
+  'species',
+  'statistics',
+  'theses',
+  'times',
+])
+
 // Letters NFD doesn't split into base letter + accent, and look-alikes of
 // plain punctuation ("FAR․AI" is written with a one-dot leader).
 const LOOKALIKES: [RegExp, string][] = [
@@ -219,11 +237,15 @@ export function foldForSearch(text: string): string {
     s
       .normalize('NFD')
       .replace(/\p{M}/gu, '')
+      // Contractions typed without the apostrophe: "don't" → "dont".
+      .replace(/(\p{L})'(t|re|ll|ve|d|m)(?![\p{L}\p{N}])/gu, '$1$2')
       // Thousands separators: "80,000" → "80000".
       .replace(/(\d),(?=\d{3}(?!\d))/g, '$1')
       // Dotted initials: "d.c." → "dc", "u.s." → "us".
-      .replace(/(?<![\p{L}\p{N}])(?:\p{L}\.)+\p{L}\.?(?![\p{L}\p{N}])/gu, m =>
-        m.replace(/\./g, '')
+      .replace(
+        /(^|[^\p{L}\p{N}])((?:\p{L}\.)+\p{L})\.?(?![\p{L}\p{N}])/gu,
+        (_, before: string, initials: string) =>
+          before + initials.replace(/\./g, '')
       )
   )
 }
@@ -237,10 +259,11 @@ interface FoldedEntry {
   title: string
   titleBare: string
   subtitle: string
-  // Category plus the keywords the result row doesn't show.
-  facets: string
+  category: string
+  // Card text the result row doesn't show.
+  keywords: string
   description: string
-  // All four, to rule a listing out with one test.
+  // All five, to rule a listing out with one test.
   all: string
   allBare: string
 }
@@ -253,16 +276,16 @@ function folded(entry: SearchEntry): FoldedEntry {
   if (!f) {
     const title = foldForSearch(entry.title)
     const subtitle = foldForSearch(entry.subtitle)
-    const facets = foldForSearch(
-      entry.keywords ? `${entry.category} · ${entry.keywords}` : entry.category
-    )
+    const category = foldForSearch(entry.category)
+    const keywords = foldForSearch(entry.keywords ?? '')
     const description = foldForSearch(entry.description)
-    const all = [title, subtitle, facets, description].join('\n')
+    const all = [title, subtitle, category, keywords, description].join('\n')
     f = {
       title,
       titleBare: bare(title),
       subtitle,
-      facets,
+      category,
+      keywords,
       description,
       all,
       allBare: ` ${bare(all)} `,
@@ -272,6 +295,12 @@ function folded(entry: SearchEntry): FoldedEntry {
   return f
 }
 
+/** Folds every entry ahead of the first keystroke, which would otherwise
+ *  pay for the whole index at once (tens of milliseconds on a phone). */
+export function prepareSearch(index: SearchEntry[]): void {
+  for (const entry of index) folded(entry)
+}
+
 // Punctuation at either end of a typed word can never sit at a word
 // boundary, so "(CAIS)", "&" or "mats?" used to match nothing. A trailing
 // + or # stays, for "c++" and "c#".
@@ -279,19 +308,27 @@ function cleanToken(token: string): string {
   return token.replace(/^[^\p{L}\p{N}]+/u, '').replace(/[^\p{L}\p{N}+#]+$/u, '')
 }
 
-/** Other spellings a typed word matches as a whole word: the singular of a
- *  plural ("podcasts" → "podcast", as the cards say), the short month the
- *  dates use ("october" → "oct") and "80k" → "80000". */
+/** Other spellings a typed word matches as a whole word in a title,
+ *  subtitle, category or keywords: the singular of a plural ("podcasts" →
+ *  "podcast", as the cards say), a month's other form ("october" ↔ "oct",
+ *  the dates use the short one) and "80k" → "80000". */
 function otherForms(token: string): string[] {
   const forms: string[] = []
   // Five letters or more keeps "news", "lens" and "mats" as typed.
-  if (/^\p{L}{5,}$/u.test(token) && /[^s]s$/.test(token)) {
+  if (
+    /^\p{L}{5,}$/u.test(token) &&
+    /[^s]s$/.test(token) &&
+    !NOT_PLURALS.has(token)
+  ) {
     if (token.endsWith('ies')) forms.push(`${token.slice(0, -3)}y`)
     else if (/(?:ch|sh|x|z|ss)es$/.test(token)) forms.push(token.slice(0, -2))
     else forms.push(token.slice(0, -1))
   }
-  if (MONTHS.includes(token) && token.length > 3) forms.push(token.slice(0, 3))
-  if (token === 'sept') forms.push('sep')
+  const month = MONTHS.find(m => m === token || m.slice(0, 3) === token)
+  if (month && month !== 'may') {
+    forms.push(token === month ? month.slice(0, 3) : month)
+  }
+  if (token === 'sept') forms.push('sep', 'september')
   const thousands = token.match(/^(\d+)k$/)
   if (thousands) forms.push(String(Number(thousands[1]) * 1000))
   return forms
@@ -301,16 +338,15 @@ interface TokenRegex {
   token: string
   /** The word as typed. */
   exactWord: RegExp
+  exactWordGlobal: RegExp
   /** The word as typed or in another form. */
   wholeWord: RegExp
-  wholeWordGlobal: RegExp
   wordPrefix: RegExp
   /** Anything the field tests could match, for ruling a listing out fast. */
   anywhere: RegExp
-  /** Category matches the start of a word only for the last word of a
-   *  longer query, the one still being typed ("venture capital"); for a
-   *  lone word, "metr" would find every "DC metro area" job. */
-  facetPrefix: boolean
+  /** The rest of each category word the typed word starts, when this is
+   *  the last of several words typed (see completesCategoryWord). */
+  categoryCompletion: RegExp | null
   /** A small word that may be missing from a match. */
   optional: boolean
   /** Listing types this word names ("jobs" → job). */
@@ -329,43 +365,70 @@ function escapeRegex(s: string): string {
 // A hyphen between letters also matches a space or nothing, so
 // "non-profit" finds "nonprofit" and "co-working" finds "coworking".
 function pattern(form: string): string {
-  return escapeRegex(form).replace(/(?<=\p{L})-(?=\p{L})/gu, '[-\\s]?')
+  return escapeRegex(form).replace(/(\p{L})-(?=\p{L})/gu, '$1[-\\s]?')
 }
 
-// Lookarounds rather than \b, which only knows ASCII letters, so words
-// ending in "é" or written in another script still have word boundaries.
-const NOT_WORD_BEFORE = '(?<![\\p{L}\\p{N}_])'
+// Lookbehind (Safari 16.4+) gives word boundaries beyond ASCII letters, so
+// words ending in "é" or written in another script still have them. Where
+// it's missing, \b keeps search working for everything else.
+const NOT_WORD_BEFORE = (() => {
+  try {
+    new RegExp('(?<!a)b', 'u')
+    return '(?<![\\p{L}\\p{N}_])'
+  } catch {
+    return '\\b'
+  }
+})()
 const NOT_WORD_AFTER = '(?![\\p{L}\\p{N}_])'
 
 function compileTokenRegexes(
   tokens: string[],
   optional: Set<string>
 ): TokenRegex[] {
-  return tokens.map((token, i) => {
-    const spellings = [token, ...otherForms(token)]
-    const forms = spellings.map(pattern).join('|')
-    const whole = `${NOT_WORD_BEFORE}(?:${forms})${NOT_WORD_AFTER}`
+  const isTypeWord = (t: string) =>
+    Object.values(TYPE_WORDS).some(words => words.includes(t))
+  // Words about the listing itself, not small words or type words.
+  const content = tokens.filter(t => !optional.has(t) && !isTypeWord(t))
+  const last = content.length > 1 ? content[content.length - 1] : null
+  return tokens.map(token => {
+    const typed = pattern(token)
+    const forms = [token, ...otherForms(token)].map(pattern).join('|')
+    const exact = `${NOT_WORD_BEFORE}${typed}${NOT_WORD_AFTER}`
     const typeWordFor = new Set<SearchType>()
     for (const [type, words] of Object.entries(TYPE_WORDS)) {
       if (words.includes(token)) typeWordFor.add(type as SearchType)
     }
     return {
       token,
-      exactWord: new RegExp(
-        `${NOT_WORD_BEFORE}${pattern(token)}${NOT_WORD_AFTER}`,
+      exactWord: new RegExp(exact, 'u'),
+      exactWordGlobal: new RegExp(exact, 'gu'),
+      wholeWord: new RegExp(
+        `${NOT_WORD_BEFORE}(?:${forms})${NOT_WORD_AFTER}`,
         'u'
       ),
-      wholeWord: new RegExp(whole, 'u'),
-      wholeWordGlobal: new RegExp(whole, 'gu'),
-      // Prefixes use the word as typed: a singular prefix would let
-      // "maths" find "math…" titles.
-      wordPrefix: new RegExp(`${NOT_WORD_BEFORE}${pattern(token)}`, 'u'),
+      wordPrefix: new RegExp(`${NOT_WORD_BEFORE}${typed}`, 'u'),
       anywhere: new RegExp(`${NOT_WORD_BEFORE}(?:${forms})`, 'u'),
-      facetPrefix: tokens.length > 1 && i === tokens.length - 1,
+      categoryCompletion:
+        token === last
+          ? new RegExp(`${NOT_WORD_BEFORE}${typed}([\\p{L}\\p{N}]*)`, 'gu')
+          : null,
       optional: optional.has(token),
       typeWordFor,
     }
   })
+}
+
+// The last word of a longer query, still being typed, may be most of a
+// category word: "venture capital" finds "Venture capitalist". Not a lone
+// word, and not a short start ("act" of "Active", "metr" of "metro"),
+// which would find every listing with that label.
+function completesCategoryWord(r: TokenRegex, category: string): boolean {
+  if (!r.categoryCompletion) return false
+  for (const m of category.matchAll(r.categoryCompletion)) {
+    const typed = m[0].length - m[1].length
+    if (typed >= 5 && typed / m[0].length >= 2 / 3) return true
+  }
+  return false
 }
 
 // Word boundaries avoid substring false-positives ("NIST" matches "(NIST)"
@@ -376,51 +439,52 @@ function scoreEntry(
   allowTypeWords: boolean
 ): number {
   const f = folded(entry)
-  // One test per word over the whole listing first: most listings lack one
-  // of the words, and are ruled out before the per-field tests.
-  const present = regexes.map(r => r.anywhere.test(f.all))
-  for (let i = 0; i < regexes.length; i++) {
-    const r = regexes[i]
-    if (present[i] || r.optional) continue
-    if (!(allowTypeWords && r.typeWordFor.has(entry.type))) return 0
+  const typeWord = (r: TokenRegex) =>
+    allowTypeWords && r.typeWordFor.has(entry.type)
+
+  // One test per word over the whole listing first, stopping at the first
+  // missing word: most listings are ruled out here.
+  for (const r of regexes) {
+    if (!r.optional && !typeWord(r) && !r.anywhere.test(f.all)) return 0
   }
 
   let score = 0
   let textHit = false
-  for (let i = 0; i < regexes.length; i++) {
-    const r = regexes[i]
+  for (const r of regexes) {
     if (r.optional) {
-      if (present[i] && r.wholeWord.test(f.all)) score += SCORE.STOPWORD
+      if (r.exactWord.test(f.all)) score += SCORE.STOPWORD
       continue
     }
-    let tokenScore = 0
-    if (!present[i]) tokenScore = 0
-    else if (f.title === r.token) tokenScore = SCORE.TITLE_EXACT
-    else if (r.exactWord.test(f.title)) tokenScore = SCORE.TITLE_WORD
-    else if (r.wholeWord.test(f.title)) tokenScore = SCORE.TITLE_FORM
-    else if (r.wordPrefix.test(f.title)) tokenScore = SCORE.TITLE_PREFIX
-    else if (r.wholeWord.test(f.subtitle)) tokenScore = SCORE.SUBTITLE_WORD
-    else if (r.wordPrefix.test(f.subtitle)) tokenScore = SCORE.SUBTITLE_PREFIX
+    let textScore = 0
+    if (f.title === r.token) textScore = SCORE.TITLE_EXACT
+    else if (r.exactWord.test(f.title)) textScore = SCORE.TITLE_WORD
+    else if (r.wholeWord.test(f.title)) textScore = SCORE.TITLE_FORM
+    else if (r.wordPrefix.test(f.title)) textScore = SCORE.TITLE_PREFIX
+    else if (r.wholeWord.test(f.subtitle)) textScore = SCORE.SUBTITLE_WORD
+    else if (r.wordPrefix.test(f.subtitle)) textScore = SCORE.SUBTITLE_PREFIX
     else {
-      // Whichever scores higher, so card text added to the facets never
-      // lowers a listing that its description already matched.
-      const facetScore = r.wholeWord.test(f.facets)
-        ? SCORE.CATEGORY_WORD
-        : r.facetPrefix && r.wordPrefix.test(f.facets)
-          ? SCORE.CATEGORY_PREFIX
-          : 0
-      const hits = f.description.match(r.wholeWordGlobal)?.length ?? 0
-      tokenScore = Math.max(
-        facetScore,
+      // The best of the lower fields, so card text added as keywords never
+      // lowers a listing that its description already matched. Other forms
+      // count in the short labels, not in descriptions, where "futures"
+      // finding every "future" is mostly noise.
+      const hits = f.description.match(r.exactWordGlobal)?.length ?? 0
+      textScore = Math.max(
+        r.wholeWord.test(f.category)
+          ? SCORE.CATEGORY_WORD
+          : completesCategoryWord(r, f.category)
+            ? SCORE.CATEGORY_PREFIX
+            : 0,
+        r.wholeWord.test(f.keywords) ? SCORE.KEYWORD_WORD : 0,
         Math.min(SCORE.DESCRIPTION_PER_HIT * hits, SCORE.DESCRIPTION_MAX)
       )
     }
 
-    if (tokenScore > 0) textHit = true
-    else if (allowTypeWords && r.typeWordFor.has(entry.type)) {
-      tokenScore = SCORE.TYPE_WORD
+    if (typeWord(r)) {
+      score += Math.max(textScore, SCORE.TYPE_WORD)
+    } else if (textScore > 0) {
+      textHit = true
+      score += textScore
     } else return 0
-    score += tokenScore
   }
   return textHit ? score : 0
 }
@@ -465,12 +529,15 @@ export function search(
     return activeType ? scoped.slice(0, BROWSE_LIMIT) : []
   }
 
-  const words = trimmed.split(/\s+/).map(cleanToken).filter(Boolean)
+  const words = trimmed
+    .split(/\s+/)
+    .map(cleanToken)
+    .filter(Boolean)
+    .slice(0, MAX_WORDS)
   // Small words are optional once the query has another word.
+  const required = words.filter(w => !STOPWORDS.has(w))
   const optional = new Set(
-    words.some(w => !STOPWORDS.has(w))
-      ? words.filter(w => STOPWORDS.has(w))
-      : []
+    required.length > 0 ? words.filter(w => STOPWORDS.has(w)) : []
   )
   const variants = joinedVariants(words, optional).map(tokens => ({
     regexes: compileTokenRegexes(tokens, optional),
@@ -497,7 +564,16 @@ export function search(
     scored.push({ entry, score })
   }
   scored.sort((a, b) => b.score - a.score)
-  const top = scored.slice(0, MAX_RESULTS)
+  // A one-word search keeps the page or two it names ("grants" → Funding)
+  // even when that word fills the 50 slots with listings.
+  const pages = scored.filter(s => s.entry.type === 'page')
+  const top =
+    required.length === 1 && pages.length > 0 && pages.length <= 2
+      ? [
+          ...pages,
+          ...scored.filter(s => s.entry.type !== 'page').slice(0, MAX_RESULTS),
+        ]
+      : scored.slice(0, MAX_RESULTS)
 
   // Pages pinned to top so section landing pages lead their group.
   const groupOrder: SearchType[] = []

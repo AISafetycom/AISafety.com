@@ -140,7 +140,7 @@ const STATIC_PAGES: SearchEntry[] = [
     'Donation guide',
     '/donation-guide',
     '/images/icons/heart.svg',
-    'How to donate effectively at any budget, via a fund, regrantors, or a donor lottery.'
+    'How to donate effectively at any budget, including via regrantors or a donor lottery.'
   ),
   page(
     'About',
@@ -153,19 +153,19 @@ const STATIC_PAGES: SearchEntry[] = [
     'Press and media',
     '/media',
     '/images/icons/paper.svg',
-    'Press kit with boilerplate, logo files, team bios, and a media contact, for journalists covering AI risk.'
+    'Press kit for journalists, with boilerplate, logo files, and team bios.'
   ),
   page(
     'Data API',
     '/developers',
     '/images/icons/computer.svg',
-    'Free, read-only JSON API over every AISafety.com directory, for developers.'
+    'Read-only JSON API for developers.'
   ),
   page(
     'Privacy',
     '/privacy',
     '/images/icons/shield.svg',
-    'What AISafety.com collects, why, and the choices you have. No cookies, no ads.'
+    'What the site collects, why, and your choices. No cookies, no ads.'
   ),
   // Name-only: "policy" alone is a common search for governance orgs.
   page(
@@ -227,6 +227,21 @@ function dateRange(start: string | null, end: string | null): string {
   return `${shortDate(start)} – ${shortDate(end)}`
 }
 
+// A subtitle only when it has a word the title lacks: the map pin's "EA
+// Forum" says something under "Effective Altruism Forum", "LASR Labs" under
+// "London AI Safety Research (LASR) Labs" doesn't, and nor does a course
+// "By ARENA" called ARENA.
+function addedName(name: string | null, title: string): string {
+  if (!name) return ''
+  // Lowercased words, singular, so "Researchers" adds nothing to "Researcher".
+  const words = (s: string) =>
+    (s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).map(w =>
+      w.length > 3 ? w.replace(/s$/, '') : w
+    )
+  const titleWords = new Set(words(title))
+  return words(name).every(w => titleWords.has(w)) ? '' : name.trim()
+}
+
 async function getEventEntries(): Promise<SearchEntry[]> {
   const events = await getEvents()
   return events.map(e => {
@@ -265,17 +280,15 @@ async function getEventEntries(): Promise<SearchEntry[]> {
   })
 }
 
-// The card's bottom rows (stipend, time commitment, entry bar, focus), minus
-// the values most programs share: "No stipend" and "Full-time" would make
-// those words, and "full-time" searches for jobs, pull in dozens of programs.
+// The card's stipend, time commitment and focus rows, minus the values most
+// programs share ("No stipend", "Full-time": those words, and "full-time"
+// searches for jobs, would pull in dozens of programs) and the row labels
+// ("Entry bar:", "Focus:"), which would match every program.
 function trainingKeywords(p: ProgramBase): string {
   return [
     p.stipend !== 'No stipend' ? p.stipend : null,
     p.timeCommitment === 'Part-time' ? p.timeCommitment : null,
-    p.entryBar ? `Entry bar: ${p.entryBar.toLowerCase()}` : null,
-    p.focus.length > 0
-      ? `Focus: ${p.focus.map(f => f.toLowerCase()).join(', ')}`
-      : null,
+    p.focus.join(', '),
   ]
     .filter(Boolean)
     .join(' · ')
@@ -370,7 +383,7 @@ async function getCourseEntries(): Promise<SearchEntry[]> {
     type: 'course' as const,
     title: c.name,
     // The card's "By <organizer>" line.
-    subtitle: c.organizer.trim(),
+    subtitle: addedName(c.organizer, c.name),
     description: c.description,
     category: [c.category, c.courseType].filter(Boolean).join(' · '),
     url: c.url || '/self-study',
@@ -407,7 +420,8 @@ async function getFunderEntries(): Promise<SearchEntry[]> {
 // The card's experience, degree and salary rows. Experience drops the
 // "(1–4 years experience)" glosses and the catch-all "Multiple experience
 // levels"; the degree row skips the baseline the card hides too. A job the
-// Remote filter lists but whose location labels don't say so gets "Remote".
+// /jobs Remote filter lists but whose location labels don't say so gets
+// "Remote".
 function jobKeywords(j: Job): string {
   const levels = j.minimumExperience
     .split(',')
@@ -415,7 +429,7 @@ function jobKeywords(j: Job): string {
     .filter(level => level && level !== 'Multiple experience levels')
     .join(', ')
   const remote =
-    j.workLocation.split(', ').includes('Remote') &&
+    j.workLocation === 'Remote' &&
     !j.locations.some(l => l.startsWith('Remote'))
   return [
     levels,
@@ -441,16 +455,6 @@ async function getJobEntries(): Promise<SearchEntry[]> {
   }))
 }
 
-// The short name the map pin shows ("EA Forum", "80k Podcast"), when it has a
-// word the title lacks; "LASR Labs" adds nothing to "London AI Safety
-// Research (LASR) Labs".
-function pinLabel(shortName: string | null, title: string): string {
-  if (!shortName) return ''
-  const words = (s: string) => s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []
-  const titleWords = new Set(words(title))
-  return words(shortName).every(w => titleWords.has(w)) ? '' : shortName
-}
-
 async function getMapEntries(): Promise<SearchEntry[]> {
   const mapData = await getMapData()
   const entries: SearchEntry[] = []
@@ -461,7 +465,8 @@ async function getMapEntries(): Promise<SearchEntry[]> {
     entries.push({
       type: 'map',
       title: o.title,
-      subtitle: pinLabel(o.shortName, o.title),
+      // The short name on the map pin.
+      subtitle: addedName(o.shortName, o.title),
       description: o.description,
       category: [o.category, o.status].filter(Boolean).join(' · '),
       url: o.link || '/map',
@@ -490,7 +495,7 @@ async function getProjectEntries(): Promise<SearchEntry[]> {
     type: 'project' as const,
     title: p.name,
     // The card's contact line; '' for Seeking owner ideas (see projects.ts).
-    subtitle: p.contact,
+    subtitle: addedName(p.contact, p.name),
     description: p.description,
     category: p.status,
     url: p.email ? `mailto:${p.email}` : '/projects',

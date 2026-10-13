@@ -167,20 +167,35 @@ describe('search: matching what the cards show', () => {
       listing('community', 'AI Safety London'),
       listing('event', 'EAG London', { category: 'London, UK' }),
       listing('job', 'Policy Analyst', { category: 'Remote (Global)' }),
+      listing('job', 'Operations Lead, London', {
+        description: 'Run our events and retreats.',
+      }),
+      listing('event', 'Summit', { category: 'London, UK' }),
     ]
-    expect(titles(index, 'london jobs')).toEqual(['Research Engineer'])
-    expect(titles(index, 'london events')).toEqual(['EAG London'])
+    expect(titles(index, 'london jobs')).toEqual([
+      'Operations Lead, London',
+      'Research Engineer',
+    ])
+    // The named type leads, though a job's title and text match better.
+    expect(titles(index, 'london events')).toEqual([
+      'EAG London',
+      'Summit',
+      'Operations Lead, London',
+    ])
     // A type word alone, or with only other type words, matches by text only.
     expect(titles(index, 'jobs')).toEqual([])
     expect(titles(index, 'jobs job')).toEqual([])
   })
 
-  it('drops small words from a longer query', () => {
+  it('lets small words be missing, but not question words', () => {
     const index = [
       listing('training', 'GovAI Fellowship', { category: 'London, UK' }),
+      listing('course', 'Intro', { description: 'What is alignment?' }),
+      listing('community', 'Alignment Club'),
     ]
     expect(titles(index, 'fellowship in london')).toEqual(['GovAI Fellowship'])
-    expect(titles(index, 'what is govai')).toEqual(['GovAI Fellowship'])
+    expect(titles(index, 'the govai fellowship')).toEqual(['GovAI Fellowship'])
+    expect(titles(index, 'what is alignment')).toEqual(['Intro'])
   })
 
   it('evens out dates, numbers, initials and hyphens', () => {
@@ -209,14 +224,17 @@ describe('search: matching what the cards show', () => {
     expect(titles(index, 'venture capital')).toEqual(['Lionheart Ventures'])
   })
 
-  it('only completes a category word for the last word of a longer query', () => {
+  it('only completes most of a category word, as the last of several words', () => {
     const index = [
       listing('job', 'Policy Analyst', {
         category: 'Washington, DC metro area, USA',
       }),
+      listing('founder', 'Lionheart', { category: 'Venture capitalist' }),
     ]
+    expect(titles(index, 'capital')).toEqual([])
+    expect(titles(index, 'lionheart capital')).toEqual(['Lionheart'])
     expect(titles(index, 'metr')).toEqual([])
-    expect(titles(index, 'policy metr')).toEqual(['Policy Analyst'])
+    expect(titles(index, 'policy metr')).toEqual([])
   })
 
   it('tries names written as one word', () => {
@@ -246,15 +264,69 @@ describe('search: matching what the cards show', () => {
 
   it('uses small words to break ties', () => {
     const index = [
-      listing('community', 'AI Safety Club'),
-      listing('course', 'Introduction to AI Safety', {
-        description: 'What is AI safety, and why does it matter?',
+      listing('community', 'AI Safety Club', { category: 'Berlin' }),
+      listing('community', 'AI Safety Hub', {
+        category: 'Berlin',
+        description: 'Meets in person.',
       }),
     ]
-    expect(titles(index, 'what is ai safety')).toEqual([
-      'Introduction to AI Safety',
+    expect(titles(index, 'ai safety in berlin')).toEqual([
+      'AI Safety Hub',
       'AI Safety Club',
     ])
+  })
+
+  it('keeps the page a one-word search names, however many listings match', () => {
+    const funders = Array.from({ length: 60 }, (_, i) =>
+      listing('funder', `Fund ${i} Grants`)
+    )
+    const index = [
+      ...funders,
+      listing('page', 'Funding', {
+        description: 'Grants and funders supporting AI safety work.',
+      }),
+    ]
+    const results = titles(index, 'grants')
+    expect(results[0]).toBe('Funding')
+    expect(results).toHaveLength(51)
+  })
+
+  it("doesn't read a different word into a plural or a description", () => {
+    const index = [
+      listing('job', 'Engineer', { category: 'Full-time' }),
+      listing('community', 'AI Safety London', {
+        description: 'Thinking about the future.',
+      }),
+      listing('map', 'AI Futures Project'),
+    ]
+    expect(titles(index, 'times')).toEqual([])
+    expect(titles(index, 'ai futures')).toEqual(['AI Futures Project'])
+  })
+
+  it('never completes a short start of a label word', () => {
+    const index = [
+      listing('community', 'AI Safety Club', { category: 'Discord · Active' }),
+      listing('map', 'EU AI Act Newsletter'),
+    ]
+    expect(titles(index, 'ai act')).toEqual(['EU AI Act Newsletter'])
+  })
+
+  it('ranks card text the row shows above card text it leaves out', () => {
+    const index = [
+      listing('training', 'MATS', { keywords: 'Stipend included' }),
+      listing('job', 'Fellow', { description: 'Comes with a stipend.' }),
+    ]
+    expect(titles(index, 'stipend')).toEqual(['Fellow', 'MATS'])
+  })
+
+  it('finds contractions and short months typed either way', () => {
+    const index = [
+      listing('map', "Don't Worry About the Vase"),
+      listing('training', 'PIBBSS Fellowship', { category: 'November 2026' }),
+    ]
+    expect(titles(index, 'dont worry')).toEqual(["Don't Worry About the Vase"])
+    expect(titles(index, "don't worry")).toEqual(["Don't Worry About the Vase"])
+    expect(titles(index, 'nov fellowship')).toEqual(['PIBBSS Fellowship'])
   })
 
   it('still ranks a title hit above hits in other fields', () => {
