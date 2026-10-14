@@ -411,7 +411,20 @@ describe('healthVerdict', () => {
         spamComplaints: 10,
       }).reasons
     ).toEqual(['spam complaints 0.104% (red above 0.1%)'])
-    // Away from the threshold, or right on it, nothing changes.
+    // One complaint in 999, or three in 2,990 (a whole-list send): 0.100%
+    // would still sit on the line.
+    expect(
+      healthVerdict({ ...ok, sendAmt: 999, spamComplaints: 1 }).reasons
+    ).toEqual(['spam complaints 0.1001% (red above 0.1%)'])
+    expect(
+      healthVerdict({
+        ...ok,
+        sendAmt: 2990,
+        verifiedOpens: 1196,
+        spamComplaints: 3,
+      }).reasons
+    ).toEqual(['spam complaints 0.1003% (red above 0.1%)'])
+    // Away from the line nothing changes (right on it: "2.0% (red at 2%)").
     expect(healthVerdict({ ...ok, verifiedOpens: 100 }).reasons).toEqual([
       'verified opens 10% (red under 15%)',
     ])
@@ -1466,36 +1479,100 @@ describe('runWatch: health checks', () => {
     expect(sent[1].text).toContain(
       'Events · Week 41 wave 4/4 needs a look before the next issue goes out: verified opens 14.96% (red under 15%).'
     )
+    expect(sent[1].text).toContain('Verified opens: 146 (14.96%)')
     expect(sent[1].text).not.toContain('cancels the waves')
     // Still nothing on the banner on later runs.
     expect((await run(later(10 * MIN))).alerts).toEqual([])
   })
 
-  it('still raises a last wave’s bounces or complaints, for the next issue', async () => {
+  it('still raises a last wave’s bounces, complaints or unsubscribes, for the next issue', async () => {
     const { store, sent, run } = setup()
+    // Low opens on each, plus one other problem: a red hard bounce, red
+    // complaints, amber unsubscribes.
     ac.campaigns = [
       sentWave({
         name: 'Training · Week 41, 2026 · wave 4/4',
         hardbounces: '25',
         verified_unique_opens: '100',
       }),
+      sentWave({
+        id: '261',
+        name: 'Events · Week 41, 2026 · wave 4/4',
+        verified_unique_opens: '100',
+      }),
+      sentWave({
+        id: '262',
+        name: 'Training · Week 40, 2026 · wave 4/4',
+        unsubscribes: '60',
+        verified_unique_opens: '100',
+      }),
     ]
-    ac.lists['260'] = ['7']
-    await approve(store, '260', { listId: '7', wave: 4, expected: 1000 })
+    ac.lists = { '260': ['7'], '261': ['6'], '262': ['7'] }
+    ac.unsubTotals['261'] = { spam_complaints: '2' }
+    for (const [id, listId] of [
+      ['260', '7'],
+      ['261', '6'],
+      ['262', '7'],
+    ])
+      await approve(store, id, { listId, wave: 4, expected: 1000 })
     const s = await run()
-    expect(s.alerts.map(a => [a.id, a.severity, a.title])).toEqual([
+    expect(
+      s.alerts.map(a => [a.id, a.severity, a.title, a.detail]).sort()
+    ).toEqual([
       [
         'health:260',
         'red',
         'Training · Week 41 wave 4/4 health check: red – look before the next issue',
+        [
+          'hard bounces 2.5% (red at 2%); verified opens 10% (red under 15%). Sent to 1,000.',
+        ],
+      ],
+      [
+        'health:261',
+        'red',
+        'Events · Week 41 wave 4/4 health check: red – look before the next issue',
+        [
+          'spam complaints 0.2% (red above 0.1%); verified opens 10% (red under 15%). Sent to 1,000.',
+        ],
+      ],
+      [
+        'health:262',
+        'red',
+        'Training · Week 40 wave 4/4 health check: red – look before the next issue',
+        [
+          'verified opens 10% (red under 15%); unsubscribes 6.0% (amber above 5%). Sent to 1,000.',
+        ],
       ],
     ])
-    expect(s.alerts[0].detail).toEqual([
-      'hard bounces 2.5% (red at 2%); verified opens 10% (red under 15%). Sent to 1,000.',
-    ])
-    expect(sent[0].subject).toBe(
+    expect(sent.map(m => m.subject)).toContain(
       'Newsletter: Training · Week 41 wave 4/4 health check: red – look before the next issue'
     )
+  })
+
+  it('keeps low opens on the banner while a later wave is to come', async () => {
+    const { store, run } = setup()
+    ac.campaigns = [
+      sentWave({ verified_unique_opens: '200' }),
+      sentWave({
+        id: '261',
+        name: 'Events · Week 41, 2026 · wave 2/4',
+        verified_unique_opens: '100',
+      }),
+    ]
+    ac.lists = { '260': ['7'], '261': ['6'] }
+    await approve(store, '260', { listId: '7', expected: 1000 })
+    await approve(store, '261', { listId: '6', wave: 2, expected: 1000 })
+    const s = await run()
+    expect(s.alerts.map(a => [a.id, a.title]).sort()).toEqual([
+      [
+        'health:260',
+        'Training · Week 41 wave 1/4 health check: amber – look before the next wave',
+      ],
+      [
+        'health:261',
+        'Events · Week 41 wave 2/4 health check: red – hold the next wave',
+      ],
+    ])
   })
 
   it('looks to the next issue after a whole-list send', async () => {

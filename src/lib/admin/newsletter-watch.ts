@@ -692,13 +692,15 @@ function pct(part: number, whole: number): string {
  *  14.96% against "under 15%" reads 14.96%, not 15% (as wave 4's check
  *  did on 12 October 2026). Otherwise the same as pct. */
 function pctBeside(part: number, whole: number, threshold: number): string {
+  if (whole <= 0) return '–'
   const p = (part / whole) * 100
   const onIt = Math.abs(p - threshold) < 1e-9
-  for (let d = p < 10 && p > 0 ? 1 : 0; d <= 2; d++) {
+  // One complaint in 999 is 0.1001%: four decimals before it leaves 0.1.
+  for (let d = p < 10 && p > 0 ? 1 : 0; d <= 6; d++) {
     const shown = p.toFixed(d)
     if (onIt || Number(shown) !== threshold) return `${shown}%`
   }
-  return `${p.toFixed(3)}%`
+  return `${p}%`
 }
 
 function num(n: number): string {
@@ -730,8 +732,9 @@ const STATUS_WORDS: Record<string, string> = {
   '7': 'held for review',
 }
 
-/** The 18-hour verdict. Red means "hold the next wave"; amber "look first".
- *  Unsubscribes stay amber at worst: the first issue after the move invites
+/** The 18-hour verdict. Red means "hold the next wave" (after an issue's
+ *  last wave or a whole-list send, "look before the next issue"); amber
+ *  "look first". Unsubscribes stay amber at worst: the first issue after the move invites
  *  readers to leave the list they don't want. Complaints only come from
  *  non-Gmail readers (Gmail tells senders nothing individually). */
 export function healthVerdict(n: HealthNumbers): {
@@ -896,13 +899,23 @@ export function healthMail(r: HealthRecord, origin: string): Mail {
       'Sent to',
       `${num(s)}${r.expected != null ? ` (the approval expected ${num(r.expected)})` : ''}`,
     ],
-    ['Verified opens', `${num(n.verifiedOpens)} (${pct(n.verifiedOpens, s)})`],
-    ['Hard bounces', `${num(n.hardBounces)} (${pct(n.hardBounces, s)})`],
+    // Each rate beside the line it's judged by, as in the reasons above.
+    [
+      'Verified opens',
+      `${num(n.verifiedOpens)} (${pctBeside(n.verifiedOpens, s, s > 0 && n.verifiedOpens / s < 0.15 ? 15 : 25)})`,
+    ],
+    [
+      'Hard bounces',
+      `${num(n.hardBounces)} (${pctBeside(n.hardBounces, s, 2)})`,
+    ],
     ['Soft bounces', `${num(n.softBounces)} (${pct(n.softBounces, s)})`],
-    ['Unsubscribes', `${num(n.unsubscribes)} (${pct(n.unsubscribes, s)})`],
+    [
+      'Unsubscribes',
+      `${num(n.unsubscribes)} (${pctBeside(n.unsubscribes, s, 5)})`,
+    ],
     [
       'Spam complaints',
-      `${num(n.spamComplaints)} (${pct(n.spamComplaints, s)}, non-Gmail readers only)`,
+      `${num(n.spamComplaints)} (${pctBeside(n.spamComplaints, s, 0.1)}, non-Gmail readers only)`,
     ],
   ]
   const lead =
