@@ -1429,9 +1429,14 @@ export default function QueueAdmin({
     }
   }, [])
 
-  const toggleGroup = (section: Section) => {
+  // A heading folds or opens itself; shift-click takes every heading beside
+  // it (`along`) the same way: all the sections on the tab, or all the pages
+  // in a section (Bryce, 14 Oct 2026: "shift click on a group should
+  // open/close all of them").
+  const toggleGroup = (section: Section, along: Section[] = [section]) => {
     setCollapsed(prev => {
-      const next = { ...prev, [section]: !prev[section] }
+      const next = { ...prev }
+      for (const s of along) next[s] = !prev[section]
       try {
         localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next))
       } catch {
@@ -1441,12 +1446,14 @@ export default function QueueAdmin({
     })
   }
 
-  const foldPage = useCallback((foldKey: string, folded: boolean) => {
+  const foldPages = useCallback((foldKeys: string[], folded: boolean) => {
     setFoldedPages(prev => {
-      if (Boolean(prev[foldKey]) === folded) return prev
+      if (foldKeys.every(key => Boolean(prev[key]) === folded)) return prev
       const next = { ...prev }
-      if (folded) next[foldKey] = true
-      else delete next[foldKey]
+      for (const key of foldKeys) {
+        if (folded) next[key] = true
+        else delete next[key]
+      }
       try {
         localStorage.setItem(FOLDED_PAGES_KEY, JSON.stringify(next))
       } catch {
@@ -1456,8 +1463,13 @@ export default function QueueAdmin({
     })
   }, [])
 
-  const togglePage = (foldKey: string) =>
-    foldPage(foldKey, !foldedPages[foldKey])
+  const foldPage = useCallback(
+    (foldKey: string, folded: boolean) => foldPages([foldKey], folded),
+    [foldPages]
+  )
+
+  const togglePage = (foldKey: string, along: string[] = [foldKey]) =>
+    foldPages(along, !foldedPages[foldKey])
 
   const chooseKind = (next: Kind) => {
     // During a search the segments count its matches; picking one leaves
@@ -3104,6 +3116,13 @@ export default function QueueAdmin({
   const tabDone = ordered.donePerKind[kind]
   const tabTotal = ordered.openPerKind[kind] + tabDone
   const toastRetry = toast?.retry ?? null
+  // The sections the list shows: those with something waiting, and
+  // Requests on the additions and changes tabs even when it is empty.
+  const shownSections = SECTIONS.filter(
+    section =>
+      ordered.groups[section].length > 0 ||
+      (section === 'requests' && kind !== 'rules')
+  )
 
   return (
     <div ref={rootRef} className={styles.queue}>
@@ -3345,18 +3364,18 @@ export default function QueueAdmin({
                   )
                 })}
               {!searching &&
-                SECTIONS.map(section => {
+                shownSections.map(section => {
                   const list = ordered.groups[section]
-                  if (
-                    list.length === 0 &&
-                    (section !== 'requests' || kind === 'rules')
-                  )
-                    return null
                   return (
                     <div key={section} className={styles.group}>
                       <button
                         className={styles.groupHead}
-                        onClick={() => toggleGroup(section)}
+                        onClick={e =>
+                          toggleGroup(
+                            section,
+                            e.shiftKey ? shownSections : undefined
+                          )
+                        }
                         aria-expanded={!collapsed[section]}
                       >
                         <span className={styles.groupIcon}>
@@ -3383,7 +3402,16 @@ export default function QueueAdmin({
                             <div key={page.key} className={styles.pageGroup}>
                               <button
                                 className={styles.pageHead}
-                                onClick={() => togglePage(foldKey)}
+                                onClick={e =>
+                                  togglePage(
+                                    foldKey,
+                                    e.shiftKey
+                                      ? ordered.pages[section].map(
+                                          p => `${section}:${p.key}`
+                                        )
+                                      : undefined
+                                  )
+                                }
                                 aria-expanded={!folded}
                               >
                                 <span
@@ -3655,6 +3683,13 @@ export default function QueueAdmin({
               <dd>
                 next / previous item; next goes to a reply Fable has finished
                 first
+              </dd>
+              <dt>
+                <kbd>⇧</kbd> click
+              </dt>
+              <dd>
+                on a heading, open or close all the sections at once, or all the
+                pages in that section
               </dd>
               <dt>
                 <kbd>/</kbd>

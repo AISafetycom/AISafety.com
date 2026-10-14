@@ -2126,17 +2126,23 @@ select.input {
   border-color: var(--q-border-strong);
 }
 
+/* Over the admin header (z-index 50) too, and scrolling when the card is
+   taller than the window, so its first lines are never hidden. */
 .help {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.35);
   display: flex;
-  align-items: center;
   justify-content: center;
-  z-index: 30;
+  padding: 16px;
+  overflow-y: auto;
+  z-index: 51;
 }
 
+/* Auto margins center the card when it fits and let it start at the top
+   when it does not. */
 .helpCard {
+  margin: auto 0;
   width: 420px;
   padding: 20px 22px;
   background: var(--q-panel);
