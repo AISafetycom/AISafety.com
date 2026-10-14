@@ -11,8 +11,10 @@ import {
 } from '@/lib/analytics/subscribers'
 import {
   DAY_MS,
+  byWeek,
   partialBucket,
   previousWindow,
+  weeksOf,
   type TrendFrame,
   type TrendMetric,
 } from '@/lib/analytics/trends'
@@ -66,19 +68,62 @@ export function eventTiles(
     // the store's oldest click, weeks before the first page view).
     const recorded = s.since ? Date.parse(`${s.since}T00:00:00Z`) : -Infinity
     const drawn = points(s.metric).filter(p => p.t >= recorded)
+    // A day's one or two says little, so small figures are drawn a week at
+    // a time (byWeek), judged on the days the chart covers.
+    const weekly =
+      s.metric.weekly && byWeek(drawn.map(p => p.v))
+        ? weekPoints(frame, s.metric.weekly, recorded, ongoing)
+        : null
     return {
       key: s.key,
       label: s.label,
       unit: s.unit,
       value: s.metric.total,
       from: from.ok ? s.metric.previous : null,
-      note: `${s.what} ${words}`,
-      step: frame.unit,
-      first: drawn[0]?.t ?? frame.starts[n - 1],
-      last: frame.starts[n - 1],
-      points: drawn,
+      note: [
+        s.what,
+        weekly && 'Drawn a week at a time, as a day’s figures are small.',
+        words,
+      ]
+        .filter(Boolean)
+        .join(' '),
+      step: weekly ? 'week' : frame.unit,
+      first: weekly ? weekly[0].t : (drawn[0]?.t ?? frame.starts[n - 1]),
+      last: weekly ? weekly[weekly.length - 1].t : frame.starts[n - 1],
+      points: weekly ?? drawn,
     }
   })
+}
+
+/** A weekly series as the chart draws it: one point on each week's Monday
+ *  from the week of `recorded` on, a week the chart only partly covers
+ *  saying how much of it counts ("3 of its 7 days", "so far"). */
+function weekPoints(
+  frame: TrendFrame,
+  weekly: number[],
+  recorded: number,
+  ongoing: boolean
+): TrendPoint[] {
+  const weeks = weeksOf(frame)!
+  const lastDay = frame.starts.length - 1
+  const hhmm = (ms: number) => new Date(ms).toISOString().slice(11, 16)
+  const out: TrendPoint[] = []
+  weeks.starts.forEach((t, w) => {
+    const days = frame.starts
+      .map((day, d) => ({ day, d }))
+      .filter(x => weeks.ofDay[x.d] === w && x.day >= recorded)
+    if (days.length === 0) return
+    const under = days.some(x => x.d === lastDay) && ongoing
+    const part = under
+      ? `${days.length} of its 7 days, so far`
+      : days.length < 7
+        ? `${days.length} of its 7 days`
+        : days.some(x => partialBucket(frame, x.d))
+          ? `from ${hhmm(frame.startMs)} UTC on its first day`
+          : undefined
+    out.push({ t, v: weekly[w] ?? 0, ...(part && { part }) })
+  })
+  return out
 }
 
 /** Whether a tile can show its From, and the sentence saying what it is or
@@ -232,7 +277,6 @@ export function subscriberTiles(
       points: [...opening, ...shown],
       markers:
         moved != null ? [{ t: moved, label: 'Moved to ActiveCampaign' }] : [],
-      fit: true,
     })
   }
   return tiles

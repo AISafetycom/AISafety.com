@@ -4,15 +4,20 @@ import {
   HOUR_MS,
   bucketOf,
   bucketsOf,
+  byWeek,
   countPer,
   eventsIn,
   partialBucket,
   peopleIn,
   peoplePer,
   instantsPer,
+  peoplePerWeek,
   previousWindow,
+  sumByWeek,
   trendFrame,
   visitStarts,
+  weeklyOf,
+  weeksOf,
 } from './trends'
 
 const at = (iso: string) => Date.parse(iso)
@@ -243,5 +248,77 @@ describe('bucket counts', () => {
     expect(countPer(hourly, b)[10]).toBe(1)
     expect(countPer(hourly, b)[11]).toBe(1)
     expect(hourly.starts[11] - hourly.starts[10]).toBe(HOUR_MS)
+  })
+})
+
+describe('weeks', () => {
+  // 30 days from Monday 14 September to Tuesday 13 October 2026.
+  const now = at('2026-10-13T12:00:00Z')
+  const frame = trendFrame(
+    { startMs: at('2026-09-14T00:00:00Z'), endMs: null },
+    now,
+    0,
+    null
+  )
+
+  it('groups the days into weeks from Monday', () => {
+    const weeks = weeksOf(frame)!
+    expect(
+      weeks.starts.map(t => new Date(t).toISOString().slice(0, 10))
+    ).toEqual([
+      '2026-09-14',
+      '2026-09-21',
+      '2026-09-28',
+      '2026-10-05',
+      '2026-10-12',
+    ])
+    expect(weeks.ofDay.slice(0, 8)).toEqual([0, 0, 0, 0, 0, 0, 0, 1])
+    expect(weeks.ofDay[29]).toBe(4)
+  })
+
+  it('adds a day-by-day count up by week', () => {
+    const weeks = weeksOf(frame)!
+    const daily = frame.starts.map(() => 1)
+    expect(sumByWeek(weeks, daily)).toEqual([7, 7, 7, 7, 2])
+  })
+
+  it('counts a person once a week, however many days they came', () => {
+    const weeks = weeksOf(frame)!
+    const events = [
+      { ts: '2026-09-14T10:00:00.000Z', vid: 'a' },
+      { ts: '2026-09-15T10:00:00.000Z', vid: 'a' },
+      { ts: '2026-09-15T11:00:00.000Z' },
+      { ts: '2026-09-22T10:00:00.000Z', vid: 'a' },
+    ]
+    expect(peoplePerWeek(weeks, events, bucketsOf(frame, events))).toEqual([
+      2, 1, 0, 0, 0,
+    ])
+  })
+
+  it('charts by week only figures that average under 10 a day', () => {
+    expect(byWeek([1, 2, 0, 1])).toBe(true)
+    expect(byWeek([10, 12, 11, 9])).toBe(false)
+    expect(byWeek([])).toBe(false)
+    expect(
+      weeklyOf(
+        frame,
+        frame.starts.map(() => 2)
+      )
+    ).toEqual([14, 14, 14, 14, 4])
+    expect(
+      weeklyOf(
+        frame,
+        frame.starts.map(() => 20)
+      )
+    ).toBeNull()
+    // Today, drawn by the hour, has no weeks.
+    const today = trendFrame(
+      { startMs: at('2026-10-13T00:00:00Z'), endMs: null },
+      now,
+      0,
+      null
+    )
+    expect(weeksOf(today)).toBeNull()
+    expect(weeklyOf(today, [1, 0, 1])).toBeNull()
   })
 })

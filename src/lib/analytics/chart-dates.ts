@@ -18,46 +18,6 @@ export function scaleTop(max: number): number {
   return 10 * p
 }
 
-/** The smallest of 1, 2, 2.5 and 5 × 10ⁿ at or above `x` (x > 0). */
-function niceAtLeast(x: number): number {
-  const p = 10 ** Math.floor(Math.log10(x))
-  for (const m of [1, 2, 2.5, 5]) if (m * p >= x) return m * p
-  return 10 * p
-}
-
-/** A scale fitted to the values instead of starting at zero, for a total
- *  that moves little against its size (subscribers, where a zero-based
- *  scale would hide a week's ups and downs): two to four equal steps of a
- *  round size, from a round number at or below `min` (never below zero) to
- *  one at or above `max`, the tightest that fits. Ticks run top to bottom. */
-export function scaleFit(
-  min: number,
-  max: number
-): { lo: number; hi: number; ticks: number[] } {
-  const span = max - min || Math.max(1, Math.abs(max) * 0.04)
-  let best: { lo: number; hi: number; steps: number; step: number } | null =
-    null
-  for (const steps of [2, 3, 4]) {
-    for (
-      let step = niceAtLeast(span / steps);
-      ;
-      step = niceAtLeast(step * 1.001)
-    ) {
-      const lo = Math.max(0, Math.floor(min / step) * step)
-      if (lo + steps * step < max) continue
-      if (!best || steps * step < best.hi - best.lo)
-        best = { lo, hi: lo + steps * step, steps, step }
-      break
-    }
-  }
-  const { lo, hi, steps, step } = best!
-  return {
-    lo,
-    hi,
-    ticks: Array.from({ length: steps + 1 }, (_, i) => hi - i * step),
-  }
-}
-
 /** A full-width chart shows every label, a narrower one every 2nd, a
  *  phone-width one every 4th and the narrowest phones every 8th, always
  *  counting back from the newest so the last column keeps its date. */

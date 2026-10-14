@@ -5,7 +5,6 @@ import { area, curveMonotoneX, line } from 'd3'
 import {
   chartDateLabels,
   chartHourLabels,
-  scaleFit,
   scaleTop,
 } from '@/lib/analytics/chart-dates'
 import styles from './analytics.module.css'
@@ -39,7 +38,8 @@ export interface TrendTile {
   /** Under the chart while the tile is picked: what it counts, and what
    *  From is. */
   note: string
-  step: 'day' | 'hour'
+  /** A point a day, an hour (Today) or a week (small figures). */
+  step: 'day' | 'hour' | 'week'
   first: number
   last: number
   /** Oldest first. A point before `first` is drawn (the line comes in from
@@ -47,11 +47,6 @@ export interface TrendTile {
   points: TrendPoint[]
   /** Moments worth a line of their own ("Moved to ActiveCampaign"). */
   markers?: { t: number; label: string }[]
-  /** Fit the scale to the values rather than start it at zero, for a total
-   *  that moves little against its size (subscribers). Drawn as a line
-   *  alone: a filled area would make the cut-off scale look like the whole
-   *  amount. */
-  fit?: boolean
 }
 
 const DAY_MS = 86_400_000
@@ -157,18 +152,11 @@ function Chart({ tile }: { tile: TrendTile }) {
   // counted for the scale's top.
   const shown = tile.points.filter(p => p.t >= first && p.t <= last)
   const drawn = tile.points.filter(p => p.t <= last)
-  const values = drawn.map(p => p.v)
   // From zero, with gridlines at the top, halfway (when that's a whole
-  // number) and zero; or fitted to the values (`fit`).
-  const top = scaleTop(Math.max(0, ...values)) || 1
-  const { lo, hi, ticks } = tile.fit
-    ? scaleFit(Math.min(...values), Math.max(...values))
-    : {
-        lo: 0,
-        hi: top,
-        ticks: Number.isInteger(top / 2) ? [top, top / 2, 0] : [top, 0],
-      }
-  const yOf = (v: number) => 1 - (v - lo) / (hi - lo)
+  // number) and zero.
+  const top = scaleTop(Math.max(0, ...drawn.map(p => p.v))) || 1
+  const ticks = Number.isInteger(top / 2) ? [top, top / 2, 0] : [top, 0]
+  const yOf = (v: number) => 1 - v / top
 
   const lineOf = line<TrendPoint>()
     .x(p => xOf(p.t) * W)
@@ -191,7 +179,11 @@ function Chart({ tile }: { tile: TrendTile }) {
   ].filter(s => s.points.length > 1)
 
   const when = (p: TrendPoint) =>
-    step === 'hour' ? hourWords(p.t) : longDay(p.t)
+    step === 'hour'
+      ? hourWords(p.t)
+      : step === 'week'
+        ? `Week of ${longDay(p.t)}`
+        : longDay(p.t)
   const shownPoint = active == null ? null : shown[active]
   const nearest = (clientX: number, el: HTMLElement) => {
     if (shown.length === 0) return
@@ -217,15 +209,11 @@ function Chart({ tile }: { tile: TrendTile }) {
     else if (e.key === 'Escape') setActive(null)
   }
 
-  // The dates (or hours) under the plot, one slot per day across it.
-  const slots =
-    step === 'hour'
-      ? Math.round(span / HOUR_MS) + 1
-      : Math.round(span / DAY_MS) + 1
-  const slotStarts = Array.from(
-    { length: slots },
-    (_, i) => first + i * (step === 'hour' ? HOUR_MS : DAY_MS)
-  )
+  // The dates (or hours) under the plot, one slot per point across it.
+  const stepMs =
+    step === 'hour' ? HOUR_MS : step === 'week' ? 7 * DAY_MS : DAY_MS
+  const slots = Math.round(span / stepMs) + 1
+  const slotStarts = Array.from({ length: slots }, (_, i) => first + i * stepMs)
   const labels =
     step === 'hour'
       ? chartHourLabels(slotStarts)
@@ -250,7 +238,7 @@ function Chart({ tile }: { tile: TrendTile }) {
           <span>
             {shown.length === 0
               ? 'Nothing to draw in this range'
-              : `Point at the chart for a ${step === 'hour' ? 'figure an hour' : 'day’s figure'}`}
+              : `Point at the chart for ${step === 'hour' ? 'a figure an hour' : step === 'week' ? 'a week’s figure' : 'a day’s figure'}`}
           </span>
         )}
       </div>
@@ -263,7 +251,7 @@ function Chart({ tile }: { tile: TrendTile }) {
         <div
           className={own.plot}
           tabIndex={shown.length > 0 ? 0 : undefined}
-          aria-label={`${tile.label} over time. Arrow keys step through the ${step === 'hour' ? 'hours' : 'days'}; the table below lists them all.`}
+          aria-label={`${tile.label} over time. Arrow keys step through the ${step}s; the table below lists them all.`}
           onPointerMove={e => nearest(e.clientX, e.currentTarget)}
           onPointerDown={e => nearest(e.clientX, e.currentTarget)}
           onPointerLeave={() => setActive(null)}
@@ -274,7 +262,7 @@ function Chart({ tile }: { tile: TrendTile }) {
             <span
               key={t}
               className={styles.chartGrid}
-              style={{ bottom: `${((t - lo) / (hi - lo)) * 100}%` }}
+              style={{ bottom: `${(t / top) * 100}%` }}
               aria-hidden
             />
           ))}
@@ -304,14 +292,13 @@ function Chart({ tile }: { tile: TrendTile }) {
           >
             {/* Each stretch fills its own area, so the fill's edge follows its
                 line exactly where a part-day stretch meets the rest. */}
-            {!tile.fit &&
-              stretches.map((s, i) => (
-                <path
-                  key={`a${i}`}
-                  className={own.area}
-                  d={fill(s.points) ?? undefined}
-                />
-              ))}
+            {stretches.map((s, i) => (
+              <path
+                key={`a${i}`}
+                className={own.area}
+                d={fill(s.points) ?? undefined}
+              />
+            ))}
             {stretches.map((s, i) => (
               <path
                 key={`l${i}`}
@@ -388,7 +375,9 @@ function Chart({ tile }: { tile: TrendTile }) {
           <table className={styles.table}>
             <thead>
               <tr>
-                <th>{step === 'hour' ? 'Hour' : 'Day'}</th>
+                <th>
+                  {step === 'hour' ? 'Hour' : step === 'week' ? 'Week' : 'Day'}
+                </th>
                 <th className={styles.numCol}>{tile.label}</th>
               </tr>
             </thead>

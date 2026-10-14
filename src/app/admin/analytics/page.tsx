@@ -31,7 +31,7 @@ import {
   type RatedReply,
   type TopQuestion,
 } from '@/lib/analytics/conversations'
-import { bucketOf, previousWindow } from '@/lib/analytics/trends'
+import { bucketOf, previousWindow, weeklyOf } from '@/lib/analytics/trends'
 import { readQuestionThemes, type ThemeSummary } from '@/lib/analytics/themes'
 import {
   buildSearchIndex,
@@ -1032,6 +1032,12 @@ async function AnalyticsView({
       ])
     : []
   const { frame } = data.trends
+  // Conversations per day (or hour), from the log's start times.
+  const conversationPoints = frame.starts.map(() => 0)
+  for (const t of convStats?.startedAt ?? []) {
+    const b = bucketOf(frame, t)
+    if (b >= 0) conversationPoints[b]++
+  }
   const chatbotTiles =
     activeTab === 'chatbot'
       ? tilesFor([
@@ -1044,14 +1050,8 @@ async function AnalyticsView({
                   metric: {
                     total: convStats.totalConversations,
                     previous: convBeforeCount,
-                    points: (() => {
-                      const out = frame.starts.map(() => 0)
-                      for (const t of convStats.startedAt) {
-                        const b = bucketOf(frame, t)
-                        if (b >= 0) out[b]++
-                      }
-                      return out
-                    })(),
+                    points: conversationPoints,
+                    weekly: weeklyOf(frame, conversationPoints),
                   },
                   what: `Conversations = chats started, from the conversation log, each on the ${per} it began.`,
                 },

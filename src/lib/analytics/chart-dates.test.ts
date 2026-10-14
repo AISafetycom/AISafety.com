@@ -5,7 +5,6 @@ import {
   chartDateLabels,
   chartHourLabels,
   labelStep,
-  scaleFit,
   scaleTop,
 } from './chart-dates'
 
@@ -282,48 +281,5 @@ describe('chartHourLabels', () => {
 
   it('has nothing to label without hours', () => {
     expect(chartHourLabels([])).toEqual([])
-  })
-})
-
-describe('scaleFit', () => {
-  it('fits a total that moves little against its size', () => {
-    // A month of subscribers: 2,737 to 3,031.
-    expect(scaleFit(2737, 3031)).toEqual({
-      lo: 2700,
-      hi: 3100,
-      ticks: [3100, 3000, 2900, 2800, 2700],
-    })
-  })
-
-  it('goes down to zero for one that grew from almost nothing', () => {
-    expect(scaleFit(7, 3031)).toEqual({
-      lo: 0,
-      hi: 4000,
-      ticks: [4000, 2000, 0],
-    })
-  })
-
-  it('gives a flat line some room', () => {
-    const s = scaleFit(3010, 3010)
-    expect(s.lo).toBeLessThanOrEqual(3010)
-    expect(s.hi).toBeGreaterThan(3010)
-  })
-
-  it('always holds the values, on round steps', () => {
-    for (const [min, max] of [
-      [0, 1],
-      [12, 13],
-      [95, 1020],
-      [4990, 5010],
-      [123_456, 130_000],
-    ]) {
-      const { lo, hi, ticks } = scaleFit(min, max)
-      expect(lo).toBeLessThanOrEqual(min)
-      expect(hi).toBeGreaterThanOrEqual(max)
-      expect(ticks[0]).toBe(hi)
-      expect(ticks[ticks.length - 1]).toBe(lo)
-      expect(ticks.length).toBeGreaterThanOrEqual(3)
-      expect(ticks.length).toBeLessThanOrEqual(5)
-    }
   })
 })

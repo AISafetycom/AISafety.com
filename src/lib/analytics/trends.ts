@@ -235,6 +235,86 @@ export interface TrendMetric {
   /** Null when the range has no stretch before it to compare with. */
   previous: number | null
   points: number[]
+  /** The values a week at a time (weeksOf), when the daily ones are small
+   *  enough to chart by week (byWeek); null otherwise. */
+  weekly: number[] | null
+}
+
+/** Days averaging fewer than this are charted by week: a day's one or two
+ *  says little, a week's ten does (Bryce, 14 October 2026). */
+const WEEKLY_BELOW_PER_DAY = 10
+
+/** Whether a day-by-day series is small enough to chart by week. */
+export function byWeek(daily: number[]): boolean {
+  if (daily.length === 0) return false
+  let sum = 0
+  for (const v of daily) sum += v
+  return sum / daily.length < WEEKLY_BELOW_PER_DAY
+}
+
+/** The weeks a frame's days fall in, Monday to Sunday (UTC), as the Org
+ *  lookup's clicks chart counts them. Null for a frame drawn by the hour. */
+export interface TrendWeeks {
+  /** Each week's Monday, epoch ms, oldest first. */
+  starts: number[]
+  /** For each of the frame's days, the week it's in. */
+  ofDay: number[]
+}
+
+export function weeksOf(frame: TrendFrame): TrendWeeks | null {
+  if (frame.unit !== 'day' || frame.starts.length === 0) return null
+  const starts: number[] = []
+  const ofDay: number[] = []
+  for (const day of frame.starts) {
+    const monday = day - ((new Date(day).getUTCDay() + 6) % 7) * DAY_MS
+    if (starts[starts.length - 1] !== monday) starts.push(monday)
+    ofDay.push(starts.length - 1)
+  }
+  return { starts, ofDay }
+}
+
+/** A day-by-day count added up a week at a time. */
+export function sumByWeek(weeks: TrendWeeks, daily: number[]): number[] {
+  const out = weeks.starts.map(() => 0)
+  daily.forEach((v, d) => {
+    out[weeks.ofDay[d]] += v
+  })
+  return out
+}
+
+/** Distinct visitors a week at a time, from the events' day buckets
+ *  (bucketsOf). Id-less events each count once, as peoplePer does. */
+export function peoplePerWeek(
+  weeks: TrendWeeks,
+  events: TrendEvent[],
+  dayBuckets: ArrayLike<number>
+): number[] {
+  const seen = weeks.starts.map(() => new Set<string>())
+  const anon = weeks.starts.map(() => 0)
+  for (let k = 0; k < events.length; k++) {
+    const d = dayBuckets[k]
+    if (d < 0) continue
+    const w = weeks.ofDay[d]
+    const vid = events[k].vid
+    if (vid) seen[w].add(vid)
+    else anon[w]++
+  }
+  return seen.map((s, w) => s.size + anon[w])
+}
+
+/** A metric's weekly values (TrendMetric.weekly): its daily counts added up,
+ *  or, for one counting people, its events' people per week. Null when it
+ *  isn't charted by week. */
+export function weeklyOf(
+  frame: TrendFrame,
+  daily: number[],
+  people?: { events: TrendEvent[]; buckets: ArrayLike<number> }
+): number[] | null {
+  const weeks = weeksOf(frame)
+  if (!weeks || !byWeek(daily)) return null
+  return people
+    ? peoplePerWeek(weeks, people.events, people.buckets)
+    : sumByWeek(weeks, daily)
 }
 
 /** A test for whether an event's timestamp falls inside inclusive bounds

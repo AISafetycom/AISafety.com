@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { NewsletterSubscribers } from '@/lib/admin/newsletter-subscribers'
-import { DAY_MS, trendFrame, previousWindow } from '@/lib/analytics/trends'
+import {
+  DAY_MS,
+  trendFrame,
+  previousWindow,
+  weeklyOf,
+} from '@/lib/analytics/trends'
 import { eventTiles, subscriberTiles } from './trend-tiles'
 
 const day = (d: string) => Date.parse(`${d}T00:00:00Z`)
@@ -11,7 +16,8 @@ describe('eventTiles', () => {
   const metric = (n: number) => ({
     total: 100,
     previous: 80,
-    points: Array.from({ length: n }, () => 3),
+    points: Array.from({ length: n }, () => 30),
+    weekly: null,
   })
 
   it('shows From when the stretch before was counted', () => {
@@ -99,6 +105,72 @@ describe('eventTiles', () => {
     ])
     expect(tile.first).toBe(day('2026-07-15'))
     expect(tile.points[0].t).toBe(day('2026-07-15'))
+  })
+})
+
+describe('weekly tiles', () => {
+  // 30 days to Wednesday 14 October, so the first and last weeks are part
+  // weeks: Monday 14 September from 18:03, and this week so far.
+  const range = { startMs: NOW - 30 * DAY_MS, endMs: null }
+  const frame = trendFrame(
+    range,
+    NOW,
+    day('2026-06-20'),
+    previousWindow(range, NOW)
+  )
+  const spec = (perDay: number) => {
+    const points = frame.starts.map(() => perDay)
+    return {
+      key: 'v',
+      label: 'V',
+      unit: 'v',
+      metric: {
+        total: 99,
+        previous: 9,
+        points,
+        weekly: weeklyOf(frame, points),
+      },
+      what: 'V.',
+    }
+  }
+
+  it('draws a small figure a week at a time', () => {
+    const [tile] = eventTiles(frame, range, '30d', '2026-06-20T00:00:00Z', [
+      spec(2),
+    ])
+    expect(tile.step).toBe('week')
+    expect(tile.points.map(p => p.v)).toEqual([14, 14, 14, 14, 6])
+    expect(tile.points[0].part).toBe('from 18:03 UTC on its first day')
+    expect(tile.points[4].part).toBe('3 of its 7 days, so far')
+    expect(tile.points[1].part).toBeUndefined()
+    expect(tile.first).toBe(day('2026-09-14'))
+    expect(tile.last).toBe(day('2026-10-12'))
+    expect(tile.note).toContain('Drawn a week at a time')
+    // The tile itself still shows the range's total and its From.
+    expect(tile.value).toBe(99)
+    expect(tile.from).toBe(9)
+  })
+
+  it('keeps a busy figure a day at a time', () => {
+    const [tile] = eventTiles(frame, range, '30d', '2026-06-20T00:00:00Z', [
+      spec(30),
+    ])
+    expect(tile.step).toBe('day')
+    expect(tile.points).toHaveLength(31)
+  })
+
+  it('starts a weekly chart in the week the figure was first recorded', () => {
+    const [tile] = eventTiles(frame, range, '30d', '2026-06-20T00:00:00Z', [
+      { ...spec(1), since: '2026-10-08' },
+    ])
+    expect(tile.step).toBe('week')
+    // Thursday 8 October to Sunday 11, then this week so far.
+    expect(
+      tile.points.map(p => [new Date(p.t).toISOString().slice(0, 10), p.part])
+    ).toEqual([
+      ['2026-10-05', '4 of its 7 days'],
+      ['2026-10-12', '3 of its 7 days, so far'],
+    ])
   })
 })
 

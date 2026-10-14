@@ -51,6 +51,7 @@ import {
   previousWindow,
   trendFrame,
   visitStarts,
+  weeklyOf,
   within,
   type TrendFrame,
   type TrendMetric,
@@ -903,7 +904,12 @@ export interface DashboardData {
   } | null
 }
 
-const NO_TREND: TrendMetric = { total: 0, previous: null, points: [] }
+const NO_TREND: TrendMetric = {
+  total: 0,
+  previous: null,
+  points: [],
+  weekly: null,
+}
 
 const EMPTY: Omit<DashboardData, 'source'> = {
   totalEvents: 0,
@@ -1708,40 +1714,56 @@ function siteTrends(
   const people = (
     hits: AnalyticsEvent[],
     prevHits: AnalyticsEvent[]
+  ): TrendMetric => {
+    const buckets = bucketsOf(frame, hits)
+    const points = peoplePer(frame, hits, buckets)
+    return {
+      total: uniqueUsers(hits),
+      previous: previous ? peopleIn(prevHits) : null,
+      points,
+      weekly: weeklyOf(frame, points, { events: hits, buckets }),
+    }
+  }
+  const counts = (
+    total: number,
+    prevTotal: number,
+    points: number[]
   ): TrendMetric => ({
-    total: uniqueUsers(hits),
-    previous: previous ? peopleIn(prevHits) : null,
-    points: peoplePer(frame, hits, bucketsOf(frame, hits)),
+    total,
+    previous: previous ? prevTotal : null,
+    points,
+    weekly: weeklyOf(frame, points),
   })
-  const events = (
-    hits: AnalyticsEvent[],
-    prevHits: AnalyticsEvent[]
-  ): TrendMetric => ({
-    total: hits.length,
-    previous: previous ? prevHits.length : null,
-    points: countPer(frame, bucketsOf(frame, hits)),
-  })
+  const events = (hits: AnalyticsEvent[], prevHits: AnalyticsEvent[]) =>
+    counts(
+      hits.length,
+      prevHits.length,
+      countPer(frame, bucketsOf(frame, hits))
+    )
   const viewBuckets = bucketsOf(frame, cur.views)
   const visitBegins = visitStarts(cur.views, SESSION_GAP_MS)
+  const visitorPoints = peoplePer(frame, cur.views, viewBuckets)
   const trends: DashboardTrends = {
     frame,
     visitors: {
       total: counted.visitors,
       previous: previous ? peopleIn(before.views) : null,
-      points: peoplePer(frame, cur.views, viewBuckets),
+      points: visitorPoints,
+      weekly: weeklyOf(frame, visitorPoints, {
+        events: cur.views,
+        buckets: viewBuckets,
+      }),
     },
-    visits: {
-      total: visitBegins.length,
-      previous: previous
-        ? visitStarts(before.views, SESSION_GAP_MS).length
-        : null,
-      points: instantsPer(frame, visitBegins),
-    },
-    pageViews: {
-      total: cur.views.length,
-      previous: previous ? before.views.length : null,
-      points: countPer(frame, viewBuckets),
-    },
+    visits: counts(
+      visitBegins.length,
+      previous ? visitStarts(before.views, SESSION_GAP_MS).length : 0,
+      instantsPer(frame, visitBegins)
+    ),
+    pageViews: counts(
+      cur.views.length,
+      before.views.length,
+      countPer(frame, viewBuckets)
+    ),
     listingClicks: events(counted.clicks, prevClicks),
     chatbotOpened: people(cur.chatbotOpen, before.chatbotOpen),
     chatbotMessaged: people(cur.chatbotMessage, before.chatbotMessage),
@@ -2003,25 +2025,38 @@ function aggregatePage(
   const page = selectedPage ?? ''
   const views = tiles.views.get(page) ?? { events: [], buckets: [] }
   const prevViews = tiles.prevViews.get(page) ?? []
+  const pageCounts = (
+    total: number,
+    prevTotal: number,
+    points: number[]
+  ): TrendMetric => ({
+    total,
+    previous: compared ? prevTotal : null,
+    points,
+    weekly: weeklyOf(frame, points),
+  })
   const pageEvents = (
     hits: AnalyticsEvent[],
     prevHits: AnalyticsEvent[] | undefined
-  ): TrendMetric => ({
-    total: hits.length,
-    previous: compared ? (prevHits?.length ?? 0) : null,
-    points: countPer(frame, bucketsOf(frame, hits)),
-  })
+  ) =>
+    pageCounts(
+      hits.length,
+      prevHits?.length ?? 0,
+      countPer(frame, bucketsOf(frame, hits))
+    )
+  const visitorPoints = peoplePer(frame, views.events, views.buckets)
   const pageTrends: PageTrends = {
     visitors: {
       total: uniqueUsers(views.events),
       previous: compared ? peopleIn(prevViews) : null,
-      points: peoplePer(frame, views.events, views.buckets),
+      points: visitorPoints,
+      weekly: weeklyOf(frame, visitorPoints, views),
     },
-    pageViews: {
-      total: views.events.length,
-      previous: compared ? prevViews.length : null,
-      points: countPer(frame, views.buckets),
-    },
+    pageViews: pageCounts(
+      views.events.length,
+      prevViews.length,
+      countPer(frame, views.buckets)
+    ),
     listingClicks: pageEvents(pageClicksAll, tiles.prevClicks.get(page)),
     filterUses: pageEvents(pageFilters, tiles.prevFilters.get(page)),
   }
