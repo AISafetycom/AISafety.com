@@ -220,7 +220,6 @@ function Chart({ tile }: { tile: TrendTile }) {
       : chartDateLabels(
           slotStarts.map(t => new Date(t).toISOString().slice(0, 10))
         )
-  const slotWidth = 100 / Math.max(1, slots - 1)
 
   return (
     <div className={styles.chart}>
@@ -337,22 +336,20 @@ function Chart({ tile }: { tile: TrendTile }) {
           )}
         </div>
       </div>
-      {/* One slot per day, centered under it; the CSS thins them out as the
-          chart narrows, as on the clicks chart (chart-dates.ts). */}
+      {/* Each date sits under its point, the newest ending flush with the
+          plot rather than past it; the CSS thins them out as the chart
+          narrows, as on the clicks chart (chart-dates.ts). */}
       <div className={styles.chartDates} aria-hidden>
         {labels.map(l => {
-          const center = slots > 1 ? (l.index / (slots - 1)) * 100 : 50
-          // The newest ends flush with the plot rather than past it.
-          const left =
-            l.index === slots - 1 && slots > 1
-              ? 100 - slotWidth
-              : center - slotWidth / 2
+          const newest = l.index === slots - 1 && slots > 1
           return (
             <span
               key={l.index}
-              className={styles.chartDate}
+              className={`${styles.chartDate} ${newest ? own.dateEnd : own.dateAt}`}
               data-keep={l.keep}
-              style={{ left: `${left}%`, width: `${slotWidth}%` }}
+              style={{
+                left: `${slots > 1 ? (l.index / (slots - 1)) * 100 : 50}%`,
+              }}
             >
               <span>
                 {l.text}

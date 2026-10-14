@@ -172,3 +172,12 @@
 .markerLabel[data-side='left'] {
   right: 0;
 }
+
+/* A date centered under its point; the newest one ends at the plot's edge. */
+.dateAt {
+  transform: translateX(-50%);
+}
+
+.dateEnd {
+  transform: translateX(-100%);
+}
