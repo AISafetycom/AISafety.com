@@ -10,6 +10,7 @@ import { filterItems, optionCounts } from '@/lib/filter-counts'
 import { withUtm } from '@/lib/utm'
 import { gridListings, placementsById } from '@/lib/placements'
 import { communityCardProps } from './card'
+import { coveredCountries, locationCountries } from './location'
 
 interface CommunitiesClientProps {
   communities: Community[]
@@ -40,6 +41,24 @@ export default function CommunitiesClient({
   const [platformFilters, setPlatformFilters] = useState<string[]>([])
   const [activityFilters, setActivityFilters] = useState<string[]>([])
   const [focusFilters, setFocusFilters] = useState<string[]>([])
+  const [countryFilters, setCountryFilters] = useState<string[]>([])
+
+  // Every country a community names itself, alphabetical so a visitor can
+  // find their own in a long list.
+  const countryOptions = useMemo(
+    () =>
+      [
+        ...new Set(communities.flatMap(c => locationCountries(c.location))),
+      ].sort((a, b) => a.localeCompare(b)),
+    [communities]
+  )
+
+  // Each community's covered countries (regions expanded), parsed once for
+  // the Country filter, which checks them for every option on each change.
+  const coveredById = useMemo(
+    () => new Map(communities.map(c => [c.id, coveredCountries(c.location)])),
+    [communities]
+  )
 
   // Each community's slot in the full page order, stamped onto a click so the
   // dashboard can tie clicks to page position even after later reordering.
@@ -65,8 +84,19 @@ export default function CommunitiesClient({
         matches: (community: Community, value: string) =>
           community.focus === value,
       },
+      country: {
+        selected: countryFilters,
+        matches: (community: Community, value: string) =>
+          coveredById.get(community.id)!.includes(value),
+      },
     }),
-    [platformFilters, activityFilters, focusFilters]
+    [
+      platformFilters,
+      activityFilters,
+      focusFilters,
+      countryFilters,
+      coveredById,
+    ]
   )
 
   const filteredCommunities = useMemo(
@@ -91,8 +121,13 @@ export default function CommunitiesClient({
         focusOptions,
         groups.focus.matches
       ),
+      country: optionCounts(
+        filterItems(communities, allPass, groups, 'country'),
+        countryOptions,
+        groups.country.matches
+      ),
     }),
-    [communities, groups]
+    [communities, groups, countryOptions]
   )
 
   const savedScrollY = useRef<number | null>(null)
@@ -158,6 +193,19 @@ export default function CommunitiesClient({
         noun="community"
         label={`${count} ${count === 1 ? 'community' : 'communities'}`}
       >
+        <FilterDropdown
+          trackingPage="Communities"
+          title="Country"
+          icon="/images/icons/pin.svg"
+          options={countryOptions}
+          selected={countryFilters}
+          counts={filterCounts.country}
+          onToggle={v => toggleFilter(v, countryFilters, setCountryFilters)}
+          searchable
+          // 386 + the search box and padding keeps the whole popover
+          // about 500px tall, the height agreed for this list.
+          maxListHeight={386}
+        />
         <FilterDropdown
           trackingPage="Communities"
           title="Platform"
