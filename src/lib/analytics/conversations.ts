@@ -14,6 +14,7 @@ import { PAGES, DEFAULT_CHIPS } from '@/lib/assistant/pages'
 import { extractChips, stripChipTokens } from '@/lib/assistant/tokens'
 import {
   isConversationsTableConfigured,
+  listConversationTimes,
   listConversationsForStats,
   type ConversationRow,
 } from '@/lib/admin/airtable'
@@ -50,6 +51,9 @@ export interface ConversationStats {
   available: boolean
   /** Conversations created inside the selected range. */
   totalConversations: number
+  /** When each of them began (epoch ms), for the Conversations tile's
+   *  chart. */
+  startedAt: number[]
   /** Median user messages per conversation, or null with no data. */
   medianLength: number | null
   /** Share (0–1) of conversations whose first message is one of the suggested
@@ -88,6 +92,7 @@ export interface ConversationStats {
 const EMPTY_STATS: ConversationStats = {
   available: false,
   totalConversations: 0,
+  startedAt: [],
   medianLength: null,
   suggestedShare: null,
   followUpMessageShare: null,
@@ -445,6 +450,24 @@ export async function listTypedQuestions(range: DateRange): Promise<string[]> {
   return out
 }
 
+/** How many conversations began in a stretch of time (the Conversations
+ *  tile's From), or null when the log isn't set up or couldn't be read: the
+ *  tile then shows no From rather than a wrong one. */
+export async function countConversations(range: {
+  startMs: number
+  endMs: number
+}): Promise<number | null> {
+  if (!isConversationsTableConfigured()) return null
+  try {
+    return (await listConversationTimes(range)).length
+  } catch (err) {
+    console.warn(
+      `[analytics] conversation count read failed: ${err instanceof Error ? err.message : String(err)}`
+    )
+    return null
+  }
+}
+
 /** Cap on distinct questions sent to the browser — same reasoning as the click
  *  tables' row cap: organic data stays far below it. */
 const MAX_QUESTIONS = 500
@@ -521,6 +544,7 @@ export async function readConversationStats(
   return {
     available: true,
     totalConversations: rows.length,
+    startedAt: rows.map(r => Date.parse(r.createdAt)),
     medianLength: median(lengths.sort((a, b) => a - b)),
     suggestedShare: withQuestion > 0 ? suggested / withQuestion : null,
     followUpMessageShare:
