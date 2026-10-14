@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   approvedMail,
   newsletterApprovalMail,
@@ -108,6 +108,37 @@ describe('sendAdminMail', () => {
     )
     delete process.env.ADMIN_MAIL_SCRIPT_URL
     delete process.env.ADMIN_MAIL_SECRET
+  })
+
+  it('logs a failed send with the subject as a plain value, not a format string', async () => {
+    process.env.ADMIN_MAIL_SCRIPT_URL = 'https://script.example/exec'
+    process.env.ADMIN_MAIL_SECRET = 'shared-secret'
+    const odd = requestMail({
+      email: 'someone@example.com',
+      name: 'Some %d One',
+      at: '2026-09-04T16:30:00.000Z',
+      count: 1,
+      adminUrl: 'https://aisafety.com/admin/users',
+    })
+    const failing = (async () => {
+      throw new Error('network down')
+    }) as typeof fetch
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(
+        await sendAdminMail('request', 'o@example.com', odd, failing)
+      ).toBe(false)
+      expect(warn).toHaveBeenCalledTimes(1)
+      const [format, ...args] = warn.mock.calls[0]
+      expect(String(format)).not.toContain('Some %d One')
+      expect(args[0]).toBe('Admin access requested by Some %d One')
+      expect(args[1]).toBe('request')
+      expect(args[2]).toBeInstanceOf(Error)
+    } finally {
+      warn.mockRestore()
+      delete process.env.ADMIN_MAIL_SCRIPT_URL
+      delete process.env.ADMIN_MAIL_SECRET
+    }
   })
 })
 
