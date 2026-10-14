@@ -3,7 +3,9 @@ import {
   type ChartDateLabel,
   type LabelThinning,
   chartDateLabels,
+  chartHourLabels,
   labelStep,
+  scaleFit,
   scaleTop,
 } from './chart-dates'
 
@@ -241,6 +243,87 @@ describe('scaleTop', () => {
       const top = scaleTop(max)
       expect(top).toBeGreaterThanOrEqual(max)
       expect(max / top).toBeGreaterThanOrEqual(2 / 3)
+    }
+  })
+})
+
+describe('chartHourLabels', () => {
+  const hours = (n: number) =>
+    Array.from({ length: n }, (_, i) => Date.UTC(2026, 9, 14, i))
+
+  it('labels each hour of a short morning', () => {
+    expect(chartHourLabels(hours(3)).map(l => l.text)).toEqual([
+      '00:00',
+      '01:00',
+      '02:00',
+    ])
+  })
+
+  it('steps back from the newest hour across a whole day', () => {
+    const labels = chartHourLabels(hours(24))
+    expect(labels.map(l => l.text)).toEqual([
+      '01:00',
+      '03:00',
+      '05:00',
+      '07:00',
+      '09:00',
+      '11:00',
+      '13:00',
+      '15:00',
+      '17:00',
+      '19:00',
+      '21:00',
+      '23:00',
+    ])
+    // The newest stays at every width, like the dates.
+    expect(labels[labels.length - 1].keep).toBe(8)
+    expect(labels.every(l => l.year === null)).toBe(true)
+  })
+
+  it('has nothing to label without hours', () => {
+    expect(chartHourLabels([])).toEqual([])
+  })
+})
+
+describe('scaleFit', () => {
+  it('fits a total that moves little against its size', () => {
+    // A month of subscribers: 2,737 to 3,031.
+    expect(scaleFit(2737, 3031)).toEqual({
+      lo: 2700,
+      hi: 3100,
+      ticks: [3100, 3000, 2900, 2800, 2700],
+    })
+  })
+
+  it('goes down to zero for one that grew from almost nothing', () => {
+    expect(scaleFit(7, 3031)).toEqual({
+      lo: 0,
+      hi: 4000,
+      ticks: [4000, 2000, 0],
+    })
+  })
+
+  it('gives a flat line some room', () => {
+    const s = scaleFit(3010, 3010)
+    expect(s.lo).toBeLessThanOrEqual(3010)
+    expect(s.hi).toBeGreaterThan(3010)
+  })
+
+  it('always holds the values, on round steps', () => {
+    for (const [min, max] of [
+      [0, 1],
+      [12, 13],
+      [95, 1020],
+      [4990, 5010],
+      [123_456, 130_000],
+    ]) {
+      const { lo, hi, ticks } = scaleFit(min, max)
+      expect(lo).toBeLessThanOrEqual(min)
+      expect(hi).toBeGreaterThanOrEqual(max)
+      expect(ticks[0]).toBe(hi)
+      expect(ticks[ticks.length - 1]).toBe(lo)
+      expect(ticks.length).toBeGreaterThanOrEqual(3)
+      expect(ticks.length).toBeLessThanOrEqual(5)
     }
   })
 })

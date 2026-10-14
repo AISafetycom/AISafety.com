@@ -41,6 +41,20 @@ import {
   type MatchReason,
   type OrgSpec,
 } from './org-lookup'
+import {
+  bucketsOf,
+  countPer,
+  eventsIn,
+  peopleIn,
+  peoplePer,
+  previousWindow,
+  trendFrame,
+  visitStarts,
+  visitsPer,
+  type TrendFrame,
+  type TrendMetric,
+  type TrendWindow,
+} from './trends'
 
 export interface AnalyticsEvent {
   /** Event kind, e.g. 'listing_click'. Must be in ALLOWED_EVENT_TYPES. */
@@ -651,6 +665,45 @@ export interface VisitorShare {
   visitors: number
 }
 
+/** The site-wide tiles' figures over time (each tab's "over time" panel):
+ *  per-day (or per-hour) values for the range, its totals, and the totals
+ *  for the stretch just before it. Each total is the figure the panels below
+ *  show; people are always counted once, clicks and signups follow the count
+ *  mode as their tables do. */
+export interface DashboardTrends {
+  frame: TrendFrame
+  /** Distinct visitors (page views). */
+  visitors: TrendMetric
+  /** Visits, each counted on the day it began. */
+  visits: TrendMetric
+  pageViews: TrendMetric
+  /** Listing clicks on every page, as Clicks by page counts them. */
+  listingClicks: TrendMetric
+  /** The chatbot funnel, in people. */
+  chatbotOpened: TrendMetric
+  chatbotMessaged: TrendMetric
+  chatbotClicked: TrendMetric
+  /** The site search funnel, in people. */
+  searchOpened: TrendMetric
+  searchTyped: TrendMetric
+  searchClicked: TrendMetric
+  /** Submits of the newsletter signup boxes. */
+  newsletterSubmits: TrendMetric
+  /** Signups through the site that ActiveCampaign took. */
+  newsletterSignups: TrendMetric
+}
+
+/** The selected resource page's tiles over time. */
+export interface PageTrends {
+  /** Distinct visitors to the page. */
+  visitors: TrendMetric
+  pageViews: TrendMetric
+  /** Its listing clicks, every source, as its tab's total counts them. */
+  listingClicks: TrendMetric
+  /** Filter values turned on, as Filter usage counts them. */
+  filterUses: TrendMetric
+}
+
 export interface DashboardData {
   /** Which backend served this data — surfaced in the UI so it's obvious in dev. */
   source: 'redis' | 'local-file' | 'none'
@@ -815,6 +868,10 @@ export interface DashboardData {
   optOuts: { off: number; on: number }
   /** First-party page views (recorded from 15 July 2026). */
   visits: VisitsData
+  /** The site-wide tiles over time. */
+  trends: DashboardTrends
+  /** The selected page's tiles over time. */
+  pageTrends: PageTrends
   /** The Org lookup tab's figures, when it asked for them (a search). */
   org?: OrgLookupData
   /** Cross-interest overlaps between pages (and the chatbot), from anonymous
@@ -844,6 +901,8 @@ export interface DashboardData {
     prevCount: number
   } | null
 }
+
+const NO_TREND: TrendMetric = { total: 0, previous: null, points: [] }
 
 const EMPTY: Omit<DashboardData, 'source'> = {
   totalEvents: 0,
@@ -930,6 +989,27 @@ const EMPTY: Omit<DashboardData, 'source'> = {
     newVisitors: 0,
     returningVisitors: 0,
     returningShareByPage: [],
+  },
+  trends: {
+    frame: { unit: 'day', starts: [], startMs: 0, endMs: 0, previous: null },
+    visitors: NO_TREND,
+    visits: NO_TREND,
+    pageViews: NO_TREND,
+    listingClicks: NO_TREND,
+    chatbotOpened: NO_TREND,
+    chatbotMessaged: NO_TREND,
+    chatbotClicked: NO_TREND,
+    searchOpened: NO_TREND,
+    searchTyped: NO_TREND,
+    searchClicked: NO_TREND,
+    newsletterSubmits: NO_TREND,
+    newsletterSignups: NO_TREND,
+  },
+  pageTrends: {
+    visitors: NO_TREND,
+    pageViews: NO_TREND,
+    listingClicks: NO_TREND,
+    filterUses: NO_TREND,
   },
   firstSeenBackfilled: true,
   correlations: [],
@@ -1193,6 +1273,7 @@ type PageFields = Pick<
   | 'anyHoverShare'
   | 'areaClicks'
   | 'mapSearch'
+  | 'pageTrends'
   | 'org'
 >
 type AggregateFields = Omit<
@@ -1221,6 +1302,15 @@ interface SiteView {
   /** Every map hover in range, deduped in unique mode. Only the map pages
    *  read it, so it's worked out on first use. */
   hovers?: AnalyticsEvent[]
+  /** The page views in range, and the page tiles' events from the stretch
+   *  before it (frame.previous; empty when there's none), counted the way
+   *  their in-range twins are. */
+  views: AnalyticsEvent[]
+  prev: {
+    views: AnalyticsEvent[]
+    clicks: AnalyticsEvent[]
+    filterApplies: AnalyticsEvent[]
+  }
 }
 
 /** Aggregate a newest-first event list into the dashboard view, filtered to the
@@ -1238,7 +1328,17 @@ function aggregate(
   /** The Org lookup tab's search, already matched against the catalog. */
   org: OrgSpec | null = null
 ): AggregateFields {
-  const site = aggregateSite(all, range, unique, firstSeen)
+  // `all` is every event there is (the dev store), so the stretch before the
+  // range is always there to compare with.
+  const now = Date.now()
+  const site = aggregateSite(
+    all,
+    range,
+    unique,
+    firstSeen,
+    previousWindow(range, now),
+    now
+  )
   return {
     ...site.fields,
     ...aggregatePage(site, selectedPageReq, sourceReq, org),
@@ -1261,7 +1361,11 @@ function aggregateSite(
   /** Epoch ms each visitor was first seen (any event, whole store), for at
    *  least every visitor with a page view in range. What makes "returning"
    *  knowable without reading the months before the range. */
-  firstSeen: Map<string, number>
+  firstSeen: Map<string, number>,
+  /** The stretch the tiles compare with, when `all` holds its events (the
+   *  store reads them only when they're there and fit: loadSiteView). */
+  previous: TrendWindow | null,
+  now: number
 ): SiteView {
   const inRange = all.filter(e => {
     const t = Date.parse(e.ts)
@@ -1411,6 +1515,127 @@ function aggregateSite(
   )
   const anyNavOverflowOpenShare = anyOnSite(navOpens, 'Any open')
 
+  // The tiles over time. The drawn stretch never starts before the oldest
+  // event read (newest first, so the last one), and the stretch before the
+  // range is counted exactly like the range itself.
+  const oldestRead = all.length > 0 ? Date.parse(all[all.length - 1].ts) : NaN
+  const frame = trendFrame(
+    { startMs, endMs },
+    now,
+    Number.isNaN(oldestRead) ? Infinity : oldestRead,
+    previous
+  )
+  const before = eventsIn(all, previous)
+  const views = inRange.filter(e => e.type === 'page_view')
+  const prev = {
+    views: before.filter(e => e.type === 'page_view'),
+    clicks: (() => {
+      const hits = before.filter(
+        e =>
+          e.type === 'listing_click' &&
+          e.page != null &&
+          LISTING_PAGES.has(e.page)
+      )
+      return unique ? uniqueClicks(hits) : hits
+    })(),
+    filterApplies: (() => {
+      const hits = before.filter(e => e.type === 'filter_apply' && e.page)
+      return unique ? uniqueFilterApplies(hits) : hits
+    })(),
+  }
+  const ofType = (events: AnalyticsEvent[], type: string) =>
+    events.filter(e => e.type === type)
+  /** A tile counting people: distinct visitors per bucket, over the range
+   *  and over the stretch before. */
+  const people = (
+    hits: AnalyticsEvent[],
+    prevHits: AnalyticsEvent[]
+  ): TrendMetric => ({
+    total: uniqueUsers(hits),
+    previous: previous ? peopleIn(prevHits) : null,
+    points: peoplePer(frame, hits, bucketsOf(frame, hits)),
+  })
+  /** A tile counting events (already deduped where the count mode says). */
+  const events = (
+    hits: AnalyticsEvent[],
+    prevHits: AnalyticsEvent[]
+  ): TrendMetric => ({
+    total: hits.length,
+    previous: previous ? prevHits.length : null,
+    points: countPer(frame, bucketsOf(frame, hits)),
+  })
+  const viewBuckets = bucketsOf(frame, views)
+  const searchQueries = (list: AnalyticsEvent[]) =>
+    list.filter(e => e.type === 'search_query' && e.query)
+  // Signups through the site, deduped as newsletterSignupResults does: one
+  // per visitor per page per day in unique mode.
+  const signups = (list: AnalyticsEvent[]) => {
+    const hits = list.filter(
+      e => e.type === 'newsletter_signup_success' && e.page
+    )
+    if (!unique) return hits
+    const seen = new Set<string>()
+    return hits.filter(e => {
+      if (!e.vid) return true
+      const key = `${e.vid}\x00${dashboardDay(Date.parse(e.ts))}\x00${e.page}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }
+  const trends: DashboardTrends = {
+    frame,
+    visitors: {
+      total: uniqueUsers(views),
+      previous: previous ? peopleIn(prev.views) : null,
+      points: peoplePer(frame, views, viewBuckets),
+    },
+    visits: {
+      total: visitStarts(views, SESSION_GAP_MS).length,
+      previous: previous
+        ? visitStarts(prev.views, SESSION_GAP_MS).length
+        : null,
+      points: visitsPer(frame, views, SESSION_GAP_MS),
+    },
+    pageViews: {
+      total: views.length,
+      previous: previous ? prev.views.length : null,
+      points: countPer(frame, viewBuckets),
+    },
+    listingClicks: events(clicks, prev.clicks),
+    chatbotOpened: people(
+      ofType(inRange, 'chatbot_open'),
+      ofType(before, 'chatbot_open')
+    ),
+    chatbotMessaged: people(
+      ofType(inRange, 'chatbot_message'),
+      ofType(before, 'chatbot_message')
+    ),
+    chatbotClicked: people(
+      ofType(inRange, 'chatbot_click'),
+      ofType(before, 'chatbot_click')
+    ),
+    searchOpened: people(
+      ofType(inRange, 'search_open'),
+      ofType(before, 'search_open')
+    ),
+    searchTyped: people(searchQueries(inRange), searchQueries(before)),
+    searchClicked: people(
+      ofType(inRange, 'search_click'),
+      ofType(before, 'search_click')
+    ),
+    newsletterSubmits: events(
+      newsletterSubmits,
+      (() => {
+        const hits = before.filter(
+          e => e.type === 'newsletter_signup' && e.page
+        )
+        return unique ? uniqueClicks(hits) : hits
+      })()
+    ),
+    newsletterSignups: events(signups(inRange), signups(before)),
+  }
+
   return {
     inRange,
     range: { startMs, endMs },
@@ -1422,6 +1647,8 @@ function aggregateSite(
     contributeClicks,
     airtableClicks,
     viewVidsByPage,
+    views,
+    prev,
     fields: {
       totalEvents: inRange.length,
       byPage,
@@ -1455,6 +1682,7 @@ function aggregateSite(
       search: searchPanels(inRange, unique),
       optOuts: optOutSplit(inRange),
       visits: visitsData(inRange, unique, firstSeen, startMs, viewVidsByPage),
+      trends,
       correlations: correlations(inRange),
       // Newest-first already; page views, map hovers and cards-section views
       // are left out so the feed stays a log of deliberate actions rather than
@@ -1679,6 +1907,38 @@ function aggregatePage(
       ? mapSearchPanels(inRange, unique, anyOnPage)
       : EMPTY.mapSearch
 
+  // The page's tiles over time, counted like the site's (aggregateSite).
+  const { frame } = site.fields.trends
+  const compared = frame.previous != null
+  const onPage = (e: AnalyticsEvent) =>
+    e.page != null && (PAGE_NAME_BY_PATH[e.page] ?? e.page) === selectedPage
+  const pageViews = site.views.filter(onPage)
+  const prevViews = site.prev.views.filter(onPage)
+  const pageEvents = (
+    hits: AnalyticsEvent[],
+    prevHits: AnalyticsEvent[]
+  ): TrendMetric => ({
+    total: hits.length,
+    previous: compared ? prevHits.length : null,
+    points: countPer(frame, bucketsOf(frame, hits)),
+  })
+  const pageTrends: PageTrends = {
+    visitors: {
+      total: uniqueUsers(pageViews),
+      previous: compared ? peopleIn(prevViews) : null,
+      points: peoplePer(frame, pageViews, bucketsOf(frame, pageViews)),
+    },
+    pageViews: pageEvents(pageViews, prevViews),
+    listingClicks: pageEvents(
+      pageClicksAll,
+      site.prev.clicks.filter(e => e.page === selectedPage)
+    ),
+    filterUses: pageEvents(
+      pageFilters,
+      site.prev.filterApplies.filter(e => e.page === selectedPage)
+    ),
+  }
+
   return {
     selectedPage,
     topListings,
@@ -1709,6 +1969,7 @@ function aggregatePage(
     anyHoverShare,
     areaClicks,
     mapSearch,
+    pageTrends,
     org: org
       ? orgLookup(inRange, org, unique, site.viewVidsByPage, site.range)
       : undefined,
@@ -3207,6 +3468,33 @@ export function fromTestCopy(ref: string | undefined): boolean {
   )
 }
 
+/** The months a view reads (newest first) and the stretch before the range
+ *  its tiles compare with. That stretch is read too, but only when the store
+ *  goes back that far and the extra months fit the month cache: a 90-day
+ *  range would otherwise double what every load holds in memory once the
+ *  store passes it. Without it the tiles show no "From". */
+function readPlan(
+  byMonth: { month: string; len: number }[],
+  range: DateRange,
+  now: number
+): { wanted: { month: string; len: number }[]; previous: TrendWindow | null } {
+  const months = byMonth.map(b => b.month)
+  const pick = (r: DateRange) =>
+    monthsInRange(months, r)
+      .map(m => byMonth.find(b => b.month === m)!)
+      .reverse() // newest first
+  const own = pick(range)
+  const previous = previousWindow(range, now)
+  if (!previous || months.length === 0) return { wanted: own, previous: null }
+  if (previous.startMs < monthBounds(months[0]).startMs)
+    return { wanted: own, previous: null }
+  const both = pick({ startMs: previous.startMs, endMs: range.endMs })
+  const events = both.reduce((n, b) => n + b.len, 0)
+  if (both.length > own.length && events > MONTH_CACHE_MAX_EVENTS)
+    return { wanted: own, previous: null }
+  return { wanted: both, previous }
+}
+
 /** The site view for a range and count mode from the Redis store, through
  *  the month cache and the site view cache, plus the store-wide fields. */
 async function loadSiteView(
@@ -3215,13 +3503,13 @@ async function loadSiteView(
   unique: boolean
 ): Promise<{ site: SiteView; meta: ViewMeta }> {
   // All stored months, oldest first, with lengths (so the near-cap warning
-  // covers the whole store); only the months the range touches have their
-  // events read. The oldest month also tells us how far back the data goes.
+  // covers the whole store); only the months the range (and the stretch the
+  // tiles compare it with) touches have their events read. The oldest month
+  // also tells us how far back the data goes.
   const byMonth = await storedMonths(db)
   const months = byMonth.map(b => b.month)
-  const wanted = monthsInRange(months, range)
-    .map(m => byMonth.find(b => b.month === m)!)
-    .reverse() // newest first
+  const now = Date.now()
+  const { wanted, previous } = readPlan(byMonth, range, now)
   const [parts, oldestEvent, backfilled] = await Promise.all([
     readMonthsCached(bulkStore ?? db, wanted),
     months.length > 0
@@ -3241,7 +3529,7 @@ async function loadSiteView(
       range.startMs != null
         ? await readFirstSeen(db, viewVidsInRange(all, range))
         : new Map<string, number>()
-    return aggregateSite(all, range, unique, firstSeen)
+    return aggregateSite(all, range, unique, firstSeen, previous, now)
   })
   return {
     site,
@@ -3420,7 +3708,20 @@ export async function savedViewWhileCold(
   if (!store || sourceFilter) return null
   try {
     const months = (await store.zrange(MONTHS_KEY, 0, -1)) as string[]
-    if (monthsInRange(months, range).every(m => monthCache.has(m))) return null
+    // The months the live view reads, the tiles' stretch before the range
+    // included (readPlan; its lengths aren't known here, so this may count a
+    // month the live view would leave out, which only shows the copy).
+    const previous = previousWindow(range, Date.now())
+    const reads = monthsInRange(months, {
+      startMs:
+        previous &&
+        months.length > 0 &&
+        previous.startMs >= monthBounds(months[0]).startMs
+          ? previous.startMs
+          : range.startMs,
+      endMs: range.endMs,
+    })
+    if (reads.every(m => monthCache.has(m))) return null
     const packed = await store.get<string>(SAVED_VIEW_KEY)
     if (typeof packed !== 'string') return null
     const saved = JSON.parse(

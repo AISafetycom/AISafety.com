@@ -1,7 +1,7 @@
-/** The dates under the Org lookup's "Clicks over time" chart (ClicksChart):
- *  which columns get one, what each says, and which ones a narrower chart
- *  drops so they never collide. Works the same for per-day and per-week
- *  columns. */
+/** The dates under the dashboard's charts (the Org lookup's ClicksChart and
+ *  the tiles' TrendChart): which columns get one, what each says, and which
+ *  ones a narrower chart drops so they never collide. Works the same for
+ *  per-day and per-week columns, and for hours (chartHourLabels). */
 
 /** Roughly how many dates a full-width chart shows. */
 export const DATE_LABEL_TARGET = 13
@@ -16,6 +16,46 @@ export function scaleTop(max: number): number {
   for (const m of [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8])
     if (m * p >= max) return m * p
   return 10 * p
+}
+
+/** The smallest of 1, 2, 2.5 and 5 × 10ⁿ at or above `x` (x > 0). */
+function niceAtLeast(x: number): number {
+  const p = 10 ** Math.floor(Math.log10(x))
+  for (const m of [1, 2, 2.5, 5]) if (m * p >= x) return m * p
+  return 10 * p
+}
+
+/** A scale fitted to the values instead of starting at zero, for a total
+ *  that moves little against its size (subscribers, where a zero-based
+ *  scale would hide a week's ups and downs): two to four equal steps of a
+ *  round size, from a round number at or below `min` (never below zero) to
+ *  one at or above `max`, the tightest that fits. Ticks run top to bottom. */
+export function scaleFit(
+  min: number,
+  max: number
+): { lo: number; hi: number; ticks: number[] } {
+  const span = max - min || Math.max(1, Math.abs(max) * 0.04)
+  let best: { lo: number; hi: number; steps: number; step: number } | null =
+    null
+  for (const steps of [2, 3, 4]) {
+    for (
+      let step = niceAtLeast(span / steps);
+      ;
+      step = niceAtLeast(step * 1.001)
+    ) {
+      const lo = Math.max(0, Math.floor(min / step) * step)
+      if (lo + steps * step < max) continue
+      if (!best || steps * step < best.hi - best.lo)
+        best = { lo, hi: lo + steps * step, steps, step }
+      break
+    }
+  }
+  const { lo, hi, steps, step } = best!
+  return {
+    lo,
+    hi,
+    ticks: Array.from({ length: steps + 1 }, (_, i) => hi - i * step),
+  }
 }
 
 /** A full-width chart shows every label, a narrower one every 2nd, a
@@ -81,6 +121,30 @@ export function chartDateLabels(days: readonly string[]): ChartDateLabel[] {
       year: yearFrom == null ? null : String(year),
       keep,
       yearFrom,
+    }
+  })
+}
+
+/** The labels for a series of hours (epoch ms, oldest first; Today on the
+ *  trend charts): "09:00", UTC, picked and thinned the same way as days. */
+export function chartHourLabels(hours: readonly number[]): ChartDateLabel[] {
+  const n = hours.length
+  if (n === 0) return []
+  const step = labelStep(n)
+  const indices: number[] = []
+  for (let i = n - 1; i >= 0; i -= step) indices.unshift(i)
+  const last = indices.length - 1
+  return indices.map((index, k) => {
+    const fromEnd = last - k
+    const keep: LabelThinning =
+      fromEnd % 8 === 0 ? 8 : fromEnd % 4 === 0 ? 4 : fromEnd % 2 === 0 ? 2 : 1
+    const hour = new Date(hours[index]).getUTCHours()
+    return {
+      index,
+      text: `${String(hour).padStart(2, '0')}:00`,
+      year: null,
+      keep,
+      yearFrom: null,
     }
   })
 }
