@@ -10,9 +10,8 @@
     accepting (or not listed) when the last Funding issue went out. Pen keeps that
     baseline in a file on Bryce's Mac, which the site can't read, so the site
     keeps its own copy: saveFundingBaseline() runs when a Funding issue is
-    approved for the real list. Until the first one is (Issue #23), Pen's
-    snapshot after Issue #22 stands in (newsletter-funding-seed.json, copied
-    8 Oct 2026); delete that file once the site has noted an issue itself.
+    approved for the real list, first for Issue #23 (14 Oct 2026). Without
+    a noted baseline (a laptop has no store) Funding isn't counted.
   - Funding, closing soon (step 3): accepting, with "Applications close
     DATE" in the next two weeks. A funder appears once in an issue, so one
     already counted as new isn't counted again here.
@@ -28,7 +27,6 @@ import { getEvents, TABLE_ID as EVENTS_TABLE } from '@/lib/data/events'
 import { getFunders } from '@/lib/data/funding'
 import { getTrainingPrograms, TRAINING_TABLE_ID } from '@/lib/data/training'
 import { isAcceptingApplications } from '@/lib/funding-status'
-import FUNDING_SEED from './newsletter-funding-seed.json'
 
 /** The real Funding list (newsletter.ts REAL_LISTS). */
 export const FUNDING_LIST_ID = '8'
@@ -230,12 +228,13 @@ function failed(what: string, err: unknown): LineupSection {
   return { error: 'couldn’t be counted just now' }
 }
 
-/** The last noted baseline, or Pen's Issue #22 one before the first. */
+/** The baseline noted when the last Funding issue was approved. */
 export async function readFundingBaseline(): Promise<FundingBaseline> {
   const noted = store
     ? await store.get<FundingBaseline>(FUNDING_BASELINE_KEY)
     : null
-  return noted ?? FUNDING_SEED
+  if (!noted) throw new Error(`no ${FUNDING_BASELINE_KEY} to count from`)
+  return noted
 }
 
 /** Note which Funding listings accept applications as `issue` goes out to

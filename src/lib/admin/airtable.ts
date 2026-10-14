@@ -124,19 +124,22 @@ export function isRecordId(id: string): boolean {
   return RECORD_ID_RE.test(id)
 }
 
+/** The shapes a request path takes: a table id, optionally a record id in
+ *  it (optionally its comments), optionally a query string as
+ *  URLSearchParams writes it. Checked right before the URL is built, so a
+ *  value that reached here from a request body or query string can only
+ *  name a table or record of this base. */
+const REQUEST_PATH_RE =
+  /^tbl[A-Za-z0-9]{14}(\/rec[A-Za-z0-9]{14}(\/comments)?)?(\?[A-Za-z0-9%&=+*._-]*)?$/
+
 export async function airtableRequest(
   path: string,
   init: RequestInit = {}
 ): Promise<Response> {
-  // Resolve the path against this base's URL and refuse anything that
-  // escapes it, so a request-supplied value can never point the call at
-  // another table, another base, or another host.
-  const base = `${AIRTABLE_ORIGIN}/v0/${BASE}/`
-  const url = new URL(path, base)
-  if (url.origin !== AIRTABLE_ORIGIN || !url.href.startsWith(base)) {
+  if (!REQUEST_PATH_RE.test(path)) {
     throw new Error('Airtable request path escapes the base')
   }
-  return fetch(url, {
+  return fetch(`${AIRTABLE_ORIGIN}/v0/${BASE}/${path}`, {
     ...init,
     headers: {
       Authorization: `Bearer ${TOKEN}`,
