@@ -47,10 +47,11 @@ import {
   eventsIn,
   peopleIn,
   peoplePer,
+  instantsPer,
   previousWindow,
   trendFrame,
   visitStarts,
-  visitsPer,
+  within,
   type TrendFrame,
   type TrendMetric,
   type TrendWindow,
@@ -1302,15 +1303,8 @@ interface SiteView {
   /** Every map hover in range, deduped in unique mode. Only the map pages
    *  read it, so it's worked out on first use. */
   hovers?: AnalyticsEvent[]
-  /** The page views in range, and the page tiles' events from the stretch
-   *  before it (frame.previous; empty when there's none), counted the way
-   *  their in-range twins are. */
-  views: AnalyticsEvent[]
-  prev: {
-    views: AnalyticsEvent[]
-    clicks: AnalyticsEvent[]
-    filterApplies: AnalyticsEvent[]
-  }
+  /** What the selected page's tiles count, by page (siteTrends). */
+  pageTiles: PageTileEvents
 }
 
 /** Aggregate a newest-first event list into the dashboard view, filtered to the
@@ -1367,13 +1361,10 @@ function aggregateSite(
   previous: TrendWindow | null,
   now: number
 ): SiteView {
-  const inRange = all.filter(e => {
-    const t = Date.parse(e.ts)
-    if (Number.isNaN(t)) return false
-    if (startMs != null && t < startMs) return false
-    if (endMs != null && t > endMs) return false
-    return true
-  })
+  // Store timestamps compare as text, much faster than parsing each of a
+  // few hundred thousand (within).
+  const inside = within({ startMs, endMs })
+  const inRange = all.filter(e => inside(e.ts))
   // Every click table below derives from this set. In unique mode it's deduped
   // to one click per visitor per listing per day, so repeat clicks don't inflate
   // the counts; in total mode every click is counted. Filtered by type, not by
@@ -1515,126 +1506,22 @@ function aggregateSite(
   )
   const anyNavOverflowOpenShare = anyOnSite(navOpens, 'Any open')
 
-  // The tiles over time. The drawn stretch never starts before the oldest
-  // event read (newest first, so the last one), and the stretch before the
-  // range is counted exactly like the range itself.
-  const oldestRead = all.length > 0 ? Date.parse(all[all.length - 1].ts) : NaN
-  const frame = trendFrame(
+  // The tiles over time, worked out once per view (siteTrends).
+  const visits = visitsData(inRange, unique, firstSeen, startMs, viewVidsByPage)
+  const { trends, pageTiles } = siteTrends(
+    all,
+    inRange,
     { startMs, endMs },
     now,
-    Number.isNaN(oldestRead) ? Infinity : oldestRead,
-    previous
-  )
-  const before = eventsIn(all, previous)
-  const views = inRange.filter(e => e.type === 'page_view')
-  const prev = {
-    views: before.filter(e => e.type === 'page_view'),
-    clicks: (() => {
-      const hits = before.filter(
-        e =>
-          e.type === 'listing_click' &&
-          e.page != null &&
-          LISTING_PAGES.has(e.page)
-      )
-      return unique ? uniqueClicks(hits) : hits
-    })(),
-    filterApplies: (() => {
-      const hits = before.filter(e => e.type === 'filter_apply' && e.page)
-      return unique ? uniqueFilterApplies(hits) : hits
-    })(),
-  }
-  const ofType = (events: AnalyticsEvent[], type: string) =>
-    events.filter(e => e.type === type)
-  /** A tile counting people: distinct visitors per bucket, over the range
-   *  and over the stretch before. */
-  const people = (
-    hits: AnalyticsEvent[],
-    prevHits: AnalyticsEvent[]
-  ): TrendMetric => ({
-    total: uniqueUsers(hits),
-    previous: previous ? peopleIn(prevHits) : null,
-    points: peoplePer(frame, hits, bucketsOf(frame, hits)),
-  })
-  /** A tile counting events (already deduped where the count mode says). */
-  const events = (
-    hits: AnalyticsEvent[],
-    prevHits: AnalyticsEvent[]
-  ): TrendMetric => ({
-    total: hits.length,
-    previous: previous ? prevHits.length : null,
-    points: countPer(frame, bucketsOf(frame, hits)),
-  })
-  const viewBuckets = bucketsOf(frame, views)
-  const searchQueries = (list: AnalyticsEvent[]) =>
-    list.filter(e => e.type === 'search_query' && e.query)
-  // Signups through the site, deduped as newsletterSignupResults does: one
-  // per visitor per page per day in unique mode.
-  const signups = (list: AnalyticsEvent[]) => {
-    const hits = list.filter(
-      e => e.type === 'newsletter_signup_success' && e.page
-    )
-    if (!unique) return hits
-    const seen = new Set<string>()
-    return hits.filter(e => {
-      if (!e.vid) return true
-      const key = `${e.vid}\x00${dashboardDay(Date.parse(e.ts))}\x00${e.page}`
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
-  }
-  const trends: DashboardTrends = {
-    frame,
-    visitors: {
-      total: uniqueUsers(views),
-      previous: previous ? peopleIn(prev.views) : null,
-      points: peoplePer(frame, views, viewBuckets),
-    },
-    visits: {
-      total: visitStarts(views, SESSION_GAP_MS).length,
-      previous: previous
-        ? visitStarts(prev.views, SESSION_GAP_MS).length
-        : null,
-      points: visitsPer(frame, views, SESSION_GAP_MS),
-    },
-    pageViews: {
-      total: views.length,
-      previous: previous ? prev.views.length : null,
-      points: countPer(frame, viewBuckets),
-    },
-    listingClicks: events(clicks, prev.clicks),
-    chatbotOpened: people(
-      ofType(inRange, 'chatbot_open'),
-      ofType(before, 'chatbot_open')
-    ),
-    chatbotMessaged: people(
-      ofType(inRange, 'chatbot_message'),
-      ofType(before, 'chatbot_message')
-    ),
-    chatbotClicked: people(
-      ofType(inRange, 'chatbot_click'),
-      ofType(before, 'chatbot_click')
-    ),
-    searchOpened: people(
-      ofType(inRange, 'search_open'),
-      ofType(before, 'search_open')
-    ),
-    searchTyped: people(searchQueries(inRange), searchQueries(before)),
-    searchClicked: people(
-      ofType(inRange, 'search_click'),
-      ofType(before, 'search_click')
-    ),
-    newsletterSubmits: events(
+    previous,
+    unique,
+    {
+      clicks,
+      filterApplies,
       newsletterSubmits,
-      (() => {
-        const hits = before.filter(
-          e => e.type === 'newsletter_signup' && e.page
-        )
-        return unique ? uniqueClicks(hits) : hits
-      })()
-    ),
-    newsletterSignups: events(signups(inRange), signups(before)),
-  }
+      visitors: visits.uniqueVisitors,
+    }
+  )
 
   return {
     inRange,
@@ -1647,8 +1534,7 @@ function aggregateSite(
     contributeClicks,
     airtableClicks,
     viewVidsByPage,
-    views,
-    prev,
+    pageTiles,
     fields: {
       totalEvents: inRange.length,
       byPage,
@@ -1681,7 +1567,7 @@ function aggregateSite(
       chatbot: chatbotPanels(inRange, unique),
       search: searchPanels(inRange, unique),
       optOuts: optOutSplit(inRange),
-      visits: visitsData(inRange, unique, firstSeen, startMs, viewVidsByPage),
+      visits,
       trends,
       correlations: correlations(inRange),
       // Newest-first already; page views, map hovers and cards-section views
@@ -1697,6 +1583,209 @@ function aggregateSite(
             (e.type !== 'listing_click' || LISTING_PAGES.has(e.page ?? ''))
         )
         .slice(0, 50),
+    },
+  }
+}
+
+/** What the page tiles count, grouped by page once per site view so a tab
+ *  only picks its own: the in-range page views with each one's bucket, and
+ *  the stretch before's views, clicks and filter uses (counted like their
+ *  in-range twins). */
+interface PageTileEvents {
+  views: Map<string, { events: AnalyticsEvent[]; buckets: number[] }>
+  prevViews: Map<string, AnalyticsEvent[]>
+  prevClicks: Map<string, AnalyticsEvent[]>
+  prevFilters: Map<string, AnalyticsEvent[]>
+}
+
+/** The events of the kinds the tiles count, in one pass over a list. */
+function tileKinds(list: AnalyticsEvent[]) {
+  const k = {
+    views: [] as AnalyticsEvent[],
+    clicks: [] as AnalyticsEvent[],
+    filters: [] as AnalyticsEvent[],
+    submits: [] as AnalyticsEvent[],
+    signups: [] as AnalyticsEvent[],
+    chatbotOpen: [] as AnalyticsEvent[],
+    chatbotMessage: [] as AnalyticsEvent[],
+    chatbotClick: [] as AnalyticsEvent[],
+    searchOpen: [] as AnalyticsEvent[],
+    searchQuery: [] as AnalyticsEvent[],
+    searchClick: [] as AnalyticsEvent[],
+  }
+  for (const e of list) {
+    switch (e.type) {
+      case 'page_view':
+        k.views.push(e)
+        break
+      case 'listing_click':
+        if (e.page != null && LISTING_PAGES.has(e.page)) k.clicks.push(e)
+        break
+      case 'filter_apply':
+        if (e.page) k.filters.push(e)
+        break
+      case 'newsletter_signup':
+        if (e.page) k.submits.push(e)
+        break
+      case 'newsletter_signup_success':
+        if (e.page) k.signups.push(e)
+        break
+      case 'chatbot_open':
+        k.chatbotOpen.push(e)
+        break
+      case 'chatbot_message':
+        k.chatbotMessage.push(e)
+        break
+      case 'chatbot_click':
+        k.chatbotClick.push(e)
+        break
+      case 'search_open':
+        k.searchOpen.push(e)
+        break
+      case 'search_query':
+        if (e.query) k.searchQuery.push(e)
+        break
+      case 'search_click':
+        k.searchClick.push(e)
+        break
+    }
+  }
+  return k
+}
+
+/** The tiles over time for a site view: each tile's per-bucket values over
+ *  the range, its total (the figure the panels below show), and the same
+ *  total over the stretch before the range (`previous`, when `all` holds
+ *  it). People are always counted once; clicks, filter uses and signups
+ *  follow the count mode as their tables do. `counted` passes in what
+ *  aggregateSite has already worked out for the range. Worked out in a few
+ *  passes, as it runs over every event in the range and the stretch before
+ *  (a few hundred thousand), on every rebuild of the view. */
+function siteTrends(
+  all: AnalyticsEvent[],
+  inRange: AnalyticsEvent[],
+  range: DateRange,
+  now: number,
+  previous: TrendWindow | null,
+  unique: boolean,
+  counted: {
+    clicks: AnalyticsEvent[]
+    filterApplies: AnalyticsEvent[]
+    newsletterSubmits: AnalyticsEvent[]
+    visitors: number
+  }
+): { trends: DashboardTrends; pageTiles: PageTileEvents } {
+  // The drawn stretch never starts before the oldest event read (newest
+  // first, so the last one).
+  const oldestRead = all.length > 0 ? Date.parse(all[all.length - 1].ts) : NaN
+  const frame = trendFrame(
+    range,
+    now,
+    Number.isNaN(oldestRead) ? Infinity : oldestRead,
+    previous
+  )
+  const cur = tileKinds(inRange)
+  const before = tileKinds(eventsIn(all, previous))
+  // Signups through the site, deduped as newsletterSignupResults does: one
+  // per visitor per page per day in unique mode.
+  const signups = (hits: AnalyticsEvent[]) => {
+    if (!unique) return hits
+    const seen = new Set<string>()
+    return hits.filter(e => {
+      if (!e.vid) return true
+      const key = `${e.vid}\x00${dashboardDay(Date.parse(e.ts))}\x00${e.page}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }
+  const prevClicks = unique ? uniqueClicks(before.clicks) : before.clicks
+  const prevFilters = unique
+    ? uniqueFilterApplies(before.filters)
+    : before.filters
+  const prevSubmits = unique ? uniqueClicks(before.submits) : before.submits
+
+  const people = (
+    hits: AnalyticsEvent[],
+    prevHits: AnalyticsEvent[]
+  ): TrendMetric => ({
+    total: uniqueUsers(hits),
+    previous: previous ? peopleIn(prevHits) : null,
+    points: peoplePer(frame, hits, bucketsOf(frame, hits)),
+  })
+  const events = (
+    hits: AnalyticsEvent[],
+    prevHits: AnalyticsEvent[]
+  ): TrendMetric => ({
+    total: hits.length,
+    previous: previous ? prevHits.length : null,
+    points: countPer(frame, bucketsOf(frame, hits)),
+  })
+  const viewBuckets = bucketsOf(frame, cur.views)
+  const visitBegins = visitStarts(cur.views, SESSION_GAP_MS)
+  const trends: DashboardTrends = {
+    frame,
+    visitors: {
+      total: counted.visitors,
+      previous: previous ? peopleIn(before.views) : null,
+      points: peoplePer(frame, cur.views, viewBuckets),
+    },
+    visits: {
+      total: visitBegins.length,
+      previous: previous
+        ? visitStarts(before.views, SESSION_GAP_MS).length
+        : null,
+      points: instantsPer(frame, visitBegins),
+    },
+    pageViews: {
+      total: cur.views.length,
+      previous: previous ? before.views.length : null,
+      points: countPer(frame, viewBuckets),
+    },
+    listingClicks: events(counted.clicks, prevClicks),
+    chatbotOpened: people(cur.chatbotOpen, before.chatbotOpen),
+    chatbotMessaged: people(cur.chatbotMessage, before.chatbotMessage),
+    chatbotClicked: people(cur.chatbotClick, before.chatbotClick),
+    searchOpened: people(cur.searchOpen, before.searchOpen),
+    searchTyped: people(cur.searchQuery, before.searchQuery),
+    searchClicked: people(cur.searchClick, before.searchClick),
+    newsletterSubmits: events(counted.newsletterSubmits, prevSubmits),
+    newsletterSignups: events(signups(cur.signups), signups(before.signups)),
+  }
+
+  const group = (
+    hits: AnalyticsEvent[],
+    keyOf: (e: AnalyticsEvent) => string
+  ) => {
+    const out = new Map<string, AnalyticsEvent[]>()
+    for (const e of hits) {
+      const key = keyOf(e)
+      const list = out.get(key)
+      if (list) list.push(e)
+      else out.set(key, [e])
+    }
+    return out
+  }
+  const pageOf = (e: AnalyticsEvent) =>
+    e.page ? (PAGE_NAME_BY_PATH[e.page] ?? e.page) : ''
+  const views = new Map<
+    string,
+    { events: AnalyticsEvent[]; buckets: number[] }
+  >()
+  cur.views.forEach((e, k) => {
+    const name = pageOf(e)
+    let g = views.get(name)
+    if (!g) views.set(name, (g = { events: [], buckets: [] }))
+    g.events.push(e)
+    g.buckets.push(viewBuckets[k])
+  })
+  return {
+    trends,
+    pageTiles: {
+      views,
+      prevViews: group(before.views, pageOf),
+      prevClicks: group(prevClicks, e => e.page ?? ''),
+      prevFilters: group(prevFilters, e => e.page ?? ''),
     },
   }
 }
@@ -1907,36 +1996,34 @@ function aggregatePage(
       ? mapSearchPanels(inRange, unique, anyOnPage)
       : EMPTY.mapSearch
 
-  // The page's tiles over time, counted like the site's (aggregateSite).
+  // The page's tiles over time, counted like the site's (siteTrends).
   const { frame } = site.fields.trends
+  const tiles = site.pageTiles
   const compared = frame.previous != null
-  const onPage = (e: AnalyticsEvent) =>
-    e.page != null && (PAGE_NAME_BY_PATH[e.page] ?? e.page) === selectedPage
-  const pageViews = site.views.filter(onPage)
-  const prevViews = site.prev.views.filter(onPage)
+  const page = selectedPage ?? ''
+  const views = tiles.views.get(page) ?? { events: [], buckets: [] }
+  const prevViews = tiles.prevViews.get(page) ?? []
   const pageEvents = (
     hits: AnalyticsEvent[],
-    prevHits: AnalyticsEvent[]
+    prevHits: AnalyticsEvent[] | undefined
   ): TrendMetric => ({
     total: hits.length,
-    previous: compared ? prevHits.length : null,
+    previous: compared ? (prevHits?.length ?? 0) : null,
     points: countPer(frame, bucketsOf(frame, hits)),
   })
   const pageTrends: PageTrends = {
     visitors: {
-      total: uniqueUsers(pageViews),
+      total: uniqueUsers(views.events),
       previous: compared ? peopleIn(prevViews) : null,
-      points: peoplePer(frame, pageViews, bucketsOf(frame, pageViews)),
+      points: peoplePer(frame, views.events, views.buckets),
     },
-    pageViews: pageEvents(pageViews, prevViews),
-    listingClicks: pageEvents(
-      pageClicksAll,
-      site.prev.clicks.filter(e => e.page === selectedPage)
-    ),
-    filterUses: pageEvents(
-      pageFilters,
-      site.prev.filterApplies.filter(e => e.page === selectedPage)
-    ),
+    pageViews: {
+      total: views.events.length,
+      previous: compared ? prevViews.length : null,
+      points: countPer(frame, views.buckets),
+    },
+    listingClicks: pageEvents(pageClicksAll, tiles.prevClicks.get(page)),
+    filterUses: pageEvents(pageFilters, tiles.prevFilters.get(page)),
   }
 
   return {
@@ -3377,13 +3464,10 @@ function viewVidsInRange(
   { startMs, endMs }: DateRange
 ): string[] {
   const vids = new Set<string>()
+  const inside = within({ startMs, endMs })
   for (const e of all) {
     if (e.type !== 'page_view' || !e.vid) continue
-    const t = Date.parse(e.ts)
-    if (Number.isNaN(t)) continue
-    if (startMs != null && t < startMs) continue
-    if (endMs != null && t > endMs) continue
-    vids.add(e.vid)
+    if (inside(e.ts)) vids.add(e.vid)
   }
   return [...vids]
 }

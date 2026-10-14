@@ -109,19 +109,45 @@ export interface TrendEvent {
   vid?: string
 }
 
+/** Whether a timestamp is in the form the store writes every event's in
+ *  (toISOString: "2026-10-14T18:03:41.123Z"). Those compare and slice as
+ *  text, in time order, several times faster than parsing each one, which
+ *  matters over a few hundred thousand events; anything else is parsed. */
+function isStoreTime(ts: string): boolean {
+  return (
+    ts.length === 24 && ts.charCodeAt(23) === 90 && ts.charCodeAt(10) === 84
+  )
+}
+
 /** Each event's bucket, -1 for those outside the drawn stretch, worked out
  *  once so several counts over the same events share it. */
 export function bucketsOf(frame: TrendFrame, events: TrendEvent[]): Int32Array {
-  const out = new Int32Array(events.length)
-  for (let k = 0; k < events.length; k++)
-    out[k] = bucketOf(frame, Date.parse(events[k].ts))
+  const out = new Int32Array(events.length).fill(-1)
+  if (frame.starts.length === 0) return out
+  // A store timestamp's day ("2026-10-14") or hour ("2026-10-14T18") names
+  // its bucket; the drawn stretch's ends are compared as text too.
+  const cut = frame.unit === 'hour' ? 13 : 10
+  const index = new Map(
+    frame.starts.map((t, i) => [new Date(t).toISOString().slice(0, cut), i])
+  )
+  const from = new Date(frame.startMs).toISOString()
+  const to = new Date(frame.endMs).toISOString()
+  for (let k = 0; k < events.length; k++) {
+    const ts = events[k].ts
+    if (!isStoreTime(ts)) out[k] = bucketOf(frame, Date.parse(ts))
+    else if (ts >= from && ts <= to) out[k] = index.get(ts.slice(0, cut)) ?? -1
+  }
   return out
 }
 
 /** Events per bucket. */
-export function countPer(frame: TrendFrame, buckets: Int32Array): number[] {
+export function countPer(
+  frame: TrendFrame,
+  buckets: ArrayLike<number>
+): number[] {
   const out = new Array<number>(frame.starts.length).fill(0)
-  for (const b of buckets) if (b >= 0) out[b]++
+  for (let k = 0; k < buckets.length; k++)
+    if (buckets[k] >= 0) out[buckets[k]]++
   return out
 }
 
@@ -131,7 +157,7 @@ export function countPer(frame: TrendFrame, buckets: Int32Array): number[] {
 export function peoplePer(
   frame: TrendFrame,
   events: TrendEvent[],
-  buckets: Int32Array
+  buckets: ArrayLike<number>
 ): number[] {
   const seen = frame.starts.map(() => new Set<string>())
   const anon = new Array<number>(frame.starts.length).fill(0)
@@ -156,41 +182,45 @@ export function peopleIn(events: TrendEvent[]): number {
   return seen.size + anon
 }
 
-/** The start of each visit among page views: one visitor's views more than
- *  `gapMs` apart are separate visits, and an id-less view is a visit of its
- *  own. The same rule as the dashboard's Visits figure, so the visits per
- *  bucket add up to it. */
+/** The start of each visit among page views (epoch ms, oldest first): one
+ *  visitor's views more than `gapMs` apart are separate visits, and an
+ *  id-less view is a visit of its own. The same rule as the dashboard's
+ *  Visits figure, so the visits per bucket add up to it. One pass, oldest
+ *  view first: the store's newest-first order read backwards, or sorted when
+ *  the views come in another order. */
 export function visitStarts(views: TrendEvent[], gapMs: number): number[] {
-  const byVid = new Map<string, number[]>()
+  const n = views.length
+  const times = new Float64Array(n)
+  let newestFirst = true
+  for (let k = 0; k < n; k++) {
+    times[k] = Date.parse(views[k].ts)
+    if (k > 0 && times[k] > times[k - 1]) newestFirst = false
+  }
+  const order = newestFirst
+    ? null
+    : Array.from({ length: n }, (_, k) => k).sort((a, b) => times[a] - times[b])
+  const lastSeen = new Map<string, number>()
   const starts: number[] = []
-  for (const e of views) {
-    const t = Date.parse(e.ts)
+  for (let j = 0; j < n; j++) {
+    const k = order ? order[j] : n - 1 - j
+    const t = times[k]
     if (Number.isNaN(t)) continue
-    if (!e.vid) {
+    const vid = views[k].vid
+    if (!vid) {
       starts.push(t)
       continue
     }
-    const times = byVid.get(e.vid)
-    if (times) times.push(t)
-    else byVid.set(e.vid, [t])
-  }
-  for (const times of byVid.values()) {
-    times.sort((a, b) => a - b)
-    starts.push(times[0])
-    for (let i = 1; i < times.length; i++)
-      if (times[i] - times[i - 1] >= gapMs) starts.push(times[i])
+    const prev = lastSeen.get(vid)
+    if (prev === undefined || t - prev >= gapMs) starts.push(t)
+    lastSeen.set(vid, t)
   }
   return starts
 }
 
-/** Visits per bucket, each counted where it began. */
-export function visitsPer(
-  frame: TrendFrame,
-  views: TrendEvent[],
-  gapMs: number
-): number[] {
+/** How many of these instants fall in each bucket. */
+export function instantsPer(frame: TrendFrame, instants: number[]): number[] {
   const out = new Array<number>(frame.starts.length).fill(0)
-  for (const t of visitStarts(views, gapMs)) {
+  for (const t of instants) {
     const b = bucketOf(frame, t)
     if (b >= 0) out[b]++
   }
@@ -207,14 +237,34 @@ export interface TrendMetric {
   points: number[]
 }
 
-/** The events (newest first, as the store holds them) inside a window. */
+/** A test for whether an event's timestamp falls inside inclusive bounds
+ *  (either may be open), comparing store timestamps as text (isStoreTime)
+ *  and parsing any other; one that doesn't parse is outside. */
+export function within(range: {
+  startMs: number | null
+  endMs: number | null
+}): (ts: string) => boolean {
+  const { startMs, endMs } = range
+  const from = startMs != null ? new Date(startMs).toISOString() : null
+  const to = endMs != null ? new Date(endMs).toISOString() : null
+  return ts => {
+    if (isStoreTime(ts))
+      return (from == null || ts >= from) && (to == null || ts <= to)
+    const t = Date.parse(ts)
+    return (
+      !Number.isNaN(t) &&
+      (startMs == null || t >= startMs) &&
+      (endMs == null || t <= endMs)
+    )
+  }
+}
+
+/** The events inside a window, in the order given. */
 export function eventsIn<T extends TrendEvent>(
   events: T[],
   w: TrendWindow | null
 ): T[] {
   if (!w) return []
-  return events.filter(e => {
-    const t = Date.parse(e.ts)
-    return t >= w.startMs && t <= w.endMs
-  })
+  const inside = within(w)
+  return events.filter(e => inside(e.ts))
 }

@@ -9,10 +9,10 @@ import {
   partialBucket,
   peopleIn,
   peoplePer,
+  instantsPer,
   previousWindow,
   trendFrame,
   visitStarts,
-  visitsPer,
 } from './trends'
 
 const at = (iso: string) => Date.parse(iso)
@@ -196,7 +196,26 @@ describe('bucket counts', () => {
       { ts: '2026-10-14T01:05:00Z' }, // id-less: its own visit
     ]
     expect(visitStarts(views, GAP)).toHaveLength(3)
-    expect(visitsPer(frame, views, GAP)).toEqual([0, 1, 2])
+    expect(instantsPer(frame, visitStarts(views, GAP))).toEqual([0, 1, 2])
+    // Newest first, as the store holds them: the same visits.
+    expect(visitStarts([...views].reverse(), GAP)).toEqual(
+      visitStarts(views, GAP)
+    )
+  })
+
+  it('reads timestamps in other forms the slow way, with the same result', () => {
+    const odd = [
+      { ts: '2026-10-13T09:00:00+00:00', vid: 'x' },
+      { ts: 'not a time', vid: 'y' },
+      { ts: '2026-10-14T11:00:00Z', vid: 'z' },
+    ]
+    expect([...bucketsOf(frame, odd)]).toEqual([1, -1, 2])
+    expect(
+      eventsIn(odd, {
+        startMs: at('2026-10-13T00:00:00Z'),
+        endMs: at('2026-10-14T00:00:00Z'),
+      }).map(e => e.vid)
+    ).toEqual(['x'])
   })
 
   it('keeps the events inside a window', () => {
