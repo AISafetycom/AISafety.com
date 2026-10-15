@@ -59,7 +59,8 @@ import {
 } from './trends'
 
 export interface AnalyticsEvent {
-  /** Event kind, e.g. 'listing_click'. Must be in ALLOWED_EVENT_TYPES. */
+  /** Event kind, e.g. 'listing_click'. Must be in ALLOWED_EVENT_TYPES, or
+   *  be one the server records itself (NEWSLETTER_COPY_VIEW). */
   type: string
   /** Resource page the event came from, e.g. 'Funding'. */
   page?: string
@@ -434,7 +435,15 @@ const FIRST_SEEN_CACHE_CAP = 50_000
 
 /** Record one event. Never throws to the caller — a failed analytics write must
  *  not break the user's request (it is fired via after() from the route). */
-export async function recordEvent(event: AnalyticsEvent): Promise<void> {
+export async function recordEvent(
+  event: AnalyticsEvent,
+  {
+    /** false for a `vid` that isn't a browser's own id (a server-side
+     *  count's daily hash): it never goes into the first-seen record, which
+     *  tells returning visitors from new ones. */
+    firstSeen = true,
+  }: { firstSeen?: boolean } = {}
+): Promise<void> {
   try {
     // A preview deployment keeps nothing (see writesSharedStore).
     if (process.env.VERCEL_ENV === 'preview') return
@@ -454,7 +463,7 @@ export async function recordEvent(event: AnalyticsEvent): Promise<void> {
         p.zadd(MONTHS_KEY, { score: monthScore(month), member: month })
       }
       // First time we see this browser? Remember when. NX keeps the earliest.
-      const writeFirstSeen = !!vid && !firstSeenWritten.has(vid)
+      const writeFirstSeen = firstSeen && !!vid && !firstSeenWritten.has(vid)
       if (writeFirstSeen) p.hsetnx(FIRST_SEEN_KEY, vid, Date.parse(event.ts))
       await p.exec()
       if (registerMonth) registeredMonths.add(month)
@@ -693,6 +702,10 @@ export interface DashboardTrends {
   newsletterSubmits: TrendMetric
   /** Signups through the site that ActiveCampaign took. */
   newsletterSignups: TrendMetric
+  /** Readers who confirmed (landed on /subscribed/<key>). */
+  newsletterConfirmed: TrendMetric
+  /** Visits from links in the newsletters. */
+  newsletterVisits: TrendMetric
 }
 
 /** The selected resource page's tiles over time. */
@@ -803,6 +816,16 @@ export interface DashboardData {
   /** Each newsletter's past issues page (/newsletter/<key>, from 10 October
    *  2026): its views and where its clicks went. */
   newsletterArchive: NewsletterArchiveRow[]
+  /** Each newsletter's signups through the site beside the readers who
+   *  confirmed (landed on /subscribed/<key>). */
+  newsletterConfirmed: NewsletterConfirmRow[]
+  /** Views of each issue's web and text versions on aisafety.com. */
+  newsletterCopies: NewsletterCopyRow[]
+  /** The Funding box's card link to Substack and the footer's Newsletters
+   *  links. */
+  newsletterLinks: NewsletterLinkRow[]
+  /** Visits from links in the newsletters, and what came of them. */
+  newsletterVisits: NewsletterVisits
   /** For `selectedPage`'s own tables: distinct visitors per listing / slot /
    *  filter group / filter value / contribute button / hovered listing,
    *  each against the page's distinct visitors. Keyed by the same row names
@@ -945,6 +968,10 @@ const EMPTY: Omit<DashboardData, 'source'> = {
   siteNewsletterShare: null,
   newsletterResults: { byPage: [], errors: [] },
   newsletterArchive: [],
+  newsletterConfirmed: [],
+  newsletterCopies: [],
+  newsletterLinks: [],
+  newsletterVisits: { byNewsletter: [], pages: [], listings: [], issues: [] },
   listingShare: [],
   anyListingShare: null,
   positionShare: [],
@@ -1011,6 +1038,8 @@ const EMPTY: Omit<DashboardData, 'source'> = {
     searchClicked: NO_TREND,
     newsletterSubmits: NO_TREND,
     newsletterSignups: NO_TREND,
+    newsletterConfirmed: NO_TREND,
+    newsletterVisits: NO_TREND,
   },
   pageTrends: {
     visitors: NO_TREND,
@@ -1512,6 +1541,8 @@ function aggregateSite(
   )
   const anyNavOverflowOpenShare = anyOnSite(navOpens, 'Any open')
 
+  const newsletterResults = newsletterSignupResults(inRange, unique)
+
   // The tiles over time, worked out once per view (siteTrends).
   const visits = visitsData(inRange, unique, firstSeen, startMs, viewVidsByPage)
   const { trends, pageTiles } = siteTrends(
@@ -1559,8 +1590,16 @@ function aggregateSite(
       siteContributeShare,
       siteAirtableShare,
       siteNewsletterShare,
-      newsletterResults: newsletterSignupResults(inRange, unique),
+      newsletterResults,
       newsletterArchive: newsletterArchiveStats(inRange, unique),
+      newsletterConfirmed: newsletterConfirmations(
+        inRange,
+        unique,
+        newsletterResults
+      ),
+      newsletterCopies: newsletterCopyViews(inRange, unique),
+      newsletterLinks: newsletterLinkClicks(inRange, unique),
+      newsletterVisits: newsletterVisits(inRange),
       footerClicks,
       navOverflowOpens,
       navOverflowOpenShare,
@@ -1583,6 +1622,7 @@ function aggregateSite(
         .filter(
           e =>
             e.type !== 'page_view' &&
+            e.type !== NEWSLETTER_COPY_VIEW &&
             e.type !== 'listing_hover' &&
             e.type !== 'cards_view' &&
             // The team's test clicks (see LISTING_PAGES) stay out here too.
@@ -1773,6 +1813,14 @@ function siteTrends(
     searchClicked: people(cur.searchClick, before.searchClick),
     newsletterSubmits: events(counted.newsletterSubmits, prevSubmits),
     newsletterSignups: events(signups(cur.signups), signups(before.signups)),
+    newsletterConfirmed: events(
+      confirmLandings(cur.views, unique),
+      confirmLandings(before.views, unique)
+    ),
+    newsletterVisits: events(
+      newsletterLandings(cur.views),
+      newsletterLandings(before.views)
+    ),
   }
 
   const group = (
@@ -2236,6 +2284,357 @@ export function newsletterArchiveStats(
     }
   }
   return [...rows.values()].sort((a, b) => b.views - a.views)
+}
+
+/** The newsletter a past issues page, confirm page or signup belongs to,
+ *  by the page it was recorded under. */
+const NEWSLETTER_OF_PAGE: Readonly<Record<string, string>> = {
+  Events: 'Events',
+  Training: 'Training',
+  '/newsletter/events': 'Events',
+  '/newsletter/training': 'Training',
+}
+
+/** Where ActiveCampaign sends a reader once they've pressed "Confirm
+ *  subscription" in the email a signup on the site triggers
+ *  (src/app/subscribed), per newsletter. */
+const CONFIRM_PAGE = /^\/subscribed\/(events|training)\/?$/
+
+/** The page views of the confirm pages that count as confirmations: every
+ *  one in total mode, one per visitor per newsletter per day in unique mode
+ *  (a reader who clicks the link twice). Events without a visitor id each
+ *  count. Expects a newest-first list, like the rest. Exported for the unit
+ *  test. */
+export function confirmLandings(
+  views: AnalyticsEvent[],
+  unique: boolean
+): AnalyticsEvent[] {
+  const seen = new Set<string>()
+  return views.filter(e => {
+    if (e.type !== 'page_view') return false
+    const m = CONFIRM_PAGE.exec(e.page ?? '')
+    if (!m) return false
+    if (!unique || !e.vid) return true
+    const t = Date.parse(e.ts)
+    const key = `${e.vid}\x00${Number.isNaN(t) ? '' : dashboardDay(t)}\x00${m[1]}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+export interface NewsletterConfirmRow {
+  /** 'Events', 'Training'. */
+  name: string
+  /** Signups ActiveCampaign took (a link to confirm went out), from the
+   *  newsletter's boxes: its resource page and its past issues page. */
+  signedUp: number
+  /** Readers who landed on the newsletter's confirm page. */
+  confirmed: number
+}
+
+/** Each newsletter's signups through the site beside its confirmations,
+ *  both following the count mode. Exported for the unit test. */
+export function newsletterConfirmations(
+  inRange: AnalyticsEvent[],
+  unique: boolean,
+  results: NewsletterSignupResults
+): NewsletterConfirmRow[] {
+  const rows = new Map<string, NewsletterConfirmRow>()
+  const rowFor = (name: string) => {
+    let row = rows.get(name)
+    if (!row) {
+      row = { name, signedUp: 0, confirmed: 0 }
+      rows.set(name, row)
+    }
+    return row
+  }
+  for (const r of results.byPage) {
+    const name = NEWSLETTER_OF_PAGE[r.name]
+    if (name && r.succeeded > 0) rowFor(name).signedUp += r.succeeded
+  }
+  for (const e of confirmLandings(inRange, unique)) {
+    const key = CONFIRM_PAGE.exec(e.page ?? '')![1]
+    rowFor(key[0].toUpperCase() + key.slice(1)).confirmed++
+  }
+  return [...rows.values()].sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** A view of an issue's web or text version on aisafety.com
+ *  (/newsletter/<key>/<issue>, …/text). Those pages run no site scripts, so
+ *  the view is counted by the server, from the small image the page loads
+ *  (src/app/newsletter/[key]/[issue]/seen): `page` is the newsletter
+ *  ('Events'), `label` the issue's address ('week-41-2026'), `source` which
+ *  copy ('web' | 'text'), `vid` a salted hash of the reader's address and
+ *  browser that changes every day, so nothing can tell who it was. Recorded
+ *  by the server only: the public beacon doesn't take this kind. */
+export const NEWSLETTER_COPY_VIEW = 'newsletter_copy_view'
+
+export interface NewsletterCopyRow {
+  /** 'Events', 'Training', 'Funding'. */
+  newsletter: string
+  /** The issue's address ('week-41-2026'). */
+  issue: string
+  web: number
+  text: number
+}
+
+/** Views of each issue's web and text versions, busiest first. Unique mode
+ *  counts a reader once per issue per copy per day; total mode every load.
+ *  Exported for the unit test. */
+export function newsletterCopyViews(
+  inRange: AnalyticsEvent[],
+  unique: boolean
+): NewsletterCopyRow[] {
+  const rows = new Map<string, NewsletterCopyRow>()
+  const seen = new Set<string>()
+  for (const e of inRange) {
+    if (e.type !== NEWSLETTER_COPY_VIEW || !e.page || !e.label) continue
+    if (e.source !== 'web' && e.source !== 'text') continue
+    const id = `${e.page}\x00${e.label}`
+    if (unique && e.vid) {
+      const t = Date.parse(e.ts)
+      const key = `${e.vid}\x00${Number.isNaN(t) ? '' : dashboardDay(t)}\x00${id}\x00${e.source}`
+      if (seen.has(key)) continue
+      seen.add(key)
+    }
+    let row = rows.get(id)
+    if (!row) {
+      row = { newsletter: e.page, issue: e.label, web: 0, text: 0 }
+      rows.set(id, row)
+    }
+    row[e.source]++
+  }
+  return [...rows.values()].sort(
+    (a, b) =>
+      b.web + b.text - (a.web + a.text) || b.issue.localeCompare(a.issue)
+  )
+}
+
+export interface NewsletterLinkRow {
+  /** What was clicked: "Funding page's box" or "Footer · AI Safety Events". */
+  name: string
+  /** Where it goes: 'Substack', '/events'. */
+  to: string
+  clicks: number
+}
+
+/** The ways to the newsletters elsewhere on the site, busiest first: the
+ *  signup box's card link where the box still hands off to Substack (the
+ *  card opens the newsletter there to read first; newsletter_view), and the
+ *  footer's Newsletters column. Unique mode counts a visitor once per link
+ *  per day. Exported for the unit test. */
+export function newsletterLinkClicks(
+  inRange: AnalyticsEvent[],
+  unique: boolean
+): NewsletterLinkRow[] {
+  const rows = new Map<string, NewsletterLinkRow>()
+  const seen = new Set<string>()
+  const where = (url: string | undefined) => {
+    if (!url) return ''
+    if (url.startsWith('/')) return url.split(/[?#]/)[0]
+    try {
+      const u = new URL(url)
+      if (/(^|\.)substack\.com$/.test(u.hostname)) return 'Substack'
+      if (/(^|\.)aisafety\.com$/.test(u.hostname)) return u.pathname
+      return u.hostname.replace(/^www\./, '')
+    } catch {
+      return url
+    }
+  }
+  for (const e of inRange) {
+    let name: string
+    let to: string
+    if (e.type === 'newsletter_view' && e.page) {
+      name = `${e.page} page's box`
+      to = 'Substack'
+    } else if (
+      e.type === 'footer_click' &&
+      e.source === 'Newsletters' &&
+      e.label
+    ) {
+      name = `Footer · ${e.label}`
+      to = where(e.url)
+    } else continue
+    if (unique && e.vid) {
+      const t = Date.parse(e.ts)
+      const key = `${e.vid}\x00${Number.isNaN(t) ? '' : dashboardDay(t)}\x00${name}`
+      if (seen.has(key)) continue
+      seen.add(key)
+    }
+    const row = rows.get(name) ?? { name, to, clicks: 0 }
+    row.clicks++
+    rows.set(name, row)
+  }
+  return [...rows.values()].sort((a, b) => b.clicks - a.clicks)
+}
+
+/** The newsletter a link in one of the emails was in, from the utm tags the
+ *  pipeline puts on every aisafety.com link (utm_source=events-newsletter,
+ *  utm_campaign=events-2026-week-42; the Events & Training issues on
+ *  Substack used events-training-…). Read from a page view's `ref`, the
+ *  address the page was on when its beacon went out. Null for any other
+ *  address. Exported for the unit test. */
+export function newsletterOfRef(
+  ref: string | undefined
+): { newsletter: string; campaign: string | null } | null {
+  if (!ref || !ref.includes('utm_source=')) return null
+  let params: URLSearchParams
+  try {
+    params = new URL(ref).searchParams
+  } catch {
+    return null
+  }
+  const m = /^(events-training|events|training|funding)-newsletter$/i.exec(
+    params.get('utm_source') ?? ''
+  )
+  if (!m) return null
+  return {
+    newsletter: NEWSLETTER_OF_UTM[m[1].toLowerCase()],
+    campaign: params.get('utm_campaign') || null,
+  }
+}
+
+const NEWSLETTER_OF_UTM: Readonly<Record<string, string>> = {
+  events: 'Events',
+  training: 'Training',
+  funding: 'Funding',
+  'events-training': 'Events & Training',
+}
+
+/** The page views that start a visit from a newsletter: a page view whose
+ *  address carries a newsletter's tags, unless the same visitor's last such
+ *  view (from the same newsletter) was under SESSION_GAP_MS before, which
+ *  is the same visit reloaded. A view without a visitor id always counts.
+ *  Newest first, like the input. Exported for the unit test. */
+export function newsletterLandings(views: AnalyticsEvent[]): AnalyticsEvent[] {
+  const tagged = views.filter(
+    e => e.type === 'page_view' && newsletterOfRef(e.ref) != null
+  )
+  const last = new Map<string, number>()
+  const keep = new Set<AnalyticsEvent>()
+  // Oldest first, so each view is judged against the one before it.
+  for (let i = tagged.length - 1; i >= 0; i--) {
+    const e = tagged[i]
+    const t = Date.parse(e.ts)
+    if (!e.vid || Number.isNaN(t)) {
+      keep.add(e)
+      continue
+    }
+    const key = `${e.vid}\x00${newsletterOfRef(e.ref)!.newsletter}`
+    const before = last.get(key)
+    if (before == null || t - before >= SESSION_GAP_MS) keep.add(e)
+    last.set(key, t)
+  }
+  return tagged.filter(e => keep.has(e))
+}
+
+export interface NewsletterVisitRow {
+  /** 'Events', 'Training', 'Funding', 'Events & Training'. */
+  name: string
+  visits: number
+  /** Distinct visitors among them (a visit without a visitor id isn't one). */
+  visitors: number
+  /** Visits that went on to another page of the site. */
+  morePages: number
+  /** Visits with a listing click. */
+  clicked: number
+  /** Listing clicks in those visits. */
+  listingClicks: number
+}
+
+export interface NewsletterVisits {
+  /** Busiest newsletter first. */
+  byNewsletter: NewsletterVisitRow[]
+  /** The pages viewed in those visits, the first one included, by page name
+   *  ('Events') or path. */
+  pages: Counted[]
+  /** The listings clicked in them. */
+  listings: Counted[]
+  /** Visits per issue, by the link's utm_campaign. */
+  issues: Counted[]
+}
+
+/** What visitors who came from a newsletter did: each landing
+ *  (newsletterLandings) starts a visit, which runs until the visitor has
+ *  been quiet for SESSION_GAP_MS or lands from a newsletter again. A visit
+ *  without a visitor id can't be followed, so only its landing page counts.
+ *  Every visit counts, whatever the count mode. Exported for the unit test. */
+export function newsletterVisits(inRange: AnalyticsEvent[]): NewsletterVisits {
+  const landings = newsletterLandings(
+    inRange.filter(e => e.type === 'page_view')
+  )
+  const rows = new Map<string, NewsletterVisitRow>()
+  const people = new Map<string, Set<string>>()
+  const pages: string[] = []
+  const listings: string[] = []
+  const issues: string[] = []
+  const pageOf = (e: AnalyticsEvent) =>
+    PAGE_NAME_BY_PATH[e.page ?? ''] ?? e.page ?? ''
+  // Each landing visitor's events, oldest first.
+  const byVid = new Map<string, AnalyticsEvent[]>()
+  for (const e of landings) if (e.vid) byVid.set(e.vid, [])
+  for (let i = inRange.length - 1; i >= 0; i--) {
+    const e = inRange[i]
+    if (e.vid) byVid.get(e.vid)?.push(e)
+  }
+  const starts = new Set(landings)
+  for (const landing of [...landings].reverse()) {
+    const { newsletter, campaign } = newsletterOfRef(landing.ref)!
+    let row = rows.get(newsletter)
+    if (!row) {
+      row = {
+        name: newsletter,
+        visits: 0,
+        visitors: 0,
+        morePages: 0,
+        clicked: 0,
+        listingClicks: 0,
+      }
+      rows.set(newsletter, row)
+      people.set(newsletter, new Set())
+    }
+    row.visits++
+    if (campaign) issues.push(campaign)
+    const first = pageOf(landing)
+    pages.push(first)
+    if (!landing.vid) continue
+    people.get(newsletter)!.add(landing.vid)
+    const events = byVid.get(landing.vid)!
+    let at = events.indexOf(landing)
+    let prev = Date.parse(landing.ts)
+    let more = false
+    let clicks = 0
+    for (at++; at < events.length; at++) {
+      const e = events[at]
+      const t = Date.parse(e.ts)
+      if (starts.has(e) || (!Number.isNaN(t) && t - prev >= SESSION_GAP_MS))
+        break
+      if (!Number.isNaN(t)) prev = t
+      if (e.type === 'page_view') {
+        const p = pageOf(e)
+        pages.push(p)
+        if (p !== first) more = true
+      } else if (
+        e.type === 'listing_click' &&
+        e.page != null &&
+        LISTING_PAGES.has(e.page)
+      ) {
+        clicks++
+        listings.push(listingMember(e))
+      }
+    }
+    if (more) row.morePages++
+    if (clicks > 0) row.clicked++
+    row.listingClicks += clicks
+  }
+  for (const [name, row] of rows) row.visitors = people.get(name)!.size
+  return {
+    byNewsletter: [...rows.values()].sort((a, b) => b.visits - a.visits),
+    pages: tally(pages),
+    listings: tally(listings),
+    issues: tally(issues),
+  }
 }
 
 // ---------------------------------------------------------------------------

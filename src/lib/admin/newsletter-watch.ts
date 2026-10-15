@@ -51,7 +51,10 @@
   The banner shows an amber or red check for EVENT_ALERT_FOR, except one on
   an issue's last wave that rests on low opens alone. A check comes before
   the issue's next wave, or after its last wave (or a whole-list send)
-  before the next issue, and says so.
+  before the next issue, and says so. Three days after the send finished
+  its numbers are read once more: bounces and spam complaints keep coming
+  in after the 18-hour check, and when they (or unsubscribes) now give a
+  worse verdict, that's an alert of its own. The recheck cancels nothing.
 
   Upstash keys (the site's analytics database; no expiry on any of them):
     aisafety:newsletter:watch:state    { lastRunAt, campaigns, api, account }
@@ -60,6 +63,8 @@
                                        waves it canceled or tried to (3 days)
     aisafety:newsletter:watch:lock     one run at a time (expires by itself)
     aisafety:newsletter:health:<id>    HealthRecord, written once per campaign
+    aisafety:newsletter:health-recheck:<id>  RecheckRecord, the three-day
+                                       second look, written once
   and it reads what the approval step writes on every real-list approval:
     aisafety:newsletter:approved:<id>  ApprovedRecord (see the wave contract)
 
@@ -137,6 +142,10 @@ const OVERSEND_FACTOR = 1.2
 const OVERSEND_SLACK = 10
 
 const HEALTH_AFTER = 18 * HOUR
+/** The second look at a checked send: bounces and spam complaints keep
+ *  arriving for a day or two after the 18-hour check (a soft bounce tried
+ *  again, a complaint a mail service passes on late). */
+const RECHECK_AFTER = 3 * DAY
 /** Below this many recipients (the rehearsals to three test addresses) the
  *  verdict is stored but not emailed: one bounce would read as 33%. */
 const HEALTH_MIN_SAMPLE = 50
@@ -189,6 +198,7 @@ const PRODUCTION_ORIGIN = 'https://aisafety.com'
 
 export const APPROVED_PREFIX = 'aisafety:newsletter:approved:'
 export const HEALTH_PREFIX = 'aisafety:newsletter:health:'
+export const RECHECK_PREFIX = 'aisafety:newsletter:health-recheck:'
 export const STATE_KEY = 'aisafety:newsletter:watch:state'
 export const ALERTS_KEY = 'aisafety:newsletter:watch:alerts'
 export const CANCELED_KEY = 'aisafety:newsletter:watch:canceled'
@@ -325,6 +335,17 @@ export interface HealthRecord {
   /** Too few recipients to judge: stored, not emailed. */
   smallSample: boolean
   emailedAt: string | null
+}
+
+/** The three-day recheck of a checked send (RECHECK_AFTER): its numbers
+ *  read again, once, and what they say. */
+export interface RecheckRecord {
+  campaignId: string
+  checkedAt: string
+  numbers: HealthNumbers
+  /** recheckNews: the verdict on bounces, complaints and unsubscribes
+   *  when it's worse than at the 18-hour check, else null. */
+  worse: { verdict: 'amber' | 'red'; reasons: string[] } | null
 }
 
 interface CampaignState {
@@ -776,6 +797,44 @@ export function healthVerdict(n: HealthNumbers): {
   return { verdict: 'green', reasons: [] }
 }
 
+const VERDICT_RANK: Record<HealthVerdict, number> = {
+  green: 0,
+  amber: 1,
+  red: 2,
+}
+
+/** The three-day recheck's news, or null: the verdict on what keeps coming
+ *  in after a send (bounces, spam complaints, unsubscribes; opens only rise,
+ *  so they're left out on both sides) when it's now worse than it was at
+ *  the 18-hour check. */
+export function recheckNews(
+  first: HealthNumbers,
+  now: HealthNumbers
+): { verdict: 'amber' | 'red'; reasons: string[] } | null {
+  const was = healthVerdict({ ...first, verifiedOpens: first.sendAmt })
+  const is = healthVerdict({ ...now, verifiedOpens: now.sendAmt })
+  if (
+    is.verdict === 'green' ||
+    VERDICT_RANK[is.verdict] <= VERDICT_RANK[was.verdict]
+  )
+    return null
+  return { verdict: is.verdict, reasons: is.reasons }
+}
+
+/** What changed since the 18-hour check, one item a number that grew:
+ *  "hard bounces 10 → 25". */
+function recheckChanges(first: HealthNumbers, now: HealthNumbers): string[] {
+  const rows: Array<[string, keyof HealthNumbers]> = [
+    ['hard bounces', 'hardBounces'],
+    ['soft bounces', 'softBounces'],
+    ['spam complaints', 'spamComplaints'],
+    ['unsubscribes', 'unsubscribes'],
+  ]
+  return rows
+    .filter(([, k]) => now[k] > first[k])
+    .map(([label, k]) => `${label} ${num(first[k])} → ${num(now[k])}`)
+}
+
 // ─── Mail ───────────────────────────────────────────────────────────────────
 
 function esc(s: string): string {
@@ -992,6 +1051,9 @@ export interface WatchSummary {
    *  them. */
   deferred: string[]
   health: Array<{ campaignId: string; verdict: HealthVerdict }>
+  /** Sends read again three days after (RECHECK_AFTER), this run: worse =
+   *  bounces, complaints or unsubscribes now give a worse verdict. */
+  rechecks: Array<{ campaignId: string; worse: 'amber' | 'red' | null }>
   /** Waves it canceled or tried to (a dry run: would have, `dry`). */
   canceled: Array<{
     campaignId: string
@@ -1047,6 +1109,7 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
     emails: [],
     deferred: [],
     health: [],
+    rechecks: [],
     canceled: [],
     draftsDeleted: [],
     errors: [],
@@ -1457,6 +1520,96 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
           campaignId: r.campaignId,
           source: 'health',
           preEmailed: true,
+        })
+      }
+    }
+
+    // ── A second look, three days after a checked send finished ──
+    // Once per send: its numbers read again. When bounces, complaints or
+    // unsubscribes now give a worse verdict than at the 18-hour check, it's
+    // raised as its own alert (and emailed). It cancels nothing: waves are
+    // held on the 18-hour verdict alone.
+    if (campaignsOk) {
+      const due = relevant.filter(({ c, lists }) => {
+        const finished = timeOf(c.ldate)
+        return (
+          c.status === '5' &&
+          lists.some(l => ISSUE_LISTS.includes(l)) &&
+          finished != null &&
+          nowMs - finished >= RECHECK_AFTER &&
+          nowMs - finished <= RECENT
+        )
+      })
+      const [firsts, seconds] =
+        due.length > 0
+          ? await Promise.all([
+              store.mget<HealthRecord>(
+                due.map(({ c }) => HEALTH_PREFIX + c.id)
+              ),
+              store.mget<RecheckRecord>(
+                due.map(({ c }) => RECHECK_PREFIX + c.id)
+              ),
+            ])
+          : [[], []]
+      for (let i = 0; i < due.length; i++) {
+        const { c } = due[i]
+        const first = firsts[i]
+        // No 18-hour check to compare with (a send from before the watcher
+        // ran), or a rehearsal: nothing to recheck.
+        if (!first || first.smallSample) continue
+        let again = seconds[i]
+        if (!again) {
+          try {
+            const totals = await ac.v1<Record<string, unknown>>(
+              'campaign_report_unsubscription_totals',
+              { campaignid: c.id }
+            )
+            const numbers: HealthNumbers = {
+              sendAmt: count(c.send_amt),
+              hardBounces: count(c.hardbounces),
+              softBounces: count(c.softbounces),
+              unsubscribes: Math.max(
+                count(c.unsubscribes),
+                count(totals.unsubscribes)
+              ),
+              spamComplaints: count(totals.spam_complaints),
+              verifiedOpens: count(c.verified_unique_opens),
+            }
+            again = {
+              campaignId: c.id,
+              checkedAt: nowIso,
+              numbers,
+              worse: recheckNews(first.numbers, numbers),
+            }
+          } catch (err) {
+            summary.errors.push(`recheck ${c.id}: ${errorText(err)}`)
+            continue
+          }
+          summary.rechecks.push({
+            campaignId: c.id,
+            worse: again.worse?.verdict ?? null,
+          })
+          if (!dry) await store.set(RECHECK_PREFIX + c.id, again)
+        }
+        if (!again.worse) continue
+        if (nowMs - Date.parse(again.checkedAt) > EVENT_ALERT_FOR) continue
+        const changes = recheckChanges(first.numbers, again.numbers)
+        raised.push({
+          id: `recheck:${c.id}`,
+          sig: again.worse.verdict,
+          severity: again.worse.verdict,
+          title: `${shortLabel(first.name, c.id)} 3-day recheck: now ${again.worse.verdict}`,
+          detail: [
+            `Read again three days after it finished: ${again.worse.reasons.join('; ')}. At the 18-hour check it was ${first.verdict}.`,
+            ...(changes.length
+              ? [
+                  `Since then: ${changes.join(', ')}. Sent to ${num(again.numbers.sendAmt)}.`,
+                ]
+              : []),
+            'The watcher cancels nothing on a recheck: any wave of the issue still to go stays scheduled unless you cancel it on the newsletter page. Look before the next issue goes out.',
+          ],
+          campaignId: c.id,
+          source: 'health',
         })
       }
     }

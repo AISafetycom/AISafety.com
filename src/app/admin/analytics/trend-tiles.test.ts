@@ -6,7 +6,7 @@ import {
   previousWindow,
   weeklyOf,
 } from '@/lib/analytics/trends'
-import { eventTiles, subscriberTiles } from './trend-tiles'
+import { eventTiles, feedDays, feedTile, subscriberTiles } from './trend-tiles'
 
 const day = (d: string) => Date.parse(`${d}T00:00:00Z`)
 const NOW = Date.parse('2026-10-14T18:03:41Z')
@@ -261,5 +261,75 @@ describe('subscriberTiles', () => {
     expect(events.value).toBe(2800)
     expect(events.from).toBe(2737)
     expect(events.last).toBe(day('2026-09-19'))
+  })
+})
+
+describe('the Feed readers tile', () => {
+  it('reads the range’s days, never before the feeds began or after today', () => {
+    expect(feedDays({ startMs: day('2026-10-12'), endMs: null }, NOW)).toEqual([
+      '2026-10-12',
+      '2026-10-13',
+      '2026-10-14',
+    ])
+    // Last 30 days: from the feeds’ first day.
+    expect(feedDays({ startMs: NOW - 30 * DAY_MS, endMs: null }, NOW)[0]).toBe(
+      '2026-10-11'
+    )
+    expect(feedDays({ startMs: null, endMs: null }, NOW)).toHaveLength(4)
+    // A range that ended before the feeds: nothing to read.
+    expect(
+      feedDays({ startMs: day('2026-09-01'), endMs: day('2026-09-30') }, NOW)
+    ).toEqual([])
+  })
+
+  const counts = (d: string, events: number, training: number) => [
+    { day: d, services: events, direct: 0 },
+    { day: d, services: 0, direct: training },
+  ]
+
+  it('shows the last full day, From the first, every newsletter together, today drawn as so far', () => {
+    const t = feedTile(
+      [
+        ...counts('2026-10-12', 10, 4),
+        ...counts('2026-10-13', 12, 5),
+        ...counts('2026-10-14', 3, 1),
+      ],
+      { startMs: day('2026-10-12'), endMs: null },
+      NOW
+    )!
+    expect(t.label).toBe('Feed readers')
+    expect(t.value).toBe(17)
+    expect(t.from).toBe(14)
+    expect(t.points.map(p => [p.v, p.part])).toEqual([
+      [14, undefined],
+      [17, undefined],
+      [4, 'so far'],
+    ])
+    expect(t.note).toContain('The figure is 13 October 2026')
+    expect(t.note).toContain('From = 12 October 2026.')
+  })
+
+  it('has no From for a range that begins before the feeds counted', () => {
+    const t = feedTile(
+      counts('2026-10-11', 2, 1),
+      { startMs: day('2026-10-01'), endMs: day('2026-10-11') + DAY_MS - 1 },
+      NOW
+    )!
+    expect(t.value).toBe(3)
+    expect(t.from).toBeNull()
+    expect(t.note).toContain('only counted their readers since 11 October 2026')
+  })
+
+  it('shows today so far when that’s all the range has, and nothing when unread', () => {
+    const t = feedTile(
+      counts('2026-10-14', 3, 1),
+      { startMs: day('2026-10-14'), endMs: null },
+      NOW
+    )!
+    expect(t.value).toBe(4)
+    expect(t.from).toBeNull()
+    expect(t.note).toContain('The figure is today so far.')
+    expect(feedTile(null, { startMs: null, endMs: null }, NOW)).toBeNull()
+    expect(feedTile([], { startMs: null, endMs: null }, NOW)).toBeNull()
   })
 })

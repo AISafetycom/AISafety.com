@@ -83,6 +83,9 @@ describe('/newsletter/<key>/<issue>/text', () => {
     expect(html).toContain('• The Big Tent<br>')
     expect(html).toContain('Copy text version')
     expect(html).toContain(
+      '<img src="/newsletter/events/week-41-2026/seen?as=text"'
+    )
+    expect(html).toContain(
       '<a href="/newsletter/events/week-41-2026">View the email</a>'
     )
     expect(html).not.toMatch(/%[A-Z]/)

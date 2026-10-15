@@ -11,6 +11,9 @@ import {
   LOCK_KEY,
   memoryWatchStore,
   readAlerts,
+  RECHECK_PREFIX,
+  type RecheckRecord,
+  recheckNews,
   runWatch,
   shortLabel,
   STATE_KEY,
@@ -1613,6 +1616,136 @@ describe('runWatch: health checks', () => {
 })
 
 /* ─── Dedupe, email batching, lock, dry runs, read-only ──────────────── */
+
+describe('recheckNews (the three-day second look)', () => {
+  const n = {
+    sendAmt: 1000,
+    hardBounces: 5,
+    softBounces: 2,
+    unsubscribes: 10,
+    spamComplaints: 0,
+    verifiedOpens: 120,
+  }
+  it('says nothing when bounces, complaints and unsubscribes give the same verdict', () => {
+    expect(
+      recheckNews(n, { ...n, hardBounces: 6, unsubscribes: 30 })
+    ).toBeNull()
+  })
+  it('leaves opens out on both sides: low opens at 18 hours are old news', () => {
+    expect(recheckNews(n, { ...n, verifiedOpens: 400 })).toBeNull()
+  })
+  it('turns red on complaints that came in late', () => {
+    expect(recheckNews(n, { ...n, spamComplaints: 2 })).toEqual({
+      verdict: 'red',
+      reasons: ['spam complaints 0.2% (red above 0.1%)'],
+    })
+  })
+  it('turns amber on bounces that came in late', () => {
+    expect(recheckNews(n, { ...n, softBounces: 6 })?.verdict).toBe('amber')
+  })
+  it('says nothing when it was already as bad', () => {
+    const red = { ...n, hardBounces: 25 }
+    expect(recheckNews(red, { ...red, hardBounces: 30 })).toBeNull()
+  })
+})
+
+describe('runWatch: the three-day recheck', () => {
+  function sentWave(over: Partial<FakeCampaign> = {}) {
+    return campaign({
+      id: '260',
+      name: 'Training · Week 41, 2026 · wave 1/4',
+      status: '5',
+      cdate: acDate(20 * HOUR),
+      sdate: acDate(20 * HOUR),
+      ldate: acDate(19 * HOUR),
+      send_amt: '1000',
+      total_amt: '1000',
+      verified_unique_opens: '400',
+      ...over,
+    })
+  }
+  const v1Reads = () =>
+    calls.filter(
+      c =>
+        c.url.searchParams.get('api_action') ===
+        'campaign_report_unsubscription_totals'
+    ).length
+
+  it('reads a checked send again three days on, once, and alerts when complaints came in late', async () => {
+    const { store, sent, run } = setup()
+    ac.campaigns = [sentWave()]
+    ac.lists['260'] = ['7']
+    await approve(store, '260', { listId: '7', expected: 1000 })
+    await run()
+    expect(sent.map(m => m.subject)).toEqual([
+      'Newsletter: Training · Week 41 wave 1/4 health check: green',
+    ])
+    // Not yet: two days on, nothing is read again.
+    await run(later(29 * HOUR))
+    expect(v1Reads()).toBe(1)
+
+    // Three days after it finished, the late complaints and bounces.
+    ac.campaigns = [sentWave({ hardbounces: '4', softbounces: '9' })]
+    ac.unsubTotals['260'] = { spam_complaints: '2' }
+    const s = await run(later(54 * HOUR))
+    expect(s.rechecks).toEqual([{ campaignId: '260', worse: 'red' }])
+    expect(ids(s)).toEqual(['recheck:260'])
+    expect(s.alerts[0].severity).toBe('red')
+    expect(sent.map(m => m.subject).slice(1)).toEqual([
+      'Newsletter: Training · Week 41 wave 1/4 3-day recheck: now red',
+    ])
+    expect(sent[1].text).toContain(
+      'Read again three days after it finished: spam complaints 0.2% (red above 0.1%); bounces 1.3% (amber at 1%). At the 18-hour check it was green.'
+    )
+    expect(sent[1].text).toContain(
+      'Since then: hard bounces 0 → 4, soft bounces 0 → 9, spam complaints 0 → 2. Sent to 1,000.'
+    )
+    expect(sent[1].text).toContain('The watcher cancels nothing on a recheck')
+    const record = await store.get<RecheckRecord>(RECHECK_PREFIX + '260')
+    expect(record?.worse?.verdict).toBe('red')
+    expect(record?.numbers.spamComplaints).toBe(2)
+
+    // Once: no second read, no second email, the alert stays up.
+    const again = await run(later(54 * HOUR + 10 * MIN))
+    expect(again.rechecks).toEqual([])
+    expect(ids(again)).toEqual(['recheck:260'])
+    expect(sent).toHaveLength(2)
+    expect(v1Reads()).toBe(2)
+  })
+
+  it('stays quiet when nothing got worse, and never reads it twice', async () => {
+    const { store, sent, run } = setup()
+    ac.campaigns = [sentWave()]
+    ac.lists['260'] = ['7']
+    await approve(store, '260', { listId: '7', expected: 1000 })
+    await run()
+    ac.campaigns = [
+      sentWave({ verified_unique_opens: '600', hardbounces: '1' }),
+    ]
+    const s = await run(later(54 * HOUR))
+    expect(s.rechecks).toEqual([{ campaignId: '260', worse: null }])
+    expect(s.alerts).toEqual([])
+    expect(sent).toHaveLength(1)
+    await run(later(60 * HOUR))
+    expect(v1Reads()).toBe(2)
+  })
+
+  it('leaves rehearsals out, and a dry run reads but writes nothing', async () => {
+    const { store, run } = setup()
+    ac.campaigns = [
+      sentWave(),
+      sentWave({ id: '261', send_amt: '3', total_amt: '3' }),
+    ]
+    ac.lists = { '260': ['7'], '261': ['7'] }
+    await approve(store, '260', { listId: '7', expected: 1000 })
+    await approve(store, '261', { listId: '7' })
+    await run()
+    const s = await run(later(54 * HOUR), { dry: true })
+    expect(s.rechecks).toEqual([{ campaignId: '260', worse: null }])
+    expect(await store.get(RECHECK_PREFIX + '260')).toBeNull()
+    expect(await store.get(RECHECK_PREFIX + '261')).toBeNull()
+  })
+})
 
 describe('runWatch: plumbing', () => {
   it('retries an alert email that failed, then stops', async () => {

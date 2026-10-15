@@ -1625,6 +1625,79 @@ async function allCampaigns({ fresh = false } = {}): Promise<RawCampaign[]> {
   return fresh ? read() : sharedRead('campaigns', 5_000, read)
 }
 
+/** How far back Analytics reads campaigns, a page of CAMPAIGN_READ_WINDOW
+ *  at a time, at most. */
+export const CAMPAIGN_READ_MAX = 2_000
+/** Each later page starts this many campaigns before the one before ended,
+ *  so a campaign deleted between two page reads (an approval deletes an
+ *  issue's draft) can't push another one past both. */
+const CAMPAIGN_PAGE_OVERLAP = 10
+/** An issue's sending campaigns are made at most this long before it first
+ *  goes out (approve once makes every wave at the press, the first five
+ *  minutes later; a canceled wave approved again is made later still), so
+ *  reading back to a week before a range finds every send of the issues
+ *  first sent in it, and the earlier waves of any issue only some of whose
+ *  waves fall in it. */
+const MADE_BEFORE_FIRST_SEND_MS = 7 * 24 * HOUR_MS
+
+/** Pure: whether Analytics should read another, older page of campaigns:
+ *  ActiveCampaign holds more than the `read` so far (`total`, its
+ *  meta.total; null = unknown, read no more), `max` isn't reached, and the
+ *  oldest one read (`oldestMs`, its creation) isn't before `fromMs` (null =
+ *  all of them). */
+export function wantsOlderCampaigns(
+  read: number,
+  total: number | null,
+  oldestMs: number,
+  fromMs: number | null,
+  max: number = CAMPAIGN_READ_MAX
+): boolean {
+  if (total == null || read >= total || read >= max) return false
+  return fromMs == null || Number.isNaN(oldestMs) || oldestMs >= fromMs
+}
+
+/** The campaigns, newest first, back to the first one made before `fromMs`
+ *  (every one for null), at most about CAMPAIGN_READ_MAX. The newest page
+ *  is the one every other reader shares; the older ones are kept a minute.
+ *  `complete` is false when the cap stopped the read short of `fromMs`. */
+async function campaignsBackTo(
+  fromMs: number | null
+): Promise<{ campaigns: RawCampaign[]; complete: boolean }> {
+  const newest = await allCampaigns()
+  const byId = new Map(newest.map(c => [c.id, c]))
+  const oldest = () => {
+    const t = [...byId.values()]
+      .map(c => timeOfCampaign(c.cdate))
+      .filter(t => !Number.isNaN(t))
+      .reduce((a, b) => Math.min(a, b), Infinity)
+    return Number.isFinite(t) ? t : NaN
+  }
+  let end = newest.length
+  let exhausted = newest.length < CAMPAIGN_READ_WINDOW
+  while (
+    !exhausted &&
+    wantsOlderCampaigns(end, campaignTotal, oldest(), fromMs)
+  ) {
+    const offset = Math.max(0, end - CAMPAIGN_PAGE_OVERLAP)
+    const page = await sharedRead(`campaigns@${offset}`, 60_000, async () => {
+      const data = await v3<{ campaigns: RawCampaign[] }>(
+        `campaigns?limit=${CAMPAIGN_READ_WINDOW}&offset=${offset}&orders[id]=DESC`
+      )
+      return data.campaigns ?? []
+    })
+    // A newer page's copy of a campaign is the fresher one.
+    for (const c of page) if (!byId.has(c.id)) byId.set(c.id, c)
+    end = offset + page.length
+    exhausted = page.length < CAMPAIGN_READ_WINDOW
+  }
+  return {
+    campaigns: [...byId.values()].sort((a, b) => Number(b.id) - Number(a.id)),
+    complete:
+      exhausted ||
+      !wantsOlderCampaigns(end, campaignTotal, oldest(), fromMs, Infinity),
+  }
+}
+
 /** The checks `ac.py verify` runs, as a list of problems (empty = OK), on
  *  what has already been read. */
 function draftProblems(
@@ -3213,10 +3286,10 @@ export interface SendStats {
 
 export interface SendStatsResult {
   issues: SendStats[]
-  /** ActiveCampaign holds more campaigns than the newest
-   *  CAMPAIGN_READ_WINDOW the site reads: when the oldest one read was made
+  /** The range reaches back past the newest CAMPAIGN_READ_MAX campaigns,
+   *  which is as far as Analytics reads: when the oldest one read was made
    *  (ISO). An issue first sent before then may be missing. Null when every
-   *  campaign was read. */
+   *  campaign the range needs was read. */
   readFrom: string | null
 }
 
@@ -3232,7 +3305,9 @@ export async function readSendStats(range: {
   startMs: number | null
   endMs: number | null
 }): Promise<SendStatsResult> {
-  const campaigns = await allCampaigns()
+  const { campaigns, complete } = await campaignsBackTo(
+    range.startMs == null ? null : range.startMs - MADE_BEFORE_FIRST_SEND_MS
+  )
   const offset = await accountUtcOffset(campaigns)
   const startOf = (c: RawCampaign) =>
     instantMs((c.sdate || c.ldate) ?? null, offset)
@@ -3342,9 +3417,7 @@ export async function readSendStats(range: {
   return {
     issues,
     readFrom:
-      campaignTotal != null &&
-      campaignTotal > campaigns.length &&
-      Number.isFinite(oldest)
+      !complete && Number.isFinite(oldest)
         ? new Date(oldest).toISOString()
         : null,
   }

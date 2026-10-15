@@ -321,6 +321,18 @@ describe('textHtml and textPlain', () => {
 })
 
 describe('textPage', () => {
+  it('loads the image that counts the view, when given one', () => {
+    const args = [
+      textVersion(WEEK_41)!,
+      'training',
+      'Week 41, 2026',
+      '/newsletter/training/week-41-2026',
+    ] as const
+    const seen = '<img src="/newsletter/training/week-41-2026/seen?as=text">'
+    expect(textPage(...args, seen)).toContain(`</main>${seen}\n<script>`)
+    expect(textPage(...args)).not.toContain('/seen?')
+  })
+
   it('shows the text, the button and the way back to the email, with its one script allowed by hash', () => {
     const page = textPage(
       textVersion(WEEK_41)!,

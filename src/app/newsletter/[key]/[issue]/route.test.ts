@@ -86,8 +86,15 @@ describe('/newsletter/<key>/<issue>', () => {
     expect(res.headers.get('content-security-policy')).toContain(
       "default-src 'none'"
     )
+    // The view-counting image is on the site itself.
+    expect(res.headers.get('content-security-policy')).toContain(
+      "img-src 'self' https: data:"
+    )
     const html = await res.text()
     expect(html).toContain('<h1>Events</h1>')
+    expect(html).toContain(
+      '<img src="/newsletter/events/week-41-2026/seen?as=web"'
+    )
     expect(html).toContain('noindex')
     expect(html).not.toMatch(/%[A-Z]/)
     expect(html).not.toContain('View in browser')

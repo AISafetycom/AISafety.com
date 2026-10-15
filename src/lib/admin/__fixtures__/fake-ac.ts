@@ -549,8 +549,11 @@ export function makeAC(opts: AcOptions = {}) {
     }
     if (p === 'campaigns') {
       const sorted = [...camps].sort((a, b) => Number(b.id) - Number(a.id))
+      // A page, as ActiveCampaign gives them: `limit` from `offset`.
+      const offset = Number(url.searchParams.get('offset') ?? 0)
+      const limit = Number(url.searchParams.get('limit') ?? sorted.length)
       return j({
-        campaigns: sorted.map(c => ({ ...c })),
+        campaigns: sorted.slice(offset, offset + limit).map(c => ({ ...c })),
         meta: { total: String(opts.totalCampaigns ?? camps.length) },
       })
     }
