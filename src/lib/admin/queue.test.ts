@@ -35,10 +35,12 @@ import {
   queueTargets,
   noReplyOf,
   rejectReplyOf,
+  saveEdits,
   undoItem,
   unflagItem,
   type QueueItem,
 } from './queue'
+import { LEFT_OUT_KEY } from './queue-left-out'
 
 const QUEUE = 'tblonlKwIFJ7Aa8QN'
 const EVENTS = 'tblXbN9swwldwq8f7'
@@ -975,5 +977,176 @@ describe('flagItem / unflagItem', () => {
         changes: null,
       })
     ).rejects.toMatchObject({ status: 409 })
+  })
+})
+
+// The cross on a proposed row (Bryce, 15 Oct 2026: "I want to be able to
+// delete a suggested field change"): the field stays as the listing has it,
+// through saves, Apply and Undo.
+describe('proposed fields left out', () => {
+  const ID = rid('fellow')
+  const LISTING = `${EVENTS}/${rid('event')}`
+  const FLD = {
+    type: 'fldBc9YIDhjmu58f3',
+    proposal: 'fldgl9Ny2jnu8T0Da',
+    edits: 'fldzCgKQbopgcbrwq',
+    targetTable: 'fld45SUjstUZROuXl',
+    targetRecord: 'fldszXtLdUijgFG4l',
+  }
+  let row: Record<string, unknown>
+  let writes: { path: string; fields: Record<string, unknown> }[]
+
+  beforeEach(() => {
+    row = {
+      [FLD.type]: 'Change',
+      [STATUS]: 'Pending',
+      [FLD.proposal]: JSON.stringify({
+        kind: 'change',
+        table: EVENTS,
+        record: rid('event'),
+        page: '/events',
+        changes: [
+          { field: 'Deadline', from: '2026-10-17', to: '2026-10-21' },
+          { field: 'Stipend', from: null, to: 'Stipend included' },
+        ],
+      }),
+      [FLD.targetTable]: EVENTS,
+      [FLD.targetRecord]: rid('event'),
+    }
+    writes = []
+    process.env.AIRTABLE_TOKEN = 'test-token'
+    process.env.AIRTABLE_BASE_ID = 'appTest'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          tables: [
+            {
+              id: EVENTS,
+              fields: [
+                { id: 'fldDeadline', name: 'Deadline', type: 'date' },
+                { id: 'fldStipend', name: 'Stipend', type: 'singleLineText' },
+              ],
+            },
+          ],
+        })
+      )
+    )
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(
+      async (path: string, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          const { fields } = JSON.parse(String(init.body)) as {
+            fields: Record<string, unknown>
+          }
+          if (!path.startsWith(`${QUEUE}/${ID}`)) {
+            writes.push({ path, fields })
+          } else {
+            for (const [k, v] of Object.entries(fields)) {
+              if (v === null) delete row[k]
+              else row[k] = v
+            }
+          }
+        }
+        return Response.json({
+          id: ID,
+          createdTime: '2026-10-15T00:00:00.000Z',
+          fields: row,
+        })
+      }
+    )
+  })
+
+  const current = async () => {
+    const i = await getQueueItem(ID)
+    if (!i) throw new Error('row gone')
+    return i
+  }
+  const saved = () => JSON.parse(String(row[FLD.edits])) as unknown
+
+  it('is saved with the edits, kept by a save that does not touch it, and put back', async () => {
+    await saveEdits(
+      await current(),
+      { Deadline: '2026-10-22', [LEFT_OUT_KEY]: ['Stipend'] },
+      undefined,
+      ['Deadline', LEFT_OUT_KEY]
+    )
+    const item = await current()
+    expect(item.edits).toEqual({ Deadline: '2026-10-22' })
+    expect(item.leftOut).toEqual(['Stipend'])
+
+    await saveEdits(item, { Deadline: '2026-10-23' }, undefined, ['Deadline'])
+    expect(saved()).toEqual({
+      Deadline: '2026-10-23',
+      [LEFT_OUT_KEY]: ['Stipend'],
+    })
+
+    await saveEdits(await current(), { Deadline: '2026-10-23' }, undefined, [
+      LEFT_OUT_KEY,
+    ])
+    expect(saved()).toEqual({ Deadline: '2026-10-23' })
+    expect((await current()).leftOut).toBeNull()
+  })
+
+  it('is not written by Apply, and Undo leaves it alone', async () => {
+    await acceptItem(await current(), { [LEFT_OUT_KEY]: ['Stipend'] })
+    expect(writes).toEqual([
+      { path: LISTING, fields: { Deadline: '2026-10-21' } },
+    ])
+    const applied = await current()
+    expect(applied.status).toBe('Applied')
+    expect(applied.leftOut).toEqual(['Stipend'])
+
+    writes = []
+    await undoItem(applied)
+    expect(writes).toEqual([
+      { path: LISTING, fields: { Deadline: '2026-10-17' } },
+    ])
+    const reopened = await current()
+    expect(reopened.status).toBe('Pending')
+    expect(reopened.leftOut).toEqual(['Stipend'])
+  })
+
+  it('wins over an edit to the same field, and forgets a field not proposed', async () => {
+    await acceptItem(await current(), {
+      Stipend: 'No stipend',
+      [LEFT_OUT_KEY]: ['Stipend', 'Logo'],
+    })
+    expect(writes).toEqual([
+      { path: LISTING, fields: { Deadline: '2026-10-21' } },
+    ])
+    expect(saved()).toEqual({ [LEFT_OUT_KEY]: ['Stipend'] })
+  })
+
+  it('writes nothing to the listing when every proposed field is left out', async () => {
+    await acceptItem(await current(), {
+      [LEFT_OUT_KEY]: ['Deadline', 'Stipend'],
+    })
+    expect(writes).toEqual([])
+    expect((await current()).status).toBe('Applied')
+  })
+
+  it('stays in the draft when Undo clears what Fable kept', async () => {
+    await acceptItem(await current(), { [LEFT_OUT_KEY]: ['Stipend'] }, null, [
+      'Deadline',
+    ])
+    expect(writes).toEqual([])
+    expect(saved()).toEqual({
+      '(kept by Fable)': ['Deadline'],
+      [LEFT_OUT_KEY]: ['Stipend'],
+    })
+    await undoItem(await current())
+    expect(writes).toEqual([])
+    expect(saved()).toEqual({ [LEFT_OUT_KEY]: ['Stipend'] })
+  })
+
+  it('is never written as a field beyond the proposal', async () => {
+    expect(
+      extraEdits(
+        await current(),
+        { [LEFT_OUT_KEY]: ['Stipend'], Host: 'Rob Miles' },
+        []
+      )
+    ).toEqual({ Host: 'Rob Miles' })
   })
 })

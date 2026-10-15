@@ -1058,6 +1058,12 @@ p.tabDoneTitle {
   border-radius: 8px;
 }
 
+/* While the rows can show their crosses, each keeps a last column for one,
+   so the columns line up whether a row has a cross or not. */
+.droppable .diffRow {
+  grid-template-columns: 150px minmax(0, 1fr) 16px minmax(0, 1fr) 16px;
+}
+
 .label {
   font-size: 12px;
   color: var(--q-muted);
@@ -2194,13 +2200,20 @@ select.input {
   }
 
   .fieldRow,
-  .diffRow {
+  .diffRow,
+  .droppable .diffRow {
     grid-template-columns: 1fr;
     gap: 4px;
   }
 
   .arrow {
     transform: rotate(90deg);
+  }
+
+  /* The row's cross sits on the field name's line. */
+  .dropEdit {
+    grid-row: 1;
+    grid-column: 1;
   }
 }
 
@@ -2719,18 +2732,20 @@ button.chatFileChip:hover {
   transform: scaleX(-1);
 }
 
-/* A field edited beyond what a change proposes: the cross drops the edit,
-   shown on the row's hover like the pencil. */
+/* The cross at the end of a change's row: a proposed field is left out, an
+   edit beyond the proposal dropped. Shown on the row's hover like the
+   pencil, level with the value's first line. */
 .dropEdit {
   display: inline-flex;
   align-items: center;
-  margin-left: 8px;
+  align-self: start;
+  justify-self: end;
+  margin-top: 3px;
   padding: 2px;
   border: 0;
   border-radius: 4px;
   background: none;
   color: var(--q-muted);
-  vertical-align: middle;
   cursor: pointer;
   opacity: 0;
   transition: opacity 120ms;
@@ -2743,4 +2758,56 @@ button.chatFileChip:hover {
 
 .dropEdit:hover {
   color: var(--q-danger);
+}
+
+/* No hover on a touch screen: the cross is always there. */
+@media (hover: none) {
+  .dropEdit {
+    opacity: 1;
+  }
+}
+
+/* A proposed field left out with the cross (Bryce, 15 Oct 2026: "I want to
+   be able to delete a suggested field change"): what the listing keeps
+   reads as it is, and the proposal is crossed out and faded. */
+.leftOut .from {
+  color: var(--q-text);
+  text-decoration: none;
+}
+
+.leftOut .arrow {
+  opacity: 0.4;
+}
+
+.leftOutValue {
+  color: var(--q-muted);
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.leftOutMark {
+  margin-left: 8px;
+  font-size: 12px;
+  font-style: normal;
+  color: var(--q-warn);
+  white-space: nowrap;
+}
+
+.putBack {
+  margin-left: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--q-muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.putBack:hover,
+.putBack:focus-visible {
+  color: var(--q-text);
 }
