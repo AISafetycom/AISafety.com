@@ -9,11 +9,13 @@ import type {
   FieldInfo,
   PreviousImage,
   PreviewKind,
+  ProposedChange,
   QueueItem,
   RejectReply,
 } from '@/lib/admin/queue'
 import { missingFields } from '@/lib/admin/queue-needed'
 import { laterSince, laterUntil } from '@/lib/admin/queue-later'
+import { LEFT_OUT_KEY, withLeftOut } from '@/lib/admin/queue-left-out'
 import { verdictWords, type FlagUpdate } from '@/lib/admin/queue-flag'
 import { rejectReplyFor, shownDeclineChip } from '@/lib/admin/queue-decline'
 import {
@@ -770,11 +772,36 @@ function editsAsText(edits: Record<string, unknown>): Record<string, string> {
   return out
 }
 
-/** The draft an item starts from: its saved edits, when it is still open. */
+/** The draft an item starts from: its saved edits and the fields it left
+ *  out, when it is still open. */
 function draftOfRow(items: QueueItem[] | null | undefined, id: string): Draft {
   const item = items?.find(i => i.id === id)
-  if (!item || !item.edits || !isOpen(item)) return FRESH
-  return { ...FRESH, edits: editsAsText(item.edits) }
+  if (!item || (!item.edits && !item.leftOut) || !isOpen(item)) return FRESH
+  return {
+    ...FRESH,
+    edits: editsAsText(item.edits ?? {}),
+    leftOut: item.leftOut ?? [],
+  }
+}
+
+/** A new edit to a left-out field (the chat's too) puts it back with that
+ *  value; an edit it had when it was left out stays with it for Put back. */
+function settle(was: Draft, next: Draft): Draft {
+  const back = next.leftOut.filter(
+    k => k in next.edits && next.edits[k] !== was.edits[k]
+  )
+  return back.length
+    ? { ...next, leftOut: next.leftOut.filter(k => !back.includes(k)) }
+    : next
+}
+
+/** The edits that go with Accept: not those of a field left out. */
+function activeEdits(d: Draft): Record<string, string> {
+  return d.leftOut.length
+    ? Object.fromEntries(
+        Object.entries(d.edits).filter(([k]) => !d.leftOut.includes(k))
+      )
+    : d.edits
 }
 
 function sameEdits(
@@ -783,6 +810,10 @@ function sameEdits(
 ): boolean {
   const ka = Object.keys(a)
   return ka.length === Object.keys(b).length && ka.every(k => a[k] === b[k])
+}
+
+function sameList(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((x, i) => x === b[i])
 }
 
 /** Waiting for a decision. An item set aside with "Review again in a
@@ -797,10 +828,18 @@ function isOpen(item: QueueItem): boolean {
 }
 
 /** The edits a card preview is built with before the admin touches
- *  anything: a Change shows its proposed values, an Add shows the record. */
-function proposedEdits(item: QueueItem): Record<string, unknown> {
+ *  anything: a Change shows its proposed values, but for the fields left
+ *  out; an Add shows the record. */
+function proposedEdits(
+  item: QueueItem,
+  leftOut: string[] = item.leftOut ?? []
+): Record<string, unknown> {
   return item.type === 'Change'
-    ? Object.fromEntries(item.changes.map(c => [c.field, c.to]))
+    ? Object.fromEntries(
+        item.changes
+          .filter(c => !leftOut.includes(c.field))
+          .map(c => [c.field, c.to])
+      )
     : {}
 }
 
@@ -940,12 +979,19 @@ function copyListingName(item: QueueItem): void {
 
 function acceptLabel(
   item: QueueItem,
-  edits: Record<string, string> = {}
+  edits: Record<string, string> = {},
+  leftOut: string[] = item.leftOut ?? []
 ): string {
   if (item.type === 'Add') return 'Publish'
   if (item.type === 'Change') {
-    // a field edited beyond the (empty) proposal makes it a change too
-    if (item.changes.length || Object.keys(edits).length) return 'Apply change'
+    // a field edited beyond the (empty) proposal makes it a change too; a
+    // proposal whose every field is left out has nothing to apply
+    if (
+      item.changes.some(c => !leftOut.includes(c.field)) ||
+      Object.keys(edits).length
+    ) {
+      return 'Apply change'
+    }
     // Nothing to apply: a Broom flag is accepted as a flag; anything else
     // (a correction that needed the owner) is just marked done.
     return item.source === 'Broom' ? 'Accept flag' : 'Mark done'
@@ -1029,7 +1075,7 @@ function doneLabel(item: QueueItem): string {
   if (item.status === 'Accepted') return 'Accepted'
   if (item.type === 'Add') return 'Published'
   if (item.type === 'Change') {
-    const n = item.changes.length
+    const n = item.changes.filter(c => !item.leftOut?.includes(c.field)).length
     if (n === 0) return item.source === 'Broom' ? 'Flag cleared' : 'Done'
     return `Changed ${n} field${n === 1 ? '' : 's'}`
   }
@@ -1063,10 +1109,10 @@ function laterNote(item: QueueItem): string {
     : 'Back in the list then'
 }
 
-function workingLabel(item: QueueItem, action: Decision): string {
+function workingLabel(item: QueueItem, action: Decision, d?: Draft): string {
   if (action === 'reject') return 'Rejecting…'
   if (action === 'later') return 'Setting it aside…'
-  const label = acceptLabel(item)
+  const label = acceptLabel(item, d && activeEdits(d), d?.leftOut)
   if (label === 'Publish') return 'Publishing…'
   if (label === 'Accept flag' || label === 'Mark done') return 'Accepting…'
   return 'Applying…'
@@ -1075,6 +1121,9 @@ function workingLabel(item: QueueItem, action: Decision): string {
 interface Draft {
   mode: 'idle' | 'reject'
   edits: Record<string, string>
+  /** A change's proposed fields left out with the cross: Accept does not
+   *  write them, so the listing keeps what it holds there. */
+  leftOut: string[]
   editing: string | null
   chip: string | null
   other: string
@@ -1095,6 +1144,7 @@ interface Draft {
 const FRESH: Draft = {
   mode: 'idle',
   edits: {},
+  leftOut: [],
   editing: null,
   chip: null,
   other: '',
@@ -2172,9 +2222,17 @@ export default function QueueAdmin({
       why: 'edit' | 'undo' | 'redo' = 'edit'
     ) => {
       const was = draftsRef.current[id] ?? draftOfRow(itemsRef.current, id)
+      // Undo and redo put back a draft exactly as it was.
+      const next = (base: Draft): Draft =>
+        why === 'edit'
+          ? settle(base, { ...base, ...patch })
+          : { ...base, ...patch }
+      const merged = next(was)
+      const leftOutMoved = !sameList(merged.leftOut, was.leftOut)
       const changed =
         (patch.edits !== undefined && !sameEdits(patch.edits, was.edits)) ||
-        (patch.reply !== undefined && patch.reply !== was.reply)
+        (patch.reply !== undefined && patch.reply !== was.reply) ||
+        leftOutMoved
       if (why !== 'undo' && changed) {
         historyRef.current.push({ id, before: was, at: Date.now() })
         if (historyRef.current.length > 50) historyRef.current.shift()
@@ -2188,10 +2246,9 @@ export default function QueueAdmin({
       // when he set its Deadline after a reload).
       setDrafts(prev => ({
         ...prev,
-        [id]: { ...(prev[id] ?? draftOfRow(itemsRef.current, id)), ...patch },
+        [id]: next(prev[id] ?? draftOfRow(itemsRef.current, id)),
       }))
-      if (!patch.edits && patch.reply === undefined) return
-      const merged = { ...was, ...patch }
+      if (!patch.edits && patch.reply === undefined && !leftOutMoved) return
       const row = itemsRef.current?.find(i => i.id === id)
       if (patch.edits) {
         const touched = (touchedKeys.current[id] ??= new Set())
@@ -2202,10 +2259,15 @@ export default function QueueAdmin({
           if (was.edits[k] !== patch.edits[k]) touched.add(k)
         }
       }
+      // The fields left out go on the row with the edits, under their own
+      // key, which the save moves like any field the page touched.
+      if (leftOutMoved) {
+        ;(touchedKeys.current[id] ??= new Set()).add(LEFT_OUT_KEY)
+      }
       const body: Record<string, unknown> = {
         id,
         action: 'edit',
-        edits: merged.edits,
+        edits: withLeftOut(merged.edits, merged.leftOut),
         keys: [...(touchedKeys.current[id] ?? [])],
       }
       if (patch.reply !== undefined && row?.replyDraft !== null) {
@@ -2553,7 +2615,7 @@ export default function QueueAdmin({
           no: action === 'reject',
           later: action === 'later',
           state: 'working',
-          text: workingLabel(item, action),
+          text: workingLabel(item, action, drafts[item.id]),
         })
         // Auto-advance to the next open item that is not itself on its way,
         // opening its page if that is folded; a finished Fable reply first.
@@ -2824,7 +2886,12 @@ export default function QueueAdmin({
         if (top) {
           setDraft(
             top.id,
-            { edits: top.after.edits, reply: top.after.reply, editing: null },
+            {
+              edits: top.after.edits,
+              leftOut: top.after.leftOut,
+              reply: top.after.reply,
+              editing: null,
+            },
             'redo'
           )
           select(top.id)
@@ -2855,7 +2922,12 @@ export default function QueueAdmin({
           redoRef.current.push({ id: top.id, after: draft(top.id) })
           setDraft(
             top.id,
-            { edits: top.before.edits, reply: top.before.reply, editing: null },
+            {
+              edits: top.before.edits,
+              leftOut: top.before.leftOut,
+              reply: top.before.reply,
+              editing: null,
+            },
             'undo'
           )
           select(top.id)
@@ -2903,17 +2975,20 @@ export default function QueueAdmin({
             e.preventDefault()
             void act(item, 'accept', {
               keep: fableFieldsRef.current[item.id] ?? [],
-              edits: coerceEdits(
-                d.edits,
-                item.type === 'Change'
-                  ? {
-                      ...live[item.id]?.fields,
-                      ...Object.fromEntries(
-                        item.changes.map(c => [c.field, c.to])
-                      ),
-                    }
-                  : (live[item.id]?.fields ?? item.fields ?? {}),
-                new Map((live[item.id]?.schema ?? []).map(f => [f.name, f]))
+              edits: withLeftOut(
+                coerceEdits(
+                  activeEdits(d),
+                  item.type === 'Change'
+                    ? {
+                        ...live[item.id]?.fields,
+                        ...Object.fromEntries(
+                          item.changes.map(c => [c.field, c.to])
+                        ),
+                      }
+                    : (live[item.id]?.fields ?? item.fields ?? {}),
+                  new Map((live[item.id]?.schema ?? []).map(f => [f.name, f]))
+                ),
+                d.leftOut
               ),
             })
           } else if (
@@ -3021,8 +3096,8 @@ export default function QueueAdmin({
           // 2026: "make S open the link for the currently shown listing").
           const href = item
             ? listingLink(item, live[item.id]?.fields, {
-                ...proposedEdits(item),
-                ...d.edits,
+                ...proposedEdits(item, d.leftOut),
+                ...activeEdits(d),
               })
             : null
           if (href) {
@@ -4041,7 +4116,7 @@ function Detail({
         typed: d.other,
       }),
     })
-  const editCount = Object.keys(d.edits).length
+  const editCount = Object.keys(activeEdits(d)).length
   const original: Record<string, unknown> =
     item.type === 'Change'
       ? {
@@ -4050,7 +4125,7 @@ function Detail({
         }
       : (live?.fields ?? item.fields ?? {})
   const types = new Map((live?.schema ?? []).map(f => [f.name, f]))
-  const editsToSave = () => coerceEdits(d.edits, original, types)
+  const editsToSave = () => coerceEdits(activeEdits(d), original, types)
   // An addition's fields as its field list shows them. An applied one
   // shows what its decision wrote, over the record as read: a read made
   // before the decision (or Comb's snapshot, until a fresh read lands)
@@ -4078,6 +4153,31 @@ function Detail({
     item.type === 'Change'
       ? item.changes.map(c => c.field).filter(k => fableFields.has(k))
       : []
+
+  // Proposed fields left out with the cross (Bryce, 15 Oct 2026: "I want
+  // to be able to delete a suggested field change"): Accept leaves them as
+  // the listing has them. An applied change shows the ones it left out.
+  const leftOut = isOpen(item)
+    ? d.leftOut
+    : item.status === 'Applied'
+      ? (item.leftOut ?? [])
+      : []
+  const canLeave = isOpen(item) && !revising
+  // An edit to the field waits with it, unsent, and comes back with it.
+  const leaveOut = (field: string, out: boolean) => {
+    const rest = d.leftOut.filter(k => k !== field)
+    setD(
+      out
+        ? {
+            leftOut: [...rest, field],
+            editing: d.editing === field ? null : d.editing,
+          }
+        : { leftOut: rest }
+    )
+  }
+  const leftCount = item.changes.filter(
+    c => leftOut.includes(c.field) && !fableFields.has(c.field)
+  ).length
 
   // Fields edited beyond what a change proposes (Bryce, 5 Oct 2026: "I
   // want a way of editing other random fields too"), each a row under the
@@ -4436,7 +4536,7 @@ function Detail({
             ) : item.replyStatus === 'Failed' ? (
               `The draft could not be saved${item.error ? `: ${item.error}` : '.'}`
             ) : isOpen(item) ? (
-              `${acceptLabel(item)} saves this as a Gmail draft. Nothing is sent.`
+              `${acceptLabel(item, activeEdits(d), d.leftOut)} saves this as a Gmail draft. Nothing is sent.`
             ) : (
               replyLabel(item)
             )}
@@ -4589,7 +4689,10 @@ function Detail({
               edits={{
                 ...Object.fromEntries(
                   item.changes
-                    .filter(c => !fableFields.has(c.field))
+                    .filter(
+                      c =>
+                        !fableFields.has(c.field) && !leftOut.includes(c.field)
+                    )
                     .map(c => [c.field, c.to])
                 ),
                 ...editsToSave(),
@@ -4683,13 +4786,32 @@ function Detail({
                   : 'No listing matched, so there is nothing to change here. Ask Fable which listing it is and to fix it, or fix it in Airtable, then Mark done; Reject if nothing needs doing.'}
             </p>
           ) : (
-            <div className={styles.diff}>
-              {item.changes.map(c =>
+            // The rows keep a column for their crosses while they can show.
+            <div
+              className={`${styles.diff} ${canLeave ? styles.droppable : ''}`}
+            >
+              {item.changes.map(c => {
                 // A proposed field Fable has since changed on the record
                 // shows Fable's value in its place, once; Accept keeps it.
-                fableFields.has(c.field) ? (
-                  fableRow(fableFields.get(c.field)!)
-                ) : (
+                if (fableFields.has(c.field)) {
+                  return fableRow(fableFields.get(c.field)!)
+                }
+                if (leftOut.includes(c.field)) {
+                  return (
+                    <LeftOutRow
+                      key={c.field}
+                      change={c}
+                      edit={isOpen(item) ? d.edits[c.field] : undefined}
+                      page={item.page}
+                      live={live?.fields[c.field]}
+                      open={isOpen(item)}
+                      onPutBack={
+                        canLeave ? () => leaveOut(c.field, false) : null
+                      }
+                    />
+                  )
+                }
+                return (
                   <div key={c.field} className={styles.diffRow}>
                     <span className={styles.label}>
                       <FieldIcon
@@ -4770,9 +4892,15 @@ function Detail({
                           </>
                         ))}
                     </span>
+                    {canLeave && d.editing !== c.field && (
+                      <DropButton
+                        field={c.field}
+                        onDrop={() => leaveOut(c.field, true)}
+                      />
+                    )}
                   </div>
                 )
-              )}
+              })}
               {fableChanges
                 .filter(c => !proposedFields.has(c.field))
                 .map(fableRow)}
@@ -4785,7 +4913,7 @@ function Detail({
                   was={extraWas(k)}
                   edit={extraEdits[k]}
                   editing={d.editing === k}
-                  canEdit={!revising}
+                  canEdit={canLeave}
                   cap={k === cap.field ? cap.cap : undefined}
                   onEditing={on => setD({ editing: on ? k : null })}
                   onEdit={text => {
@@ -5035,14 +5163,20 @@ function Detail({
               className={`${styles.button} ${styles.primary}`}
               disabled={d.busy}
               onClick={() =>
-                act('accept', { edits: editsToSave(), keep: fableKept })
+                act('accept', {
+                  edits: withLeftOut(editsToSave(), d.leftOut),
+                  keep: fableKept,
+                })
               }
             >
               <Icon
                 src={item.type === 'Add' ? ICON.plus : ICON.check}
                 size={12}
               />
-              {d.busy ? 'Applying…' : acceptLabel(item, d.edits)} <kbd>A</kbd>
+              {d.busy
+                ? 'Applying…'
+                : acceptLabel(item, activeEdits(d), d.leftOut)}{' '}
+              <kbd>A</kbd>
             </button>
             <button
               className={`${styles.button} ${styles.danger}`}
@@ -5061,10 +5195,16 @@ function Detail({
               <Icon src={ICON.clock} size={12} />
               Review again in a week <kbd>W</kbd>
             </button>
-            {editCount > 0 && (
+            {(editCount > 0 || leftCount > 0) && (
               <span className={styles.note}>
-                {editCount === 1 ? '1 edit goes' : `${editCount} edits go`} with
-                it
+                {[
+                  editCount > 0 &&
+                    `${editCount === 1 ? '1 edit goes' : `${editCount} edits go`} with it`,
+                  leftCount > 0 &&
+                    `${leftCount === 1 ? '1 field' : `${leftCount} fields`} left out`,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
               </span>
             )}
           </div>
@@ -5333,6 +5473,68 @@ function FableChangeRow({
   )
 }
 
+/** A proposed field left out with the cross (Bryce, 15 Oct 2026: "I want
+ *  to be able to delete a suggested field change"): what the listing keeps
+ *  reads as it is, the proposal is crossed out, and Put back brings it back
+ *  while the item is open. Accept does not write it. */
+function LeftOutRow({
+  change,
+  edit,
+  page,
+  live,
+  open,
+  onPutBack,
+}: {
+  change: ProposedChange
+  /** The page's edit to the proposed value, kept for Put back. */
+  edit: string | undefined
+  page: string | null
+  /** The record's field now, for a fresh link to the picture it keeps. */
+  live: unknown
+  open: boolean
+  /** Null when it cannot come back: a decided item, or view only. */
+  onPutBack: (() => void) | null
+}) {
+  const pictureField = touchesPicture(change)
+  const from = pictureOf(change.from, live, { pictureField, open })
+  const value = edit ?? change.to
+  const to = pictureOf(value, null, { pictureField })
+  return (
+    <div className={`${styles.diffRow} ${styles.leftOut}`}>
+      <span className={styles.label}>
+        <FieldIcon
+          page={page}
+          name={change.field}
+          value={show(change.from)}
+          size={12}
+        />
+        {change.field}
+      </span>
+      <span className={styles.from}>
+        {from ? (
+          <Picture key={from.url ?? ''} {...from} />
+        ) : (
+          friendly(show(change.from))
+        )}
+      </span>
+      <span className={styles.arrow}>
+        <Icon src={ICON.arrow} size={12} />
+      </span>
+      <span className={styles.to}>
+        <span className={styles.leftOutValue}>
+          {to ? <Picture key={to.url ?? ''} {...to} /> : friendly(show(value))}
+        </span>
+        <em className={styles.leftOutMark}>left out</em>
+        {onPutBack && (
+          <button type="button" className={styles.putBack} onClick={onPutBack}>
+            Put back
+          </button>
+        )}
+      </span>
+    </div>
+  )
+}
+
 /** Field types the change view does not offer to edit: pictures upload
  *  straight onto the record (an addition's slot does that), links to other
  *  records and people are ids, not text. */
@@ -5451,19 +5653,28 @@ function ExtraChangeRow({
           </em>
         )}
         {cap !== undefined && !editing && <Counted text={value} cap={cap} />}
-        {canEdit && edit !== undefined && !editing && (
-          <button
-            type="button"
-            className={styles.dropEdit}
-            title={`Leave ${field} as it is`}
-            aria-label={`Leave ${field} as it is`}
-            onClick={() => onEdit(null)}
-          >
-            <Icon src="/images/icons/x-small.svg" size={12} />
-          </button>
-        )}
       </span>
+      {canEdit && edit !== undefined && !editing && (
+        <DropButton field={field} onDrop={() => onEdit(null)} />
+      )}
     </div>
+  )
+}
+
+/** The cross at the end of a change's row, shown on the row's hover like
+ *  the pencil: the field stays as the listing has it – a proposed field is
+ *  left out, an edit beyond the proposal dropped. */
+function DropButton({ field, onDrop }: { field: string; onDrop: () => void }) {
+  return (
+    <button
+      type="button"
+      className={styles.dropEdit}
+      title={`Leave ${field} as it is`}
+      aria-label={`Leave ${field} as it is`}
+      onClick={onDrop}
+    >
+      <Icon src="/images/icons/x-small.svg" size={12} />
+    </button>
   )
 }
 

@@ -47,6 +47,7 @@ import { reviewAgainAt } from './queue-later'
 import { ruleTestOf, type RuleTest } from './queue-rule-test'
 import { alreadyRepliedOf, type AlreadyReplied } from './queue-already'
 import { reasonsText, type FlagUpdate } from './queue-flag'
+import { LEFT_OUT_KEY, leftOutOf, withLeftOut } from './queue-left-out'
 
 export const QUEUE_TABLE_ID = 'tblonlKwIFJ7Aa8QN'
 const BROOM_ISSUES_TABLE_ID = 'tblntD3WITPEgjHRK'
@@ -188,6 +189,10 @@ export interface QueueItem {
    *  had already changed them on the record from the chat; Undo leaves
    *  them too. */
   keptByFable?: string[] | null
+  /** Change: the proposed fields the admin left out with the cross
+   *  (queue-left-out.ts) – a draft while the item is open; once applied,
+   *  the fields Accept did not write, which Undo leaves alone too. */
+  leftOut?: string[] | null
   decidedAt: string | null
   appliedAt: string | null
   error: string | null
@@ -581,13 +586,24 @@ function rowToItem(
   let edits: Record<string, unknown> | null = null
   let before: Record<string, unknown> | null = null
   let keptByFable: string[] | null = null
+  let leftOut: string[] | null = null
   if (isRecord(saved)) {
-    const { [BEFORE_KEY]: was, [KEPT_KEY]: kept, ...rest } = saved
+    const {
+      [BEFORE_KEY]: was,
+      [KEPT_KEY]: kept,
+      [LEFT_OUT_KEY]: left,
+      ...rest
+    } = saved
     edits = rest
     before = isRecord(was) ? was : null
     keptByFable = Array.isArray(kept)
       ? kept.filter((k): k is string => typeof k === 'string')
       : null
+    const names = leftOutOf(
+      left,
+      changes.map(c => c.field)
+    )
+    leftOut = names.length ? names : null
   }
   // The reply the page sent with Reject shows at once, before the Mac has
   // saved it (Undo clears it, so it always belongs to this decision).
@@ -640,6 +656,7 @@ function rowToItem(
     edits,
     before,
     keptByFable,
+    leftOut,
     decidedAt: str(f[F.decidedAt]),
     appliedAt: str(f[F.appliedAt]),
     error: str(f[F.error]),
@@ -1641,7 +1658,14 @@ export function extraEdits(
   const types = new Map(schema.map(f => [f.name, f.type]))
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(edits)) {
-    if (proposed.has(k) || k === BEFORE_KEY || k === KEPT_KEY) continue
+    if (
+      proposed.has(k) ||
+      k === BEFORE_KEY ||
+      k === KEPT_KEY ||
+      k === LEFT_OUT_KEY
+    ) {
+      continue
+    }
     if (PROTECTED_FIELDS.has(k) || k.length > 100) continue
     if (UNWRITABLE_TYPES.has(types.get(k) ?? '')) continue
     out[k] = v
@@ -1677,13 +1701,24 @@ async function currentValues(
 
 export async function acceptItem(
   item: QueueItem,
-  edits: Record<string, unknown>,
+  pageEdits: Record<string, unknown>,
   replyDraft: string | null = null,
   keep: string[] = []
 ): Promise<void> {
   requireOpen(item)
   const stamp = now()
+  // The proposed fields left out with the cross come with the page's edits
+  // under their own key, which is never a field to write.
+  const { [LEFT_OUT_KEY]: left, ...edits } = pageEdits
+  const leftOut =
+    item.type === 'Change'
+      ? leftOutOf(
+          left,
+          item.changes.map(c => c.field)
+        )
+      : []
   const saved: Record<string, unknown> = { ...edits }
+  for (const k of leftOut) delete saved[k]
   // The reply draft as it reads on the page goes on the row first, so the
   // Mac agent (or the worker) saves exactly what the admin approved.
   const draft =
@@ -1718,8 +1753,19 @@ export async function acceptItem(
         .map(c => c.field)
         .filter(k => keep.includes(k) && !(k in edits))
       if (kept.length > 0) saved[KEPT_KEY] = kept
+      // A proposed field the admin left out is not written at all: the
+      // listing keeps what it holds there (Bryce, 15 Oct 2026: "I want to
+      // be able to delete a suggested field change"). The row keeps which,
+      // for the Done view and for Undo.
+      if (leftOut.length > 0) saved[LEFT_OUT_KEY] = leftOut
       for (const c of item.changes) {
-        if (c.field.length > 100 || kept.includes(c.field)) continue
+        if (
+          c.field.length > 100 ||
+          kept.includes(c.field) ||
+          leftOut.includes(c.field)
+        ) {
+          continue
+        }
         if (PROTECTED_FIELDS.has(c.field)) {
           fields[c.field] = asBox(c.to)
           continue
@@ -1978,7 +2024,13 @@ export async function saveEdits(
   keys?: string[]
 ): Promise<void> {
   requireOpen(item)
-  const merged = mergeEdits(item.edits, edits, keys)
+  // The fields left out sit on the row with the edits, under their own key,
+  // so a save that does not touch them keeps them.
+  const merged = mergeEdits(
+    withLeftOut(item.edits ?? {}, item.leftOut ?? []),
+    edits,
+    keys
+  )
   const fields: Record<string, unknown> = {
     [F.edits]: Object.keys(merged).length ? JSON.stringify(merged) : null,
   }
@@ -2032,8 +2084,14 @@ export async function undoItem(item: QueueItem): Promise<void> {
     const t = target(item)
     const fields: Record<string, unknown> = {}
     for (const c of item.changes) {
-      // Accept did not write it (Fable had changed it), so it stays.
-      if (item.keptByFable?.includes(c.field)) continue
+      // Accept did not write it (Fable had changed it, or it was left
+      // out), so it stays.
+      if (
+        item.keptByFable?.includes(c.field) ||
+        item.leftOut?.includes(c.field)
+      ) {
+        continue
+      }
       fields[c.field] = PROTECTED_FIELDS.has(c.field)
         ? asBox(c.from)
         : (c.from ?? null)
@@ -2045,9 +2103,10 @@ export async function undoItem(item: QueueItem): Promise<void> {
     }
     const back = await withAttachmentShapes(t.table, fields, 'skip')
     if (Object.keys(back).length) await patchRecord(t.table, t.record, back)
-    // The edits stay as the page's draft; what they replaced is spent.
+    // The edits stay as the page's draft, the fields left out too; what
+    // they replaced is spent.
     if (item.before || item.keptByFable) {
-      const kept = item.edits ?? {}
+      const kept = withLeftOut(item.edits ?? {}, item.leftOut ?? [])
       reopen[F.edits] = Object.keys(kept).length ? JSON.stringify(kept) : null
     }
     await patchQueueRow(item.id, reopen)
