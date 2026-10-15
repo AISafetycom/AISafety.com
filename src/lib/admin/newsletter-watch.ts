@@ -48,6 +48,10 @@
   check (bounces, unsubscribes, spam complaints, verified opens) with a
   green/amber/red verdict, emailed and stored for the page. A red one cancels
   the waves of that issue still scheduled (above); amber cancels nothing.
+  The banner shows an amber or red check for EVENT_ALERT_FOR, except one on
+  an issue's last wave that rests on low opens alone. A check comes before
+  the issue's next wave, or after its last wave (or a whole-list send)
+  before the next issue, and says so.
 
   Upstash keys (the site's analytics database; no expiry on any of them):
     aisafety:newsletter:watch:state    { lastRunAt, campaigns, api, account }
@@ -684,6 +688,21 @@ function pct(part: number, whole: number): string {
   return `${p < 10 && p > 0 ? p.toFixed(1) : Math.round(p)}%`
 }
 
+/** A rate next to the threshold it's judged by, never rounded onto it:
+ *  14.96% against "under 15%" reads 14.96%, not 15% (as wave 4's check
+ *  did on 12 October 2026). Otherwise the same as pct. */
+function pctBeside(part: number, whole: number, threshold: number): string {
+  if (whole <= 0) return '–'
+  const p = (part / whole) * 100
+  const onIt = Math.abs(p - threshold) < 1e-9
+  // One complaint in 999 is 0.1001%: four decimals before it leaves 0.1.
+  for (let d = p < 10 && p > 0 ? 1 : 0; d <= 6; d++) {
+    const shown = p.toFixed(d)
+    if (onIt || Number(shown) !== threshold) return `${shown}%`
+  }
+  return `${p}%`
+}
+
 function num(n: number): string {
   return n.toLocaleString('en-US')
 }
@@ -713,8 +732,9 @@ const STATUS_WORDS: Record<string, string> = {
   '7': 'held for review',
 }
 
-/** The 18-hour verdict. Red means "hold the next wave"; amber "look first".
- *  Unsubscribes stay amber at worst: the first issue after the move invites
+/** The 18-hour verdict. Red means "hold the next wave" (after an issue's
+ *  last wave or a whole-list send, "look before the next issue"); amber
+ *  "look first". Unsubscribes stay amber at worst: the first issue after the move invites
  *  readers to leave the list they don't want. Complaints only come from
  *  non-Gmail readers (Gmail tells senders nothing individually). */
 export function healthVerdict(n: HealthNumbers): {
@@ -731,18 +751,26 @@ export function healthVerdict(n: HealthNumbers): {
     }
   }
   if (n.hardBounces / s >= 0.02)
-    red.push(`hard bounces ${pct(n.hardBounces, s)} (red at 2%)`)
+    red.push(`hard bounces ${pctBeside(n.hardBounces, s, 2)} (red at 2%)`)
   if (n.spamComplaints / s > 0.001)
-    red.push(`spam complaints ${pct(n.spamComplaints, s)} (red above 0.1%)`)
+    red.push(
+      `spam complaints ${pctBeside(n.spamComplaints, s, 0.1)} (red above 0.1%)`
+    )
   if (n.verifiedOpens / s < 0.15)
-    red.push(`verified opens ${pct(n.verifiedOpens, s)} (red under 15%)`)
+    red.push(
+      `verified opens ${pctBeside(n.verifiedOpens, s, 15)} (red under 15%)`
+    )
   const bounces = n.hardBounces + n.softBounces
   if (bounces / s >= 0.01 && n.hardBounces / s < 0.02)
-    amber.push(`bounces ${pct(bounces, s)} (amber at 1%)`)
+    amber.push(`bounces ${pctBeside(bounces, s, 1)} (amber at 1%)`)
   if (n.unsubscribes / s > 0.05)
-    amber.push(`unsubscribes ${pct(n.unsubscribes, s)} (amber above 5%)`)
+    amber.push(
+      `unsubscribes ${pctBeside(n.unsubscribes, s, 5)} (amber above 5%)`
+    )
   if (n.verifiedOpens / s < 0.25 && n.verifiedOpens / s >= 0.15)
-    amber.push(`verified opens ${pct(n.verifiedOpens, s)} (amber under 25%)`)
+    amber.push(
+      `verified opens ${pctBeside(n.verifiedOpens, s, 25)} (amber under 25%)`
+    )
   if (red.length) return { verdict: 'red', reasons: [...red, ...amber] }
   if (amber.length) return { verdict: 'amber', reasons: amber }
   return { verdict: 'green', reasons: [] }
@@ -837,14 +865,33 @@ export function alertMail(alerts: WatchAlert[], origin: string): Mail {
   }
 }
 
-const VERDICT_WORDS: Record<HealthVerdict, string> = {
-  green: 'green',
-  amber: 'amber – look before the next wave',
-  red: 'red – hold the next wave',
+/** What a check comes before: the issue's next wave while it has one, else
+ *  its next issue (after a whole-list send, or an issue's last wave). */
+function nextSend(r: {
+  wave: number | null
+  waves: number | null
+}): 'wave' | 'issue' {
+  return r.wave != null && r.waves != null && r.wave < r.waves
+    ? 'wave'
+    : 'issue'
+}
+
+function verdictWords(verdict: HealthVerdict, next: 'wave' | 'issue'): string {
+  if (verdict === 'green') return 'green'
+  if (verdict === 'amber') return `amber – look before the next ${next}`
+  return next === 'wave'
+    ? 'red – hold the next wave'
+    : 'red – look before the next issue'
+}
+
+/** Amber or red on verified opens alone: every other number is in range. */
+function opensOnly(n: HealthNumbers): boolean {
+  return healthVerdict({ ...n, verifiedOpens: n.sendAmt }).verdict === 'green'
 }
 
 export function healthMail(r: HealthRecord, origin: string): Mail {
   const label = shortLabel(r.name, r.campaignId)
+  const next = nextSend(r)
   const n = r.numbers
   const s = n.sendAmt
   const rows: Array<[string, string]> = [
@@ -852,26 +899,38 @@ export function healthMail(r: HealthRecord, origin: string): Mail {
       'Sent to',
       `${num(s)}${r.expected != null ? ` (the approval expected ${num(r.expected)})` : ''}`,
     ],
-    ['Verified opens', `${num(n.verifiedOpens)} (${pct(n.verifiedOpens, s)})`],
-    ['Hard bounces', `${num(n.hardBounces)} (${pct(n.hardBounces, s)})`],
+    // Each rate beside the line it's judged by, as in the reasons above.
+    [
+      'Verified opens',
+      `${num(n.verifiedOpens)} (${pctBeside(n.verifiedOpens, s, s > 0 && n.verifiedOpens / s < 0.15 ? 15 : 25)})`,
+    ],
+    [
+      'Hard bounces',
+      `${num(n.hardBounces)} (${pctBeside(n.hardBounces, s, 2)})`,
+    ],
     ['Soft bounces', `${num(n.softBounces)} (${pct(n.softBounces, s)})`],
-    ['Unsubscribes', `${num(n.unsubscribes)} (${pct(n.unsubscribes, s)})`],
+    [
+      'Unsubscribes',
+      `${num(n.unsubscribes)} (${pctBeside(n.unsubscribes, s, 5)})`,
+    ],
     [
       'Spam complaints',
-      `${num(n.spamComplaints)} (${pct(n.spamComplaints, s)}, non-Gmail readers only)`,
+      `${num(n.spamComplaints)} (${pctBeside(n.spamComplaints, s, 0.1)}, non-Gmail readers only)`,
     ],
   ]
   const lead =
     r.verdict === 'green'
-      ? `${label} looks healthy 18 hours after it finished sending. Fine to go ahead with the next wave.`
+      ? `${label} looks healthy 18 hours after it finished sending.${next === 'wave' ? ' Fine to go ahead with the next wave.' : ''}`
       : r.verdict === 'amber'
-        ? `${label} needs a look before the next wave: ${r.reasons.join('; ')}.`
-        : `Hold the next wave of ${r.baseName.replace(/, \d{4}$/, '')}: ${r.reasons.join('; ')}.${r.wave != null && r.waves != null && r.wave < r.waves ? ' The send watcher cancels the waves of it still scheduled.' : ''}`
+        ? `${label} needs a look before the next ${next}: ${r.reasons.join('; ')}.`
+        : next === 'wave'
+          ? `Hold the next wave of ${r.baseName.replace(/, \d{4}$/, '')}: ${r.reasons.join('; ')}. The send watcher cancels the waves of it still scheduled.`
+          : `${label} needs a look before the next issue goes out: ${r.reasons.join('; ')}.`
   const note =
     'Verified opens leave out Apple’s automatic opens. Red: hard bounces at 2%, complaints above 0.1% or verified opens under 15%. Amber: bounces at 1%, unsubscribes above 5% or verified opens under 25%.'
   const links = linksBlock(origin)
   return {
-    subject: `Newsletter: ${label} health check: ${VERDICT_WORDS[r.verdict]}`,
+    subject: `Newsletter: ${label} health check: ${verdictWords(r.verdict, next)}`,
     text: [
       lead,
       '',
@@ -1379,11 +1438,19 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
       for (const r of records) {
         if (r.smallSample || r.verdict === 'green') continue
         if (nowMs - Date.parse(r.checkedAt) > EVENT_ALERT_FOR) continue
+        // An issue's last wave goes to everyone the keener waves left (in
+        // week 41, the least engaged third of the imported readers plus new
+        // signups), so its opens read lowest, and no wave of it is left to
+        // hold: low opens alone raise nothing there. Week 41's wave 4/4 checks did, for three days
+        // (Bryce, 14 October 2026: "Guess we should get rid of those
+        // notifications?"). The email still gives every number.
+        if (nextSend(r) === 'issue' && r.wave != null && opensOnly(r.numbers))
+          continue
         raised.push({
           id: `health:${r.campaignId}`,
           sig: r.verdict,
           severity: r.verdict === 'red' ? 'red' : 'amber',
-          title: `${shortLabel(r.name, r.campaignId)} health check: ${VERDICT_WORDS[r.verdict]}`,
+          title: `${shortLabel(r.name, r.campaignId)} health check: ${verdictWords(r.verdict, nextSend(r))}`,
           detail: [
             `${r.reasons.join('; ')}. Sent to ${num(r.numbers.sendAmt)}.`,
           ],
