@@ -8,6 +8,7 @@ import {
   type TrainingType,
 } from '../training-types'
 import { parseFeaturedRank } from '../featured'
+import { lastDayListed } from '../training-listing'
 
 // The redesigned /training page reads from two tables: "Training" holds
 // dated upcoming iterations, "Recurring training" holds evergreen programs
@@ -386,8 +387,14 @@ export async function getTrainingPrograms(): Promise<TrainingProgram[]> {
 
     // A program leaves the page once its start date has passed; until then
     // a passed deadline only marks it Closed, and the Applications filter
-    // (defaulting to Open) hides it. Dateless programs stay indefinitely.
-    if (startDate && startDate < today) continue
+    // (defaulting to Open) hides it. With only rough timing on file it stays
+    // until that period is over (training-listing.ts). Dateless programs
+    // stay indefinitely.
+    const lastDay = lastDayListed(
+      startDate,
+      optionalString(f[TRAINING_FIELD.startDateApprox])?.trim() || null
+    )
+    if (lastDay && lastDay < today) continue
 
     const program = trainingProgramFromRecord(record, today)
     if (!program) continue
@@ -410,7 +417,8 @@ export async function getTrainingPrograms(): Promise<TrainingProgram[]> {
 /**
  * Every published, non-hidden round in the Training table, past and
  * upcoming, in table order. getTrainingPrograms() drops rounds once they've
- * started; the chatbot's round-history tool needs those too. Same raw fetch
+ * started (or their rough start period is over); the chatbot's round-history
+ * tool needs those too. Same raw fetch
  * (identical arguments) as getTrainingPrograms, so both read one cached
  * Airtable result.
  */
