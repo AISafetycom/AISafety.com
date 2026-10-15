@@ -1394,6 +1394,31 @@ describe('Recent sends and Analytics group waves by issue', () => {
     expect(rows[0].baseName).toBe(ISSUE)
   })
 
+  it('Recent sends: an issue past the newest 12 sends still shows every wave', async () => {
+    const ac = makeAC({
+      extra: [
+        sentWave(1, { ldate: '2026-10-01T09:30:00-05:00' }),
+        sentWave(2, { ldate: '2026-10-09T09:30:00-05:00' }),
+        ...Array.from({ length: 11 }, (_, i) =>
+          camp({
+            id: String(300 + i),
+            name: `Training · Week ${i + 1}, 2027`,
+            list: '7',
+            ldate: `2026-10-0${2 + (i % 6)}T12:00:00-05:00`,
+          })
+        ),
+      ],
+    })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const rows = await nl.listRecent()
+    expect(rows).toHaveLength(13)
+    expect(rows.filter(r => r.baseName === ISSUE).map(r => r.id)).toEqual([
+      '181',
+      '180',
+    ])
+  })
+
   it('Analytics: one row per issue, its waves added up, its clicks once', async () => {
     const ac = makeAC({
       extra: [

@@ -657,8 +657,6 @@ export interface SentSummary {
   scheduledAt: string | null
   sentAt: string | null
   sentTo: number
-  uniqueOpens: number | null
-  unsubscribes: number | null
   listNames: string[]
   /** The issue's name without any wave suffix. */
   baseName: string
@@ -668,14 +666,8 @@ export interface SentSummary {
    *  (or went) to the whole list. An approval deletes such a send at once,
    *  but not if it was cut off before its read back. */
   segmentLost: boolean
-  /** Rows of one issue on one list share this: they are shown together, and
-   *  the clicks (counted per issue) once for the lot. */
+  /** Rows of one issue on one list share this: they are shown together. */
   group: string
-  /** Clicks counted on aisafety.com (the email's links go through
-   *  /api/nl since 28 Sept 2026); zero for older sends, whose links went
-   *  through ActiveCampaign's tracker. Per issue: every wave of it carries
-   *  the same numbers. */
-  clicks: CampaignClicks
   /** What may be done to it from the page right now (approvers only). */
   actions: StopAction[]
 }
@@ -2312,24 +2304,32 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-/** The most recent sends (and anything scheduled or stuck), newest first. */
+/** The most recent sends (and anything scheduled or stuck), newest first.
+ *  Their opens, clicks and the rest are on /admin/analytics' Newsletters
+ *  tab (readSendStats). */
 export async function listRecent(limit = 12): Promise<SentSummary[]> {
   const [campaigns, names] = await Promise.all([allCampaigns(), listNames()])
   // A send that can still be canceled, paused, stopped or resumed stays on
   // the page however old it is: one held for ActiveCampaign's review for
   // days must keep its Cancel button.
-  const recent = campaigns
+  const sends = campaigns
     .filter(c => c.status in STATUS_NAMES)
     .sort((a, b) =>
       String(b.ldate ?? b.sdate ?? '').localeCompare(
         String(a.ldate ?? a.sdate ?? '')
       )
     )
-    .filter((c, i) => i < limit || STILL_GOING.has(c.status))
-  // Clicks are counted per issue: every wave of one shares its base name.
-  const [lists, clicks, offset] = await Promise.all([
+  const shown = sends.filter((c, i) => i < limit || STILL_GOING.has(c.status))
+  // Every send of an issue that's shown, so its row adds up all its waves
+  // (the newest 12 left out Training Week 41's first wave, 15 Oct 2026).
+  const issues = new Set(
+    shown.map(c => baseIssueName(c.name)).filter(n => n !== '')
+  )
+  const recent = sends.filter(
+    c => shown.includes(c) || issues.has(baseIssueName(c.name))
+  )
+  const [lists, offset] = await Promise.all([
     mapLimit(recent, 3, knownListIds),
-    readClicks([...new Set(recent.map(c => baseIssueName(c.name)))]),
     accountUtcOffset(campaigns),
   ])
   const rows = recent.map((c, i): SentSummary => {
@@ -2343,8 +2343,6 @@ export async function listRecent(limit = 12): Promise<SentSummary[]> {
       scheduledAt: sdateInstant(c.sdate, offset),
       sentAt: c.ldate,
       sentTo: Number(c.send_amt ?? 0),
-      uniqueOpens: c.uniqueopens == null ? null : Number(c.uniqueopens),
-      unsubscribes: c.unsubscribes == null ? null : Number(c.unsubscribes),
       listNames: listIds.map(id => names.get(id) ?? `list ${id}`),
       baseName,
       wave: waveOf(c.name),
@@ -2355,7 +2353,6 @@ export async function listRecent(limit = 12): Promise<SentSummary[]> {
         c.segmentid != null &&
         String(c.segmentid).trim() === '0',
       group: `${listIds.join(',')}|${baseName}`,
-      clicks: clicks.get(baseName) ?? { total: 0, links: [] },
       actions: stopActionsFor(c.status, listIds),
     }
   })

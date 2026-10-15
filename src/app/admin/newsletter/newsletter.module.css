@@ -190,7 +190,7 @@
   background: color-mix(in srgb, var(--teal-800) 45%, transparent);
 }
 
-.table tbody tr:not(.clicksTr):hover td {
+.table tbody tr:hover td {
   background: var(--teal-800);
 }
 
@@ -298,28 +298,20 @@
   color: #ff6b6b;
 }
 
-/* The open rate beside the opens count. */
-.rate {
-  display: inline-block;
-  min-width: 3.4em;
-  margin-left: 6px;
-  color: var(--teal-400);
+/* Under the table: where each issue's numbers are (Analytics → Newsletters
+   since 15 Oct 2026). Its own line-height, as .testResult. */
+.tableNote {
+  margin: 12px 0 0 4px;
   font-size: 12px;
+  line-height: 1.5;
+  color: var(--teal-400);
 }
 
-.clicksButton {
-  padding: 0;
-  border: none;
-  background: none;
+.tableNote a {
   color: var(--bright-teal-300);
-  font-family: inherit;
-  font-size: inherit;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
 }
 
-.clicksButton:hover {
+.tableNote a:hover {
   text-decoration: underline;
 }
 
@@ -734,44 +726,6 @@
   .spinner {
     animation: none;
   }
-}
-
-/* Per-link clicks under a Recent sends row (counted on aisafety.com since
-   28 Sept 2026). */
-.table .clicksCell {
-  padding: 4px 4px 14px;
-}
-
-.clicksList {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0;
-  padding: 8px 12px;
-  list-style: none;
-  border: 1px solid var(--teal-800);
-  border-radius: 6px;
-  background: var(--teal-900);
-  font-size: 12px;
-}
-
-.clicksRow {
-  display: grid;
-  grid-template-columns: 3em 2.6em 1fr auto;
-  gap: 10px;
-  align-items: baseline;
-}
-
-.clicksCount {
-  text-align: right;
-  font-weight: 600;
-  color: var(--bright-teal-300);
-}
-
-/* The link's share of the issue's clicks, in the open rate's color. */
-.clicksShare {
-  text-align: right;
-  color: var(--teal-400);
 }
 
 /* ─── Pre-send warnings (29 Sept 2026) ────────────────────────────────── */
