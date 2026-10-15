@@ -25,11 +25,13 @@ import {
   DASHBOARD_TZ,
 } from '@/lib/analytics/events'
 import {
+  countConversations,
   readConversationStats,
   type ConversationStats,
   type RatedReply,
   type TopQuestion,
 } from '@/lib/analytics/conversations'
+import { bucketOf, previousWindow, weeklyOf } from '@/lib/analytics/trends'
 import { readQuestionThemes, type ThemeSummary } from '@/lib/analytics/themes'
 import {
   buildSearchIndex,
@@ -57,6 +59,11 @@ import {
   type SendStats,
 } from '@/lib/admin/newsletter'
 import {
+  historyStale,
+  readNewsletterSubscribers,
+  refreshSubscriberHistory,
+} from '@/lib/admin/newsletter-subscribers'
+import {
   readFeedReaders,
   type FeedReaders,
 } from '@/lib/newsletter-archive-store'
@@ -83,6 +90,9 @@ import PendingMark from './PendingMark'
 import RefreshIfStale from './RefreshIfStale'
 import PreloadLink, { type Preload } from './PreloadLink'
 import SortableTable, { type SortColumn, type SortValue } from './SortableTable'
+import TrendChart, { type TrendTile } from './TrendChart'
+import SubstackUpload from './SubstackUpload'
+import { eventTiles, subscriberTiles, type TileSpec } from './trend-tiles'
 import {
   OrgView,
   openedWords,
@@ -158,6 +168,15 @@ const DEFAULT_RANGE = '30d'
 // listing_hover events, so only their tabs get the hovered-listings panel —
 // and only Map has areas, so the by-area rollup is Map-only.
 const MAP_PAGES = new Set(['Map', 'Communities'])
+
+// When the events behind some tiles began to be recorded (the captions below
+// say the same), so a tile never compares with a stretch from before.
+// Clicks and the chatbot go back to the store's oldest event.
+const PAGE_VIEWS_SINCE = '2026-07-15'
+const SEARCH_SINCE = '2026-07-16'
+const FILTERS_SINCE = '2026-07-29'
+const SIGNUP_BOX_SINCE = '2026-07-29'
+const SITE_SIGNUPS_SINCE = '2026-10-08'
 
 /** How long ago a saved copy was made, for the "figures from …" note. */
 function savedAgo(at: number): string {
@@ -496,6 +515,8 @@ export default async function AnalyticsPage({
   // Org pages put figures outside the admin, so only Admin admin's editors
   // make them (the API checks the same).
   const canShare = canEdit(access, 'manageUsers')
+  // Adding a newsletter's Substack export is for the people who send them.
+  const canAddExport = canEdit(access, 'newsletter')
 
   const sp = await searchParams
   const query = readQuery(sp)
@@ -521,7 +542,14 @@ export default async function AnalyticsPage({
           first(sp.source)
         )
       : null
-  const live = <AnalyticsView sp={sp} query={query} canShare={canShare} />
+  const live = (
+    <AnalyticsView
+      sp={sp}
+      query={query}
+      canShare={canShare}
+      canAddExport={canAddExport}
+    />
+  )
   if (!saved) return live
   return (
     <Suspense
@@ -530,6 +558,7 @@ export default async function AnalyticsPage({
           sp={sp}
           query={query}
           canShare={canShare}
+          canAddExport={canAddExport}
           saved={saved}
         />
       }
@@ -545,12 +574,15 @@ async function AnalyticsView({
   sp,
   query,
   canShare,
+  canAddExport,
   saved,
 }: {
   sp: SearchParams
   query: Query
   /** May make org pages from the Org lookup tab. */
   canShare: boolean
+  /** May add a newsletter's Substack export on the Newsletters tab. */
+  canAddExport: boolean
   saved?: { at: number; data: DashboardData }
 }) {
   const { range, unique, tabReq, onResourceTab } = query
@@ -567,14 +599,20 @@ async function AnalyticsView({
     tabReq === 'orgs' && normText(orgQuery).length >= 2
       ? orgSearchSpec(orgQuery, orgLeftOut)
       : undefined
+  // The stretch the Conversations tile compares with (the tiles' rule,
+  // previousWindow); the log is read for it only on the Chatbot tab.
+  const convBefore =
+    tabReq === 'chatbot' ? previousWindow(range, renderedAt) : null
 
   const [
     data,
     funders,
     convStats,
+    convBeforeCount,
     themes,
     searchIndex,
     sendStats,
+    subscribers,
     feeds,
     issueClicks,
     shares,
@@ -592,6 +630,7 @@ async function AnalyticsView({
     // The transcript-derived stats only render on the Chatbot tab, so only
     // fetch the (ever-growing) conversation log when it's the active tab.
     tabReq === 'chatbot' ? readConversationStats(range) : null,
+    convBefore ? countConversations(convBefore) : null,
     tabReq === 'chatbot' ? readQuestionThemes() : null,
     // Resolves clicked search results to their resource page; only the Search
     // tab reads it. On error the page icons resolve from recorded types alone.
@@ -608,6 +647,9 @@ async function AnalyticsView({
           return null
         })
       : null,
+    // The subscriber tiles' figures (ActiveCampaign, kept in Upstash, and
+    // the Substack histories). Never rejects.
+    tabReq === 'newsletters' ? readNewsletterSubscribers() : null,
     // The feeds' readers yesterday and so far today (UTC days); null =
     // couldn't read them.
     tabReq === 'newsletters' ? readFeedDays() : null,
@@ -905,6 +947,198 @@ async function AnalyticsView({
     !Number.isNaN(oldestMs) &&
     (range.startMs == null || range.startMs < oldestMs)
 
+  // The tiles over time, for whichever tab is open.
+  const tilesFor = (specs: TileSpec[]) =>
+    eventTiles(data.trends.frame, range, range.key, data.oldestTs, specs)
+  const per = data.trends.frame.unit === 'hour' ? 'hour' : 'day'
+  const clickWords = unique
+    ? `once per visitor per listing per day (the Unique count)`
+    : `every click (the Total count)`
+  const siteTiles =
+    activeTab === 'pages'
+      ? tilesFor([
+          {
+            key: 'visitors',
+            label: 'Visitors',
+            unit: 'visitors',
+            metric: data.trends.visitors,
+            since: PAGE_VIEWS_SINCE,
+            what: `Visitors = distinct browsers that viewed a page. One that came on several ${per}s counts once in the tile and on each of those ${per}s in the chart.`,
+          },
+          {
+            key: 'visits',
+            label: 'Visits',
+            unit: 'visits',
+            metric: data.trends.visits,
+            since: PAGE_VIEWS_SINCE,
+            what: `Visits = a visitor's page views with less than 30 minutes between them, each counted on the ${per} it began.`,
+          },
+          {
+            key: 'views',
+            label: 'Page views',
+            unit: 'page views',
+            metric: data.trends.pageViews,
+            since: PAGE_VIEWS_SINCE,
+            what: 'Page views = every page viewed.',
+          },
+          {
+            key: 'clicks',
+            label: 'Listing clicks',
+            unit: 'listing clicks',
+            metric: data.trends.listingClicks,
+            what: `Listing clicks = clicks on listings across the resource pages, ${clickWords}.`,
+          },
+        ])
+      : []
+  const pageLabel =
+    labelByPage.get(data.selectedPage ?? '') ?? data.selectedPage
+  const pageTiles = onResourceView
+    ? tilesFor([
+        {
+          key: 'visitors',
+          label: 'Visitors',
+          unit: 'visitors',
+          metric: data.pageTrends.visitors,
+          since: PAGE_VIEWS_SINCE,
+          what: `Visitors = distinct browsers that viewed this page. One that came on several ${per}s counts once in the tile and on each of those ${per}s in the chart.`,
+        },
+        {
+          key: 'views',
+          label: 'Page views',
+          unit: 'page views',
+          metric: data.pageTrends.pageViews,
+          since: PAGE_VIEWS_SINCE,
+          what: 'Page views = every view of this page.',
+        },
+        {
+          key: 'clicks',
+          label: 'Listing clicks',
+          unit: 'listing clicks',
+          metric: data.pageTrends.listingClicks,
+          what: `Listing clicks = clicks on this page's listings from every part of the page, ${clickWords}.`,
+        },
+        ...(data.filterGroups.length > 0 || data.pageTrends.filterUses.previous
+          ? [
+              {
+                key: 'filters',
+                label: 'Filter uses',
+                unit: 'filter uses',
+                metric: data.pageTrends.filterUses,
+                since: FILTERS_SINCE,
+                what: 'Filter uses = a filter value turned on, as Filter usage counts them.',
+              },
+            ]
+          : []),
+      ])
+    : []
+  const { frame } = data.trends
+  // Conversations per day (or hour), from the log's start times.
+  const conversationPoints = frame.starts.map(() => 0)
+  for (const t of convStats?.startedAt ?? []) {
+    const b = bucketOf(frame, t)
+    if (b >= 0) conversationPoints[b]++
+  }
+  const chatbotTiles =
+    activeTab === 'chatbot'
+      ? tilesFor([
+          ...(convStats?.available
+            ? [
+                {
+                  key: 'conversations',
+                  label: 'Conversations',
+                  unit: 'conversations',
+                  metric: {
+                    total: convStats.totalConversations,
+                    previous: convBeforeCount,
+                    points: conversationPoints,
+                    weekly: weeklyOf(frame, conversationPoints),
+                  },
+                  what: `Conversations = chats started, from the conversation log, each on the ${per} it began.`,
+                },
+              ]
+            : []),
+          {
+            key: 'opened',
+            label: 'Opened the chatbot',
+            unit: 'people opened it',
+            metric: data.trends.chatbotOpened,
+            what: `Opened, Sent a message and Clicked a result count people, as the funnel below does. One who came back on several ${per}s counts once in the tile and on each of those ${per}s in the chart.`,
+          },
+          {
+            key: 'messaged',
+            label: 'Sent a message',
+            unit: 'people sent one',
+            metric: data.trends.chatbotMessaged,
+            what: `Sent a message = people who wrote to the chatbot, counted like Opened.`,
+          },
+          {
+            key: 'clicked',
+            label: 'Clicked a result',
+            unit: 'people clicked one',
+            metric: data.trends.chatbotClicked,
+            what: `Clicked a result = people who opened a card or link from a reply, counted like Opened.`,
+          },
+        ])
+      : []
+  const searchTiles =
+    activeTab === 'search'
+      ? tilesFor([
+          {
+            key: 'opened',
+            label: 'Opened search',
+            unit: 'people opened it',
+            metric: data.trends.searchOpened,
+            since: SEARCH_SINCE,
+            what: `Opened, Typed a search and Clicked a result count people, as the funnel below does. One who came back on several ${per}s counts once in the tile and on each of those ${per}s in the chart.`,
+          },
+          {
+            key: 'typed',
+            label: 'Typed a search',
+            unit: 'people searched',
+            metric: data.trends.searchTyped,
+            since: SEARCH_SINCE,
+            what: 'Typed a search = people who searched for something, counted like Opened.',
+          },
+          {
+            key: 'clicked',
+            label: 'Clicked a result',
+            unit: 'people clicked one',
+            metric: data.trends.searchClicked,
+            since: SEARCH_SINCE,
+            what: 'Clicked a result = people who opened a result, counted like Opened.',
+          },
+        ])
+      : []
+  const newsletterTiles =
+    activeTab === 'newsletters'
+      ? [
+          ...(subscribers ? subscriberTiles(subscribers, range) : []),
+          ...tilesFor([
+            {
+              key: 'submits',
+              label: 'Signup box submits',
+              unit: 'submits',
+              metric: data.trends.newsletterSubmits,
+              since: SIGNUP_BOX_SINCE,
+              what: `Signup box submits = the newsletter boxes on the site sent, ${unique ? 'once per visitor per page per day (the Unique count)' : 'every time (the Total count)'}, as Signup box on the site counts them. Not every submit ends in a signup.`,
+            },
+            {
+              key: 'signups',
+              label: 'Signed up through the site',
+              unit: 'signups',
+              metric: data.trends.newsletterSignups,
+              since: SITE_SIGNUPS_SINCE,
+              what: 'Signed up through the site = submits on /events and /training that ActiveCampaign took and sent a link to confirm, as Signups through the site counts them.',
+            },
+          ]),
+        ]
+      : []
+  // The subscriber figures since the move take a while to work out, so a
+  // load that finds them missing or a few hours old has them worked out
+  // again after it's sent.
+  if (subscribers && historyStale(subscribers.history))
+    after(() => refreshSubscriberHistory())
+
   return (
     <div className={styles.dashboard}>
       <div className={styles.headerRow}>
@@ -1021,6 +1255,7 @@ async function AnalyticsView({
 
           {activeTab === 'chatbot' && (
             <ChatbotView
+              trends={chatbotTiles}
               funnel={data.funnel}
               opensByPage={data.chatbot.opensByPage}
               openShareByPage={data.chatbot.openShareByPage}
@@ -1035,10 +1270,21 @@ async function AnalyticsView({
 
           {activeTab === 'search' && (
             <SearchView
+              trends={searchTiles}
               search={data.search}
               index={searchIndex}
               unique={unique}
             />
+          )}
+
+          {activeTab === 'newsletters' && (
+            <Panel title="Subscribers and signups">
+              <TrendChart
+                tiles={newsletterTiles}
+                label="Newsletter subscribers and signups"
+              />
+              {canAddExport && <SubstackUpload />}
+            </Panel>
           )}
 
           {activeTab === 'newsletters' && (
@@ -1101,11 +1347,8 @@ async function AnalyticsView({
 
           {activeTab === 'pages' && (
             <Panel title="Site traffic">
-              <div className={styles.funnel}>
-                <Stat
-                  label="Visitors"
-                  value={data.visits.uniqueVisitors.toLocaleString()}
-                />
+              <TrendChart tiles={siteTiles} label="Site traffic" />
+              <div className={`${styles.funnel} margin-top-16px`}>
                 <Stat
                   label="New visitors"
                   value={data.visits.newVisitors.toLocaleString()}
@@ -1120,14 +1363,6 @@ async function AnalyticsView({
                     data.visits.returningVisitors,
                     data.visits.uniqueVisitors
                   )}
-                />
-                <Stat
-                  label="Visits"
-                  value={data.visits.visitCount.toLocaleString()}
-                />
-                <Stat
-                  label="Page views"
-                  value={data.visits.totalViews.toLocaleString()}
                 />
                 <Stat
                   label="Analytics opt-outs"
@@ -1206,6 +1441,12 @@ async function AnalyticsView({
 
           {onResourceView && (
             <div className={styles.pageSection}>
+              <Panel title="Over time">
+                <TrendChart
+                  tiles={pageTiles}
+                  label={`${pageLabel ?? 'This page'} over time`}
+                />
+              </Panel>
               <SourceSplit
                 rows={data.bySource}
                 active={data.selectedSource}
@@ -2324,6 +2565,7 @@ function OverallListingsTable({
  *  transcript-derived conversation stats (the Airtable conversation log), and
  *  what visitors click out of replies. */
 function ChatbotView({
+  trends,
   funnel,
   opensByPage,
   openShareByPage,
@@ -2334,6 +2576,7 @@ function ChatbotView({
   themes,
   unique,
 }: {
+  trends: TrendTile[]
   funnel: ChatbotFunnel
   opensByPage: Counted[]
   openShareByPage: VisitorShare[]
@@ -2363,6 +2606,10 @@ function ChatbotView({
   const n = (v: number) => v.toLocaleString()
   return (
     <>
+      <Panel title="Over time">
+        <TrendChart tiles={trends} label="Chatbot over time" />
+      </Panel>
+
       <Panel title="Funnel · unique users">
         <Funnel
           stages={[
@@ -2563,10 +2810,12 @@ function ChatbotView({
  *  what people search for, which searches come back empty, and what gets
  *  clicked out of the results. */
 function SearchView({
+  trends,
   search,
   index,
   unique,
 }: {
+  trends: TrendTile[]
   search: SearchPanelData
   index: SearchEntry[]
   unique: boolean
@@ -2583,6 +2832,10 @@ function SearchView({
   const pageBadges = searchPageBadges(index, destRows)
   return (
     <>
+      <Panel title="Over time">
+        <TrendChart tiles={trends} label="Search over time" />
+      </Panel>
+
       <Panel title="Funnel · unique users">
         <Funnel
           stages={[

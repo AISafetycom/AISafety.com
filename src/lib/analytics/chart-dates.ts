@@ -1,7 +1,7 @@
-/** The dates under the Org lookup's "Clicks over time" chart (ClicksChart):
- *  which columns get one, what each says, and which ones a narrower chart
- *  drops so they never collide. Works the same for per-day and per-week
- *  columns. */
+/** The dates under the dashboard's charts (the Org lookup's ClicksChart and
+ *  the tiles' TrendChart): which columns get one, what each says, and which
+ *  ones a narrower chart drops so they never collide. Works the same for
+ *  per-day and per-week columns, and for hours (chartHourLabels). */
 
 /** Roughly how many dates a full-width chart shows. */
 export const DATE_LABEL_TARGET = 13
@@ -81,6 +81,30 @@ export function chartDateLabels(days: readonly string[]): ChartDateLabel[] {
       year: yearFrom == null ? null : String(year),
       keep,
       yearFrom,
+    }
+  })
+}
+
+/** The labels for a series of hours (epoch ms, oldest first; Today on the
+ *  trend charts): "09:00", UTC, picked and thinned the same way as days. */
+export function chartHourLabels(hours: readonly number[]): ChartDateLabel[] {
+  const n = hours.length
+  if (n === 0) return []
+  const step = labelStep(n)
+  const indices: number[] = []
+  for (let i = n - 1; i >= 0; i -= step) indices.unshift(i)
+  const last = indices.length - 1
+  return indices.map((index, k) => {
+    const fromEnd = last - k
+    const keep: LabelThinning =
+      fromEnd % 8 === 0 ? 8 : fromEnd % 4 === 0 ? 4 : fromEnd % 2 === 0 ? 2 : 1
+    const hour = new Date(hours[index]).getUTCHours()
+    return {
+      index,
+      text: `${String(hour).padStart(2, '0')}:00`,
+      year: null,
+      keep,
+      yearFrom: null,
     }
   })
 }
