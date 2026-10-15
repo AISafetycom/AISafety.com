@@ -176,7 +176,7 @@ Rules:
   },
   {
     name: 'get_program_history',
-    description: `Every round of a training program or event that the site has on file — PAST rounds included, which search_listings never shows (the catalog holds only upcoming or running rounds). Use it whenever the user asks how often something runs, when previous rounds ran, whether or when there will be another round ("would there be one starting in January?"), what its usual season or deadline is, or how many times it has run — and BEFORE telling the user a program's next dates aren't known, since the pattern of past rounds is usually the most useful thing you can offer them.
+    description: `Every round of a training program or event that the site has on file — PAST rounds included, which search_listings never shows (the catalog holds only upcoming or running rounds). Use it whenever the user asks how often something runs, when previous rounds ran, whether or when there will be another round ("would there be one starting in January?"), what its usual season or deadline is, or how many times it has run — and BEFORE telling the user a program's next dates aren't known, since the pattern of past rounds is usually the most useful thing you can offer them. Also use it before telling the user the site has no record of a program or event they name: a training round leaves search_listings once it starts and an event once it ends, so a round the site listed a few weeks ago may only be here.
 
 Pass \`id\` (the catalog id of the training / event / org listing in question, copied from a search_listings or get_listing result — use it whenever you have one) and/or \`query\` (the program's short name: "Pathfinder Fellowship", "MATS", "EA Global London"). Season, year and "cohort" words are ignored, so a dated listing's full name works fine as the query. Matching is deliberately generous, so results can include sub-streams or sibling programs from the same organizer — read the names and use only the rounds that are actually the same program.
 
@@ -353,11 +353,18 @@ async function executeSearch(
     sort,
   })
   if (hits.length === 0) {
+    // A program the site listed a few weeks ago may only be in its round
+    // history now, so a named search that could be one points there too.
+    const historyNote =
+      input.query &&
+      (!input.type || ['training', 'event', 'course'].includes(input.type))
+        ? ' If the user named a program or event, also call get_program_history with that name before saying the site has no record of it — a training round leaves the catalog once it starts and an event once it ends, but the site keeps every round on file.'
+        : ''
     return {
       ok: true,
       content: JSON.stringify({
         matches: 0,
-        note: 'Nothing matched. BEFORE giving up, try broader: drop a filter, expand radiusKm, drop the type, try synonyms. Only after a couple of broader retries should you tell the user nothing matched and offer [[suggest:TYPE:USER_QUERY]], where TYPE is the listing type you searched (community, event, training, funder, course, media-channel, founder-resource, advisor, project, org). Do NOT offer a suggest form for jobs — the job board comes from 80,000 Hours and is not curated here; instead point the user to the 80,000 Hours job board.',
+        note: `Nothing matched. BEFORE giving up, try broader: drop a filter, expand radiusKm, drop the type, try synonyms.${historyNote} Only after a couple of broader retries should you tell the user nothing matched and offer [[suggest:TYPE:USER_QUERY]], where TYPE is the listing type you searched (community, event, training, funder, course, media-channel, founder-resource, advisor, project, org). Do NOT offer a suggest form for jobs — the job board comes from 80,000 Hours and is not curated here; instead point the user to the 80,000 Hours job board.`,
       }),
       listings: [],
     }

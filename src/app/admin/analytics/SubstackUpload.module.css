@@ -1,0 +1,10 @@
+/* The file input hides inside its label, so the label shows the keyboard
+   focus the input can't (globals.css's focus ring). */
+.pick {
+  position: relative;
+}
+
+.pick:focus-within {
+  outline: 2px solid var(--bright-teal-500);
+  outline-offset: 2px;
+}
