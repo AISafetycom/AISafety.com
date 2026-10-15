@@ -1442,7 +1442,7 @@ describe('runWatch: health checks', () => {
   })
 
   it('leaves low opens on an issue’s last wave off the banner, and looks to the next issue', async () => {
-    // Week 41's wave 4/4, the long-time non-openers (12 October 2026).
+    // Week 41's wave 4/4, its least engaged readers (12 October 2026).
     const { store, sent, run } = setup()
     ac.campaigns = [
       sentWave({

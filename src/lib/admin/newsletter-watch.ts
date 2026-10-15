@@ -1438,10 +1438,10 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
       for (const r of records) {
         if (r.smallSample || r.verdict === 'green') continue
         if (nowMs - Date.parse(r.checkedAt) > EVENT_ALERT_FOR) continue
-        // An issue's last wave goes to its least engaged readers (the
-        // warm-up sends the keenest first), so its opens read lowest by
-        // design, and no wave of it is left to hold: low opens alone raise
-        // nothing there. Week 41's wave 4/4 checks did, for three days
+        // An issue's last wave goes to everyone the keener waves left (in
+        // week 41, the least engaged third of the imported readers plus new
+        // signups), so its opens read lowest, and no wave of it is left to
+        // hold: low opens alone raise nothing there. Week 41's wave 4/4 checks did, for three days
         // (Bryce, 14 October 2026: "Guess we should get rid of those
         // notifications?"). The email still gives every number.
         if (nextSend(r) === 'issue' && r.wave != null && opensOnly(r.numbers))
