@@ -345,6 +345,8 @@ export default function Chat({
   const undoRef = useRef<Record<string, Undo>>({})
   // How many messages the page has already looked at for blocks to apply.
   const seenRef = useRef<number | null>(null)
+  // Whether the thread has loaded from the Mac yet.
+  const loadedRef = useRef(false)
 
   // The page's changed fields list what Fable changed on the listing.
   const onChangesRef = useRef(onFableChanges)
@@ -384,9 +386,9 @@ export default function Chat({
     [canEditField, decided, onSetEdits, onSetReply, onWrote]
   )
   // Read through a ref by loadHistory, so that it changes only with the
-  // agent's token or the item. The page hands down new callbacks on every
-  // render, and each loaded history re-renders the page (the changed
-  // fields above): with applyFrom as a dependency the history reloaded the
+  // item. The page hands down new callbacks on every render, and each
+  // loaded history re-renders the page (the changed fields above): with
+  // applyFrom as a dependency the history reloaded the
   // moment it landed, thousands of times a minute, and an expired token
   // turned that into 2.4 million refusals in the Mac agent's log (7 Oct 2026).
   const applyFromRef = useRef(applyFrom)
@@ -409,15 +411,23 @@ export default function Chat({
     }
   }
 
+  // The page gets a fresh token with every list refresh (each minute, and
+  // on coming back to the tab), so it is read through a ref: a new token
+  // must not reload the thread. It did, and a reload that landed before the
+  // Mac had saved the message just sent took it off the screen while Fable
+  // answered (15 Oct 2026, "Didn't we get contacted about this?" on
+  // Organization Builders Program).
+  const tokenRef = useRef(agent.token)
+  tokenRef.current = agent.token
   const call = useCallback(
     (path: string, body: Record<string, unknown>) =>
       fetch(`http://127.0.0.1:${agent.port}${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...body, id: item.id, token: agent.token }),
+        body: JSON.stringify({ ...body, id: item.id, token: tokenRef.current }),
         cache: 'no-store',
       }),
-    [agent.port, agent.token, item.id]
+    [agent.port, item.id]
   )
 
   /** A file from an earlier message, back from the Mac. */
@@ -447,22 +457,33 @@ export default function Chat({
       for (const msg of list.slice(seenRef.current)) applyFromRef.current(msg)
     }
     seenRef.current = list.length
+    loadedRef.current = true
     setMessages(list)
     setPending(Boolean(data.pending))
     return { list, pending: Boolean(data.pending) }
   }, [call])
 
+  // The thread loads once per item. One that could not load (the Mac was
+  // down, or the token had run out) tries again with the page's next token.
   useEffect(() => {
+    if (loadedRef.current) return
     let alive = true
-    loadHistory().catch(e => {
-      if (!alive) return
-      setMessages([])
-      setError(e instanceof Error ? e.message : 'The Mac agent did not answer.')
-    })
+    loadHistory().then(
+      () => {
+        if (alive) setError(null)
+      },
+      e => {
+        if (!alive) return
+        setMessages([])
+        setError(
+          e instanceof Error ? e.message : 'The Mac agent did not answer.'
+        )
+      }
+    )
     return () => {
       alive = false
     }
-  }, [loadHistory])
+  }, [loadHistory, agent.token])
 
   // A reply still being written on the Mac lands in the history when done.
   useEffect(() => {
