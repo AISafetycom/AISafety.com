@@ -1082,6 +1082,12 @@ function doneLabel(item: QueueItem): string {
   return 'Applied'
 }
 
+/** The page's edits that went out with an applied item, as text; none for
+ *  any other decision (a rejection keeps them on the row unwritten). */
+function appliedEdits(item: QueueItem): Record<string, string> {
+  return item.status === 'Applied' ? editsAsText(item.edits ?? {}) : {}
+}
+
 /** A decided item's chat cards: the decision's button, and what it wrote
  *  to the listing. Null while the item is open. Only an applied decision
  *  wrote the row's edits; a rejection keeps them on the row but writes
@@ -3095,10 +3101,13 @@ export default function QueueAdmin({
           // The shown listing's own link, in a new tab (Bryce, 17 Sept
           // 2026: "make S open the link for the currently shown listing").
           const href = item
-            ? listingLink(item, live[item.id]?.fields, {
-                ...proposedEdits(item, d.leftOut),
-                ...activeEdits(d),
-              })
+            ? listingLink(
+                item,
+                live[item.id]?.fields,
+                isOpen(item)
+                  ? { ...proposedEdits(item, d.leftOut), ...activeEdits(d) }
+                  : { ...proposedEdits(item), ...appliedEdits(item) }
+              )
             : null
           if (href) {
             e.preventDefault()
@@ -4162,7 +4171,12 @@ function Detail({
     : item.status === 'Applied'
       ? (item.leftOut ?? [])
       : []
-  const canLeave = isOpen(item) && !revising
+  // The proposal's fields can be edited or left out only while it is open.
+  const canChange = isOpen(item) && !revising
+  // The edits a change's fields show: the draft's while it is open; once
+  // applied, the ones that went out with it (Bryce, 15 Oct 2026: an applied
+  // change showed its proposals again, not the values Apply wrote).
+  const shownEdits = isOpen(item) ? d.edits : appliedEdits(item)
   // An edit to the field waits with it, unsent, and comes back with it.
   const leaveOut = (field: string, out: boolean) => {
     const rest = d.leftOut.filter(k => k !== field)
@@ -4225,11 +4239,7 @@ function Detail({
         />
       )
     }
-    const edit = isOpen(item)
-      ? d.edits[c.field]
-      : item.status === 'Applied'
-        ? editsAsText(item.edits ?? {})[c.field]
-        : undefined
+    const edit = shownEdits[c.field]
     return (
       <ExtraChangeRow
         key={`fable:${c.field}`}
@@ -4695,7 +4705,12 @@ function Detail({
                     )
                     .map(c => [c.field, c.to])
                 ),
-                ...editsToSave(),
+                // An applied change shows the edits that went out with it.
+                ...(isOpen(item)
+                  ? editsToSave()
+                  : item.status === 'Applied'
+                    ? item.edits
+                    : null),
               }}
             />
             <div className={styles.cardRowText}>{excerptBlock}</div>
@@ -4788,7 +4803,7 @@ function Detail({
           ) : (
             // The rows keep a column for their crosses while they can show.
             <div
-              className={`${styles.diff} ${canLeave ? styles.droppable : ''}`}
+              className={`${styles.diff} ${canChange ? styles.droppable : ''}`}
             >
               {item.changes.map(c => {
                 // A proposed field Fable has since changed on the record
@@ -4806,7 +4821,7 @@ function Detail({
                       live={live?.fields[c.field]}
                       open={isOpen(item)}
                       onPutBack={
-                        canLeave ? () => leaveOut(c.field, false) : null
+                        canChange ? () => leaveOut(c.field, false) : null
                       }
                     />
                   )
@@ -4842,7 +4857,7 @@ function Detail({
                       {(() => {
                         // A proposed picture is shown, not its JSON, and
                         // is not typed over: it is taken or refused whole.
-                        if (c.field in d.edits || d.editing === c.field) {
+                        if (c.field in shownEdits || d.editing === c.field) {
                           return null
                         }
                         const pic = pictureOf(c.to, null, {
@@ -4871,19 +4886,19 @@ function Detail({
                           <>
                             <EditableValue
                               text={friendly(
-                                c.field in d.edits
-                                  ? d.edits[c.field]
+                                c.field in shownEdits
+                                  ? shownEdits[c.field]
                                   : show(c.to)
                               )}
-                              edited={c.field in d.edits}
-                              canEdit={!revising}
+                              edited={c.field in shownEdits}
+                              canEdit={canChange}
                               onEdit={() => setD({ editing: c.field })}
                             />
                             {c.field === cap.field && (
                               <Counted
                                 text={
-                                  c.field in d.edits
-                                    ? d.edits[c.field]
+                                  c.field in shownEdits
+                                    ? shownEdits[c.field]
                                     : show(c.to)
                                 }
                                 cap={cap.cap}
@@ -4892,7 +4907,7 @@ function Detail({
                           </>
                         ))}
                     </span>
-                    {canLeave && d.editing !== c.field && (
+                    {canChange && d.editing !== c.field && (
                       <DropButton
                         field={c.field}
                         onDrop={() => leaveOut(c.field, true)}
@@ -4913,7 +4928,7 @@ function Detail({
                   was={extraWas(k)}
                   edit={extraEdits[k]}
                   editing={d.editing === k}
-                  canEdit={canLeave}
+                  canEdit={canChange}
                   cap={k === cap.field ? cap.cap : undefined}
                   onEditing={on => setD({ editing: on ? k : null })}
                   onEdit={text => {
@@ -6381,6 +6396,7 @@ function EditableValue({
       <>
         {icon}
         {shown}
+        {edited && <em className={styles.edited}>edited</em>}
       </>
     )
   return (
