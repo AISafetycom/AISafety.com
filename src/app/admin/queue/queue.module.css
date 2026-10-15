@@ -2111,6 +2111,11 @@ select.input {
   margin-right: 8px;
 }
 
+/* The Discord reply went on the clipboard with the decision. */
+.toastCopied {
+  color: var(--q-accent);
+}
+
 .toastUndo {
   display: inline-flex;
   align-items: center;
