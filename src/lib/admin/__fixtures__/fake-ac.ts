@@ -87,8 +87,9 @@ export class FakeRedis {
         })
         return p
       },
-      hgetall: () => {
-        ops.push(() => null)
+      // Click counts a test put in kv.data under their key; none otherwise.
+      hgetall: (key: string) => {
+        ops.push(() => (kvHas(key) ? kv.data.get(key) : null))
         return p
       },
       exec: async () => {
@@ -321,6 +322,9 @@ export interface AcOptions {
   startsBeforeDelete?: boolean
   /** v1 campaign_report_unsubscription_totals per campaign. */
   spamComplaints?: Record<string, string>
+  /** v1 campaign_report_unsubscription_totals has nothing to say for these
+   *  campaign ids (result_code 0). */
+  reportFails?: string[]
   /** Reading back a campaign the approval just created answers with this
    *  HTTP status (the read back fails). */
   readbackStatus?: number
@@ -484,7 +488,8 @@ export function makeAC(opts: AcOptions = {}) {
       if (action === 'campaign_report_unsubscription_totals') {
         const id = url.searchParams.get('campaignid') ?? ''
         const c = camps.find(x => x.id === id)
-        if (!c) return j({ result_code: 0, result_message: 'Failed' })
+        if (!c || opts.reportFails?.includes(id))
+          return j({ result_code: 0, result_message: 'Failed' })
         return j({
           result_code: 1,
           total_amt: c.send_amt,
@@ -544,8 +549,11 @@ export function makeAC(opts: AcOptions = {}) {
     }
     if (p === 'campaigns') {
       const sorted = [...camps].sort((a, b) => Number(b.id) - Number(a.id))
+      // A page, as ActiveCampaign gives them: `limit` from `offset`.
+      const offset = Number(url.searchParams.get('offset') ?? 0)
+      const limit = Number(url.searchParams.get('limit') ?? sorted.length)
       return j({
-        campaigns: sorted.map(c => ({ ...c })),
+        campaigns: sorted.slice(offset, offset + limit).map(c => ({ ...c })),
         meta: { total: String(opts.totalCampaigns ?? camps.length) },
       })
     }

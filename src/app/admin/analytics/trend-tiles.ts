@@ -197,6 +197,82 @@ function partWords(frame: TrendFrame, i: number, ongoing: boolean): string {
   return ongoing ? 'so far' : `to ${hhmm(frame.endMs)} UTC`
 }
 
+/** The first UTC day the feeds counted their readers (the past issues pages
+ *  and feeds went live on 11 October 2026, PAST_ISSUES_LIVE_SINCE). */
+export const FEEDS_SINCE = '2026-10-11'
+
+/** The UTC days ('2026-10-12') whose feed readers the Feed readers tile
+ *  draws for a range: from its first day (never before FEEDS_SINCE) to its
+ *  last (never after today). Empty when the range ended before then. */
+export function feedDays(range: DateRange, now: number): string[] {
+  const day = (t: number) => Math.floor(t / DAY_MS) * DAY_MS
+  const since = Date.parse(`${FEEDS_SINCE}T00:00:00Z`)
+  const first = Math.max(
+    range.startMs != null ? day(range.startMs) : since,
+    since
+  )
+  const last = day(Math.min(range.endMs ?? now, now))
+  const out: string[] = []
+  for (let t = first; t <= last; t += DAY_MS)
+    out.push(new Date(t).toISOString().slice(0, 10))
+  return out
+}
+
+/** The Newsletters tab's Feed readers tile: the people following the feeds
+ *  (every newsletter's together) each day of the range, as the feeds
+ *  counted them (feed services' own counts plus reader apps). Like the
+ *  subscriber tiles it's a level, not a count over the range: the figure is
+ *  the range's last full day (today so far only when the range is today),
+ *  From its first day. `days` comes from feedDays; null when the counts
+ *  couldn't be read, and then there's no tile. */
+export function feedTile(
+  days: Array<{ day: string; services: number; direct: number }> | null,
+  range: DateRange,
+  now: number
+): TrendTile | null {
+  if (!days || days.length === 0) return null
+  const byDay = new Map<string, number>()
+  for (const d of days)
+    byDay.set(d.day, (byDay.get(d.day) ?? 0) + d.services + d.direct)
+  const today = new Date(now).toISOString().slice(0, 10)
+  const points: TrendPoint[] = [...byDay.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([day, v]) => ({
+      t: Date.parse(`${day}T00:00:00Z`),
+      v,
+      ...(day === today && { part: 'so far' }),
+    }))
+  const full = points.filter(p => !p.part)
+  const shown =
+    full.length > 0 ? full[full.length - 1] : points[points.length - 1]
+  const since = Date.parse(`${FEEDS_SINCE}T00:00:00Z`)
+  const startsBefore = range.startMs == null || range.startMs < since
+  const opening = points[0]
+  const from = startsBefore || opening === shown ? null : opening.v
+  return {
+    key: 'feed-readers',
+    label: 'Feed readers',
+    unit: 'feed readers',
+    value: shown.v,
+    from,
+    note: [
+      'Feed readers = people following the newsletters’ RSS feeds (aisafety.com/newsletter/events/feed and /training/feed) on each day (UTC), every feed together: a feed service such as Feedly reports how many of its users follow the feed, and each reader app fetching for one person counts once.',
+      shown.part
+        ? 'The figure is today so far.'
+        : `The figure is ${dayWords(shown.t)}, the range’s last full day.`,
+      from != null
+        ? `From = ${dayWords(opening.t)}.`
+        : startsBefore
+          ? `There’s no From, since the feeds have only counted their readers since ${dayWords(since)}.`
+          : 'There’s no From, since the range has only one day of counts.',
+    ].join(' '),
+    step: 'day',
+    first: points[0].t,
+    last: points[points.length - 1].t,
+    points,
+  }
+}
+
 /** The Newsletters tab's subscriber tiles: each newsletter's subscribers now
  *  (at the range's end, for a range in the past), where it stood when the
  *  range began, and the line between: its Substack issues before the move,

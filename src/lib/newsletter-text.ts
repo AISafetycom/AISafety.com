@@ -419,12 +419,14 @@ export const TEXT_SCRIPT_HASH =
   'sha256-' + createHash('sha256').update(TEXT_SCRIPT).digest('base64')
 
 /** Pure: the text version's page. `emailHref` is the issue's web version
- *  (a path on the site); the copy's title links it in full. */
+ *  (a path on the site); the copy's title links it in full. `seen` is the
+ *  image that counts the view (seenImage in newsletter-web.ts). */
 export function textPage(
   tv: TextVersion,
   key: WebKey,
   subject: string,
-  emailHref: string
+  emailHref: string,
+  seen = ''
 ): string {
   const sender = WEB_NEWSLETTERS[key].sender
   const title = {
@@ -472,7 +474,7 @@ export function textPage(
 ${textHtml(tv, title)}
 </div>
 <textarea id="plain" readonly aria-hidden="true" tabindex="-1">${esc(textPlain(tv, title))}</textarea>
-</main>
+</main>${seen}
 <script>${TEXT_SCRIPT}</script>
 </body>
 </html>`

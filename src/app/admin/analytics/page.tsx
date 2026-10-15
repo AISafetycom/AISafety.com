@@ -20,7 +20,12 @@ import {
   type SearchPanelData,
   type MapSearchPanelData,
   type NewsletterArchiveRow,
+  type NewsletterConfirmRow,
+  type NewsletterCopyRow,
+  type NewsletterLinkRow,
   type NewsletterSignupResults,
+  type NewsletterVisits,
+  type DateRange,
   type VisitorShare,
   DASHBOARD_TZ,
 } from '@/lib/analytics/events'
@@ -55,8 +60,10 @@ import { getProjects } from '@/lib/data/projects'
 import { requireAccess } from '@/lib/admin/auth'
 import {
   isNewsletterConfigured,
+  CAMPAIGN_READ_MAX,
   readSendStats,
   type SendStats,
+  type SendStatsResult,
 } from '@/lib/admin/newsletter'
 import {
   historyStale,
@@ -64,9 +71,10 @@ import {
   refreshSubscriberHistory,
 } from '@/lib/admin/newsletter-subscribers'
 import {
-  readFeedReaders,
+  readFeedHistory,
   type FeedReaders,
 } from '@/lib/newsletter-archive-store'
+import { issueName } from '@/lib/newsletter-web'
 import { MAX_QUERY, normText, parseLeftOut } from '@/lib/analytics/org-lookup'
 import { readIssueClicks } from '@/lib/analytics/org-newsletter'
 import {
@@ -92,7 +100,13 @@ import PreloadLink, { type Preload } from './PreloadLink'
 import SortableTable, { type SortColumn, type SortValue } from './SortableTable'
 import TrendChart, { type TrendTile } from './TrendChart'
 import SubstackUpload from './SubstackUpload'
-import { eventTiles, subscriberTiles, type TileSpec } from './trend-tiles'
+import {
+  eventTiles,
+  feedDays,
+  feedTile,
+  subscriberTiles,
+  type TileSpec,
+} from './trend-tiles'
 import {
   OrgView,
   openedWords,
@@ -650,9 +664,9 @@ async function AnalyticsView({
     // The subscriber tiles' figures (ActiveCampaign, kept in Upstash, and
     // the Substack histories). Never rejects.
     tabReq === 'newsletters' ? readNewsletterSubscribers() : null,
-    // The feeds' readers yesterday and so far today (UTC days); null =
-    // couldn't read them.
-    tabReq === 'newsletters' ? readFeedDays() : null,
+    // The feeds' readers each day of the range, and yesterday and so far
+    // today (UTC days); null = couldn't read them.
+    tabReq === 'newsletters' ? readFeeds(range) : null,
     // The Org lookup's newsletter panel: the sent issues' link clicks
     // (Upstash, live site only). Never rejects.
     orgSearch ? readIssueClicks(range) : null,
@@ -1130,9 +1144,38 @@ async function AnalyticsView({
               since: SITE_SIGNUPS_SINCE,
               what: 'Signed up through the site = submits on /events and /training that ActiveCampaign took and sent a link to confirm, as Signups through the site counts them.',
             },
+            {
+              key: 'confirmed',
+              label: 'Confirmed',
+              unit: 'confirmed',
+              metric: data.trends.newsletterConfirmed,
+              since: SITE_SIGNUPS_SINCE,
+              what: `Confirmed = readers who pressed the link in that email and landed on aisafety.com/subscribed/events or /subscribed/training, ${unique ? 'once per visitor per newsletter per day (the Unique count)' : 'every landing (the Total count)'}, as Signups through the site counts them.`,
+            },
+            {
+              key: 'newsletter-visits',
+              label: 'Visits from newsletters',
+              unit: 'visits',
+              metric: data.trends.newsletterVisits,
+              what: 'Visits from newsletters = visits to aisafety.com that began with a link in one of the newsletters, as Visits from the newsletters counts them.',
+            },
           ]),
         ]
       : []
+  // The feeds' readers day by day: a level, like the subscribers, so it
+  // sits beside them.
+  const feedReadersTile =
+    activeTab === 'newsletters' && feeds
+      ? feedTile(feeds.history, range, renderedAt)
+      : null
+  if (feedReadersTile) {
+    const at = newsletterTiles.findIndex(t => !t.key.startsWith('subscribers-'))
+    newsletterTiles.splice(
+      at < 0 ? newsletterTiles.length : at,
+      0,
+      feedReadersTile
+    )
+  }
   // The subscriber figures since the move take a while to work out, so a
   // load that finds them missing or a few hours old has them worked out
   // again after it's sent.
@@ -1290,6 +1333,7 @@ async function AnalyticsView({
           {activeTab === 'newsletters' && (
             <NewsletterView
               sends={sendStats}
+              rangeStartMs={range.startMs}
               signups={
                 <>
                   <Panel title="Signup box on the site">
@@ -1318,11 +1362,24 @@ async function AnalyticsView({
                   </Panel>
                   <SignupResultsPanel
                     results={data.newsletterResults}
+                    confirmed={data.newsletterConfirmed}
                     labelFor={name => labelByPage.get(name) ?? name}
+                  />
+                  <NewsletterVisitsPanel
+                    visits={data.newsletterVisits}
+                    labelFor={name => labelByPage.get(name) ?? name}
+                  />
+                  <IssueCopiesPanel
+                    rows={data.newsletterCopies}
+                    unique={unique}
                   />
                   <PastIssuesPanel
                     rows={data.newsletterArchive}
                     feeds={feeds}
+                  />
+                  <NewsletterLinksPanel
+                    rows={data.newsletterLinks}
+                    unique={unique}
                   />
                 </>
               }
@@ -2109,20 +2166,28 @@ function DashboardTabs({
   )
 }
 
-/** Each newsletter's feed readers yesterday and so far today (UTC), or
- *  null when Upstash couldn't be read. */
-async function readFeedDays(): Promise<{
+/** Each newsletter's feed readers on each day the range covers (feedDays,
+ *  for the Feed readers tile), and yesterday and so far today (UTC, for the
+ *  Past issues and feeds table), in one read; null when Upstash couldn't be
+ *  read. */
+async function readFeeds(range: DateRange): Promise<{
+  history: FeedReaders[]
   yesterday: FeedReaders[]
   today: FeedReaders[]
 } | null> {
   const now = Date.now()
   const day = (ms: number) => new Date(ms).toISOString().slice(0, 10)
+  const yesterday = day(now - 86_400_000)
+  const today = day(now)
+  const days = feedDays(range, now)
   try {
-    const [yesterday, today] = await Promise.all([
-      readFeedReaders(day(now - 86_400_000)),
-      readFeedReaders(day(now)),
-    ])
-    return { yesterday, today }
+    const all = await readFeedHistory([...new Set([...days, yesterday, today])])
+    const wanted = new Set(days)
+    return {
+      history: all.filter(f => wanted.has(f.day)),
+      yesterday: all.filter(f => f.day === yesterday),
+      today: all.filter(f => f.day === today),
+    }
   } catch (err) {
     console.warn(
       `[analytics] feed readers unavailable: ${err instanceof Error ? err.message : String(err)}`
@@ -2247,18 +2312,283 @@ function PastIssuesPanel({
   )
 }
 
+/** Rows a "where they went" table shows. */
+const VISIT_TOP = 10
+
+/** The Newsletters tab's visits from links in the newsletters: per
+ *  newsletter, how many visits and what came of them, then the pages they
+ *  saw, the listings they clicked and the issues that sent them. */
+function NewsletterVisitsPanel({
+  visits,
+  labelFor,
+}: {
+  visits: NewsletterVisits
+  labelFor: (name: string) => string
+}) {
+  const rows = visits.byNewsletter
+  const sum = (pick: (r: (typeof rows)[number]) => number) =>
+    rows.reduce((n, r) => n + pick(r), 0)
+  const total = {
+    visits: sum(r => r.visits),
+    morePages: sum(r => r.morePages),
+    clicked: sum(r => r.clicked),
+    listingClicks: sum(r => r.listingClicks),
+  }
+  return (
+    <Panel title="Visits from the newsletters">
+      {rows.length === 0 ? (
+        <p className={styles.dim}>
+          No visits from links in the newsletters in this range.
+        </p>
+      ) : (
+        <>
+          <SortableTable
+            columns={[
+              { label: 'Newsletter', sort: 'text' },
+              { label: 'Visits', className: styles.numCol, sort: 'number' },
+              { label: 'Visitors', className: styles.numCol, sort: 'number' },
+              {
+                label: 'Saw another page',
+                className: styles.pctCol,
+                sort: 'number',
+              },
+              {
+                label: 'Clicked a listing',
+                className: styles.pctCol,
+                sort: 'number',
+              },
+              {
+                label: 'Listing clicks',
+                className: styles.numCol,
+                sort: 'number',
+              },
+            ]}
+            values={rows.map(r => [
+              r.name,
+              r.visits,
+              r.visitors,
+              r.visits > 0 ? r.morePages / r.visits : null,
+              r.visits > 0 ? r.clicked / r.visits : null,
+              r.listingClicks,
+            ])}
+            foot={
+              rows.length > 1 ? (
+                <tr className={styles.totalRow}>
+                  <td className={styles.totalLabel}>Total</td>
+                  <td className={styles.numCol}>
+                    {total.visits.toLocaleString()}
+                  </td>
+                  <td className={styles.numCol} />
+                  <td className={styles.pctCol}>
+                    {pct(total.morePages, total.visits)}
+                  </td>
+                  <td className={styles.pctCol}>
+                    {pct(total.clicked, total.visits)}
+                  </td>
+                  <td className={styles.numCol}>
+                    {total.listingClicks.toLocaleString()}
+                  </td>
+                </tr>
+              ) : undefined
+            }
+          >
+            {rows.map(r => (
+              <tr key={r.name}>
+                <td>{r.name}</td>
+                <td className={styles.numCol}>{r.visits.toLocaleString()}</td>
+                <td className={styles.numCol}>{r.visitors.toLocaleString()}</td>
+                <td className={styles.pctCol}>{pct(r.morePages, r.visits)}</td>
+                <td className={styles.pctCol}>{pct(r.clicked, r.visits)}</td>
+                <td className={styles.numCol}>
+                  {r.listingClicks.toLocaleString()}
+                </td>
+              </tr>
+            ))}
+          </SortableTable>
+          <div className={styles.grid}>
+            <CountTable
+              rows={visits.pages
+                .slice(0, VISIT_TOP)
+                .map(r => ({ ...r, name: labelFor(r.name) }))}
+              labelHead="Pages they saw"
+              countHead="Views"
+            />
+            <CountTable
+              rows={visits.listings.slice(0, VISIT_TOP)}
+              labelHead="Listings they clicked"
+            />
+          </div>
+          <CountTable
+            rows={visits.issues.slice(0, VISIT_TOP)}
+            labelHead="Issue (its links’ utm_campaign)"
+            countHead="Visits"
+          />
+        </>
+      )}
+      <p className={styles.caption}>
+        Every link to aisafety.com in the newsletters carries tags saying which
+        newsletter and issue it&apos;s from (utm_source=events-newsletter,
+        utm_campaign=events-2026-week-42), and a page view records the address
+        it was on. A visit from a newsletter starts with a page view carrying
+        those tags and lasts until the visitor has been away for 30 minutes;
+        reloading the page within it isn&apos;t a new visit. Events &amp;
+        Training = the two together on Substack, before 8 October 2026; Funding
+        still sends from Substack, with the same tags. Saw another page = the
+        share of visits that went on to another page of the site; Clicked a
+        listing = the share with a click on a listing. Every visit counts,
+        whatever the count mode. Links to other sites in the emails go straight
+        there and are under Most-clicked links. A visitor whose browser blocks
+        the site&apos;s tracking isn&apos;t counted.
+      </p>
+    </Panel>
+  )
+}
+
+/** The Newsletters tab's views of each issue's web and text versions on
+ *  aisafety.com (/newsletter/<key>/<issue>, …/text). */
+function IssueCopiesPanel({
+  rows,
+  unique,
+}: {
+  rows: NewsletterCopyRow[]
+  unique: boolean
+}) {
+  // "Events · Week 41, 2026" → "Week 41, 2026"; the address if it isn't one.
+  const issue = (r: NewsletterCopyRow) =>
+    issueName(r.newsletter.toLowerCase(), r.issue)?.replace(/^[^·]+· /, '') ??
+    r.issue
+  const web = rows.reduce((n, r) => n + r.web, 0)
+  const text = rows.reduce((n, r) => n + r.text, 0)
+  return (
+    <Panel title="Issues read on aisafety.com">
+      {rows.length === 0 ? (
+        <p className={styles.dim}>
+          No views of the issues&apos; web or text versions in this range.
+        </p>
+      ) : (
+        <SortableTable
+          columns={[
+            { label: 'Issue', sort: 'text' },
+            { label: 'Newsletter', sort: 'text' },
+            { label: 'Web version', className: styles.numCol, sort: 'number' },
+            {
+              label: 'Text version',
+              className: styles.numCol,
+              sort: 'number',
+            },
+          ]}
+          values={rows.map(r => [issue(r), r.newsletter, r.web, r.text])}
+          foot={
+            <tr className={styles.totalRow}>
+              <td className={styles.totalLabel}>Total</td>
+              <td />
+              <td className={styles.numCol}>{web.toLocaleString()}</td>
+              <td className={styles.numCol}>{text.toLocaleString()}</td>
+            </tr>
+          }
+        >
+          {rows.map(r => (
+            <tr key={`${r.newsletter}|${r.issue}`}>
+              <td>{issue(r)}</td>
+              <td>{r.newsletter}</td>
+              <td className={styles.numCol}>{r.web.toLocaleString()}</td>
+              <td className={styles.numCol}>{r.text.toLocaleString()}</td>
+            </tr>
+          ))}
+        </SortableTable>
+      )}
+      <p className={styles.caption}>
+        Views of each issue&apos;s web version (the email on its own page,
+        aisafety.com/newsletter/events/week-41-2026, opened from &quot;View in
+        browser&quot; or the past issues page) and its text version (…/text),{' '}
+        {unique
+          ? 'once per reader per issue per day (the Unique count)'
+          : 'every load (the Total count)'}
+        . Those pages run none of the site&apos;s scripts, so each view is
+        counted by the server when the page loads a one-pixel image; a reader is
+        told apart only within a day, by a hash of their network address and
+        browser that changes daily. Link checkers, bots and anyone signed in to
+        the admin aren&apos;t counted. Recording since October 2026.
+      </p>
+    </Panel>
+  )
+}
+
+/** The Newsletters tab's other ways to the newsletters on the site: the
+ *  signup box's card link where the box still hands off to Substack, and
+ *  the footer's Newsletters column. */
+function NewsletterLinksPanel({
+  rows,
+  unique,
+}: {
+  rows: NewsletterLinkRow[]
+  unique: boolean
+}) {
+  const total = rows.reduce((n, r) => n + r.clicks, 0)
+  return (
+    <Panel title="Other ways to the newsletters">
+      {rows.length === 0 ? (
+        <p className={styles.dim}>
+          No clicks on the footer&apos;s newsletter links or the Funding
+          box&apos;s link in this range.
+        </p>
+      ) : (
+        <SortableTable
+          columns={[
+            { label: 'Link', sort: 'text' },
+            { label: 'Goes to', sort: 'text' },
+            { label: 'Clicks', className: styles.numCol, sort: 'number' },
+          ]}
+          values={rows.map(r => [r.name, r.to, r.clicks])}
+          foot={
+            rows.length > 1 ? (
+              <tr className={styles.totalRow}>
+                <td className={styles.totalLabel}>Total</td>
+                <td />
+                <td className={styles.numCol}>{total.toLocaleString()}</td>
+              </tr>
+            ) : undefined
+          }
+        >
+          {rows.map(r => (
+            <tr key={r.name}>
+              <td>{r.name}</td>
+              <td className={styles.dim}>{r.to}</td>
+              <td className={styles.numCol}>{r.clicks.toLocaleString()}</td>
+            </tr>
+          ))}
+        </SortableTable>
+      )}
+      <p className={styles.caption}>
+        Funding page&apos;s box = clicks on the Funding signup box outside its
+        email field, which open the newsletter on Substack to read first; the
+        box&apos;s submits are under Signup box on the site and finish on
+        Substack. Footer = the links in the site footer&apos;s Newsletters
+        column, on every page: Events and Training go to their pages, whose box
+        signs people up; Funding and Updates go to Substack.{' '}
+        {unique
+          ? 'Once per visitor per link per day (the Unique count).'
+          : 'Every click (the Total count).'}
+      </p>
+    </Panel>
+  )
+}
+
 /** The Newsletters tab's results of the signups made on the site: the
  *  /events and /training boxes sign people up through ActiveCampaign (from 8
  *  October 2026). Per page, how many went through and how many showed the
  *  visitor an error, then what the errors were. */
 function SignupResultsPanel({
   results,
+  confirmed,
   labelFor,
 }: {
   results: NewsletterSignupResults
+  confirmed: NewsletterConfirmRow[]
   labelFor: (name: string) => string
 }) {
   const succeeded = results.byPage.reduce((n, r) => n + r.succeeded, 0)
+  const already = results.byPage.reduce((n, r) => n + r.already, 0)
   const failed = results.byPage.reduce((n, r) => n + r.failed, 0)
   return (
     <Panel title="Signups through the site">
@@ -2269,17 +2599,24 @@ function SignupResultsPanel({
           columns={[
             { label: 'Page', sort: 'text' },
             { label: 'Signed up', className: styles.numCol, sort: 'number' },
+            {
+              label: 'Already subscribed',
+              className: styles.numCol,
+              sort: 'number',
+            },
             { label: 'Errors', className: styles.numCol, sort: 'number' },
           ]}
           values={results.byPage.map(r => [
             labelFor(r.name),
             r.succeeded,
+            r.already,
             r.failed,
           ])}
           foot={
             <tr className={styles.totalRow}>
               <td className={styles.totalLabel}>Total</td>
               <td className={styles.numCol}>{succeeded.toLocaleString()}</td>
+              <td className={styles.numCol}>{already.toLocaleString()}</td>
               <td className={styles.numCol}>{failed.toLocaleString()}</td>
             </tr>
           }
@@ -2288,6 +2625,7 @@ function SignupResultsPanel({
             <tr key={r.name}>
               <td>{labelFor(r.name)}</td>
               <td className={styles.numCol}>{r.succeeded.toLocaleString()}</td>
+              <td className={styles.numCol}>{r.already.toLocaleString()}</td>
               <td className={styles.numCol}>{r.failed.toLocaleString()}</td>
             </tr>
           ))}
@@ -2301,27 +2639,88 @@ function SignupResultsPanel({
           total={failed}
         />
       )}
+      {confirmed.length > 0 && (
+        <SortableTable
+          columns={[
+            { label: 'Newsletter', sort: 'text' },
+            { label: 'Signed up', className: styles.numCol, sort: 'number' },
+            { label: 'Confirmed', className: styles.numCol, sort: 'number' },
+            {
+              label: '% confirmed',
+              className: styles.pctCol,
+              sort: 'number',
+            },
+          ]}
+          values={confirmed.map(r => [
+            r.name,
+            r.signedUp,
+            r.confirmed,
+            r.signedUp > 0 ? r.confirmed / r.signedUp : null,
+          ])}
+        >
+          {confirmed.map(r => (
+            <tr key={r.name}>
+              <td>{r.name}</td>
+              <td className={styles.numCol}>{r.signedUp.toLocaleString()}</td>
+              <td className={styles.numCol}>{r.confirmed.toLocaleString()}</td>
+              <td className={styles.pctCol}>
+                {r.signedUp > 0 ? pct(r.confirmed, r.signedUp) : '—'}
+              </td>
+            </tr>
+          ))}
+        </SortableTable>
+      )}
       <p className={styles.caption}>
         Since 8 October 2026 the boxes on /events and /training (and, since
         October 2026, on their past issues pages) sign people up on the site,
         through ActiveCampaign. Signed up = ActiveCampaign took the address and
-        emailed a link to confirm it (whether the reader confirmed shows in
-        ActiveCampaign, not here). Errors = the visitor saw an error message
-        instead. /funding&apos;s box still opens Substack, so its signups finish
-        there and don&apos;t show here.
+        emailed a link to confirm it. Already subscribed = the address was on
+        the list already, so the visitor was told so and nothing was sent.
+        Errors = the visitor saw an error message instead. Confirmed = readers
+        who pressed the link in that email: ActiveCampaign then sends them to
+        aisafety.com/subscribed/events or /subscribed/training, and their view
+        of that page is counted, once per visitor per newsletter per day in the
+        Unique count. A confirmation can come days after its signup, so near the
+        range&apos;s edges the two don&apos;t pair up exactly, and a reader
+        whose browser blocks the site&apos;s tracking isn&apos;t counted.
+        /funding&apos;s box still opens Substack, so its signups finish there
+        and don&apos;t show here.
       </p>
     </Panel>
   )
 }
 
-/** The Newsletters tab: the issues sent in the range (ActiveCampaign's
- *  deliveries, opens and unsubscribes; clicks counted on aisafety.com since
- *  28 Sept 2026), the most-clicked links, and the signup box on the site. */
+/** A small rate with the decimals it needs (0.36%, 2.1%, 42%): an issue's
+ *  unsubscribes or bounces would otherwise all round to 0%. */
+function pctSmall(part: number, whole: number): string {
+  if (whole <= 0) return '—'
+  const p = (100 * part) / whole
+  if (p === 0) return '0%'
+  if (p < 0.01) return '<0.01%'
+  return `${p < 1 ? p.toFixed(2) : p < 10 ? p.toFixed(1) : Math.round(p)}%`
+}
+
+/** Most-clicked links shows this many; the caption says when there are more. */
+const TOP_LINKS = 50
+
+/** An issue's hard and soft bounces together; null when neither was read. */
+function bouncesOf(s: SendStats): number | null {
+  return s.hardBounces == null && s.softBounces == null
+    ? null
+    : (s.hardBounces ?? 0) + (s.softBounces ?? 0)
+}
+
+/** The Newsletters tab: the issues first sent in the range (ActiveCampaign's
+ *  sends, opens, unsubscribes, bounces and spam complaints; clicks counted
+ *  on aisafety.com), the most-clicked links, and the signup box on the
+ *  site. */
 function NewsletterView({
   sends,
+  rangeStartMs,
   signups,
 }: {
-  sends: SendStats[] | null
+  sends: SendStatsResult | null
+  rangeStartMs: number | null
   signups: React.ReactNode
 }) {
   if (sends === null) {
@@ -2337,14 +2736,31 @@ function NewsletterView({
       </>
     )
   }
-  const delivered = sends.reduce((n, s) => n + s.delivered, 0)
-  const opens = sends.reduce((n, s) => n + (s.opens ?? 0), 0)
-  const clicks = sends.reduce((n, s) => n + s.clicks.total, 0)
-  const unsubs = sends.reduce((n, s) => n + (s.unsubscribes ?? 0), 0)
-  const topLinks = sends
-    .flatMap(s => s.clicks.links.map(l => ({ ...l, issue: s.name })))
+  const issues = sends.issues
+  const sent = issues.reduce((n, s) => n + s.sent, 0)
+  const opens = issues.reduce((n, s) => n + (s.opens ?? 0), 0)
+  // The click counts are read in one go: all there, or none.
+  const clicksKnown = issues.every(s => s.clicks != null)
+  const clicks = issues.reduce((n, s) => n + (s.clicks?.total ?? 0), 0)
+  const unsubs = issues.reduce((n, s) => n + (s.unsubscribes ?? 0), 0)
+  const bounced = issues.reduce((n, s) => n + (bouncesOf(s) ?? 0), 0)
+  // Unknown for the range when one issue's report didn't load.
+  const spam = issues.some(s => s.spamComplaints == null)
+    ? null
+    : issues.reduce((n, s) => n + (s.spamComplaints ?? 0), 0)
+  const allLinks = issues.flatMap(s =>
+    (s.clicks?.links ?? []).map(l => ({ ...l, issue: s.name }))
+  )
+  const topLinks = [...allLinks]
     .sort((a, b) => b.clicks - a.clicks)
-    .slice(0, 50)
+    .slice(0, TOP_LINKS)
+  // The site reads ActiveCampaign's newest campaigns only; say so when the
+  // range reaches back past them.
+  const readFrom =
+    sends.readFrom &&
+    (rangeStartMs == null || rangeStartMs < Date.parse(sends.readFrom))
+      ? sends.readFrom
+      : null
   const host = (url: string) => {
     try {
       return new URL(url).hostname.replace(/^www\./, '')
@@ -2352,18 +2768,35 @@ function NewsletterView({
       return url
     }
   }
+  const unfinished: Record<NonNullable<SendStats['unfinished']>, string> = {
+    sending: 'still sending',
+    paused: 'paused partway',
+    stopped: 'stopped partway',
+    scheduled: 'more waves to come',
+  }
   return (
     <>
       <Panel title="Newsletter sends">
         <div className={styles.funnel}>
-          <Stat label="Issues sent" value={sends.length.toLocaleString()} />
-          <Stat label="Emails delivered" value={delivered.toLocaleString()} />
-          <Stat label="Opened" value={pct(opens, delivered)} />
-          <Stat label="Clicks" value={clicks.toLocaleString()} />
-          <Stat label="Clicks per email" value={pct(clicks, delivered)} />
-          <Stat label="Unsubscribed" value={pct(unsubs, delivered)} />
+          <Stat label="Issues sent" value={issues.length.toLocaleString()} />
+          <Stat label="Emails sent" value={sent.toLocaleString()} />
+          <Stat label="Opened" value={pct(opens, sent)} />
+          <Stat
+            label="Clicks"
+            value={clicksKnown ? clicks.toLocaleString() : '—'}
+          />
+          <Stat
+            label="Clicks per email"
+            value={clicksKnown && sent > 0 ? (clicks / sent).toFixed(2) : '—'}
+          />
+          <Stat label="Unsubscribed" value={pctSmall(unsubs, sent)} />
+          <Stat label="Bounced" value={pctSmall(bounced, sent)} />
+          <Stat
+            label="Marked as spam"
+            value={spam == null ? '—' : spam.toLocaleString()}
+          />
         </div>
-        {sends.length === 0 ? (
+        {issues.length === 0 ? (
           <p className={styles.dim}>No issues sent in this range.</p>
         ) : (
           <SortableTable
@@ -2371,29 +2804,36 @@ function NewsletterView({
               { label: 'Issue', sort: 'text' },
               { label: 'Newsletter', sort: 'text' },
               { label: 'Sent', sort: 'text' },
-              { label: 'Delivered', className: styles.numCol, sort: 'number' },
+              { label: 'Sent to', className: styles.numCol, sort: 'number' },
               { label: 'Opened', className: styles.pctCol, sort: 'number' },
               { label: 'Clicks', className: styles.numCol, sort: 'number' },
               { label: 'Unsubs', className: styles.numCol, sort: 'number' },
+              { label: 'Bounced', className: styles.numCol, sort: 'number' },
+              { label: 'Spam', className: styles.numCol, sort: 'number' },
             ]}
-            values={sends.map(s => [
+            values={issues.map(s => [
               s.name,
               s.newsletter,
               s.sentAt ?? '',
-              s.delivered,
-              s.opens != null && s.delivered > 0 ? s.opens / s.delivered : null,
-              s.clicks.total,
+              s.sent,
+              s.opens != null && s.sent > 0 ? s.opens / s.sent : null,
+              s.clicks?.total ?? null,
               s.unsubscribes,
+              bouncesOf(s),
+              s.spamComplaints,
             ])}
           >
-            {sends.map(s => (
+            {issues.map(s => (
               <tr key={s.id}>
                 <td>
                   {s.name}
-                  {s.waves > 0 && (
+                  {(s.waves > 0 || s.unfinished) && (
                     <span className={styles.dim}>
-                      {' '}
-                      · {s.waves} wave{s.waves === 1 ? '' : 's'}
+                      {s.waves > 0 &&
+                        (s.wavesPlanned > s.waves
+                          ? ` · ${s.waves} of ${s.wavesPlanned} waves`
+                          : ` · ${s.waves} wave${s.waves === 1 ? '' : 's'}`)}
+                      {s.unfinished && ` · ${unfinished[s.unfinished]}`}
                     </span>
                   )}
                 </td>
@@ -2401,37 +2841,74 @@ function NewsletterView({
                 <td className={styles.dim}>
                   {s.sentAt ? formatDay(s.sentAt) : '—'}
                 </td>
-                <td className={styles.numCol}>
-                  {s.delivered.toLocaleString()}
-                </td>
+                <td className={styles.numCol}>{s.sent.toLocaleString()}</td>
                 <td className={styles.pctCol}>
-                  {s.opens != null ? pct(s.opens, s.delivered) : '—'}
+                  {s.opens != null ? pct(s.opens, s.sent) : '—'}
                 </td>
                 <td className={styles.numCol}>
-                  {s.clicks.total.toLocaleString()}
+                  {s.clicks ? s.clicks.total.toLocaleString() : '—'}
                 </td>
                 <td className={styles.numCol}>
                   {s.unsubscribes != null
                     ? s.unsubscribes.toLocaleString()
                     : '—'}
                 </td>
+                <td
+                  className={styles.numCol}
+                  title={
+                    s.hardBounces != null || s.softBounces != null
+                      ? `${(s.hardBounces ?? 0).toLocaleString()} hard, ${(s.softBounces ?? 0).toLocaleString()} soft`
+                      : undefined
+                  }
+                >
+                  {bouncesOf(s)?.toLocaleString() ?? '—'}
+                </td>
+                <td className={styles.numCol}>
+                  {s.spamComplaints != null
+                    ? s.spamComplaints.toLocaleString()
+                    : '—'}
+                </td>
               </tr>
             ))}
           </SortableTable>
         )}
+        {readFrom && (
+          <p className={styles.dim}>
+            ActiveCampaign holds more campaigns than the site reads (the newest{' '}
+            {CAMPAIGN_READ_MAX.toLocaleString()}), so issues first sent before{' '}
+            {formatDay(readFrom)} may be missing here, or show only some of
+            their waves.
+          </p>
+        )}
         <p className={styles.caption}>
-          Issues sent to the Events, Training and Funding lists in this range
-          (test lists left out). An issue sent in warm-up waves is one row, its
-          finished waves added up. Opened = unique opens ÷ delivered, from
-          ActiveCampaign; Apple Mail opens every email it receives, so it reads
-          high. Clicks are counted on aisafety.com as readers follow a link,
-          every click (not unique readers), link checkers left out; issues sent
-          before 28 September 2026 went through ActiveCampaign&apos;s tracker
-          and show none. Clicks per email = clicks ÷ delivered.
+          Issues sent through ActiveCampaign to the Events, Training and Funding
+          lists, by the day each first went out. Test lists, and practice sends
+          to fewer than 50 people, are left out. Events and Training moved from
+          Substack on 8 October 2026, so their earlier issues aren&apos;t here,
+          and Funding still sends from Substack. An issue sent in waves is one
+          row with all its waves added up. Sent to = emails sent, bounced ones
+          included. Opened = unique opens ÷ emails sent, from ActiveCampaign.
+          Apple Mail opens every email it receives, so this reads high, and the
+          send watcher&apos;s verified opens, which leave those out, read lower.
+          Clicks are counted on aisafety.com as readers follow a link in the
+          email or its web, text or feed copy, every click (not unique readers)
+          whenever it was made, link checkers left out. Clicks per email =
+          clicks ÷ emails sent. Bounced = emails turned away, hard (the address
+          doesn&apos;t exist, so ActiveCampaign sends it nothing more) and soft
+          (a full mailbox or a server down, tried again next time). Hover a
+          number for the split. Spam = readers who pressed Report spam where
+          their mail service tells the sender (Yahoo, Outlook, AOL and others;
+          Gmail tells nobody about one reader). No sender can see whether an
+          email landed in a spam folder, so falling opens are the usual sign.
         </p>
       </Panel>
       <Panel title="Most-clicked links">
-        {topLinks.length === 0 ? (
+        {!clicksKnown ? (
+          <p className={styles.dim}>
+            The click counts couldn&apos;t be read just now — try refreshing in
+            a moment.
+          </p>
+        ) : topLinks.length === 0 ? (
           <p className={styles.dim}>No clicks counted in this range yet.</p>
         ) : (
           <SortableTable
@@ -2466,6 +2943,12 @@ function NewsletterView({
               </tr>
             ))}
           </SortableTable>
+        )}
+        {allLinks.length > TOP_LINKS && (
+          <p className={styles.caption}>
+            The {TOP_LINKS} most-clicked of {allLinks.length.toLocaleString()}{' '}
+            links clicked on these issues.
+          </p>
         )}
       </Panel>
       {signups}

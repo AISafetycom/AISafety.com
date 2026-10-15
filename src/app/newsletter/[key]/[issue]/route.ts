@@ -19,7 +19,7 @@ import {
   htmlResponse,
   sentEmail,
 } from '@/lib/newsletter-web-copy'
-import { missingPage, webPage } from '@/lib/newsletter-web'
+import { missingPage, seenImage, webPage } from '@/lib/newsletter-web'
 import { textVersion } from '@/lib/newsletter-text'
 
 export const runtime = 'nodejs'
@@ -42,5 +42,9 @@ export async function GET(_req: Request, { params }: Ctx) {
   const text = textVersion(email)
     ? `/newsletter/${key}/${issue}/text`
     : undefined
-  return htmlResponse(webPage(email, text), 200, FOUND_CACHE)
+  return htmlResponse(
+    webPage(email, text, seenImage(key, issue, 'web')),
+    200,
+    FOUND_CACHE
+  )
 }

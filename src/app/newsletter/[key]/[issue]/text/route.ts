@@ -14,7 +14,7 @@ import {
   htmlResponse,
   sentEmail,
 } from '@/lib/newsletter-web-copy'
-import { isWebKey, missingPage } from '@/lib/newsletter-web'
+import { isWebKey, missingPage, seenImage } from '@/lib/newsletter-web'
 import { TEXT_SCRIPT_HASH, textPage, textVersion } from '@/lib/newsletter-text'
 
 export const runtime = 'nodejs'
@@ -50,7 +50,13 @@ export async function GET(_req: Request, { params }: Ctx) {
   }
   const subject = /<title>([^<]*)<\/title>/.exec(email)?.[1]?.trim() || issue
   return htmlResponse(
-    textPage(tv, key, decodeTitle(subject), `/newsletter/${key}/${issue}`),
+    textPage(
+      tv,
+      key,
+      decodeTitle(subject),
+      `/newsletter/${key}/${issue}`,
+      seenImage(key, issue, 'text')
+    ),
     200,
     FOUND_CACHE,
     TEXT_SCRIPT_HASH
