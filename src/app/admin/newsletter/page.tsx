@@ -1,6 +1,7 @@
 import {
   canReviewQueue,
   canSendNewsletter,
+  canViewAnalytics,
   currentAdmin,
   requireAccess,
 } from '@/lib/admin/auth'
@@ -19,9 +20,10 @@ export default async function NewsletterAdminPage() {
   // ActiveCampaign read (preview-only reviewers used to see the amber
   // "sends real emails" warning until the list arrived). The layout has
   // already turned away anyone who can neither approve nor preview.
-  const [canSend, canQueue, admin] = await Promise.all([
+  const [canSend, canQueue, canAnalytics, admin] = await Promise.all([
     canSendNewsletter(),
     canReviewQueue(),
+    canViewAnalytics(),
     currentAdmin(),
   ])
   // Where "Send test" delivers: the approver's own address, the one they
@@ -32,6 +34,8 @@ export default async function NewsletterAdminPage() {
       testTo={canSend ? (admin?.email ?? null) : null}
       // Fix on a changed listing applies a Broom item: a Queue decision.
       canQueue={canQueue}
+      // Recent sends points to Analytics for each issue's numbers.
+      canAnalytics={canAnalytics}
     />
   )
 }

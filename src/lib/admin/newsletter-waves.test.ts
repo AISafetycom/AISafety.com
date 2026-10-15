@@ -1404,6 +1404,31 @@ describe('Recent sends and Analytics group waves by issue', () => {
     expect(rows[0].baseName).toBe(ISSUE)
   })
 
+  it('Recent sends: an issue past the newest 12 sends still shows every wave', async () => {
+    const ac = makeAC({
+      extra: [
+        sentWave(1, { ldate: '2026-10-01T09:30:00-05:00' }),
+        sentWave(2, { ldate: '2026-10-09T09:30:00-05:00' }),
+        ...Array.from({ length: 11 }, (_, i) =>
+          camp({
+            id: String(300 + i),
+            name: `Training · Week ${i + 1}, 2027`,
+            list: '7',
+            ldate: `2026-10-0${2 + (i % 6)}T12:00:00-05:00`,
+          })
+        ),
+      ],
+    })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const rows = await nl.listRecent()
+    expect(rows).toHaveLength(13)
+    expect(rows.filter(r => r.baseName === ISSUE).map(r => r.id)).toEqual([
+      '181',
+      '180',
+    ])
+  })
+
   it('Analytics: one row per issue, its waves added up, its clicks once', async () => {
     const ac = makeAC({
       extra: [
@@ -1727,28 +1752,6 @@ describe('Recent sends and Analytics group waves by issue', () => {
       .slice(0, end)
     const oldest = Math.min(...read.map(c => Date.parse(c.cdate ?? '')))
     expect(readFrom).toBe(new Date(oldest).toISOString())
-  })
-
-  it('Recent sends: a test-list send of an issue doesn’t show the real issue’s clicks', async () => {
-    const ac = makeAC({
-      extra: [
-        sentWave(1),
-        camp({ id: '175', name: ISSUE, list: '4', status: '5', send_amt: '3' }),
-      ],
-    })
-    vi.stubGlobal('fetch', ac.fetchMock)
-    const nl = await freshModule()
-    kv.data.set('aisafety:newsletter:clicks:' + ISSUE, { __total: 473 })
-    const rows = await nl.listRecent()
-    expect(
-      rows
-        .filter(r => r.baseName === ISSUE)
-        .map(r => [r.id, r.clicks.total])
-        .sort()
-    ).toEqual([
-      ['175', 0],
-      ['180', 473],
-    ])
   })
 })
 
