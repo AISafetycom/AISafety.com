@@ -335,6 +335,13 @@ describe('approveAndSend: fail closed', () => {
     const nl = await freshModule()
     await nl.approveAndSend('200', '5', WHO)
     expect(zsets.size).toBe(0)
+    // Nor as the issue's first send, which would end the hold on test
+    // copies' clicks.
+    expect(
+      [...kvData.keys()].filter(k =>
+        k.startsWith('aisafety:newsletter:sends-from:')
+      )
+    ).toEqual([])
   })
 
   it('a send held for ActiveCampaign’s review counts as scheduled', async () => {

@@ -2092,6 +2092,7 @@ function pctSmall(part: number, whole: number): string {
   if (whole <= 0) return '—'
   const p = (100 * part) / whole
   if (p === 0) return '0%'
+  if (p < 0.01) return '<0.01%'
   return `${p < 1 ? p.toFixed(2) : p < 10 ? p.toFixed(1) : Math.round(p)}%`
 }
 
@@ -2165,8 +2166,9 @@ function NewsletterView({
   }
   const unfinished: Record<NonNullable<SendStats['unfinished']>, string> = {
     sending: 'still sending',
-    paused: 'paused part-way',
-    stopped: 'stopped part-way',
+    paused: 'paused partway',
+    stopped: 'stopped partway',
+    scheduled: 'more waves to come',
   }
   return (
     <>
@@ -2224,7 +2226,9 @@ function NewsletterView({
                   {(s.waves > 0 || s.unfinished) && (
                     <span className={styles.dim}>
                       {s.waves > 0 &&
-                        ` · ${s.waves} wave${s.waves === 1 ? '' : 's'}`}
+                        (s.wavesPlanned > s.waves
+                          ? ` · ${s.waves} of ${s.wavesPlanned} waves`
+                          : ` · ${s.waves} wave${s.waves === 1 ? '' : 's'}`)}
                       {s.unfinished && ` · ${unfinished[s.unfinished]}`}
                     </span>
                   )}
@@ -2268,7 +2272,8 @@ function NewsletterView({
           <p className={styles.dim}>
             ActiveCampaign holds more campaigns than the site reads at once (the
             newest {CAMPAIGN_READ_WINDOW}), so issues first sent before{' '}
-            {formatDay(readFrom)} may be missing here.
+            {formatDay(readFrom)} may be missing here, or show only some of
+            their waves.
           </p>
         )}
         <p className={styles.caption}>

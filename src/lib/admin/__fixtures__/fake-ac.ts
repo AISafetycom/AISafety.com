@@ -322,6 +322,9 @@ export interface AcOptions {
   startsBeforeDelete?: boolean
   /** v1 campaign_report_unsubscription_totals per campaign. */
   spamComplaints?: Record<string, string>
+  /** v1 campaign_report_unsubscription_totals has nothing to say for these
+   *  campaign ids (result_code 0). */
+  reportFails?: string[]
   /** Reading back a campaign the approval just created answers with this
    *  HTTP status (the read back fails). */
   readbackStatus?: number
@@ -485,7 +488,8 @@ export function makeAC(opts: AcOptions = {}) {
       if (action === 'campaign_report_unsubscription_totals') {
         const id = url.searchParams.get('campaignid') ?? ''
         const c = camps.find(x => x.id === id)
-        if (!c) return j({ result_code: 0, result_message: 'Failed' })
+        if (!c || opts.reportFails?.includes(id))
+          return j({ result_code: 0, result_message: 'Failed' })
         return j({
           result_code: 1,
           total_amt: c.send_amt,

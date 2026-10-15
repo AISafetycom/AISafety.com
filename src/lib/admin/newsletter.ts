@@ -520,13 +520,21 @@ async function v1report(
     ...params,
   })
   try {
-    const res = await fetch(`${base()}/admin/api.php?${qs}`, {
-      cache: 'no-store',
-      signal: AbortSignal.timeout(READ_TIMEOUT_MS),
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const out = (await res.json()) as Record<string, unknown>
-    return Number(out.result_code) === 1 ? out : null
+    // A busy or gateway answer is tried again, as v3 reads are.
+    for (let attempt = 0; ; attempt++) {
+      const res = await fetch(`${base()}/admin/api.php?${qs}`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(READ_TIMEOUT_MS),
+      })
+      const delay = READ_RETRY_DELAYS_MS[attempt]
+      if (!res.ok && TRANSIENT_STATUSES.has(res.status) && delay != null) {
+        await new Promise(r => setTimeout(r, delay))
+        continue
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const out = (await res.json()) as Record<string, unknown>
+      return Number(out.result_code) === 1 ? out : null
+    }
   } catch (err) {
     console.warn(
       `[newsletter] ActiveCampaign ${action} unreadable: ${err instanceof Error ? err.message : String(err)}`
@@ -2338,6 +2346,11 @@ export async function listRecent(limit = 12): Promise<SentSummary[]> {
     readClicks([...new Set(recent.map(c => baseIssueName(c.name)))]),
     accountUtcOffset(campaigns),
   ])
+  const realNames = new Set(
+    recent
+      .filter((c, i) => lists[i].some(isRealList))
+      .map(c => baseIssueName(c.name))
+  )
   const rows = recent.map((c, i): SentSummary => {
     const listIds = lists[i]
     const baseName = baseIssueName(c.name)
@@ -2362,10 +2375,12 @@ export async function listRecent(limit = 12): Promise<SentSummary[]> {
         String(c.segmentid).trim() === '0',
       group: `${listIds.join(',')}|${baseName}`,
       // Clicks are counted per issue name, which a test-list send shares:
-      // it would show the real issue's clicks (473 on week 41's test row).
-      clicks: listIds.some(isRealList)
-        ? (clicks.get(baseName) ?? { total: 0, links: [] })
-        : { total: 0, links: [] },
+      // once the issue has gone to a real list, they're its readers' (473
+      // on week 41's test row), so the test row shows none.
+      clicks:
+        listIds.some(isRealList) || !realNames.has(baseName)
+          ? (clicks.get(baseName) ?? { total: 0, links: [] })
+          : { total: 0, links: [] },
       actions: stopActionsFor(c.status, listIds),
     }
   })
@@ -3186,9 +3201,14 @@ export interface SendStats {
   clicks: CampaignClicks | null
   /** How many waves the numbers add up (0 = one whole-list send). */
   waves: number
-  /** A send of it that reached readers but hasn't finished: still going,
-   *  paused, or stopped part-way. Null once every send has finished. */
-  unfinished: 'sending' | 'paused' | 'stopped' | null
+  /** How many waves the issue was sent in, by its waves' names ("wave 2/4"):
+   *  more than `waves` when some were canceled, are still to go, or fell
+   *  outside the campaigns read. 0 for a whole-list send. */
+  wavesPlanned: number
+  /** A send of it that reached readers but hasn't finished (still going,
+   *  paused, or stopped partway), or a wave of it still scheduled. Null once
+   *  every send has finished. */
+  unfinished: 'sending' | 'paused' | 'stopped' | 'scheduled' | null
 }
 
 export interface SendStatsResult {
@@ -3213,51 +3233,67 @@ export async function readSendStats(range: {
   endMs: number | null
 }): Promise<SendStatsResult> {
   const campaigns = await allCampaigns()
-  // Every send that reached readers, finished or not: a wave stopped after
-  // 1,200 people still went to them.
-  const reached = campaigns.filter(c => reachedReaders(c) && c.name !== '')
-  const [lists, offset] = await Promise.all([
-    mapLimit(reached, 3, knownListIds),
-    accountUtcOffset(campaigns),
-  ])
-  const real = reached
-    .map((c, i) => ({ c, listId: lists[i].length === 1 ? lists[i][0] : '' }))
-    .filter(({ listId }) => isRealList(listId))
-    .map(r => ({ ...r, list: REAL_LISTS[r.listId].prefix }))
+  const offset = await accountUtcOffset(campaigns)
+  const startOf = (c: RawCampaign) =>
+    instantMs((c.sdate || c.ldate) ?? null, offset)
   const inRange = (at: number) =>
     Number.isNaN(at)
       ? range.startMs == null && range.endMs == null
       : (range.startMs == null || at >= range.startMs) &&
         (range.endMs == null || at <= range.endMs)
+  // Issues carry their newsletter's name in front ("Events · Week 41,
+  // 2026"; sendChecks holds every real-list send to it). An issue first
+  // sent in the range has a send that started in it: only those names'
+  // lists are read, so a short range costs a few reads, not one per send.
+  const prefixes = Object.values(REAL_LISTS).map(l => `${l.prefix} · `)
+  const named = campaigns.filter(c =>
+    prefixes.some(p => baseIssueName(c.name).startsWith(p))
+  )
+  // Every send that reached readers, finished or not: a wave stopped after
+  // 1,200 people still went to them.
+  const reached = named.filter(c => reachedReaders(c))
+  const names = new Set(
+    reached.filter(c => inRange(startOf(c))).map(c => baseIssueName(c.name))
+  )
+  const wanted = reached.filter(c => names.has(baseIssueName(c.name)))
+  // Waves of those issues still to go (approve once schedules them all).
+  const toGo = named.filter(
+    c =>
+      (c.status === '1' || c.status === '7') && names.has(baseIssueName(c.name))
+  )
+  const [lists, toGoLists] = await Promise.all([
+    mapLimit(wanted, 3, knownListIds),
+    mapLimit(toGo, 3, knownListIds),
+  ])
+  const real = wanted
+    .map((c, i) => ({ c, listId: lists[i].length === 1 ? lists[i][0] : '' }))
+    .filter(({ listId }) => isRealList(listId))
+    .map(r => ({ ...r, list: REAL_LISTS[r.listId].prefix }))
+  const scheduled = new Set(
+    toGo.flatMap((c, i) =>
+      toGoLists[i].map(l => `${l}|${baseIssueName(c.name)}`)
+    )
+  )
   const kept = sumIssues(real)
-    .map(g => ({
-      ...g,
+    .map(g => {
       // First send: when the earliest wave started, as sentIssuesOn has it.
-      first: Math.min(
-        ...g.rows.map(r => {
-          const at = instantMs(r.c.sdate ?? r.c.ldate ?? null, offset)
-          return Number.isNaN(at) ? Infinity : at
-        })
-      ),
-      sent: g.rows.reduce((n, r) => n + (Number(r.c.send_amt ?? 0) || 0), 0),
-    }))
-    .map(g => ({ ...g, first: Number.isFinite(g.first) ? g.first : NaN }))
+      const starts = g.rows.map(r => startOf(r.c)).filter(t => !Number.isNaN(t))
+      return {
+        ...g,
+        first: starts.length ? Math.min(...starts) : NaN,
+        sent: g.rows.reduce((n, r) => n + (Number(r.c.send_amt ?? 0) || 0), 0),
+      }
+    })
     .filter(g => g.sent >= MIN_READERS && inRange(g.first))
     .sort((a, b) => (b.first || 0) - (a.first || 0))
-  // Spam complaints are only in a v1 report, one read per send, shared with
-  // the newsletter page's wave numbers for a minute. The field is there
-  // even at zero (read live from campaigns 165 and 166, 29 Sept 2026).
   const keptRows = kept.flatMap(g => g.rows)
   const [clicks, reports] = await Promise.all([
     readClicks([...new Set(kept.map(g => baseIssueName(g.rows[0].c.name)))]),
-    mapLimit(keptRows, 3, ({ c }) =>
-      sharedRead(`unsubtotals:${c.id}`, 60_000, () =>
-        v1report('campaign_report_unsubscription_totals', { campaignid: c.id })
-      )
-    ),
+    mapLimit(keptRows, 3, ({ c }) => spamReport(c)),
   ])
   const reportOf = new Map(keptRows.map(({ c }, i) => [c.id, reports[i]]))
   const issues = kept.map(({ rows, list, first, sent }): SendStats => {
+    const listId = rows[0].listId
     const newest = rows[0].c
     const name = baseIssueName(newest.name)
     const sum = (pick: (c: RawCampaign) => string | null | undefined) => {
@@ -3269,6 +3305,7 @@ export async function readSendStats(range: {
       countOrNull(reportOf.get(r.c.id)?.spam_complaints)
     )
     const statuses = new Set(rows.map(r => r.c.status))
+    const waveNames = rows.map(r => waveOf(r.c.name))
     return {
       id: newest.id,
       name,
@@ -3285,14 +3322,17 @@ export async function readSendStats(range: {
       // readClicks answers every name it was asked for, or none when the
       // read failed.
       clicks: clicks.get(name) ?? null,
-      waves: rows.filter(r => waveOf(r.c.name) != null).length,
+      waves: new Set(waveNames.filter(w => w != null).map(w => w.wave)).size,
+      wavesPlanned: Math.max(0, ...waveNames.map(w => w?.waves ?? 0)),
       unfinished: statuses.has('2')
         ? 'sending'
         : statuses.has('3')
           ? 'paused'
           : statuses.has('4')
             ? 'stopped'
-            : null,
+            : scheduled.has(`${listId}|${name}`)
+              ? 'scheduled'
+              : null,
     }
   })
   const oldest = campaigns
@@ -3308,6 +3348,32 @@ export async function readSendStats(range: {
         ? new Date(oldest).toISOString()
         : null,
   }
+}
+
+/** A send's v1 unsubscription report, for its spam complaints (the field is
+ *  there even at zero: read live from campaigns 165 and 166, 29 Sept 2026).
+ *  Kept an hour once the send is three days old, when its numbers have
+ *  mostly settled, else a minute. A failed read isn't kept: null, and the
+ *  next load tries again. */
+async function spamReport(
+  c: RawCampaign
+): Promise<Record<string, unknown> | null> {
+  const finished = timeOfCampaign(c.ldate)
+  const settled =
+    c.status === '5' &&
+    !Number.isNaN(finished) &&
+    Date.now() - finished > 72 * HOUR_MS
+  return sharedRead(
+    `spamtotals:${c.id}`,
+    settled ? 60 * 60_000 : 60_000,
+    async () => {
+      const report = await v1report('campaign_report_unsubscription_totals', {
+        campaignid: c.id,
+      })
+      if (!report) throw new Error('no report')
+      return report
+    }
+  ).catch(() => null)
 }
 
 /** A campaign's cdate (it carries the account's offset) as epoch ms; NaN
