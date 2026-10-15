@@ -1720,6 +1720,10 @@ export interface NewsletterResultRow {
   name: string
   /** Signups ActiveCampaign took: the confirmation email went out. */
   succeeded: number
+  /** Addresses already confirmed on the list: the visitor was told so, as
+   *  a success, and nothing was sent. Recorded as a signup error with the
+   *  reason 'already_subscribed', but not one. */
+  already: number
   /** Submits that showed the visitor an error instead. */
   failed: number
 }
@@ -1757,22 +1761,24 @@ export function newsletterSignupResults(
     })
   }
   const succeeded = onePerDay('newsletter_signup_success', () => '')
-  const failed = onePerDay('newsletter_signup_error', e => e.source ?? '')
+  const answers = onePerDay('newsletter_signup_error', e => e.source ?? '')
+  const already = answers.filter(e => e.source === 'already_subscribed')
+  const failed = answers.filter(e => e.source !== 'already_subscribed')
   const rows = new Map<string, NewsletterResultRow>()
   const rowFor = (page: string) => {
     let row = rows.get(page)
     if (!row) {
-      row = { name: page, succeeded: 0, failed: 0 }
+      row = { name: page, succeeded: 0, already: 0, failed: 0 }
       rows.set(page, row)
     }
     return row
   }
   for (const e of succeeded) rowFor(e.page as string).succeeded++
+  for (const e of already) rowFor(e.page as string).already++
   for (const e of failed) rowFor(e.page as string).failed++
+  const all = (r: NewsletterResultRow) => r.succeeded + r.already + r.failed
   return {
-    byPage: [...rows.values()].sort(
-      (a, b) => b.succeeded + b.failed - (a.succeeded + a.failed)
-    ),
+    byPage: [...rows.values()].sort((a, b) => all(b) - all(a)),
     errors: tally(failed.map(e => newsletterErrorLabel(e.source))),
   }
 }
@@ -1793,6 +1799,16 @@ export interface NewsletterArchiveRow {
  *  with any, busiest first. Follows the count mode: unique = one view per
  *  visitor per page per day, and one click per visitor per link per day.
  *  Exported for the unit test. */
+/** When each past issues page went live (PR #685, deployed 11 October 2026
+ *  at about 12:30 UTC). Before then the address was the site's 404 page,
+ *  and so is a newsletter's page that isn't listed here: Funding's, until
+ *  its move. Add a newsletter's time on the day its page first lists an
+ *  issue (Funding's move checklist in ~/Newsletter/PLAN.md says so). */
+export const PAST_ISSUES_LIVE_SINCE: Readonly<Record<string, number>> = {
+  events: Date.parse('2026-10-11T12:30:00Z'),
+  training: Date.parse('2026-10-11T12:30:00Z'),
+}
+
 export function newsletterArchiveStats(
   inRange: AnalyticsEvent[],
   unique: boolean
@@ -1821,6 +1837,10 @@ export function newsletterArchiveStats(
         e.page ?? ''
       )
       if (!m) continue
+      // A view of the 404 page that stood at the address isn't a view.
+      const live = PAST_ISSUES_LIVE_SINCE[m[1]]
+      const t = Date.parse(e.ts)
+      if (live == null || Number.isNaN(t) || t < live) continue
       const name = m[1][0].toUpperCase() + m[1].slice(1)
       if (counts(e, `view\x00${name}`)) rowFor(name).views++
     } else if (e.type === 'newsletter_archive_click' && e.page) {

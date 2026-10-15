@@ -53,8 +53,10 @@ import { getProjects } from '@/lib/data/projects'
 import { requireAccess } from '@/lib/admin/auth'
 import {
   isNewsletterConfigured,
+  CAMPAIGN_READ_WINDOW,
   readSendStats,
   type SendStats,
+  type SendStatsResult,
 } from '@/lib/admin/newsletter'
 import {
   readFeedReaders,
@@ -1044,6 +1046,7 @@ async function AnalyticsView({
           {activeTab === 'newsletters' && (
             <NewsletterView
               sends={sendStats}
+              rangeStartMs={range.startMs}
               signups={
                 <>
                   <Panel title="Signup box on the site">
@@ -2018,6 +2021,7 @@ function SignupResultsPanel({
   labelFor: (name: string) => string
 }) {
   const succeeded = results.byPage.reduce((n, r) => n + r.succeeded, 0)
+  const already = results.byPage.reduce((n, r) => n + r.already, 0)
   const failed = results.byPage.reduce((n, r) => n + r.failed, 0)
   return (
     <Panel title="Signups through the site">
@@ -2028,17 +2032,24 @@ function SignupResultsPanel({
           columns={[
             { label: 'Page', sort: 'text' },
             { label: 'Signed up', className: styles.numCol, sort: 'number' },
+            {
+              label: 'Already subscribed',
+              className: styles.numCol,
+              sort: 'number',
+            },
             { label: 'Errors', className: styles.numCol, sort: 'number' },
           ]}
           values={results.byPage.map(r => [
             labelFor(r.name),
             r.succeeded,
+            r.already,
             r.failed,
           ])}
           foot={
             <tr className={styles.totalRow}>
               <td className={styles.totalLabel}>Total</td>
               <td className={styles.numCol}>{succeeded.toLocaleString()}</td>
+              <td className={styles.numCol}>{already.toLocaleString()}</td>
               <td className={styles.numCol}>{failed.toLocaleString()}</td>
             </tr>
           }
@@ -2047,6 +2058,7 @@ function SignupResultsPanel({
             <tr key={r.name}>
               <td>{labelFor(r.name)}</td>
               <td className={styles.numCol}>{r.succeeded.toLocaleString()}</td>
+              <td className={styles.numCol}>{r.already.toLocaleString()}</td>
               <td className={styles.numCol}>{r.failed.toLocaleString()}</td>
             </tr>
           ))}
@@ -2065,22 +2077,45 @@ function SignupResultsPanel({
         October 2026, on their past issues pages) sign people up on the site,
         through ActiveCampaign. Signed up = ActiveCampaign took the address and
         emailed a link to confirm it (whether the reader confirmed shows in
-        ActiveCampaign, not here). Errors = the visitor saw an error message
-        instead. /funding&apos;s box still opens Substack, so its signups finish
-        there and don&apos;t show here.
+        ActiveCampaign, not here). Already subscribed = the address was on the
+        list already, so the visitor was told so and nothing was sent. Errors =
+        the visitor saw an error message instead. /funding&apos;s box still
+        opens Substack, so its signups finish there and don&apos;t show here.
       </p>
     </Panel>
   )
 }
 
-/** The Newsletters tab: the issues sent in the range (ActiveCampaign's
- *  deliveries, opens and unsubscribes; clicks counted on aisafety.com since
- *  28 Sept 2026), the most-clicked links, and the signup box on the site. */
+/** A small rate with the decimals it needs (0.36%, 2.1%, 42%): an issue's
+ *  unsubscribes or bounces would otherwise all round to 0%. */
+function pctSmall(part: number, whole: number): string {
+  if (whole <= 0) return '—'
+  const p = (100 * part) / whole
+  if (p === 0) return '0%'
+  return `${p < 1 ? p.toFixed(2) : p < 10 ? p.toFixed(1) : Math.round(p)}%`
+}
+
+/** Most-clicked links shows this many; the caption says when there are more. */
+const TOP_LINKS = 50
+
+/** An issue's hard and soft bounces together; null when neither was read. */
+function bouncesOf(s: SendStats): number | null {
+  return s.hardBounces == null && s.softBounces == null
+    ? null
+    : (s.hardBounces ?? 0) + (s.softBounces ?? 0)
+}
+
+/** The Newsletters tab: the issues first sent in the range (ActiveCampaign's
+ *  sends, opens, unsubscribes, bounces and spam complaints; clicks counted
+ *  on aisafety.com), the most-clicked links, and the signup box on the
+ *  site. */
 function NewsletterView({
   sends,
+  rangeStartMs,
   signups,
 }: {
-  sends: SendStats[] | null
+  sends: SendStatsResult | null
+  rangeStartMs: number | null
   signups: React.ReactNode
 }) {
   if (sends === null) {
@@ -2096,14 +2131,31 @@ function NewsletterView({
       </>
     )
   }
-  const delivered = sends.reduce((n, s) => n + s.delivered, 0)
-  const opens = sends.reduce((n, s) => n + (s.opens ?? 0), 0)
-  const clicks = sends.reduce((n, s) => n + s.clicks.total, 0)
-  const unsubs = sends.reduce((n, s) => n + (s.unsubscribes ?? 0), 0)
-  const topLinks = sends
-    .flatMap(s => s.clicks.links.map(l => ({ ...l, issue: s.name })))
+  const issues = sends.issues
+  const sent = issues.reduce((n, s) => n + s.sent, 0)
+  const opens = issues.reduce((n, s) => n + (s.opens ?? 0), 0)
+  // The click counts are read in one go: all there, or none.
+  const clicksKnown = issues.every(s => s.clicks != null)
+  const clicks = issues.reduce((n, s) => n + (s.clicks?.total ?? 0), 0)
+  const unsubs = issues.reduce((n, s) => n + (s.unsubscribes ?? 0), 0)
+  const bounced = issues.reduce((n, s) => n + (bouncesOf(s) ?? 0), 0)
+  // Unknown for the range when one issue's report didn't load.
+  const spam = issues.some(s => s.spamComplaints == null)
+    ? null
+    : issues.reduce((n, s) => n + (s.spamComplaints ?? 0), 0)
+  const allLinks = issues.flatMap(s =>
+    (s.clicks?.links ?? []).map(l => ({ ...l, issue: s.name }))
+  )
+  const topLinks = [...allLinks]
     .sort((a, b) => b.clicks - a.clicks)
-    .slice(0, 50)
+    .slice(0, TOP_LINKS)
+  // The site reads ActiveCampaign's newest campaigns only; say so when the
+  // range reaches back past them.
+  const readFrom =
+    sends.readFrom &&
+    (rangeStartMs == null || rangeStartMs < Date.parse(sends.readFrom))
+      ? sends.readFrom
+      : null
   const host = (url: string) => {
     try {
       return new URL(url).hostname.replace(/^www\./, '')
@@ -2111,18 +2163,34 @@ function NewsletterView({
       return url
     }
   }
+  const unfinished: Record<NonNullable<SendStats['unfinished']>, string> = {
+    sending: 'still sending',
+    paused: 'paused part-way',
+    stopped: 'stopped part-way',
+  }
   return (
     <>
       <Panel title="Newsletter sends">
         <div className={styles.funnel}>
-          <Stat label="Issues sent" value={sends.length.toLocaleString()} />
-          <Stat label="Emails delivered" value={delivered.toLocaleString()} />
-          <Stat label="Opened" value={pct(opens, delivered)} />
-          <Stat label="Clicks" value={clicks.toLocaleString()} />
-          <Stat label="Clicks per email" value={pct(clicks, delivered)} />
-          <Stat label="Unsubscribed" value={pct(unsubs, delivered)} />
+          <Stat label="Issues sent" value={issues.length.toLocaleString()} />
+          <Stat label="Emails sent" value={sent.toLocaleString()} />
+          <Stat label="Opened" value={pct(opens, sent)} />
+          <Stat
+            label="Clicks"
+            value={clicksKnown ? clicks.toLocaleString() : '—'}
+          />
+          <Stat
+            label="Clicks per email"
+            value={clicksKnown && sent > 0 ? (clicks / sent).toFixed(2) : '—'}
+          />
+          <Stat label="Unsubscribed" value={pctSmall(unsubs, sent)} />
+          <Stat label="Bounced" value={pctSmall(bounced, sent)} />
+          <Stat
+            label="Marked as spam"
+            value={spam == null ? '—' : spam.toLocaleString()}
+          />
         </div>
-        {sends.length === 0 ? (
+        {issues.length === 0 ? (
           <p className={styles.dim}>No issues sent in this range.</p>
         ) : (
           <SortableTable
@@ -2130,29 +2198,34 @@ function NewsletterView({
               { label: 'Issue', sort: 'text' },
               { label: 'Newsletter', sort: 'text' },
               { label: 'Sent', sort: 'text' },
-              { label: 'Delivered', className: styles.numCol, sort: 'number' },
+              { label: 'Sent to', className: styles.numCol, sort: 'number' },
               { label: 'Opened', className: styles.pctCol, sort: 'number' },
               { label: 'Clicks', className: styles.numCol, sort: 'number' },
               { label: 'Unsubs', className: styles.numCol, sort: 'number' },
+              { label: 'Bounced', className: styles.numCol, sort: 'number' },
+              { label: 'Spam', className: styles.numCol, sort: 'number' },
             ]}
-            values={sends.map(s => [
+            values={issues.map(s => [
               s.name,
               s.newsletter,
               s.sentAt ?? '',
-              s.delivered,
-              s.opens != null && s.delivered > 0 ? s.opens / s.delivered : null,
-              s.clicks.total,
+              s.sent,
+              s.opens != null && s.sent > 0 ? s.opens / s.sent : null,
+              s.clicks?.total ?? null,
               s.unsubscribes,
+              bouncesOf(s),
+              s.spamComplaints,
             ])}
           >
-            {sends.map(s => (
+            {issues.map(s => (
               <tr key={s.id}>
                 <td>
                   {s.name}
-                  {s.waves > 0 && (
+                  {(s.waves > 0 || s.unfinished) && (
                     <span className={styles.dim}>
-                      {' '}
-                      · {s.waves} wave{s.waves === 1 ? '' : 's'}
+                      {s.waves > 0 &&
+                        ` · ${s.waves} wave${s.waves === 1 ? '' : 's'}`}
+                      {s.unfinished && ` · ${unfinished[s.unfinished]}`}
                     </span>
                   )}
                 </td>
@@ -2160,37 +2233,73 @@ function NewsletterView({
                 <td className={styles.dim}>
                   {s.sentAt ? formatDay(s.sentAt) : '—'}
                 </td>
-                <td className={styles.numCol}>
-                  {s.delivered.toLocaleString()}
-                </td>
+                <td className={styles.numCol}>{s.sent.toLocaleString()}</td>
                 <td className={styles.pctCol}>
-                  {s.opens != null ? pct(s.opens, s.delivered) : '—'}
+                  {s.opens != null ? pct(s.opens, s.sent) : '—'}
                 </td>
                 <td className={styles.numCol}>
-                  {s.clicks.total.toLocaleString()}
+                  {s.clicks ? s.clicks.total.toLocaleString() : '—'}
                 </td>
                 <td className={styles.numCol}>
                   {s.unsubscribes != null
                     ? s.unsubscribes.toLocaleString()
                     : '—'}
                 </td>
+                <td
+                  className={styles.numCol}
+                  title={
+                    s.hardBounces != null || s.softBounces != null
+                      ? `${(s.hardBounces ?? 0).toLocaleString()} hard, ${(s.softBounces ?? 0).toLocaleString()} soft`
+                      : undefined
+                  }
+                >
+                  {bouncesOf(s)?.toLocaleString() ?? '—'}
+                </td>
+                <td className={styles.numCol}>
+                  {s.spamComplaints != null
+                    ? s.spamComplaints.toLocaleString()
+                    : '—'}
+                </td>
               </tr>
             ))}
           </SortableTable>
         )}
+        {readFrom && (
+          <p className={styles.dim}>
+            ActiveCampaign holds more campaigns than the site reads at once (the
+            newest {CAMPAIGN_READ_WINDOW}), so issues first sent before{' '}
+            {formatDay(readFrom)} may be missing here.
+          </p>
+        )}
         <p className={styles.caption}>
-          Issues sent to the Events, Training and Funding lists in this range
-          (test lists left out). An issue sent in warm-up waves is one row, its
-          finished waves added up. Opened = unique opens ÷ delivered, from
-          ActiveCampaign; Apple Mail opens every email it receives, so it reads
-          high. Clicks are counted on aisafety.com as readers follow a link,
-          every click (not unique readers), link checkers left out; issues sent
-          before 28 September 2026 went through ActiveCampaign&apos;s tracker
-          and show none. Clicks per email = clicks ÷ delivered.
+          Issues sent through ActiveCampaign to the Events, Training and Funding
+          lists, by the day each first went out. Test lists, and practice sends
+          to fewer than 50 people, are left out. Events and Training moved from
+          Substack on 8 October 2026, so their earlier issues aren&apos;t here,
+          and Funding still sends from Substack. An issue sent in waves is one
+          row with all its waves added up. Sent to = emails sent, bounced ones
+          included. Opened = unique opens ÷ emails sent, from ActiveCampaign.
+          Apple Mail opens every email it receives, so this reads high, and the
+          send watcher&apos;s verified opens, which leave those out, read lower.
+          Clicks are counted on aisafety.com as readers follow a link in the
+          email or its web, text or feed copy, every click (not unique readers)
+          whenever it was made, link checkers left out. Clicks per email =
+          clicks ÷ emails sent. Bounced = emails turned away, hard (the address
+          doesn&apos;t exist, so ActiveCampaign sends it nothing more) and soft
+          (a full mailbox or a server down, tried again next time). Hover a
+          number for the split. Spam = readers who pressed Report spam where
+          their mail service tells the sender (Yahoo, Outlook, AOL and others;
+          Gmail tells nobody about one reader). No sender can see whether an
+          email landed in a spam folder, so falling opens are the usual sign.
         </p>
       </Panel>
       <Panel title="Most-clicked links">
-        {topLinks.length === 0 ? (
+        {!clicksKnown ? (
+          <p className={styles.dim}>
+            The click counts couldn&apos;t be read just now — try refreshing in
+            a moment.
+          </p>
+        ) : topLinks.length === 0 ? (
           <p className={styles.dim}>No clicks counted in this range yet.</p>
         ) : (
           <SortableTable
@@ -2225,6 +2334,12 @@ function NewsletterView({
               </tr>
             ))}
           </SortableTable>
+        )}
+        {allLinks.length > TOP_LINKS && (
+          <p className={styles.caption}>
+            The {TOP_LINKS} most-clicked of {allLinks.length.toLocaleString()}{' '}
+            links clicked on these issues.
+          </p>
         )}
       </Panel>
       {signups}

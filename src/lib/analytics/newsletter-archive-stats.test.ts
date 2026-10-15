@@ -23,9 +23,9 @@ const click = (
     ts,
   }) as AnalyticsEvent
 
-const DAY1 = '2026-10-10T10:00:00Z'
-const DAY1_LATER = '2026-10-10T18:00:00Z'
-const DAY2 = '2026-10-11T09:00:00Z'
+const DAY1 = '2026-10-12T10:00:00Z'
+const DAY1_LATER = '2026-10-12T18:00:00Z'
+const DAY2 = '2026-10-13T09:00:00Z'
 
 const EVENTS = [
   view('/newsletter/events', 'a', DAY1),
@@ -82,6 +82,29 @@ describe('newsletterArchiveStats', () => {
         issueClicks: 0,
         feedClicks: 2,
         substackClicks: 1,
+      },
+    ])
+  })
+
+  it('leaves out views of the 404 page that stood at the address', () => {
+    // Before the pages went live (about 12:30 UTC on 11 October 2026), and
+    // Funding's, which has no page until its move.
+    expect(
+      newsletterArchiveStats(
+        [
+          view('/newsletter/events', 'a', '2026-10-11T12:00:00Z'),
+          view('/newsletter/funding', 'b', DAY1),
+          view('/newsletter/training', 'c', '2026-10-11T12:45:00Z'),
+        ],
+        true
+      )
+    ).toEqual([
+      {
+        name: 'Training',
+        views: 1,
+        issueClicks: 0,
+        feedClicks: 0,
+        substackClicks: 0,
       },
     ])
   })

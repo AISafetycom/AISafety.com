@@ -34,6 +34,8 @@ const EVENTS = [
   // No visitor id (private browsing): always counted.
   ev('newsletter_signup_error', 'Training', undefined, DAY1, 'http_504'),
   ev('newsletter_signup_error', 'Training', undefined, DAY1, 'http_504'),
+  // c is on the list already: told so as a success, nothing sent, no error.
+  ev('newsletter_signup_error', 'Training', 'c', DAY1, 'already_subscribed'),
   // Not results: submits, views, and an event without a page.
   ev('newsletter_signup', 'Events', 'a', DAY1),
   ev('newsletter_view', 'Funding', 'a', DAY1),
@@ -44,8 +46,8 @@ describe('newsletterSignupResults', () => {
   it('counts one success a visitor a page a day, and each kind of error', () => {
     expect(newsletterSignupResults(EVENTS, true)).toEqual({
       byPage: [
-        { name: 'Events', succeeded: 3, failed: 2 },
-        { name: 'Training', succeeded: 1, failed: 2 },
+        { name: 'Events', succeeded: 3, already: 0, failed: 2 },
+        { name: 'Training', succeeded: 1, already: 1, failed: 2 },
       ],
       errors: [
         { name: 'Site error (HTTP 504)', count: 2 },
@@ -58,8 +60,8 @@ describe('newsletterSignupResults', () => {
   it('counts every result in total mode', () => {
     const r = newsletterSignupResults(EVENTS, false)
     expect(r.byPage).toEqual([
-      { name: 'Events', succeeded: 4, failed: 3 },
-      { name: 'Training', succeeded: 1, failed: 2 },
+      { name: 'Events', succeeded: 4, already: 0, failed: 3 },
+      { name: 'Training', succeeded: 1, already: 1, failed: 2 },
     ])
     expect(r.errors).toEqual([
       { name: 'Email address not accepted', count: 2 },

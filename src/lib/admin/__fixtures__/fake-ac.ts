@@ -87,8 +87,9 @@ export class FakeRedis {
         })
         return p
       },
-      hgetall: () => {
-        ops.push(() => null)
+      // Click counts a test put in kv.data under their key; none otherwise.
+      hgetall: (key: string) => {
+        ops.push(() => (kvHas(key) ? kv.data.get(key) : null))
         return p
       },
       exec: async () => {
