@@ -18,6 +18,7 @@ import { laterSince, laterUntil } from '@/lib/admin/queue-later'
 import { LEFT_OUT_KEY, withLeftOut } from '@/lib/admin/queue-left-out'
 import { verdictWords, type FlagUpdate } from '@/lib/admin/queue-flag'
 import { rejectReplyFor, shownDeclineChip } from '@/lib/admin/queue-decline'
+import { discordAppLink, replyToCopy } from '@/lib/admin/queue-discord'
 import {
   alreadyRepliedOf,
   type AlreadyReplied,
@@ -1044,6 +1045,23 @@ function discordRejectText(item: QueueItem): string | null {
     : null
 }
 
+/** What a decision's toast says once its Discord reply is on the clipboard. */
+const COPIED_NOTE = 'Reply copied · paste it in Discord'
+
+/** The Discord reply a decision's toast offers: the one copied with the
+ *  decision, else the one ready once the decision landed. Such a toast stays
+ *  up until Discord is opened, it is closed, or the next decision, so the
+ *  paste is not forgotten (Bryce, 15 Oct 2026). */
+function toastReply(toast: Toast): string | null {
+  if (toast.item.source !== 'Discord' || toast.later) return null
+  if (toast.state === 'failed' || toast.state === 'undoing') return null
+  if (toast.copied) return toast.copied
+  if (toast.state !== 'done') return null
+  return (
+    (toast.no ? discordRejectText(toast.item) : toast.item.replyDraft) || null
+  )
+}
+
 function replyLabel(item: QueueItem): string {
   if (item.alreadyReplied) return 'Already replied by hand · no draft'
   if (item.status === 'Rejected') {
@@ -1180,6 +1198,8 @@ interface Toast {
   sub?: string
   /** What Retry sends again after a failure. */
   retry?: { action: Action; extra: Record<string, unknown> }
+  /** A Discord reply put on the clipboard with the decision. */
+  copied?: string
 }
 
 /** What the page tells the Mac agent to do after a decision: save the
@@ -2597,6 +2617,16 @@ export default function QueueAdmin({
         action === 'accept' && reply !== null ? { replyDraft: reply } : {}
       const decision =
         action === 'accept' || action === 'reject' || action === 'later'
+      // A Discord reply goes on the clipboard with the decision, as the page
+      // shows it, ready to paste (Bryce, 15 Oct 2026). Copied here, inside
+      // the click or key press, because the browser allows it only then.
+      const copyText = replyToCopy({
+        source: item.source,
+        action,
+        alreadyReplied: Boolean(item.alreadyReplied),
+        shownReply: reply ?? item.replyDraft,
+        rejectReply: extra.rejectReply,
+      })
       if (decision) {
         // The page moves on now; the write lands behind it. The previous
         // decision stops being U's target (the Done list still has it).
@@ -2623,6 +2653,22 @@ export default function QueueAdmin({
           state: 'working',
           text: workingLabel(item, action, drafts[item.id]),
         })
+        if (copyText) {
+          navigator.clipboard.writeText(copyText).then(
+            () =>
+              setToast(prev =>
+                prev &&
+                prev.item.id === item.id &&
+                prev.state !== 'undoing' &&
+                !undoAfterRef.current.has(item.id)
+                  ? { ...prev, copied: copyText }
+                  : prev
+              ),
+            // Not copied (the page lost focus first): the toast keeps its
+            // Copy reply button, so nothing is lost.
+            () => {}
+          )
+        }
         // Auto-advance to the next open item that is not itself on its way,
         // opening its page if that is folded; a finished Fable reply first.
         const walk = ordered.walk
@@ -2727,6 +2773,7 @@ export default function QueueAdmin({
                   later: action === 'later',
                   state: 'done',
                   text,
+                  copied: prev.copied,
                   sub:
                     action === 'later'
                       ? laterNote(updated)
@@ -2834,14 +2881,15 @@ export default function QueueAdmin({
     undoAfterRef.current.add(id)
     setToast(prev =>
       prev && prev.item.id === id
-        ? { ...prev, sub: 'Undoing as soon as it lands…' }
+        ? { ...prev, copied: undefined, sub: 'Undoing as soon as it lands…' }
         : prev
     )
   }, [])
 
   useEffect(() => {
-    // A decision on its way, or one that failed, stays up until dealt with.
-    if (!toast || toast.state !== 'done') return
+    // A decision on its way, or one that failed, stays up until dealt with;
+    // so does one whose Discord reply is still to be pasted.
+    if (!toast || toast.state !== 'done' || toastReply(toast)) return
     const leave = setTimeout(
       () => setToastLeaving(true),
       TOAST_MS - TOAST_OUT_MS
@@ -3200,6 +3248,7 @@ export default function QueueAdmin({
   const tabDone = ordered.donePerKind[kind]
   const tabTotal = ordered.openPerKind[kind] + tabDone
   const toastRetry = toast?.retry ?? null
+  const toastCopy = toast ? toastReply(toast) : null
   // The sections the list shows: those with something waiting, and
   // Requests on the additions and changes tabs even when it is empty.
   const shownSections = SECTIONS.filter(
@@ -3678,31 +3727,28 @@ export default function QueueAdmin({
             <span className={styles.rowMeta}>
               <span>{toast.text}</span>
               {toast.item.page && <span>{toast.item.page}</span>}
-              {toast.sub && <span>{toast.sub}</span>}
+              {toast.copied && toast.state !== 'failed' ? (
+                <span className={styles.toastCopied}>{COPIED_NOTE}</span>
+              ) : (
+                toast.sub && <span>{toast.sub}</span>
+              )}
             </span>
           </span>
-          {toast.state === 'done' &&
-            toast.item.source === 'Discord' &&
-            (toast.no
-              ? discordRejectText(toast.item)
-              : toast.item.replyDraft) && (
-              <>
-                <CopyReply
-                  text={
-                    (toast.no
-                      ? discordRejectText(toast.item)
-                      : toast.item.replyDraft) ?? ''
-                  }
+          {toastCopy && (
+            <>
+              {toast.item.sourceLink && (
+                <OpenOnDiscord
+                  href={toast.item.sourceLink}
                   className={styles.toastUndo}
+                  onOpen={() => setToast(null)}
                 />
-                {toast.item.sourceLink && (
-                  <OpenOnDiscord
-                    href={toast.item.sourceLink}
-                    className={styles.toastUndo}
-                  />
-                )}
-              </>
-            )}
+              )}
+              {/* Copied already: the Done list keeps a Copy reply for later. */}
+              {!toast.copied && (
+                <CopyReply text={toastCopy} className={styles.toastUndo} />
+              )}
+            </>
+          )}
           {toast.state === 'failed' ? (
             <>
               {toastRetry && (
@@ -3751,6 +3797,15 @@ export default function QueueAdmin({
             >
               <Icon src={ICON.undo} size={12} className={styles.undoIcon} />
               Undo <kbd>U</kbd>
+            </button>
+          )}
+          {toastCopy && toast.state === 'done' && (
+            <button
+              className={styles.toastClose}
+              aria-label="Dismiss"
+              onClick={() => setToast(null)}
+            >
+              <Icon src={ICON.x} size={12} />
             </button>
           )}
         </div>
@@ -4366,9 +4421,7 @@ function Detail({
                 {item.sourceLink ? (
                   <>
                     {' '}
-                    <a href={item.sourceLink} target="_blank" rel="noreferrer">
-                      on Discord
-                    </a>
+                    <a href={discordAppLink(item.sourceLink)}>on Discord</a>
                   </>
                 ) : (
                   ' on Discord'
@@ -4430,6 +4483,11 @@ function Detail({
         <p className={styles.note}>
           Fable writes this one from your reason when you reject.
         </p>
+      ) : item.source === 'Discord' ? (
+        // The same box as the accept's Discord reply above it: click to
+        // copy, no typing here (Bryce, 15 Oct 2026: "why do these have
+        // different buttons?").
+        <CopyBox text={declineText} />
       ) : d.editingDecline ? (
         <textarea
           ref={fitToText}
@@ -4469,11 +4527,11 @@ function Detail({
       {!declineFromReason && (
         <p className={styles.note}>
           {d.decline !== null || !declineChip
-            ? 'Reject saves this'
-            : `Reject for “${declineChip}” saves this`}
+            ? 'Reject'
+            : `Reject for “${declineChip}”`}
           {item.source === 'Discord'
-            ? ' here to copy into Discord. Nothing is sent.'
-            : ' as a Gmail draft. Nothing is sent.'}
+            ? ' copies this, ready to paste in Discord. Nothing is sent.'
+            : ' saves this as a Gmail draft. Nothing is sent.'}
         </p>
       )}
     </section>
@@ -4528,7 +4586,14 @@ function Detail({
             onEdit={() => setD({ editingReply: true })}
           />
         )}
-        {item.source !== 'Discord' && (
+        {item.source === 'Discord' ? (
+          isOpen(item) && (
+            <p className={styles.note}>
+              {acceptLabel(item, activeEdits(d), d.leftOut)} copies this, ready
+              to paste in Discord. Nothing is sent.
+            </p>
+          )
+        ) : (
           <p className={styles.note}>
             {item.replyStatus === 'Saved' ? (
               <>
@@ -6567,20 +6632,25 @@ function CopyReply({ text, className }: { text: string; className?: string }) {
   )
 }
 
-/** The conversation the request came from, in Discord. */
+/** The conversation the request came from, opened in the Discord app,
+ *  where the reply is pasted (Bryce, 15 Oct 2026: "it could open the
+ *  specific thread"). */
 function OpenOnDiscord({
   href,
   className,
+  onOpen,
 }: {
   href: string
   className?: string
+  onOpen?: () => void
 }) {
+  const app = discordAppLink(href)
   return (
     <a
       className={className ?? styles.ghost}
-      href={href}
-      target="_blank"
-      rel="noreferrer"
+      href={app}
+      {...(app === href ? { target: '_blank', rel: 'noreferrer' } : {})}
+      onClick={onOpen}
     >
       <Icon src={ICON.external} size={16} />
       Open on Discord
