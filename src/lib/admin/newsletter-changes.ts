@@ -52,6 +52,7 @@ import {
   type PreviewListing,
   type QueueItem,
 } from './queue'
+import { withLeftOut } from './queue-left-out'
 
 /** A line of the card the site would draw: the email's field name, its icon
  *  (null for the title and the description) and the text. */
@@ -343,10 +344,19 @@ export async function fixListing(
         409
       )
     const keep = await alreadyChanged(item)
-    await acceptItem(item, sanitiseEdits(item.edits ?? {}), null, keep)
+    // The page's edits as the Queue saved them, and the fields left out
+    // there, which Apply does not write from here either.
+    await acceptItem(
+      item,
+      sanitiseEdits(withLeftOut(item.edits ?? {}, item.leftOut ?? [])),
+      null,
+      keep
+    )
     applied = true
     if (keep.length)
       note = `Left ${keep.join(', ')} as it is: someone changed it on the listing after Broom’s check.`
+    if (item.leftOut?.length)
+      note = `${note ? `${note} ` : ''}Left ${item.leftOut.join(', ')} as it is: you left it out in the Queue.`
   }
   const previews = await previewsFor([key])
   const card = group.cards.find(c => c.key === key) as CardInfo
