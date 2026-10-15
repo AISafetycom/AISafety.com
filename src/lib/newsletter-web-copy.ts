@@ -82,7 +82,8 @@ export function htmlResponse(
 ): Response {
   const policy = [
     "default-src 'none'",
-    'img-src https: data:',
+    // 'self': the image that counts a view (seenImage), on any host.
+    "img-src 'self' https: data:",
     "style-src 'unsafe-inline' https://fonts.googleapis.com",
     'font-src https://fonts.gstatic.com',
     ...(script ? [`script-src '${script}'`] : []),

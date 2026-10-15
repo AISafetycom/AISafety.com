@@ -1646,8 +1646,8 @@ describe('Recent sends and Analytics group waves by issue', () => {
     expect(issues.map(s => [s.name, s.spamComplaints])).toEqual([[ISSUE, null]])
   })
 
-  it('Analytics: unknown clicks stay unknown, and a cut read window is said', async () => {
-    const ac = makeAC({ extra: [sentWave(1)], totalCampaigns: 250 })
+  it('Analytics: unknown clicks stay unknown', async () => {
+    const ac = makeAC({ extra: [sentWave(1)] })
     vi.stubGlobal('fetch', ac.fetchMock)
     const nl = await freshModule()
     kv.down = true
@@ -1656,12 +1656,76 @@ describe('Recent sends and Analytics group waves by issue', () => {
       endMs: null,
     })
     expect(issues.map(s => [s.name, s.clicks])).toEqual([[ISSUE, null]])
-    // The oldest campaign read: older issues may be missing.
-    const oldest = Math.min(
-      ...ac.camps
-        .map(c => Date.parse(c.cdate ?? ''))
-        .filter(t => !Number.isNaN(t))
+    expect(readFrom).toBeNull()
+  })
+
+  /** `n` test-list campaigns newer than the issue (ids from 300 up), the
+   *  newest made at 15 October 2026, 12:00 UTC and each one `every` hours
+   *  before the next. */
+  function fillers(n: number, every: number) {
+    const newest = Date.parse('2026-10-15T12:00:00Z')
+    return Array.from({ length: n }, (_, i) =>
+      camp({
+        id: String(300 + n - 1 - i),
+        name: `Filler ${i}`,
+        list: '4',
+        cdate: new Date(newest - i * every * 3_600_000).toISOString(),
+      })
     )
+  }
+
+  const campaignPages = (ac: ReturnType<typeof makeAC>) =>
+    ac.calls
+      .filter(c => c.method === 'GET' && c.path.startsWith('campaigns?'))
+      .map(c => new URLSearchParams(c.path.split('?')[1]).get('offset'))
+
+  it('Analytics: reads past the newest 100 campaigns, a page at a time, for an issue behind them', async () => {
+    const ac = makeAC({ extra: [sentWave(1), ...fillers(250, 1)] })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const { issues, readFrom } = await nl.readSendStats({
+      startMs: null,
+      endMs: null,
+    })
+    expect(issues.map(s => s.name)).toEqual([ISSUE])
+    // Each page starts 10 before the last one ended.
+    expect(campaignPages(ac)).toEqual([null, '90', '180'])
+    expect(readFrom).toBeNull()
+  })
+
+  it('Analytics: reads no older page than the range needs', async () => {
+    // 250 campaigns, one every 6 hours: the newest 100 reach back 25 days.
+    const ac = makeAC({ extra: [sentWave(1), ...fillers(250, 6)] })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const { issues, readFrom } = await nl.readSendStats({
+      startMs: Date.parse('2026-10-13T00:00:00Z'),
+      endMs: null,
+    })
+    expect(issues).toEqual([])
+    expect(campaignPages(ac)).toEqual([null])
+    expect(readFrom).toBeNull()
+  })
+
+  it('Analytics: says so when the range reaches back past the most it reads', async () => {
+    const nl = await freshModule()
+    const max = nl.CAMPAIGN_READ_MAX
+    const ac = makeAC({ extra: [sentWave(1), ...fillers(max + 200, 1)] })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const { issues, readFrom } = await nl.readSendStats({
+      startMs: null,
+      endMs: null,
+    })
+    // The issue is older than every campaign read.
+    expect(issues).toEqual([])
+    const pages = campaignPages(ac)
+    const end = Number(pages[pages.length - 1]) + 100
+    expect(end).toBeGreaterThanOrEqual(max)
+    expect(end).toBeLessThan(max + 100)
+    const read = [...ac.camps]
+      .sort((a, b) => Number(b.id) - Number(a.id))
+      .slice(0, end)
+    const oldest = Math.min(...read.map(c => Date.parse(c.cdate ?? '')))
     expect(readFrom).toBe(new Date(oldest).toISOString())
   })
 

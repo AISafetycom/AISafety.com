@@ -100,11 +100,34 @@ function webFooter(textHref: string): string {
   )
 }
 
+/** Pure: the image an issue's web or text version loads so its views can be
+ *  counted: the pages run no site scripts, and the CDN keeps the pages
+ *  themselves for a day, so only this request reaches the server on every
+ *  view (src/app/newsletter/[key]/[issue]/seen). One transparent pixel, out
+ *  of the layout. */
+export function seenImage(
+  key: string,
+  slug: string,
+  copy: 'web' | 'text'
+): string {
+  const src = `/newsletter/${encodeURIComponent(key)}/${encodeURIComponent(slug)}/seen?as=${copy}`
+  return `<img src="${src}" width="1" height="1" alt="" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none">`
+}
+
+/** Pure: `html` with `extra` just before its closing body tag (at the end
+ *  when it has none). */
+export function beforeBodyEnd(html: string, extra: string): string {
+  if (!extra) return html
+  const at = html.search(/<\/body>/i)
+  return at < 0 ? html + extra : html.slice(0, at) + extra + html.slice(at)
+}
+
 /** Pure: the sent email as a web page. With `textHref` (the issue has a
- *  text version), its footer is the link to that instead. */
-export function webPage(email: string, textHref?: string): string {
+ *  text version), its footer is the link to that instead; `seen` (seenImage)
+ *  goes at the end of the body. */
+export function webPage(email: string, textHref?: string, seen = ''): string {
   let footer = textHref ? webFooter(textHref) : ''
-  return (
+  return beforeBodyEnd(
     email
       // The pipeline's footer: divider, Unsubscribe · View in browser, address.
       .replace(/<!--web:hide-->[\s\S]*?<!--\/web:hide-->/g, () => {
@@ -125,7 +148,8 @@ export function webPage(email: string, textHref?: string): string {
       .replace(/%(?:UNSUBSCRIBELINK|WEBCOPY|SENDER-INFO-SINGLELINE)%/g, '')
       .replace(/<!--aisafety-issue:[0-9a-f]{16}-->/g, '')
       .replace(/<!--aisafety-cards:[A-Za-z0-9+/=]*-->/g, '')
-      .replace(/<head>/i, '<head>\n<meta name="robots" content="noindex">')
+      .replace(/<head>/i, '<head>\n<meta name="robots" content="noindex">'),
+    seen
   )
 }
 
