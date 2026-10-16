@@ -115,6 +115,56 @@ function saveDraft(id: string, text: string, quote: string | null) {
 // Files waiting to go, per item, while the page stays open.
 const draftFiles = new Map<string, Pending[]>()
 
+// Fable's edits and reply drafts go on the page by themselves, with a
+// small Undo (Bryce, 16 Oct 2026: "let's make edits apply automatically,
+// and instead have a small Undo Edit button"). They used to apply only
+// when the reply finished while its item was open, so one that finished
+// after Bryce had moved on waited behind an Apply button (Guidelight AI's
+// link, 13–16 Oct 2026). The page now keeps, per item in this browser, the
+// time of the newest message it has looked at – anything newer is applied
+// when the item next opens – and what each applied reply replaced, so Undo
+// works after moving away and back, and after a reload.
+const APPLIED_KEY = 'aisafety-admin-queue:chat-applied'
+
+interface Applied {
+  /** The newest message looked at ('' for a thread that was empty). */
+  seen: string
+  /** Per reply (by its time stamp): what applying it replaced. */
+  undo: Record<string, Undo>
+  at: number
+}
+
+function readApplied(): Record<string, Applied> {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(APPLIED_KEY) ?? '{}')
+    if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+      return saved as Record<string, Applied>
+    }
+  } catch {
+    // storage refused or garbled: nothing kept
+  }
+  return {}
+}
+
+function appliedOf(id: string): Applied | null {
+  const a = readApplied()[id]
+  return a && typeof a.seen === 'string' ? a : null
+}
+
+function saveApplied(id: string, seen: string, undo: Record<string, Undo>) {
+  const all = readApplied()
+  const cutoff = Date.now() - DRAFT_DAYS * 86_400_000
+  for (const [k, a] of Object.entries(all)) {
+    if (!(a?.at > cutoff)) delete all[k]
+  }
+  all[id] = { seen, undo, at: Date.now() }
+  try {
+    localStorage.setItem(APPLIED_KEY, JSON.stringify(all))
+  } catch {
+    // storage refused: only replies that land while the item is open apply
+  }
+}
+
 interface Msg {
   role: 'you' | 'fable' | 'error'
   text?: string
@@ -203,10 +253,21 @@ function textOf(msg: Msg): string {
   return (msg.parts ?? []).map(p => (p.t === 'text' ? p.text : '')).join('')
 }
 
-/** What an auto-applied reply changed, so Undo can put it back. */
+/** What an applied reply changed, so Undo can put it back. */
 interface Undo {
-  edits?: Record<string, string | undefined>
-  reply?: string | null
+  /** Each field's edit before (null: the field had none). */
+  edits?: Record<string, string | null>
+  /** The reply draft before. */
+  reply?: string
+}
+
+/** What a reply's cards can do once it has landed: put its edits or draft
+ *  on the page (again), or take them back off. */
+interface CardActs {
+  applyEdits: (usable: Record<string, string>) => void
+  applyReply: (text: string) => void
+  undoEdits?: () => void
+  undoReply?: () => void
 }
 
 /** A decided item, opened from Done today: its cards are read-only and
@@ -341,8 +402,41 @@ export default function Chat({
   const cap = descriptionCap(item)
   const replyRef = useRef(reply)
   replyRef.current = reply
+  // What this browser kept for the item last time: the newest message it
+  // looked at, and what each applied reply replaced (APPLIED_KEY).
+  const [kept] = useState(() => appliedOf(item.id))
   // Per reply (by its time stamp): what applying it changed, for Undo.
-  const undoRef = useRef<Record<string, Undo>>({})
+  const undoRef = useRef<Record<string, Undo>>(kept?.undo ?? {})
+  // The newest message looked at; null until the thread first loads in a
+  // browser that had not seen it before.
+  const seenAtRef = useRef<string | null>(kept?.seen ?? null)
+  const keep = useCallback(() => {
+    if (seenAtRef.current !== null) {
+      saveApplied(item.id, seenAtRef.current, undoRef.current)
+    }
+  }, [item.id])
+  // Whether this item is still the open one. A reply's stream outlives the
+  // panel when Bryce moves on mid-answer; what lands after that is left
+  // for the next time the item opens (it is newer than seenAtRef), rather
+  // than applied on top of the edits as they stood when he left.
+  const mountedRef = useRef(false)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+  /** Note a message as looked at, once its blocks are applied. */
+  const markSeen = useCallback(
+    (at: string) => {
+      if (!mountedRef.current) return
+      if (seenAtRef.current === null || at > seenAtRef.current) {
+        seenAtRef.current = at
+        keep()
+      }
+    },
+    [keep]
+  )
   // How many messages the page has already looked at for blocks to apply.
   const seenRef = useRef<number | null>(null)
   // Whether the thread has loaded from the Mac yet.
@@ -355,35 +449,56 @@ export default function Chat({
     if (messages) onChangesRef.current?.(fableChangesOf(messages))
   }, [messages])
 
+  /** Put a reply's field values on the page, keeping what they replace
+   *  for its Undo. The refs move at once, so a second reply applied in the
+   *  same breath builds on this one rather than on what came before. */
+  const putEdits = useCallback(
+    (at: string, usable: Record<string, string>) => {
+      const before = editsRef.current
+      const moved = Object.keys(usable).filter(k => before[k] !== usable[k])
+      if (!moved.length) return
+      undoRef.current[at] = {
+        ...undoRef.current[at],
+        edits: Object.fromEntries(moved.map(k => [k, before[k] ?? null])),
+      }
+      const next = { ...before, ...usable }
+      editsRef.current = next
+      onSetEdits(next)
+      keep()
+    },
+    [keep, onSetEdits]
+  )
+  /** The same for a reply's new reply draft. */
+  const putReply = useCallback(
+    (at: string, text: string) => {
+      const before = replyRef.current
+      if (before === null || before === text) return
+      undoRef.current[at] = { ...undoRef.current[at], reply: before }
+      replyRef.current = text
+      onSetReply(text)
+      keep()
+    },
+    [keep, onSetReply]
+  )
+
   /** Apply the blocks in a reply that has just arrived. */
   const applyFrom = useCallback(
     (msg: Msg) => {
-      if (msg.role !== 'fable') return
+      if (msg.role !== 'fable' || !mountedRef.current) return
       if (msg.wrote) onWrote?.()
       // A decided item keeps what went with its decision: a reply that
       // lands after it changes nothing on the page.
       if (decided) return
       const { edits: proposed, reply: draft } = blocksOf(textOf(msg))
-      const undo: Undo = {}
       if (proposed) {
         const usable = Object.fromEntries(
           Object.entries(proposed).filter(([k]) => canEditField(k))
         )
-        if (Object.keys(usable).length) {
-          const before = editsRef.current
-          undo.edits = Object.fromEntries(
-            Object.keys(usable).map(k => [k, before[k]])
-          )
-          onSetEdits({ ...before, ...usable })
-        }
+        if (Object.keys(usable).length) putEdits(msg.at, usable)
       }
-      if (draft && replyRef.current !== null) {
-        undo.reply = replyRef.current
-        onSetReply(draft)
-      }
-      if (undo.edits || undo.reply !== undefined) undoRef.current[msg.at] = undo
+      if (draft) putReply(msg.at, draft)
     },
-    [canEditField, decided, onSetEdits, onSetReply, onWrote]
+    [canEditField, decided, onWrote, putEdits, putReply]
   )
   // Read through a ref by loadHistory, so that it changes only with the
   // item. The page hands down new callbacks on every render, and each
@@ -394,20 +509,44 @@ export default function Chat({
   const applyFromRef = useRef(applyFrom)
   applyFromRef.current = applyFrom
 
-  const undoFor = (msg: Msg): (() => void) | undefined => {
+  /** Forget one part of a reply's Undo once it has been used. */
+  const dropUndo = (at: string, part: keyof Undo) => {
+    const rest = { ...undoRef.current[at] }
+    delete rest[part]
+    if (rest.edits || rest.reply !== undefined) undoRef.current[at] = rest
+    else delete undoRef.current[at]
+    keep()
+  }
+
+  /** What a landed reply's cards can do: its edits and its draft each have
+   *  their own Undo, and their own Apply once taken back off. */
+  const actsFor = (msg: Msg): CardActs => {
     const u = undoRef.current[msg.at]
-    if (!u) return undefined
-    return () => {
-      if (u.edits) {
-        const next = { ...editsRef.current }
-        for (const [k, v] of Object.entries(u.edits)) {
-          if (v === undefined) delete next[k]
-          else next[k] = v
-        }
-        onSetEdits(next)
-      }
-      if (u.reply !== undefined) onSetReply(u.reply)
-      delete undoRef.current[msg.at]
+    const edits = u?.edits
+    const draft = u?.reply
+    return {
+      applyEdits: usable => putEdits(msg.at, usable),
+      applyReply: text => putReply(msg.at, text),
+      undoEdits: edits
+        ? () => {
+            const next = { ...editsRef.current }
+            for (const [k, v] of Object.entries(edits)) {
+              if (v === null) delete next[k]
+              else next[k] = v
+            }
+            editsRef.current = next
+            onSetEdits(next)
+            dropUndo(msg.at, 'edits')
+          }
+        : undefined,
+      undoReply:
+        draft !== undefined
+          ? () => {
+              replyRef.current = draft
+              onSetReply(draft)
+              dropUndo(msg.at, 'reply')
+            }
+          : undefined,
     }
   }
 
@@ -450,18 +589,24 @@ export default function Chat({
     }
     if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
     const list = data.messages ?? []
-    // A reply that landed while the page was away (or reloading mid-answer)
-    // still applies its blocks; ones from before the page opened do not –
-    // they were applied when they came, and are on the row.
+    // A reply that landed since the page last looked applies its blocks:
+    // one that came while this item stayed open (the pending poll), and
+    // one that came while Bryce was on another item or the page was shut
+    // (newer than the last message this browser looked at). Older ones
+    // were applied when they came, and are on the row.
     if (seenRef.current !== null) {
       for (const msg of list.slice(seenRef.current)) applyFromRef.current(msg)
+    } else if (seenAtRef.current !== null) {
+      const since = seenAtRef.current
+      for (const msg of list) if (msg.at > since) applyFromRef.current(msg)
     }
     seenRef.current = list.length
+    markSeen(list.reduce((a, m) => (m.at > a ? m.at : a), ''))
     loadedRef.current = true
     setMessages(list)
     setPending(Boolean(data.pending))
     return { list, pending: Boolean(data.pending) }
-  }, [call])
+  }, [call, markSeen])
 
   // The thread loads once per item. One that could not load (the Mac was
   // down, or the token had run out) tries again with the page's next token.
@@ -673,6 +818,7 @@ export default function Chat({
           applyFrom(msg)
           setMessages(m => [...(m ?? []), msg])
           seenRef.current = (seenRef.current ?? 0) + 1
+          markSeen(msg.at)
         }
         setLive(null)
         setNote(null)
@@ -940,9 +1086,7 @@ export default function Chat({
                   reply={reply}
                   canEditField={canEditField}
                   decided={decided}
-                  onSetEdits={onSetEdits}
-                  onSetReply={onSetReply}
-                  undo={undoFor(m)}
+                  acts={actsFor(m)}
                   cap={cap}
                 />
                 {m.flag !== undefined && (
@@ -966,8 +1110,6 @@ export default function Chat({
                 reply={reply}
                 canEditField={canEditField}
                 decided={decided}
-                onSetEdits={onSetEdits}
-                onSetReply={onSetReply}
                 streaming
                 cap={cap}
               />
@@ -1295,9 +1437,7 @@ function Parts({
   reply,
   canEditField,
   decided,
-  onSetEdits,
-  onSetReply,
-  undo,
+  acts,
   streaming,
   cap,
 }: {
@@ -1306,9 +1446,8 @@ function Parts({
   reply: string | null
   canEditField: (field: string) => boolean
   decided: Decided | null
-  onSetEdits: (edits: Record<string, string>) => void
-  onSetReply: (text: string | null) => void
-  undo?: () => void
+  /** Missing while the reply is still being written. */
+  acts?: CardActs
   streaming?: boolean
   cap: DescCap
 }) {
@@ -1332,9 +1471,7 @@ function Parts({
             reply={reply}
             canEditField={canEditField}
             decided={decided}
-            onSetEdits={onSetEdits}
-            onSetReply={onSetReply}
-            undo={undo}
+            acts={acts}
             caret={Boolean(streaming) && i === answer}
             blocksOnly={i !== answer}
             cap={cap}
@@ -1351,9 +1488,7 @@ function Prose({
   reply,
   canEditField,
   decided,
-  onSetEdits,
-  onSetReply,
-  undo,
+  acts,
   caret,
   blocksOnly,
   cap,
@@ -1363,9 +1498,7 @@ function Prose({
   reply: string | null
   canEditField: (field: string) => boolean
   decided: Decided | null
-  onSetEdits: (edits: Record<string, string>) => void
-  onSetReply: (text: string | null) => void
-  undo?: () => void
+  acts?: CardActs
   caret: boolean
   /** Text that isn't the answer: only its edits and reply cards show, so a
    *  change Fable proposed before its last lookup still has its Undo. */
@@ -1386,8 +1519,7 @@ function Prose({
           proposed={m[2].trim()}
           current={reply}
           decided={decided}
-          onSet={onSetReply}
-          undo={undo}
+          acts={acts}
         />
       )
     } else {
@@ -1400,8 +1532,7 @@ function Prose({
             edits={edits}
             canEditField={canEditField}
             decided={decided}
-            onSet={onSetEdits}
-            undo={undo}
+            acts={acts}
             cap={cap}
           />
         ) : (
@@ -1424,25 +1555,25 @@ function Prose({
   )
 }
 
-/** Field values from a reply. They are applied the moment the reply
- *  lands; the card shows what changed, with Undo, and turns back into an
- *  Apply button if the page's value is later edited away from it. On a
- *  decided item it only says whether they went out with the decision. */
+/** Field values from a reply. They go on the page by themselves once the
+ *  reply has landed (into the item's edits – the listing itself changes
+ *  only with Accept); the card shows what changed with a small Undo, and
+ *  a small Apply once they are off the page again (undone, or edited away
+ *  by hand). On a decided item it only says whether they went out with
+ *  the decision. */
 function EditsCard({
   proposed,
   edits,
   canEditField,
   decided,
-  onSet,
-  undo,
+  acts,
   cap,
 }: {
   proposed: Record<string, string>
   edits: Record<string, string>
   canEditField: (field: string) => boolean
   decided: Decided | null
-  onSet: (edits: Record<string, string>) => void
-  undo?: () => void
+  acts?: CardActs
   cap: DescCap
 }) {
   // Only what the page can take: a formula or housekeeping field Fable
@@ -1488,29 +1619,30 @@ function EditsCard({
         <CardFoot
           applied={applied}
           appliedText="Applied – goes with Accept"
-          applyText="Apply to the listing"
-          onApply={() => onSet({ ...edits, ...usable })}
-          undo={undo}
+          offText="Not applied"
+          waitText="Applies when Fable finishes"
+          applyText="Apply"
+          onApply={acts ? () => acts.applyEdits(usable) : undefined}
+          undoText={keys.length > 1 ? 'Undo edits' : 'Undo edit'}
+          undo={acts?.undoEdits}
         />
       )}
     </div>
   )
 }
 
-/** A new reply draft from a reply: put on the page's draft the moment it
- *  lands (it is a draft – nothing is sent), with Undo. */
+/** A new reply draft from a reply: put on the page's draft once the reply
+ *  has landed (it is a draft – nothing is sent), with a small Undo. */
 function ReplyCard({
   proposed,
   current,
   decided,
-  onSet,
-  undo,
+  acts,
 }: {
   proposed: string
   current: string | null
   decided: Decided | null
-  onSet: (text: string | null) => void
-  undo?: () => void
+  acts?: CardActs
 }) {
   if (current === null) {
     return (
@@ -1535,9 +1667,12 @@ function ReplyCard({
         <CardFoot
           applied={applied}
           appliedText="The draft on the page is updated"
-          applyText="Use as the reply draft"
-          onApply={() => onSet(proposed)}
-          undo={undo}
+          offText="Not the draft on the page"
+          waitText="Goes on the draft when Fable finishes"
+          applyText="Use it"
+          onApply={acts ? () => acts.applyReply(proposed) : undefined}
+          undoText="Undo"
+          undo={acts?.undoReply}
         />
       )}
     </div>
@@ -1680,40 +1815,65 @@ function DecidedFoot({ done, text }: { done: boolean; text: string }) {
 function CardFoot({
   applied,
   appliedText,
+  offText,
+  waitText,
   applyText,
   onApply,
+  undoText = 'Undo',
   undo,
   busy = false,
 }: {
   applied: boolean
   appliedText: string
+  /** Set on a card that applies by itself: once off the page its Apply is
+   *  a small link beside these words, not a button. */
+  offText?: string
+  /** What such a card says while its reply is still being written
+   *  (onApply missing). */
+  waitText?: string
   applyText: string
-  onApply: () => void
+  onApply?: () => void
+  undoText?: string
   undo?: () => void
   /** A write is on its way: the button waits. */
   busy?: boolean
 }) {
+  if (applied) {
+    return (
+      <div className={styles.chatCardFoot}>
+        <span className={styles.chatTool}>{appliedText}</span>
+        {undo && (
+          <button type="button" className={styles.chatLink} onClick={undo}>
+            {undoText}
+          </button>
+        )}
+      </div>
+    )
+  }
+  if (offText !== undefined) {
+    return (
+      <div className={styles.chatCardFoot}>
+        <span className={`${styles.chatTool} ${styles.chatNotApplied}`}>
+          {onApply ? offText : waitText}
+        </span>
+        {onApply && (
+          <button type="button" className={styles.chatLink} onClick={onApply}>
+            {applyText}
+          </button>
+        )}
+      </div>
+    )
+  }
   return (
     <div className={styles.chatCardFoot}>
-      {applied ? (
-        <>
-          <span className={styles.chatTool}>{appliedText}</span>
-          {undo && (
-            <button type="button" className={styles.chatLink} onClick={undo}>
-              Undo
-            </button>
-          )}
-        </>
-      ) : (
-        <button
-          type="button"
-          className={`${styles.button} ${styles.primary}`}
-          disabled={busy}
-          onClick={onApply}
-        >
-          {applyText}
-        </button>
-      )}
+      <button
+        type="button"
+        className={`${styles.button} ${styles.primary}`}
+        disabled={busy}
+        onClick={onApply}
+      >
+        {applyText}
+      </button>
     </div>
   )
 }
