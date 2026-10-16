@@ -121,7 +121,7 @@ export default function Navigation({
   )
   useEffect(() => cancelDropdownClose, [cancelDropdownClose])
   const navRef = useRef<HTMLElement>(null)
-  const navOuterRef = useRef<HTMLDivElement>(null)
+  const navOuterRef = useRef<HTMLElement>(null)
   const itemRefs = useRef<(HTMLAnchorElement | null)[]>([])
   const itemWidths = useRef<number[]>([])
   const scrollInfo = useRef({
@@ -338,7 +338,10 @@ export default function Navigation({
   }, [])
   return (
     <SearchProvider counts={counts} preview={preview}>
-      <div ref={navOuterRef} className={`${styles.nav} ${styles['nav-fixed']}`}>
+      <header
+        ref={navOuterRef}
+        className={`${styles.nav} ${styles['nav-fixed']}`}
+      >
         <div className={styles['nav-container']}>
           <Link href="/" className="padding-right-24px">
             <Image
@@ -453,7 +456,7 @@ export default function Navigation({
             </span>
           </button>
         </div>
-      </div>
+      </header>
 
       <div
         className={`${styles['mobile-menu']} ${isMenuOpen ? styles['mobile-menu-visible'] : ''}`}
