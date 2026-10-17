@@ -9,6 +9,7 @@ import {
   MAX_ROUNDS,
   type IndexedRound,
 } from './program-history'
+import { datedRoundsByProgram } from './dated-rounds'
 
 export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
@@ -230,12 +231,15 @@ interface ProgramHistoryInput {
  *  A deadline that falls today still counts as open (you can apply through the
  *  last day). An EMPTY close date is deliberately 'unknown' (rolling, walk-in,
  *  not yet announced) — never assume an empty deadline means "open".
- *  Two flags outrank the deadline: recurring programs have no dated round at
- *  all, and "not yet open" means the round is announced but you can't apply
- *  yet (orgs sometimes publish the deadline before opening applications). */
+ *  Two flags outrank the deadline: recurring programs carry no dates of their
+ *  own (their dated rounds, when the site lists any, ride along separately as
+ *  `datedRounds` – `hasDatedRounds` says whether they do), and "not yet open"
+ *  means the round is announced but you can't apply yet (orgs sometimes
+ *  publish the deadline before opening applications). */
 function eventApplicationStatus(
   meta: Record<string, unknown>,
-  today: string
+  today: string,
+  hasDatedRounds = false
 ): {
   applicationsStatus:
     | 'open'
@@ -245,11 +249,18 @@ function eventApplicationStatus(
     | 'recurring'
   applicationsNote: string
 } {
+  if (meta.recurring === 'Yes' && hasDatedRounds) {
+    return {
+      applicationsStatus: 'recurring',
+      applicationsNote:
+        "An evergreen program that runs repeatedly, and the site ALSO lists dated rounds of it: see datedRounds. Those are its next rounds — when the user asks about this program, when it runs, or how to apply, give their dates and application status, and never say no dates are listed. Whether to card a round is up to that round's own applicationsNote; this program listing is fine to card either way. For rounds before these, call get_program_history with this listing's id.",
+    }
+  }
   if (meta.recurring === 'Yes') {
     return {
       applicationsStatus: 'recurring',
       applicationsNote:
-        "An evergreen program that runs repeatedly — no dates for the next round are listed here. Fine to recommend the program itself. If the user asks when it runs, how often, or whether there'll be another round, call get_program_history with this listing's id first — the site usually has its earlier rounds on file, and their pattern is the honest answer. For the current round's dates and deadline, point the user to the program's own page, and suggest the AI Safety Training newsletter (signed up for on /training) to catch new rounds as they are announced.",
+        "An evergreen program that runs repeatedly — the site lists no dated round of it right now. Fine to recommend the program itself. If the user asks when it runs, how often, or whether there'll be another round, call get_program_history with this listing's id first — the site usually has its earlier rounds on file, and their pattern is the honest answer. For the current round's dates and deadline, point the user to the program's own page, and suggest the AI Safety Training newsletter (signed up for on /training) to catch new rounds as they are announced.",
     }
   }
   const close =
@@ -292,11 +303,20 @@ function summariseListing(
   // it is served in full and can run to thousands of chars, so a browse-all
   // search must not carry it for every match. The note travels with the data
   // so the model sees the handling rules at the moment it reads the text.
-  includeDetails?: boolean
+  includeDetails?: boolean,
+  // A recurring program's dated rounds listed elsewhere in the catalog
+  // (dated-rounds.ts), summarised with their own dates and status so the
+  // model can answer "when is the next one?" from the program's card.
+  datedRounds?: Listing[]
 ): object {
+  const rounds = datedRounds ?? []
   const eventStatus =
     l.type === 'event' || l.type === 'training'
-      ? eventApplicationStatus(l.meta as Record<string, unknown>, today)
+      ? eventApplicationStatus(
+          l.meta as Record<string, unknown>,
+          today,
+          rounds.length > 0
+        )
       : null
   return {
     id: l.id,
@@ -306,6 +326,21 @@ function summariseListing(
     description: l.description,
     meta: l.meta,
     ...(eventStatus ?? {}),
+    ...(rounds.length > 0
+      ? {
+          datedRounds: rounds.map(r => ({
+            id: r.id,
+            name: r.name,
+            ...(r.meta.startDate ? { startDate: r.meta.startDate } : {}),
+            ...(r.meta.startDateApprox
+              ? { startDateApprox: r.meta.startDateApprox }
+              : {}),
+            ...(r.meta.endDate ? { endDate: r.meta.endDate } : {}),
+            ...(r.meta.location ? { location: r.meta.location } : {}),
+            ...eventApplicationStatus(r.meta, today),
+          })),
+        }
+      : {}),
     ...(includeDates && l.dateAdded ? { dateAdded: l.dateAdded } : {}),
     ...(includeDates && l.lastModified ? { lastModified: l.lastModified } : {}),
     ...(includeDetails && l.details
@@ -370,12 +405,20 @@ async function executeSearch(
     }
   }
   const today = new Date().toISOString().slice(0, 10)
+  const rounds = datedRoundsByProgram(catalog.listings)
   return {
     ok: true,
     content: JSON.stringify({
       matches: hits.length,
       results: hits.map(h =>
-        summariseListing(h.listing, today, h.distanceKm, Boolean(sort))
+        summariseListing(
+          h.listing,
+          today,
+          h.distanceKm,
+          Boolean(sort),
+          false,
+          rounds.get(h.listing.id)
+        )
       ),
     }),
     listings: hits.map(h => h.listing),
@@ -400,7 +443,14 @@ function executeGetListing(
   return {
     ok: true,
     content: JSON.stringify(
-      summariseListing(listing, today, undefined, true, true)
+      summariseListing(
+        listing,
+        today,
+        undefined,
+        true,
+        true,
+        datedRoundsByProgram(catalog.listings).get(listing.id)
+      )
     ),
     listings: [listing],
   }
