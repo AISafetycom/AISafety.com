@@ -1386,7 +1386,27 @@ p.tabDoneTitle {
   color: var(--q-text);
 }
 
-/* A rule's test on past decisions (RuleTestBlock): one line per decision
+/* A rule's one line on its test (RuleCard): how many past decisions, then
+   each outcome's count as its small coloured label. */
+.ruleStat {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  font-size: 14px;
+  color: var(--q-text-2);
+}
+
+/* The rest of a rule's summary and Fable's take, behind Details. */
+.ruleMore {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--q-text-2);
+}
+
+/* A rule's test on past decisions (RuleCard): one line per decision
    it would have changed, its outcome as a small coloured label. */
 .ruleTest {
   margin: 0;
