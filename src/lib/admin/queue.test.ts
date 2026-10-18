@@ -76,6 +76,7 @@ function item(over: Partial<QueueItem>): QueueItem {
     ruleWording: null,
     ruleWas: null,
     ruleTest: null,
+    rulePublicPolicy: false,
     verdict: null,
     reasons: [],
     rejectChips: [],

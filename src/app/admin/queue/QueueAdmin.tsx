@@ -24,9 +24,9 @@ import {
   type AlreadyReplied,
 } from '@/lib/admin/queue-already'
 import {
+  leadSentence,
   OUTCOME_LABEL,
-  ruleTestHeadline,
-  type RuleTest,
+  ruleTestShort,
   type RuleTestResult,
 } from '@/lib/admin/queue-rule-test'
 import {
@@ -5018,39 +5018,7 @@ function Detail({
           />
         )}
 
-        {item.type === 'Rule' && (
-          <section className={styles.block}>
-            <h3 className={styles.h3}>What changes for the bots</h3>
-            <p className={styles.summary}>
-              {item.summary ?? 'No summary was written for this rule.'}
-            </p>
-            {item.appliesTo && (
-              <p className={styles.note}>Applies to: {item.appliesTo}</p>
-            )}
-          </section>
-        )}
-        {item.type === 'Rule' && <RuleTestBlock test={item.ruleTest} />}
-        {item.type === 'Rule' && item.ruleWording && (
-          // The rule as it will read, folded away: the summary is what gets
-          // read (9 Sept 2026: no diffs on the card); the words are there on
-          // a click for a rule worth checking closely (5 Oct 2026).
-          <details className={styles.findingMore}>
-            <summary>Exact wording</summary>
-            <div className={styles.block}>
-              <blockquote className={styles.quote}>
-                {item.ruleWording}
-              </blockquote>
-              {item.ruleWas && (
-                <>
-                  <h3 className={styles.h3}>Replaces</h3>
-                  <blockquote className={`${styles.quote} ${styles.from}`}>
-                    {item.ruleWas}
-                  </blockquote>
-                </>
-              )}
-            </div>
-          </details>
-        )}
+        {item.type === 'Rule' && <RuleCard key={item.id} item={item} />}
 
         {(hasCard || !excerptBlock) && replyBlock}
 
@@ -5081,13 +5049,19 @@ function Detail({
               </span>
             </div>
           )}
-          {item.reasons.length > 0 && (
-            <ul className={styles.reasons}>
-              {item.reasons.map((r, i) => (
-                <li key={i}>{r}</li>
-              ))}
-            </ul>
-          )}
+          {item.reasons.length > 0 &&
+            (item.type === 'Rule' ? (
+              // A rule's bullets are the decisions it was learned from:
+              // there on a click, not read every time (Bryce, 18 Oct 2026:
+              // "reduce it to just the bare essentials").
+              <RuleReasons key={item.id} reasons={item.reasons} />
+            ) : (
+              <ul className={styles.reasons}>
+                {item.reasons.map((r, i) => (
+                  <li key={i}>{r}</li>
+                ))}
+              </ul>
+            ))}
           {chatAgent && (
             <Chat
               key={item.id}
@@ -6693,51 +6667,122 @@ function ReplyDraft({
   )
 }
 
-/** What the Mac's test of a rule on the owner's past decisions found
- *  (~/Queue/replay.py, 9 Oct 2026): one line, Fable's take, then each
- *  decision it would have changed, "Goes against you" first; the ones where
- *  his call stands sit behind a fold. */
-function RuleTestBlock({ test }: { test: RuleTest | null }) {
-  if (!test) {
-    return (
-      <section className={styles.block}>
-        <h3 className={styles.h3}>Tested on your past decisions</h3>
-        <p className={styles.note}>
-          Not tested yet. The Mac tests each new rule on your past decisions
-          within a few minutes.
-        </p>
-      </section>
-    )
-  }
-  const changed = test.results.filter(r => r.outcome !== 'keeps')
-  const same = test.results.filter(r => r.outcome === 'keeps')
+/** A rule, bare (Bryce, 18 Oct 2026: "I find each Rule page too text
+ *  heavy, please reduce it to just the bare essentials"): the first
+ *  sentence of what changes, one line on the test on his past decisions
+ *  with its counts as labels, and only the results that need him (goes
+ *  against him, can't tell) spelled out. The rest of the summary, Fable's
+ *  take on the test, every other result, where it applies and the exact
+ *  wording wait behind one Details fold. */
+function RuleCard({ item }: { item: QueueItem }) {
+  const { lead, rest } = leadSentence(
+    item.summary ?? 'No summary was written for this rule.'
+  )
+  const test = item.ruleTest
+  const needsYou =
+    test?.results.filter(
+      r => r.outcome === 'breaks' || r.outcome === 'unclear'
+    ) ?? []
+  const others =
+    test?.results.filter(
+      r => r.outcome !== 'breaks' && r.outcome !== 'unclear'
+    ) ?? []
+  const hasDetails =
+    Boolean(rest) ||
+    Boolean(test?.summary) ||
+    others.length > 0 ||
+    (Boolean(item.appliesTo) && !item.rulePublicPolicy) ||
+    Boolean(item.ruleWording)
   return (
     <section className={styles.block}>
-      <h3 className={styles.h3}>Tested on your past decisions</h3>
-      <p className={styles.summary}>{ruleTestHeadline(test)}</p>
-      {test.summary && <p className={styles.note}>{test.summary}</p>}
-      {changed.length > 0 && (
+      <p className={styles.summary}>{lead}</p>
+      {item.rulePublicPolicy ? (
+        // The policy check's rows change aisafety.com/listing-policy only;
+        // replay.py skips them, so "Not tested yet" was never coming true.
+        <p className={styles.note}>
+          Not tested, as no bot reads the public listing policy. Apply puts this
+          wording on aisafety.com/listing-policy.
+        </p>
+      ) : !test ? (
+        <p className={styles.note}>
+          Not tested yet. The Mac tests it on your past decisions within a few
+          minutes.
+        </p>
+      ) : (
+        <p className={styles.ruleStat}>
+          <span>{ruleTestShort(test)}</span>
+          {RULE_OUTCOMES.filter(o => test.counts[o] > 0).map(o => (
+            <span key={o} className={styles.ruleTestOutcome} data-outcome={o}>
+              {OUTCOME_LABEL[o]} {test.counts[o]}
+            </span>
+          ))}
+        </p>
+      )}
+      {needsYou.length > 0 && (
         <ul className={styles.ruleTest}>
-          {changed.map(r => (
+          {needsYou.map(r => (
             <RuleTestLine key={r.row} result={r} />
           ))}
         </ul>
       )}
-      {same.length > 0 && (
+      {hasDetails && (
         <details className={styles.findingMore}>
-          <summary>
-            {same.length === 1
-              ? '1 more it touches, same as you'
-              : `${same.length} more it touches, same as you`}
-          </summary>
-          <ul className={styles.ruleTest}>
-            {same.map(r => (
-              <RuleTestLine key={r.row} result={r} />
-            ))}
-          </ul>
+          <summary>Details</summary>
+          <div className={styles.block}>
+            {rest && <p className={styles.ruleMore}>{rest}</p>}
+            {test?.summary && <p className={styles.ruleMore}>{test.summary}</p>}
+            {others.length > 0 && (
+              <ul className={styles.ruleTest}>
+                {others.map(r => (
+                  <RuleTestLine key={r.row} result={r} />
+                ))}
+              </ul>
+            )}
+            {item.appliesTo && !item.rulePublicPolicy && (
+              <p className={styles.note}>Applies to {item.appliesTo}</p>
+            )}
+            {item.ruleWording && (
+              // The rule as it will read (9 Sept 2026: no diffs on the
+              // card; 5 Oct 2026: the words a click away).
+              <>
+                <h3 className={styles.h3}>Exact wording</h3>
+                <blockquote className={styles.quote}>
+                  {item.ruleWording}
+                </blockquote>
+              </>
+            )}
+            {item.ruleWas && (
+              <>
+                <h3 className={styles.h3}>Replaces</h3>
+                <blockquote className={`${styles.quote} ${styles.from}`}>
+                  {item.ruleWas}
+                </blockquote>
+              </>
+            )}
+          </div>
         </details>
       )}
     </section>
+  )
+}
+
+const RULE_OUTCOMES = ['breaks', 'unclear', 'fixes', 'keeps'] as const
+
+/** The aside's bullets on a rule, folded: what it came from. The
+ *  policy check's "Accept puts it on …" line is left out, as the card
+ *  says so itself. */
+function RuleReasons({ reasons }: { reasons: string[] }) {
+  const shown = reasons.filter(r => !/^Accept puts it on /i.test(r))
+  if (shown.length === 0) return null
+  return (
+    <details className={styles.findingMore}>
+      <summary>Where it came from ({shown.length})</summary>
+      <ul className={styles.reasons}>
+        {shown.map((r, i) => (
+          <li key={i}>{r}</li>
+        ))}
+      </ul>
+    </details>
   )
 }
 

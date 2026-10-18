@@ -43,6 +43,7 @@ function item(over: Partial<QueueItem>): QueueItem {
     ruleWording: null,
     ruleWas: null,
     ruleTest: null,
+    rulePublicPolicy: false,
     verdict: 'Publish',
     reasons: ['Fits the events page: an in-person meetup on AI risk.'],
     rejectChips: [],

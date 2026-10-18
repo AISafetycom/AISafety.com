@@ -133,3 +133,25 @@ export function ruleTestHeadline(t: RuleTest): string {
     line += `; ${count(unclear)} ${unclear === 1 ? 'is' : 'are'} unclear`
   return `${line}.`
 }
+
+/** The rule card's short test line (Bryce, 18 Oct 2026: "I find each Rule
+ *  page too text heavy, please reduce it to just the bare essentials"):
+ *  how many past decisions, and whether it ever goes against him. The
+ *  per-outcome counts sit beside it as labels. */
+export function ruleTestShort(t: RuleTest): string {
+  if (t.checked === 0) return 'No past decisions to test it on yet'
+  const on = `Tested on ${t.checked} past decision${t.checked === 1 ? '' : 's'}`
+  return t.counts.breaks ? on : `${on}, never against you`
+}
+
+/** A rule's plain-words summary split for the card: the first sentence is
+ *  shown, the rest waits behind Details (same request, 18 Oct 2026). */
+export function leadSentence(text: string): {
+  lead: string
+  rest: string | null
+} {
+  const t = text.trim()
+  const m = t.match(/^([\s\S]+?[.!?])\s+(?=[A-Z0-9“"‘'(])/)
+  if (!m) return { lead: t, rest: null }
+  return { lead: m[1], rest: t.slice(m[0].length).trim() || null }
+}
