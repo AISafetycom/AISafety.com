@@ -5051,9 +5051,8 @@ function Detail({
           )}
           {item.reasons.length > 0 &&
             (item.type === 'Rule' ? (
-              // A rule's bullets are the decisions it was learned from:
-              // there on a click, not read every time (Bryce, 18 Oct 2026:
-              // "reduce it to just the bare essentials").
+              // A rule's bullets are the decisions it was learned from,
+              // under a heading that folds them away.
               <RuleReasons key={item.id} reasons={item.reasons} />
             ) : (
               <ul className={styles.reasons}>
@@ -6768,14 +6767,16 @@ function RuleCard({ item }: { item: QueueItem }) {
 
 const RULE_OUTCOMES = ['breaks', 'unclear', 'fixes', 'keeps'] as const
 
-/** The aside's bullets on a rule, folded: what it came from. The
+/** The aside's bullets on a rule: what it came from, open to begin with
+ *  and folded on a click (Bryce, 18 Oct 2026: "make the where it came from
+ *  show by default"). The
  *  policy check's "Accept puts it on …" line is left out, as the card
  *  says so itself. */
 function RuleReasons({ reasons }: { reasons: string[] }) {
   const shown = reasons.filter(r => !/^Accept puts it on /i.test(r))
   if (shown.length === 0) return null
   return (
-    <details className={styles.findingMore}>
+    <details className={styles.findingMore} open>
       <summary>Where it came from ({shown.length})</summary>
       <ul className={styles.reasons}>
         {shown.map((r, i) => (
