@@ -5018,7 +5018,9 @@ function Detail({
           />
         )}
 
-        {item.type === 'Rule' && <RuleCard key={item.id} item={item} />}
+        {item.type === 'Rule' && (
+          <RuleCard key={`rule:${item.id}`} item={item} />
+        )}
 
         {(hasCard || !excerptBlock) && replyBlock}
 
@@ -5052,8 +5054,11 @@ function Detail({
           {item.reasons.length > 0 &&
             (item.type === 'Rule' ? (
               // A rule's bullets are the decisions it was learned from,
-              // under a heading that folds them away.
-              <RuleReasons key={item.id} reasons={item.reasons} />
+              // under a heading that folds them away. Its key must differ
+              // from the Chat's below (a sibling keyed by the item id):
+              // sharing one left every rule visited stacked in the panel
+              // (18 Oct 2026).
+              <RuleReasons key={`reasons:${item.id}`} reasons={item.reasons} />
             ) : (
               <ul className={styles.reasons}>
                 {item.reasons.map((r, i) => (
