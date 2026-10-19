@@ -51,7 +51,7 @@ Advancing capabilities counts against a listing. The map shows the major AI comp
 
 ## What's the bar for the page I submitted to?
 
-Each page adds its own bar, and seriousness is a separate gate: on topic isn't the same as ready.
+Each page adds its own bar, and seriousness is a separate gate: on topic isn't the same as ready. If the only public link is an application form, with nothing that describes the program, that counts a little against it.
 
 **/map** – the field map of key organizations, programs, and projects.
 - The bar is higher here than for any of our other pages.
