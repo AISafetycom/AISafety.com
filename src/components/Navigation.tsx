@@ -42,11 +42,6 @@ const navItems = [
   },
   { href: '/advisors', label: 'Advisors', icon: 'person.svg' },
   {
-    href: '/projects',
-    label: 'Volunteer projects',
-    icon: 'clipboard.svg',
-  },
-  {
     href: '/founders',
     label: 'Founder toolkit',
     icon: 'rocket.svg',
@@ -56,7 +51,7 @@ const navItems = [
 
 // Caps the visible row at 6 items — Funding and below live in the +N menu
 // (and the mobile menu, which always lists everything).
-const MIN_OVERFLOW = 6
+const MAX_VISIBLE = 6
 
 // How long the +N panel stays mounted after closing, for its exit animation.
 // Must match the transition on .nav-dropdown-closing in the CSS.
@@ -71,9 +66,7 @@ export default function Navigation({
 }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
-  const [visibleCount, setVisibleCount] = useState(
-    navItems.length - MIN_OVERFLOW
-  )
+  const [visibleCount, setVisibleCount] = useState(MAX_VISIBLE)
   const pathname = usePathname()
 
   // Close the mobile menu only once the new route is actually active.
@@ -149,8 +142,7 @@ export default function Navigation({
       count++
     }
 
-    const maxVisible = navItems.length - MIN_OVERFLOW
-    setVisibleCount(Math.min(count, maxVisible))
+    setVisibleCount(Math.min(count, MAX_VISIBLE))
   }, [])
 
   // Measure item widths and calculate before the browser paints — no jitter

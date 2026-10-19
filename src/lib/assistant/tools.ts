@@ -20,7 +20,7 @@ You should call this tool LIBERALLY. By default there is NO limit — the tool r
 
 ARGUMENTS:
 
-• \`type\` — listing type. One of: 'job', 'funder', 'advisor', 'community', 'course', 'founder-resource', 'project', 'media-channel', 'org', 'event', 'training'. Highly recommended.
+• \`type\` — listing type. One of: 'job', 'funder', 'advisor', 'community', 'course', 'founder-resource', 'media-channel', 'org', 'event', 'training'. Highly recommended.
 
 • \`query\` — optional free-text terms. Tokens are matched against name (×5 weight), organization (×3), meta fields (×2), and description (×1). Use the user's words, related keywords, or leave empty to browse by filter alone.
 
@@ -98,7 +98,6 @@ EXAMPLES:
             'community',
             'course',
             'founder-resource',
-            'project',
             'media-channel',
             'org',
             'event',

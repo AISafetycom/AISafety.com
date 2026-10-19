@@ -12,7 +12,6 @@ const BROWSE_LABEL: Record<ListingType, string> = {
   community: 'Browse communities',
   course: 'Browse self-study',
   'founder-resource': 'Browse the founder toolkit',
-  project: 'Browse volunteer projects',
   'media-channel': 'Browse media channels',
   org: 'Browse the field map',
   event: 'Browse events',

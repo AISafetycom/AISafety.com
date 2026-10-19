@@ -114,9 +114,6 @@ Each page adds its own bar, and seriousness is a separate gate: on topic isn't t
 
 **/advisors** – advising services: mostly career and contribution advice, plus some coaching and operational support.
 
-**/projects** – volunteer projects for the AI safety community, including project ideas looking for an owner.
-- The bar is lower here than on any other page. An early-stage project or an unstarted idea is fine, as long as it's a specific piece of work for AI safety with a real ask for volunteers or an owner.
-
 **/jobs** – synced from the 80,000 Hours job board.
 - Vacancies only, internships included: roles tagged as fellowship, course, funding, or volunteering are not listed.
 - Submit roles to 80,000 Hours directly, using their [Propose a vacancy](https://jobs.80000hours.org/submit-role) form.
@@ -142,5 +139,5 @@ An existing listing isn't a guarantee, and we review and remove listings often.
 - **Tell us if we misread you.** If we missed x-risk work on your site or picked the wrong page, show us where. Reply to our email or use the "Send us an email" button.
 - **Suggest a correction.** If you think another listing shouldn't be there, use "Suggest correction" on that page and say why.
 
-Last updated: 13 October 2026
+Last updated: 19 October 2026
 `
