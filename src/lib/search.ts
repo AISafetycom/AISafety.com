@@ -19,7 +19,6 @@ export const BROWSE_TYPES: SearchType[] = [
   'funder',
   'media',
   'advisor',
-  'project',
   'founder',
 ]
 
@@ -33,7 +32,6 @@ export const TYPE_LABEL: Record<SearchType, string> = {
   job: 'Jobs',
   map: 'Field map',
   media: 'Media channels',
-  project: 'Volunteer projects',
   training: 'Training programs',
   page: 'Pages',
 }
@@ -48,7 +46,6 @@ export const TYPE_ICON: Record<SearchType, string | null> = {
   job: '/images/icons/briefcase.svg',
   map: '/images/icons/map.svg',
   media: '/images/icons/megaphone.svg',
-  project: '/images/icons/clipboard.svg',
   training: '/images/icons/grad-cap.svg',
   page: null,
 }
@@ -66,7 +63,6 @@ export const TYPE_PATH: Record<SearchType, string | null> = {
   job: '/jobs',
   map: '/map',
   media: '/media-channels',
-  project: '/projects',
   training: '/training',
   page: null,
 }
@@ -168,7 +164,6 @@ const TYPE_WORDS: Partial<Record<SearchType, string[]>> = {
   community: ['community', 'communities'],
   funder: ['funder', 'funders', 'funding', 'grant', 'grants'],
   advisor: ['advisor', 'advisors', 'advice'],
-  project: ['project', 'projects', 'volunteer'],
   founder: ['founder', 'founders'],
   training: ['training', 'program', 'programs'],
   media: ['media'],

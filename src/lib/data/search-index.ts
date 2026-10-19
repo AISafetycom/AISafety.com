@@ -7,7 +7,6 @@ import { getFunders } from './funding'
 import { getJobs, type Job } from './jobs'
 import { getMapData } from './map'
 import { getMediaChannels } from './media-channels'
-import { getProjects } from './projects'
 import {
   getTrainingPrograms,
   getRecurringPrograms,
@@ -24,7 +23,6 @@ export type SearchType =
   | 'job'
   | 'map'
   | 'media'
-  | 'project'
   | 'training'
   | 'page'
 
@@ -117,12 +115,6 @@ const STATIC_PAGES: SearchEntry[] = [
     '/advisors',
     '/images/icons/person.svg',
     'Talk to a 1-1 advisor.'
-  ),
-  page(
-    'Volunteer projects',
-    '/projects',
-    '/images/icons/clipboard.svg',
-    'Volunteer projects you can join.'
   ),
   page(
     'Hackathon 2026',
@@ -491,20 +483,6 @@ async function getMediaEntries(): Promise<SearchEntry[]> {
   }))
 }
 
-async function getProjectEntries(): Promise<SearchEntry[]> {
-  const projects = await getProjects()
-  return projects.map(p => ({
-    type: 'project' as const,
-    title: p.name,
-    // The card's contact line; '' for Seeking owner ideas (see projects.ts).
-    subtitle: addedName(p.contact, p.name),
-    description: p.description,
-    category: p.status,
-    url: p.email ? `mailto:${p.email}` : '/projects',
-    logo: p.logo,
-  }))
-}
-
 /** Every search type with listings behind it — all but the static pages. */
 export type ListingSearchType = Exclude<SearchType, 'page'>
 
@@ -521,7 +499,6 @@ const ENTRY_BUILDERS: Record<ListingSearchType, () => Promise<SearchEntry[]>> =
     job: getJobEntries,
     map: getMapEntries,
     media: getMediaEntries,
-    project: getProjectEntries,
   }
 
 export function isListingSearchType(type: string): type is ListingSearchType {

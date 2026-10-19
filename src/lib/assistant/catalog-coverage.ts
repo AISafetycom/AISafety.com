@@ -64,12 +64,6 @@ export const RESOURCE_TABLES: ResourceTable[] = [
     pagePath: '/founders',
   },
   {
-    tableId: 'tblHT29QNgMYKB8iW',
-    tableName: 'Projects',
-    catalogType: 'project',
-    pagePath: '/projects',
-  },
-  {
     tableId: 'tblCTOMzyH3vILL5I',
     tableName: 'Media channels',
     catalogType: 'media-channel',
@@ -112,6 +106,10 @@ export const INTERNAL_TABLES: { tableId: string; tableName: string }[] = [
   { tableId: 'tblKm44KngUDniaDR', tableName: 'Site corrections' },
   { tableId: 'tblHxEuvRUlQ5e3KQ', tableName: 'Contact' },
   { tableId: 'tblonlKwIFJ7Aa8QN', tableName: 'Queue' },
+  // The /projects page was retired on 19 October 2026 (it redirects to
+  // /about), so the bot no longer searches the table. A rebuilt page moves it
+  // back to RESOURCE_TABLES.
+  { tableId: 'tblHT29QNgMYKB8iW', tableName: 'Projects' },
 ]
 
 export interface CoverageResult {

@@ -17,7 +17,6 @@ The site does not publish articles or research. It is a directory and discovery 
 - [Funding](https://aisafety.com/funding): Organizations and programs offering financial support for AI safety projects and research
 - [Media Channels](https://aisafety.com/media-channels): Podcasts, newsletters, YouTube channels, and other media covering AI safety
 - [Advisors](https://aisafety.com/advisors): People offering free 1-on-1 calls to help others contribute effectively to AI safety
-- [Volunteer Projects](https://aisafety.com/projects): Open-source and volunteer-driven tools and projects supporting the AI safety ecosystem
 - [Donation Guide](https://aisafety.com/donation-guide): Guidance on how to donate effectively to AI safety organizations
 - [Founder Toolkit](https://aisafety.com/founders): Resources for starting a new AI safety organization or project
 

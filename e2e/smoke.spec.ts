@@ -34,16 +34,21 @@ function findPublicPages(dir = APP_DIR, route = ''): string[] {
   return pages.sort()
 }
 
-const PUBLIC_PAGES = findPublicPages()
+// Retired pages whose code is kept for a rebuild. next.config.ts redirects
+// them, so they're checked for the redirect instead of rendered.
+const RETIRED_PAGES: Record<string, string> = { '/projects': '/about' }
+
+const PUBLIC_PAGES = findPublicPages().filter(p => !(p in RETIRED_PAGES))
 
 // The resource pages (src/lib/site-pages.ts) get extra checks on their data.
-const RESOURCE_PAGES: string[] = Object.values(SITE_PAGES).map(p => p.path)
+const RESOURCE_PAGES: string[] = Object.values(SITE_PAGES)
+  .map(p => p.path)
+  .filter(p => !(p in RETIRED_PAGES))
 
 // Resource pages whose main content is a list of listings that link out.
-// The map draws logos instead, volunteer projects name a contact person
-// rather than linking anywhere, and the donation guide is prose.
+// The map draws logos instead, and the donation guide is prose.
 const LISTING_PAGES = RESOURCE_PAGES.filter(
-  p => !['/map', '/projects', '/donation-guide'].includes(p)
+  p => !['/map', '/donation-guide'].includes(p)
 )
 
 // Every outbound listing link carries the site's UTM tags (src/lib/utm.ts),
@@ -104,10 +109,6 @@ test.describe('public pages', () => {
         await expect(page.locator(LISTING_LINK).first()).toBeVisible()
         expect(await page.locator(LISTING_LINK).count()).toBeGreaterThan(3)
       }
-      if (path === '/projects') {
-        // One <h3> per project card.
-        expect(await page.locator('h3').count()).toBeGreaterThan(3)
-      }
       if (path === '/map') {
         // The D3 map draws one <image> per organization logo.
         await expect
@@ -119,6 +120,15 @@ test.describe('public pages', () => {
       await page.waitForLoadState('load')
       await page.waitForTimeout(1000)
       expect(errors).toEqual([])
+    })
+  }
+})
+
+test.describe('retired pages', () => {
+  for (const [path, target] of Object.entries(RETIRED_PAGES)) {
+    test(`${path} redirects to ${target}`, async ({ page }) => {
+      await page.goto(path)
+      expect(new URL(page.url()).pathname).toBe(target)
     })
   }
 })

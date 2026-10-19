@@ -41,7 +41,6 @@ const DIRECTORIES = [
   { path: '/media-channels', label: 'Media channels indexed' },
   { path: '/advisors', label: 'Advisors' },
   { path: '/self-study', label: 'Self-study courses' },
-  { path: '/projects', label: 'Volunteer projects' },
   { path: '/founders', label: 'Founder resources' },
 ] as const
 

@@ -5,7 +5,6 @@ import { getAdvisors } from '@/lib/data/advisors'
 import { getCommunities } from '@/lib/data/communities'
 import { getCourses } from '@/lib/data/self-study'
 import { getFounderResources } from '@/lib/data/founders'
-import { getProjects } from '@/lib/data/projects'
 import { getMediaChannels } from '@/lib/data/media-channels'
 import { getMapData } from '@/lib/data/map'
 import { mapAreaFor } from '@/lib/data/map-areas'
@@ -100,7 +99,6 @@ export async function buildCatalog(): Promise<Catalog> {
     communities,
     courses,
     founders,
-    projects,
     mediaChannels,
     mapData,
     events,
@@ -113,7 +111,6 @@ export async function buildCatalog(): Promise<Catalog> {
     getCommunities(),
     getCourses(),
     getFounderResources(),
-    getProjects(),
     getMediaChannels(),
     getMapData(),
     getEvents(),
@@ -263,25 +260,6 @@ export async function buildCatalog(): Promise<Catalog> {
         type: r.type,
       }),
       featured: isFeatured(r),
-    })
-  }
-
-  for (const p of projects) {
-    listings.push({
-      id: `project:${p.id}`,
-      type: 'project',
-      name: p.name,
-      description: clamp(p.description, 280),
-      details: p.descriptionLong?.trim() || undefined,
-      url: p.email ? `mailto:${p.email}` : '#',
-      pageUrl: '/projects',
-      dateAdded: p.dateAdded ?? undefined,
-      lastModified: p.lastModified ?? undefined,
-      meta: compact({
-        status: p.status,
-        contact: p.contact,
-      }),
-      featured: isFeatured(p),
     })
   }
 
