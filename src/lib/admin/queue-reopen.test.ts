@@ -5,6 +5,7 @@ import {
   reopenedOf,
   reopeningLabel,
   reopeningOf,
+  reviewNewerThanChat,
   wasDeclined,
   withReopenMarker,
   type DecisionFacts,
@@ -91,6 +92,7 @@ describe('the proposal keys', () => {
         text: 'The expression of interest form IS the application.',
         take: 'Yes – the form is the application.',
         changes: 'yes',
+        reviewed: '2026-10-20T16:54:18Z',
       })
     ).toEqual({
       from: 'joseph@example.org',
@@ -100,6 +102,7 @@ describe('the proposal keys', () => {
       text: 'The expression of interest form IS the application.',
       take: 'Yes – the form is the application.',
       changes: 'yes',
+      reviewed: '2026-10-20T16:54:18Z',
     })
     const odd = pushbackOf({
       text: 'hi',
@@ -109,6 +112,7 @@ describe('the proposal keys', () => {
     expect(odd?.link).toBeNull()
     expect(odd?.changes).toBeNull()
     expect(odd?.take).toBeNull()
+    expect(odd?.reviewed).toBeNull()
     expect(pushbackOf({ text: '  ' })).toBeNull()
   })
   it('reads how it came back', () => {
@@ -174,5 +178,47 @@ describe('reopeningLabel', () => {
     expect(reopeningLabel({ at: null, by: 'page', error: 'boom' })).toBe(
       'Could not bring it back · boom'
     )
+  })
+})
+
+describe('reviewNewerThanChat', () => {
+  // AI Safety Essentials Fellowship: Bryce's last chat on 13 Oct, back on
+  // 20 Oct after their reply, then Fable's review again.
+  const pushback = pushbackOf({
+    text: 'The expression of interest form IS the application.',
+    reviewed: '2026-10-20T16:54:18Z',
+  })
+  const reopened = reopenedOf({ at: '2026-10-20T16:38:00Z', by: 'reply' })
+  const chat = '2026-10-13T09:49:27Z'
+
+  it('is newer when the review ran again after the chat', () => {
+    expect(reviewNewerThanChat({ pushback, reopened }, chat)).toBe(true)
+  })
+  it('is newer when it came back after the chat, before a new review', () => {
+    expect(
+      reviewNewerThanChat(
+        { pushback: pushbackOf({ text: 'hi' }), reopened },
+        chat
+      )
+    ).toBe(true)
+  })
+  it('is not when Bryce has chatted since', () => {
+    expect(
+      reviewNewerThanChat({ pushback, reopened }, '2026-10-20T17:02:11Z')
+    ).toBe(false)
+  })
+  it('is not for an item never brought back', () => {
+    expect(reviewNewerThanChat({ pushback: null, reopened: null }, chat)).toBe(
+      false
+    )
+    expect(
+      reviewNewerThanChat(
+        { pushback: null, reopened: reopenedOf({ at: 'soon' }) },
+        chat
+      )
+    ).toBe(false)
+  })
+  it('is newer than an empty chat', () => {
+    expect(reviewNewerThanChat({ pushback, reopened: null }, null)).toBe(true)
   })
 })

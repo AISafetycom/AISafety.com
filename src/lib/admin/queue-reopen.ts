@@ -35,6 +35,9 @@ export interface Pushback {
    *  the Mac has written it. */
   take: string | null
   changes: 'yes' | 'no' | 'unsure' | null
+  /** When Fable's full review ran again with their reply as context, which
+   *  refreshed the verdict and its reasons; null until it has. */
+  reviewed: string | null
 }
 
 export interface Reopened {
@@ -94,6 +97,7 @@ export function pushbackOf(v: unknown): Pushback | null {
     changes: (CHANGES as readonly string[]).includes(changes ?? '')
       ? (changes as Pushback['changes'])
       : null,
+    reviewed: text(v.reviewed),
   }
 }
 
@@ -106,6 +110,24 @@ export function reopenedOf(v: unknown): Reopened | null {
     rebuilt: v.rebuilt === true,
     logo: text(v.logo),
   }
+}
+
+/** The item came back, or Fable reviewed it again, after the newest message
+ *  in its chat (`chatAt`, ISO; null for an empty thread): the verdict and
+ *  its reasons are the news, so the side panel opens at its top rather than
+ *  at the foot of the old chat (Bryce, 20 Oct 2026, on AI Safety Essentials
+ *  Fellowship, re-reviewed to Publish after their reply while the panel
+ *  showed his 13 Oct chat: "Where's Fable's new review?"). */
+export function reviewNewerThanChat(
+  item: { pushback: Pushback | null; reopened: Reopened | null },
+  chatAt: string | null
+): boolean {
+  const times = [item.pushback?.reviewed, item.reopened?.at]
+    .map(at => Date.parse(at ?? ''))
+    .filter(Number.isFinite)
+  if (!times.length) return false
+  const chat = Date.parse(chatAt ?? '')
+  return !Number.isFinite(chat) || Math.max(...times) > chat
 }
 
 /** The reply block's `declined`, when no reply from them came since. */
