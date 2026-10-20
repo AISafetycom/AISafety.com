@@ -73,6 +73,9 @@ import {
   type PictureSide,
 } from '@/lib/admin/queue-picture'
 import styles from './queue.module.css'
+import { Collapse } from '../Collapse'
+import { useClosing } from '../motion'
+import motion from '../motion.module.css'
 
 // The Queue is a triage tool Bryce sits in for long stretches, so it has its
 // own look (see queue.module.css) rather than the admin's teal card stack:
@@ -1516,6 +1519,7 @@ export default function QueueAdmin({
     return () => clearTimeout(t)
   }, [dayStart])
   const [showHelp, setShowHelp] = useState(false)
+  const [helpShown, helpClosing] = useClosing(showHelp)
   const [kind, setKind] = useState<Kind>('additions')
   const [collapsed, setCollapsed] = useState<Record<Section, boolean>>({
     fable: false,
@@ -3902,44 +3906,46 @@ export default function QueueAdmin({
                           <Icon src={ICON.chevron} size={12} />
                         </span>
                       </button>
-                      {collapsed[section] ? null : list.length === 0 ? (
-                        <div className={styles.groupEmpty}>Nothing waiting</div>
-                      ) : ordered.pages[section].length ? (
-                        ordered.pages[section].map(page => {
-                          const foldKey = `${section}:${page.key}`
-                          const folded = foldedPages[foldKey] === true
-                          return (
-                            <div key={page.key} className={styles.pageGroup}>
-                              <button
-                                className={styles.pageHead}
-                                onClick={e =>
-                                  togglePage(
-                                    foldKey,
-                                    e.shiftKey
-                                      ? ordered.pages[section].map(
-                                          p => `${section}:${p.key}`
-                                        )
-                                      : undefined
-                                  )
-                                }
-                                aria-expanded={!folded}
-                              >
-                                <span
-                                  className={`${styles.pageChevron} ${folded ? styles.groupChevronClosed : ''}`}
+                      <Collapse open={!collapsed[section]}>
+                        {list.length === 0 ? (
+                          <div className={styles.groupEmpty}>
+                            Nothing waiting
+                          </div>
+                        ) : ordered.pages[section].length ? (
+                          ordered.pages[section].map(page => {
+                            const foldKey = `${section}:${page.key}`
+                            const folded = foldedPages[foldKey] === true
+                            return (
+                              <div key={page.key} className={styles.pageGroup}>
+                                <button
+                                  className={styles.pageHead}
+                                  onClick={e =>
+                                    togglePage(
+                                      foldKey,
+                                      e.shiftKey
+                                        ? ordered.pages[section].map(
+                                            p => `${section}:${p.key}`
+                                          )
+                                        : undefined
+                                    )
+                                  }
+                                  aria-expanded={!folded}
                                 >
-                                  <Icon src={ICON.chevron} size={12} />
-                                </span>
-                                {page.label}
-                                <span className={styles.pageCount}>
-                                  {page.items.length}
-                                </span>
-                                {folded && (
-                                  <FableDot mark={markAmong(page.items)} />
-                                )}
-                              </button>
-                              {folded
-                                ? null
-                                : page.items.map(item => (
+                                  <span
+                                    className={`${styles.pageChevron} ${folded ? styles.groupChevronClosed : ''}`}
+                                  >
+                                    <Icon src={ICON.chevron} size={12} />
+                                  </span>
+                                  {page.label}
+                                  <span className={styles.pageCount}>
+                                    {page.items.length}
+                                  </span>
+                                  {folded && (
+                                    <FableDot mark={markAmong(page.items)} />
+                                  )}
+                                </button>
+                                <Collapse open={!folded}>
+                                  {page.items.map(item => (
                                     <Row
                                       key={item.id}
                                       item={item}
@@ -3957,35 +3963,38 @@ export default function QueueAdmin({
                                       onLogoError={() => logoDied(item)}
                                     />
                                   ))}
-                            </div>
-                          )
-                        })
-                      ) : (
-                        list.map(item => (
-                          <Row
-                            key={item.id}
-                            item={item}
-                            active={item.id === selectedId && !showDone}
-                            working={pending[item.id] ?? null}
-                            failed={
-                              !pending[item.id] && Boolean(draft(item.id).error)
-                            }
-                            fable={fableMarks[item.id]}
-                            urgency={
-                              section === 'fable' || section === 'urgent'
-                                ? ordered.urgencies.get(item.id)
-                                : undefined
-                            }
-                            urgencyNote={
-                              section === 'urgent'
-                                ? visitorsNote(item)
-                                : undefined
-                            }
-                            onClick={() => select(item.id)}
-                            onLogoError={() => logoDied(item)}
-                          />
-                        ))
-                      )}
+                                </Collapse>
+                              </div>
+                            )
+                          })
+                        ) : (
+                          list.map(item => (
+                            <Row
+                              key={item.id}
+                              item={item}
+                              active={item.id === selectedId && !showDone}
+                              working={pending[item.id] ?? null}
+                              failed={
+                                !pending[item.id] &&
+                                Boolean(draft(item.id).error)
+                              }
+                              fable={fableMarks[item.id]}
+                              urgency={
+                                section === 'fable' || section === 'urgent'
+                                  ? ordered.urgencies.get(item.id)
+                                  : undefined
+                              }
+                              urgencyNote={
+                                section === 'urgent'
+                                  ? visitorsNote(item)
+                                  : undefined
+                              }
+                              onClick={() => select(item.id)}
+                              onLogoError={() => logoDied(item)}
+                            />
+                          ))
+                        )}
+                      </Collapse>
                     </div>
                   )
                 })}
@@ -4202,9 +4211,16 @@ export default function QueueAdmin({
         </div>
       )}
 
-      {showHelp && (
-        <div className={styles.help} onClick={() => setShowHelp(false)}>
-          <div className={styles.helpCard} onClick={e => e.stopPropagation()}>
+      {helpShown && (
+        <div
+          className={`${styles.help} ${helpClosing ? motion.fadeOut : motion.fade}`}
+          onClick={() => setShowHelp(false)}
+          inert={helpClosing}
+        >
+          <div
+            className={`${styles.helpCard} ${helpClosing ? motion.riseOut : motion.rise}`}
+            onClick={e => e.stopPropagation()}
+          >
             <div className={styles.helpTitle}>Keyboard</div>
             <dl className={styles.helpList}>
               <dt>
@@ -5709,7 +5725,7 @@ function Detail({
             Claude is revising this{item.note ? ` (“${item.note}”)` : ''}.
           </p>
         ) : d.mode === 'reject' ? (
-          <div className={styles.panel}>
+          <div className={`${styles.panel} ${motion.fade}`}>
             <div className={styles.chips}>
               {item.rejectChips.map((chip, i) => (
                 // Picking a reason IS the rejection: no Confirm step after

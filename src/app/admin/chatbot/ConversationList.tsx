@@ -16,6 +16,8 @@ import {
 } from 'react'
 import { parseLog, parseNotes, stampToDate } from '@/lib/admin/annotation-log'
 import styles from '../admin.module.css'
+import { Collapse } from '../Collapse'
+import motion from '../motion.module.css'
 import TranscriptMessage, {
   ClickedCardsContext,
   ListingInfoContext,
@@ -1266,475 +1268,482 @@ function ConversationRow({
         <div className={styles.convRowQuery}>{firstUser}</div>
       </button>
 
-      {expanded && data && (
-        <ClickedCardsContext.Provider value={clickedSet}>
-          <div className={styles.convDetail}>
-            <div className={styles.convDetailField}>
-              <div className={styles.convDetailLabel}>
-                Transcript ({turnCount} turn{turnCount === 1 ? '' : 's'})
-              </div>
-              <div className={styles.convTranscript}>
-                {/* conv.page is the page the chat started on, so this is the
+      {data && (
+        <Collapse open={expanded}>
+          <ClickedCardsContext.Provider value={clickedSet}>
+            <div className={styles.convDetail}>
+              <div className={styles.convDetailField}>
+                <div className={styles.convDetailLabel}>
+                  Transcript ({turnCount} turn{turnCount === 1 ? '' : 's'})
+                </div>
+                <div className={styles.convTranscript}>
+                  {/* conv.page is the page the chat started on, so this is the
                     greeting the visitor actually opened the widget under
                     (from today's page config — old rows show the current
                     wording). Mid-chat navigation appears as dividers below. */}
-                <div className={styles.convGreeting}>
-                  {greetingFor(conv.page)}
-                </div>
-                {/* The suggestion chips offered with the greeting. Chips send
+                  <div className={styles.convGreeting}>
+                    {greetingFor(conv.page)}
+                  </div>
+                  {/* The suggestion chips offered with the greeting. Chips send
                     their text verbatim, so a first message that matches one
                     was a press, not typed — badge it. Like the greeting, the
                     chips come from today's page config rather than the log,
                     so old rows show the current set. */}
-                <div className={styles.convGreetingChips}>
-                  {chipsFor(conv.page).map(chip => {
-                    const pressed = chip === firstUser.trim()
-                    return (
-                      <span
-                        key={chip}
-                        className={
-                          pressed
-                            ? `${styles.convChip} ${styles.convChipPressed}`
-                            : styles.convChip
-                        }
-                        title={
-                          pressed
-                            ? 'The visitor pressed this suggestion — their first message was not typed'
-                            : 'Suggestion offered with the greeting'
-                        }
-                      >
-                        {chip}
-                        {pressed && (
-                          <span className={styles.convChipPressedTag}>✓</span>
-                        )}
-                      </span>
-                    )
-                  })}
-                </div>
-                {/* The stored history is a window (the last 50 messages; 14
+                  <div className={styles.convGreetingChips}>
+                    {chipsFor(conv.page).map(chip => {
+                      const pressed = chip === firstUser.trim()
+                      return (
+                        <span
+                          key={chip}
+                          className={
+                            pressed
+                              ? `${styles.convChip} ${styles.convChipPressed}`
+                              : styles.convChip
+                          }
+                          title={
+                            pressed
+                              ? 'The visitor pressed this suggestion — their first message was not typed'
+                              : 'Suggestion offered with the greeting'
+                          }
+                        >
+                          {chip}
+                          {pressed && (
+                            <span className={styles.convChipPressedTag}>✓</span>
+                          )}
+                        </span>
+                      )
+                    })}
+                  </div>
+                  {/* The stored history is a window (the last 50 messages; 14
                     on rows logged before 17 Aug 2026), so a long chat's
                     opening turns are gone from the transcript even though
                     the per-turn arrays still count them. Say so, rather than
                     letting the visible start read as the real one. */}
-                {missingTurns > 0 && data.history.length > 0 && (
-                  <div
-                    className={styles.convNavDivider}
-                    title="The log keeps only the most recent messages of a conversation; earlier turns were not stored"
-                  >
-                    {missingTurns} earlier turn{missingTurns === 1 ? '' : 's'}{' '}
-                    not stored
-                  </div>
-                )}
-                {data.history.length > 0 ? (
-                  data.history.map((t, i) => {
-                    // This reply's position in the visitor's own message list
-                    // — what the rating/delivery/click keys point at.
-                    // Undefined when the mapping is unknowable (legacy row
-                    // with dropped messages): the badges are hidden rather
-                    // than misattributed.
-                    const clientIdx =
-                      t.role === 'assistant' && clientIndexOf
-                        ? clientIndexOf(i)
-                        : undefined
-                    const reads =
-                      t.role === 'assistant'
-                        ? toolCallsForMessage(data, i).filter(
-                            c =>
-                              c.name === 'read_listing_page' ||
-                              c.name === 'get_program_history'
-                          )
-                        : []
-                    // The visitor moved to a different page before sending
-                    // this message — mark it so the transcript reads in the
-                    // context they actually saw.
-                    const navTo = (() => {
-                      if (t.role !== 'user') return undefined
-                      const page = pageForUserMessage(data, i)
-                      if (!page) return undefined
-                      for (let j = i - 1; j >= 0; j--) {
-                        if (data.history[j].role === 'user') {
-                          const prev = pageForUserMessage(data, j)
-                          return prev && prev !== page ? page : undefined
-                        }
-                      }
-                      return undefined
-                    })()
-                    return (
-                      <Fragment key={i}>
-                        {navTo && (
-                          <div className={styles.convNavDivider}>
-                            navigated to {navTo}
-                          </div>
-                        )}
-                        <div
-                          className={
-                            t.role === 'user'
-                              ? styles.convTurnUser
-                              : styles.convTurnAssistant
-                          }
-                        >
-                          <div className={styles.convTurnRole}>
-                            {t.role === 'user' ? 'User' : 'Chatbot'}
-                            {t.role === 'user' &&
-                              (() => {
-                                const time = timeForUserMessage(
-                                  data,
-                                  i,
-                                  conv.createdAt
-                                )
-                                return time ? (
-                                  <span
-                                    className={styles.convTurnTime}
-                                    title="When the visitor sent this message (your browser's local timezone)"
-                                  >
-                                    {time}
-                                  </span>
-                                ) : null
-                              })()}
-                            {clientIdx != null &&
-                              ratingByTurn.has(clientIdx) && (
-                                <span
-                                  className={styles.convRating}
-                                  title={
-                                    ratingByTurn.get(clientIdx) === 'up'
-                                      ? 'The visitor rated this reply thumbs up'
-                                      : 'The visitor rated this reply thumbs down'
-                                  }
-                                >
-                                  {ratingByTurn.get(clientIdx) === 'up'
-                                    ? '👍'
-                                    : '👎'}
-                                </span>
-                              )}
-                            {clientIdx != null &&
-                              (() => {
-                                const note = describeDelivery(
-                                  conv.delivery[String(clientIdx)]
-                                )
-                                return note ? (
-                                  <span
-                                    className={
-                                      note.warn
-                                        ? `${styles.convDelivery} ${styles.convDeliveryWarn}`
-                                        : styles.convDelivery
-                                    }
-                                    title={note.title}
-                                  >
-                                    {note.label}
-                                  </span>
-                                ) : null
-                              })()}
-                          </div>
-                          <VisitedPages reads={reads} />
-                          {t.role === 'user' ? (
-                            <div className={styles.convTurnContent}>
-                              {t.content}
-                            </div>
-                          ) : (
-                            <TranscriptMessage
-                              text={t.content}
-                              turnIndex={clientIdx}
-                              fallbackCardIds={fallbackCardsForMessage(data, i)}
-                            />
-                          )}
-                        </div>
-                      </Fragment>
-                    )
-                  })
-                ) : (
-                  <TranscriptMessage text={data.response} />
-                )}
-              </div>
-            </div>
-
-            {data.referrer && (
-              <div className={styles.convDetailField}>
-                <div className={styles.convDetailLabel}>Came from</div>
-                <div className={styles.convDetailValue}>{data.referrer}</div>
-              </div>
-            )}
-
-            <div className={styles.convDetailField}>
-              <div className={styles.convDetailLabel}>Rating</div>
-              <div className={styles.convAnnotRow}>
-                {REVIEW_VALUES.map(v => {
-                  const active = conv.review === v
-                  return (
-                    <button
-                      key={v}
-                      type="button"
-                      className={[
-                        styles.convRateBtn,
-                        styles[`convRate${v}`],
-                        active ? styles.convRateActive : '',
-                      ]
-                        .filter(Boolean)
-                        .join(' ')}
-                      aria-pressed={active}
-                      title={
-                        active
-                          ? 'Click again to clear this verdict'
-                          : `Mark this conversation ${v.toLowerCase()}`
-                      }
-                      onClick={() =>
-                        void persist({ review: active ? null : v })
-                      }
+                  {missingTurns > 0 && data.history.length > 0 && (
+                    <div
+                      className={styles.convNavDivider}
+                      title="The log keeps only the most recent messages of a conversation; earlier turns were not stored"
                     >
-                      {v}
-                    </button>
-                  )
-                })}
-                <button
-                  type="button"
-                  className={styles.convCopyLink}
-                  onClick={() => void copyLink()}
-                  title="Copy a direct link to this conversation — opening it still needs an admin sign-in"
-                >
-                  {linkCopied ? 'Link copied ✓' : '🔗 Copy link'}
-                </button>
-              </div>
-              {conv.review && conv.reviewedBy && (
-                <div className={styles.convReviewedBy}>
-                  Rated {conv.review.toLowerCase()} by {conv.reviewedBy}
-                </div>
-              )}
-            </div>
-
-            <div className={styles.convDetailField}>
-              <div className={styles.convDetailLabel}>Labels</div>
-              <div className={styles.convAnnotRow}>
-                {conv.tags.map(t => (
-                  <span key={t} className={styles.convLabelChip}>
-                    {t}
-                    <button
-                      type="button"
-                      className={styles.convLabelRemove}
-                      onClick={() => removeLabel(t)}
-                      title={`Remove the "${t}" label`}
-                      aria-label={`Remove the ${t} label`}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-                <div className={styles.convLabelPicker}>
-                  <input
-                    className={styles.convLabelInput}
-                    value={labelInput}
-                    onChange={e => {
-                      setLabelInput(e.target.value)
-                      setLabelMenuOpen(true)
-                      setLabelHighlight(-1)
-                    }}
-                    onFocus={() => setLabelMenuOpen(true)}
-                    onBlur={() => {
-                      setLabelMenuOpen(false)
-                      setLabelHighlight(-1)
-                    }}
-                    onKeyDown={e => {
-                      if (e.key === 'ArrowDown' && labelSuggestions.length) {
-                        e.preventDefault()
-                        setLabelMenuOpen(true)
-                        setLabelHighlight(
-                          h => (h + 1) % labelSuggestions.length
-                        )
-                      } else if (
-                        e.key === 'ArrowUp' &&
-                        labelSuggestions.length
-                      ) {
-                        e.preventDefault()
-                        setLabelMenuOpen(true)
-                        setLabelHighlight(h =>
-                          h <= 0 ? labelSuggestions.length - 1 : h - 1
-                        )
-                      } else if (e.key === 'Enter') {
-                        e.preventDefault()
-                        if (
-                          labelMenuOpen &&
-                          labelHighlight >= 0 &&
-                          labelHighlight < labelSuggestions.length
-                        ) {
-                          addLabel(labelSuggestions[labelHighlight])
-                        } else {
-                          addLabel(labelInput)
-                        }
-                      } else if (e.key === 'Escape') {
-                        setLabelMenuOpen(false)
-                        setLabelHighlight(-1)
-                      }
-                    }}
-                    placeholder="Add label…"
-                    title="Pick an existing label or type a new one and press Enter"
-                  />
-                  {labelMenuOpen && labelSuggestions.length > 0 && (
-                    <div className={styles.convLabelMenu}>
-                      {labelSuggestions.map((l, i) => (
-                        <button
-                          key={l}
-                          type="button"
-                          className={[
-                            styles.convLabelOption,
-                            i === labelHighlight
-                              ? styles.convLabelOptionActive
-                              : '',
-                          ]
-                            .filter(Boolean)
-                            .join(' ')}
-                          // Keep the input focused so its blur doesn't close
-                          // the menu before this click lands.
-                          onMouseDown={e => e.preventDefault()}
-                          onClick={() => addLabel(l)}
-                          onMouseEnter={() => setLabelHighlight(i)}
-                        >
-                          {l}
-                        </button>
-                      ))}
+                      {missingTurns} earlier turn{missingTurns === 1 ? '' : 's'}{' '}
+                      not stored
                     </div>
                   )}
+                  {data.history.length > 0 ? (
+                    data.history.map((t, i) => {
+                      // This reply's position in the visitor's own message list
+                      // — what the rating/delivery/click keys point at.
+                      // Undefined when the mapping is unknowable (legacy row
+                      // with dropped messages): the badges are hidden rather
+                      // than misattributed.
+                      const clientIdx =
+                        t.role === 'assistant' && clientIndexOf
+                          ? clientIndexOf(i)
+                          : undefined
+                      const reads =
+                        t.role === 'assistant'
+                          ? toolCallsForMessage(data, i).filter(
+                              c =>
+                                c.name === 'read_listing_page' ||
+                                c.name === 'get_program_history'
+                            )
+                          : []
+                      // The visitor moved to a different page before sending
+                      // this message — mark it so the transcript reads in the
+                      // context they actually saw.
+                      const navTo = (() => {
+                        if (t.role !== 'user') return undefined
+                        const page = pageForUserMessage(data, i)
+                        if (!page) return undefined
+                        for (let j = i - 1; j >= 0; j--) {
+                          if (data.history[j].role === 'user') {
+                            const prev = pageForUserMessage(data, j)
+                            return prev && prev !== page ? page : undefined
+                          }
+                        }
+                        return undefined
+                      })()
+                      return (
+                        <Fragment key={i}>
+                          {navTo && (
+                            <div className={styles.convNavDivider}>
+                              navigated to {navTo}
+                            </div>
+                          )}
+                          <div
+                            className={
+                              t.role === 'user'
+                                ? styles.convTurnUser
+                                : styles.convTurnAssistant
+                            }
+                          >
+                            <div className={styles.convTurnRole}>
+                              {t.role === 'user' ? 'User' : 'Chatbot'}
+                              {t.role === 'user' &&
+                                (() => {
+                                  const time = timeForUserMessage(
+                                    data,
+                                    i,
+                                    conv.createdAt
+                                  )
+                                  return time ? (
+                                    <span
+                                      className={styles.convTurnTime}
+                                      title="When the visitor sent this message (your browser's local timezone)"
+                                    >
+                                      {time}
+                                    </span>
+                                  ) : null
+                                })()}
+                              {clientIdx != null &&
+                                ratingByTurn.has(clientIdx) && (
+                                  <span
+                                    className={styles.convRating}
+                                    title={
+                                      ratingByTurn.get(clientIdx) === 'up'
+                                        ? 'The visitor rated this reply thumbs up'
+                                        : 'The visitor rated this reply thumbs down'
+                                    }
+                                  >
+                                    {ratingByTurn.get(clientIdx) === 'up'
+                                      ? '👍'
+                                      : '👎'}
+                                  </span>
+                                )}
+                              {clientIdx != null &&
+                                (() => {
+                                  const note = describeDelivery(
+                                    conv.delivery[String(clientIdx)]
+                                  )
+                                  return note ? (
+                                    <span
+                                      className={
+                                        note.warn
+                                          ? `${styles.convDelivery} ${styles.convDeliveryWarn}`
+                                          : styles.convDelivery
+                                      }
+                                      title={note.title}
+                                    >
+                                      {note.label}
+                                    </span>
+                                  ) : null
+                                })()}
+                            </div>
+                            <VisitedPages reads={reads} />
+                            {t.role === 'user' ? (
+                              <div className={styles.convTurnContent}>
+                                {t.content}
+                              </div>
+                            ) : (
+                              <TranscriptMessage
+                                text={t.content}
+                                turnIndex={clientIdx}
+                                fallbackCardIds={fallbackCardsForMessage(
+                                  data,
+                                  i
+                                )}
+                              />
+                            )}
+                          </div>
+                        </Fragment>
+                      )
+                    })
+                  ) : (
+                    <TranscriptMessage text={data.response} />
+                  )}
                 </div>
-                {labelInput.trim() && (
+              </div>
+
+              {data.referrer && (
+                <div className={styles.convDetailField}>
+                  <div className={styles.convDetailLabel}>Came from</div>
+                  <div className={styles.convDetailValue}>{data.referrer}</div>
+                </div>
+              )}
+
+              <div className={styles.convDetailField}>
+                <div className={styles.convDetailLabel}>Rating</div>
+                <div className={styles.convAnnotRow}>
+                  {REVIEW_VALUES.map(v => {
+                    const active = conv.review === v
+                    return (
+                      <button
+                        key={v}
+                        type="button"
+                        className={[
+                          styles.convRateBtn,
+                          styles[`convRate${v}`],
+                          active ? styles.convRateActive : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
+                        aria-pressed={active}
+                        title={
+                          active
+                            ? 'Click again to clear this verdict'
+                            : `Mark this conversation ${v.toLowerCase()}`
+                        }
+                        onClick={() =>
+                          void persist({ review: active ? null : v })
+                        }
+                      >
+                        {v}
+                      </button>
+                    )
+                  })}
                   <button
                     type="button"
-                    className={styles.convLabelAdd}
-                    onClick={() => addLabel(labelInput)}
+                    className={styles.convCopyLink}
+                    onClick={() => void copyLink()}
+                    title="Copy a direct link to this conversation — opening it still needs an admin sign-in"
                   >
-                    Add
+                    {linkCopied ? 'Link copied ✓' : '🔗 Copy link'}
                   </button>
+                </div>
+                {conv.review && conv.reviewedBy && (
+                  <div className={styles.convReviewedBy}>
+                    Rated {conv.review.toLowerCase()} by {conv.reviewedBy}
+                  </div>
                 )}
               </div>
-            </div>
 
-            <div className={styles.convDetailField}>
-              <div className={styles.convDetailLabel}>Notes</div>
-              {(() => {
-                const parsed = parseNotes(conv.notes)
-                return (
-                  <>
-                    {parsed.legacy && (
-                      <div className={styles.convNoteLegacy}>
-                        {parsed.legacy}
+              <div className={styles.convDetailField}>
+                <div className={styles.convDetailLabel}>Labels</div>
+                <div className={styles.convAnnotRow}>
+                  {conv.tags.map(t => (
+                    <span key={t} className={styles.convLabelChip}>
+                      {t}
+                      <button
+                        type="button"
+                        className={styles.convLabelRemove}
+                        onClick={() => removeLabel(t)}
+                        title={`Remove the "${t}" label`}
+                        aria-label={`Remove the ${t} label`}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  <div className={styles.convLabelPicker}>
+                    <input
+                      className={styles.convLabelInput}
+                      value={labelInput}
+                      onChange={e => {
+                        setLabelInput(e.target.value)
+                        setLabelMenuOpen(true)
+                        setLabelHighlight(-1)
+                      }}
+                      onFocus={() => setLabelMenuOpen(true)}
+                      onBlur={() => {
+                        setLabelMenuOpen(false)
+                        setLabelHighlight(-1)
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === 'ArrowDown' && labelSuggestions.length) {
+                          e.preventDefault()
+                          setLabelMenuOpen(true)
+                          setLabelHighlight(
+                            h => (h + 1) % labelSuggestions.length
+                          )
+                        } else if (
+                          e.key === 'ArrowUp' &&
+                          labelSuggestions.length
+                        ) {
+                          e.preventDefault()
+                          setLabelMenuOpen(true)
+                          setLabelHighlight(h =>
+                            h <= 0 ? labelSuggestions.length - 1 : h - 1
+                          )
+                        } else if (e.key === 'Enter') {
+                          e.preventDefault()
+                          if (
+                            labelMenuOpen &&
+                            labelHighlight >= 0 &&
+                            labelHighlight < labelSuggestions.length
+                          ) {
+                            addLabel(labelSuggestions[labelHighlight])
+                          } else {
+                            addLabel(labelInput)
+                          }
+                        } else if (e.key === 'Escape') {
+                          setLabelMenuOpen(false)
+                          setLabelHighlight(-1)
+                        }
+                      }}
+                      placeholder="Add label…"
+                      title="Pick an existing label or type a new one and press Enter"
+                    />
+                    {labelMenuOpen && labelSuggestions.length > 0 && (
+                      <div className={`${styles.convLabelMenu} ${motion.pop}`}>
+                        {labelSuggestions.map((l, i) => (
+                          <button
+                            key={l}
+                            type="button"
+                            className={[
+                              styles.convLabelOption,
+                              i === labelHighlight
+                                ? styles.convLabelOptionActive
+                                : '',
+                            ]
+                              .filter(Boolean)
+                              .join(' ')}
+                            // Keep the input focused so its blur doesn't close
+                            // the menu before this click lands.
+                            onMouseDown={e => e.preventDefault()}
+                            onClick={() => addLabel(l)}
+                            onMouseEnter={() => setLabelHighlight(i)}
+                          >
+                            {l}
+                          </button>
+                        ))}
                       </div>
                     )}
-                    {parsed.entries.length > 0 && (
-                      <ul className={styles.convNoteList}>
-                        {parsed.entries.map((n, i) => (
-                          <li key={i} className={styles.convNoteEntry}>
-                            <div className={styles.convNoteMeta}>
-                              <span className={styles.convActivityWho}>
-                                {n.actor}
-                              </span>
-                              <span className={styles.convActivityWhen}>
-                                {formatStamp(n.at)}
-                              </span>
-                              <span className={styles.convNoteActions}>
-                                {deletingNote === i ? (
-                                  <>
-                                    <span className={styles.convNoteConfirm}>
-                                      Delete this note?
-                                    </span>
-                                    <button
-                                      type="button"
-                                      className={`${styles.convNoteDelete} ${styles.convNoteDanger}`}
-                                      onClick={() => {
-                                        setDeletingNote(null)
-                                        void persist({
-                                          deleteNote: {
-                                            index: i,
-                                            at: n.at,
-                                            actor: n.actor,
-                                          },
-                                        })
-                                      }}
-                                    >
-                                      Yes, delete
-                                    </button>
+                  </div>
+                  {labelInput.trim() && (
+                    <button
+                      type="button"
+                      className={styles.convLabelAdd}
+                      onClick={() => addLabel(labelInput)}
+                    >
+                      Add
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className={styles.convDetailField}>
+                <div className={styles.convDetailLabel}>Notes</div>
+                {(() => {
+                  const parsed = parseNotes(conv.notes)
+                  return (
+                    <>
+                      {parsed.legacy && (
+                        <div className={styles.convNoteLegacy}>
+                          {parsed.legacy}
+                        </div>
+                      )}
+                      {parsed.entries.length > 0 && (
+                        <ul className={styles.convNoteList}>
+                          {parsed.entries.map((n, i) => (
+                            <li key={i} className={styles.convNoteEntry}>
+                              <div className={styles.convNoteMeta}>
+                                <span className={styles.convActivityWho}>
+                                  {n.actor}
+                                </span>
+                                <span className={styles.convActivityWhen}>
+                                  {formatStamp(n.at)}
+                                </span>
+                                <span className={styles.convNoteActions}>
+                                  {deletingNote === i ? (
+                                    <>
+                                      <span className={styles.convNoteConfirm}>
+                                        Delete this note?
+                                      </span>
+                                      <button
+                                        type="button"
+                                        className={`${styles.convNoteDelete} ${styles.convNoteDanger}`}
+                                        onClick={() => {
+                                          setDeletingNote(null)
+                                          void persist({
+                                            deleteNote: {
+                                              index: i,
+                                              at: n.at,
+                                              actor: n.actor,
+                                            },
+                                          })
+                                        }}
+                                      >
+                                        Yes, delete
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className={styles.convNoteDelete}
+                                        onClick={() => setDeletingNote(null)}
+                                      >
+                                        Cancel
+                                      </button>
+                                    </>
+                                  ) : (
                                     <button
                                       type="button"
                                       className={styles.convNoteDelete}
-                                      onClick={() => setDeletingNote(null)}
+                                      onClick={() => setDeletingNote(i)}
                                     >
-                                      Cancel
+                                      Delete
                                     </button>
-                                  </>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    className={styles.convNoteDelete}
-                                    onClick={() => setDeletingNote(i)}
-                                  >
-                                    Delete
-                                  </button>
-                                )}
-                              </span>
-                            </div>
-                            <div className={styles.convNoteText}>{n.text}</div>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </>
-                )
-              })()}
-              <textarea
-                className={styles.convNotes}
-                value={noteDraft}
-                onChange={e => setNoteDraft(e.target.value)}
-                onKeyDown={e => {
-                  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                    e.preventDefault()
-                    if (noteDraft.trim()) {
+                                  )}
+                                </span>
+                              </div>
+                              <div className={styles.convNoteText}>
+                                {n.text}
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </>
+                  )
+                })()}
+                <textarea
+                  className={styles.convNotes}
+                  value={noteDraft}
+                  onChange={e => setNoteDraft(e.target.value)}
+                  onKeyDown={e => {
+                    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                      e.preventDefault()
+                      if (noteDraft.trim()) {
+                        void persist({ addNote: noteDraft })
+                        setNoteDraft('')
+                      }
+                    }
+                  }}
+                  placeholder="Add a note — it will be signed with your name and the time"
+                />
+                <div className={styles.convAnnotRow}>
+                  <button
+                    type="button"
+                    className={styles.convLabelAdd}
+                    disabled={!noteDraft.trim()}
+                    onClick={() => {
                       void persist({ addNote: noteDraft })
                       setNoteDraft('')
-                    }
-                  }
-                }}
-                placeholder="Add a note — it will be signed with your name and the time"
-              />
-              <div className={styles.convAnnotRow}>
-                <button
-                  type="button"
-                  className={styles.convLabelAdd}
-                  disabled={!noteDraft.trim()}
-                  onClick={() => {
-                    void persist({ addNote: noteDraft })
-                    setNoteDraft('')
-                  }}
-                >
-                  Add note
-                </button>
+                    }}
+                  >
+                    Add note
+                  </button>
+                </div>
               </div>
+
+              {conv.reviewLog.trim() && (
+                <div className={styles.convDetailField}>
+                  <div className={styles.convDetailLabel}>Activity</div>
+                  <ul className={styles.convActivity}>
+                    {parseLog(conv.reviewLog).map((e, i) => (
+                      <li key={i} className={styles.convActivityRow}>
+                        {e.actor ? (
+                          <>
+                            <span className={styles.convActivityWho}>
+                              {e.actor}
+                            </span>{' '}
+                            {e.what}
+                            <span className={styles.convActivityWhen}>
+                              {formatStamp(e.at)}
+                            </span>
+                          </>
+                        ) : (
+                          e.what
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {saveStatus && (
+                <div className={styles.convStatus}>{saveStatus}</div>
+              )}
             </div>
-
-            {conv.reviewLog.trim() && (
-              <div className={styles.convDetailField}>
-                <div className={styles.convDetailLabel}>Activity</div>
-                <ul className={styles.convActivity}>
-                  {parseLog(conv.reviewLog).map((e, i) => (
-                    <li key={i} className={styles.convActivityRow}>
-                      {e.actor ? (
-                        <>
-                          <span className={styles.convActivityWho}>
-                            {e.actor}
-                          </span>{' '}
-                          {e.what}
-                          <span className={styles.convActivityWhen}>
-                            {formatStamp(e.at)}
-                          </span>
-                        </>
-                      ) : (
-                        e.what
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {saveStatus && (
-              <div className={styles.convStatus}>{saveStatus}</div>
-            )}
-          </div>
-        </ClickedCardsContext.Provider>
+          </ClickedCardsContext.Provider>
+        </Collapse>
       )}
     </div>
   )
