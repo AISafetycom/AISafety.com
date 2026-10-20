@@ -922,6 +922,8 @@ async function AnalyticsView({
     0
   )
   const footerTotal = data.footerClicks.reduce((sum, r) => sum + r.count, 0)
+  const pressTotal = data.press.byAction.reduce((sum, r) => sum + r.count, 0)
+  const pressActionShare = shareMap(data.press.actionShare)
   const navOpenTotal = data.navOverflowOpens.reduce(
     (sum, r) => sum + r.count,
     0
@@ -1879,6 +1881,30 @@ async function AnalyticsView({
                   The footer&apos;s link columns – &quot;Help us out&quot;,
                   &quot;Newsletters&quot;, and &quot;For press and
                   developers&quot;. Recording since 29 July 2026.
+                </p>
+              </Panel>
+              <Panel title="Press page">
+                <CountTable
+                  rows={data.press.byAction}
+                  labelHead="Action"
+                  total={pressTotal}
+                  shareFor={name => pressActionShare.get(name)}
+                  totalShare={data.press.anyShare}
+                />
+                {data.press.byItem.length > 0 && (
+                  <CountTable
+                    rows={data.press.byItem}
+                    labelHead="Item"
+                    total={pressTotal}
+                  />
+                )}
+                <p className={styles.caption}>
+                  Clicks on /media. Copy = a boilerplate block copied, Download
+                  = a logo, screenshot, or the press kit, Contact = the press
+                  email link, Jump = one of the two buttons at the top that
+                  glide down the page. % of visitors = the share of the
+                  page&apos;s visitors who did it. Recording since 19 September
+                  2026.
                 </p>
               </Panel>
               <Panel title="+N menu opens">
