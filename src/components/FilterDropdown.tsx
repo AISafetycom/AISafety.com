@@ -2,7 +2,7 @@
 
 import Icon from './Icon'
 import SearchBar from './SearchBar'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { trackFilterApply } from '@/lib/analytics'
 import { trackedFilterGroup, trackedFilterValue } from '@/lib/filter-tracking'
 import styles from './FilterDropdown.module.css'
@@ -43,39 +43,68 @@ export default function FilterDropdown({
 }: FilterDropdownProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const [pos, setPos] = useState({ top: 0, left: 0 })
+  // Sideways nudge (px) that keeps the popover inside the viewport.
+  const [shift, setShift] = useState(0)
   const ref = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
+  const needle = query.trim().toLowerCase()
+  const visibleOptions = needle
+    ? options.filter(option => option.toLowerCase().includes(needle))
+    : options
+
+  // The popover hangs under the pill in the page itself (position: absolute),
+  // so it moves with the page as it scrolls, in step. Only the sideways nudge
+  // is measured: before paint on opening, and again on resize or when a
+  // search changes the popover's width.
+  useLayoutEffect(() => {
     if (!open) return
-    // The popover is position: fixed (so the filter bar's horizontal scroll
-    // can't clip it). Pin it under the pill, clamped to the viewport, and keep
-    // it there as the bar/page scrolls. Capture phase catches the bar's scroll.
-    const position = () => {
+    const place = () => {
       const r = buttonRef.current?.getBoundingClientRect()
-      if (!r) return
-      const width = popoverRef.current?.offsetWidth ?? 0
+      const width = popoverRef.current?.offsetWidth
+      if (!r || width === undefined) return
       const left = Math.max(
         16,
         Math.min(r.left, window.innerWidth - width - 16)
       )
-      setPos({ top: r.bottom + 8, left })
+      setShift(left - r.left)
     }
-    position()
+    place()
+    window.addEventListener('resize', place)
+    return () => window.removeEventListener('resize', place)
+  }, [open, needle])
+
+  useEffect(() => {
+    if (!open) return
     const handleClick = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
         setOpen(false)
       }
     }
+    // Escape closes the popover and hands focus back to the pill. With text
+    // in the search box, the first Escape only clears it (SearchBar), so this
+    // runs in the capture phase, before the box empties.
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      const target = e.target
+      // Only the search box counts: a ticked checkbox's value is "on".
+      if (
+        target instanceof HTMLInputElement &&
+        target.type === 'text' &&
+        target.value !== '' &&
+        popoverRef.current?.contains(target)
+      ) {
+        return
+      }
+      setOpen(false)
+      buttonRef.current?.focus()
+    }
     document.addEventListener('mousedown', handleClick)
-    window.addEventListener('scroll', position, true)
-    window.addEventListener('resize', position)
+    document.addEventListener('keydown', handleKey, true)
     return () => {
       document.removeEventListener('mousedown', handleClick)
-      window.removeEventListener('scroll', position, true)
-      window.removeEventListener('resize', position)
+      document.removeEventListener('keydown', handleKey, true)
     }
   }, [open])
 
@@ -86,11 +115,6 @@ export default function FilterDropdown({
         ? `${title}: ${selected[0]}`
         : `${title}: ${selected[0]} +${selected.length - 1}`
 
-  const needle = query.trim().toLowerCase()
-  const visibleOptions = needle
-    ? options.filter(option => option.toLowerCase().includes(needle))
-    : options
-
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button
@@ -100,14 +124,8 @@ export default function FilterDropdown({
           open ? ` ${styles.pillOpen}` : ''
         }`}
         onClick={() => {
-          // Pre-position before opening so the popover doesn't flash at 0,0
-          // (the effect re-clamps once it's measured).
-          if (!open) {
-            const r = buttonRef.current?.getBoundingClientRect()
-            if (r) setPos({ top: r.bottom + 8, left: r.left })
-            // Each opening starts from the full list.
-            setQuery('')
-          }
+          // Each opening starts from the full list.
+          if (!open) setQuery('')
           setOpen(o => !o)
         }}
       >
@@ -124,7 +142,7 @@ export default function FilterDropdown({
         <div
           ref={popoverRef}
           className={`${styles.popover} border-plus-fill drop-shadow-extra-dark`}
-          style={{ top: pos.top, left: pos.left }}
+          style={{ left: shift }}
         >
           {searchable && (
             <SearchBar
