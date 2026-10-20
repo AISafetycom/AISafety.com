@@ -243,6 +243,22 @@
   font-weight: 600;
 }
 
+/* A sent issue's name opens its web version in a new tab. */
+.issueLink {
+  color: inherit;
+  text-decoration: none;
+}
+
+.issueLinkText {
+  color: var(--bright-teal-300);
+  text-underline-offset: 2px;
+}
+
+.issueLink:hover .issueLinkText {
+  color: var(--bright-teal-500);
+  text-decoration: underline;
+}
+
 .subline {
   display: block;
   margin-top: 2px;

@@ -5,6 +5,7 @@ import {
   fundingAccepting,
   issueLabel,
   monthBefore,
+  closingKeys,
   pickClosingFunders,
   pickNewFunders,
   pickNewListings,
@@ -174,5 +175,30 @@ describe('pickClosingFunders', () => {
         f => f.id
       )
     ).toEqual(['recToday', 'recEdge'])
+  })
+  it('leaves out one an earlier issue already reminded readers of', () => {
+    expect(
+      pickClosingFunders(
+        funders,
+        '2026-10-08',
+        new Set(['recNew', 'recToday'])
+      ).map(f => f.id)
+    ).toEqual(['recEdge'])
+  })
+})
+
+describe('closingKeys', () => {
+  it('takes the closing section only, old heading too', () => {
+    expect(
+      closingKeys([
+        { label: 'Newly announced', cards: [{ key: 'recNew' }] },
+        {
+          label: 'Closing in the next two weeks',
+          cards: [{ key: 'recA' }, { key: 'recB' }],
+        },
+        { label: 'Closing soon', cards: [{ key: 'recC' }] },
+        { label: 'Always open', cards: [{ key: 'recOpen' }] },
+      ])
+    ).toEqual(['recA', 'recB', 'recC'])
   })
 })
