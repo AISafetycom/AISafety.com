@@ -40,6 +40,7 @@ We lean toward work relevant to superintelligence, since we consider this to be 
 These are real problems, they're just not what this site covers:
 
 - Bias and fairness, deepfakes, misinformation and AI persuasion, content moderation, surveillance, privacy and civil liberties, child safety, copyright, job displacement and the economic impact of AI, AI for good, and AI literacy about near-term harms.
+- Machine ethics and moral-reasoning evaluations, meaning work on whether models judge right and wrong, even when it is framed in alignment or x-risk terms. Work whose own subject is alignment or loss of control and that includes an ethics track is judged normally.
 - AI welfare, digital minds, AI consciousness, AI and animals.
 - General AI policy, AI diplomacy, and great-power competition or export controls framed as geopolitics.
 - Tracking AI capabilities or the economics of AI without any safety work.
@@ -92,8 +93,8 @@ Each page adds its own bar, and seriousness is a separate gate: on topic isn't t
 **/communities** – local and online groups people can join.
 - A group needs its own joinable space (e.g. a channel in someone else's server doesn't count).
 - The main question is whether the group addresses x-risk: a multi-cause group where x-risk is only a sliver doesn't clear it.
-- Being new isn't held against you, nor is being national.
-- We look for x-risk activity people can see and join (public events, an open reading group, an active discussion space) and a home they can find. A group whose only footprint is a few event pages and a LinkedIn page is marginal but likely to be accepted.
+- Being new isn't held against you, nor is being national. A group that hasn't held its first meetup yet can still be listed, and a site that calls itself pre-launch isn't a strike.
+- We look for a real organizer, a home people can find (a site, a join link, or an open discussion space), and x-risk framing there. A group whose only footprint is a few event pages and a LinkedIn page is marginal but likely to be accepted.
 - A listed network's chapters are covered by the parent listing.
 - Coworking hubs go here, not on /map, although one that also runs its own programs can earn a /map entry too.
 
@@ -113,6 +114,7 @@ Each page adds its own bar, and seriousness is a separate gate: on topic isn't t
 - Cause-general ones qualify if the organization addresses AI x-risk.
 
 **/advisors** – advising services: mostly career and contribution advice, plus some coaching and operational support.
+- Advisers are people you can talk to. An AI chatbot or automated advice tool isn't listed, however good the organization behind it.
 
 **/jobs** – synced from the 80,000 Hours job board.
 - Vacancies only, internships included: roles tagged as fellowship, course, funding, or volunteering are not listed.
@@ -139,5 +141,5 @@ An existing listing isn't a guarantee, and we review and remove listings often.
 - **Tell us if we misread you.** If we missed x-risk work on your site or picked the wrong page, show us where. Reply to our email or use the "Send us an email" button.
 - **Suggest a correction.** If you think another listing shouldn't be there, use "Suggest correction" on that page and say why.
 
-Last updated: 19 October 2026
+Last updated: 20 October 2026
 `
