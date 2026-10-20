@@ -34,7 +34,9 @@ import {
   mergeEdits,
   queueTargets,
   noReplyOf,
+  rejectItem,
   rejectReplyOf,
+  reopenItem,
   saveEdits,
   undoItem,
   unflagItem,
@@ -96,6 +98,11 @@ function item(over: Partial<QueueItem>): QueueItem {
     error: null,
     reviewAgainOn: null,
     flagUndo: false,
+    declined: false,
+    reopening: null,
+    pushback: null,
+    reopened: null,
+    declinedBefore: null,
     ...over,
   }
 }
@@ -978,6 +985,143 @@ describe('flagItem / unflagItem', () => {
         changes: null,
       })
     ).rejects.toMatchObject({ status: 409 })
+  })
+})
+
+// Bringing a declined addition back (Bryce, 20 Oct 2026: AI Safety
+// Essentials Fellowship, declined 13 Oct; the Mac had deleted its record
+// a day later and marked the row Applied).
+describe('reopenItem', () => {
+  const ID = rid('fellowship')
+  const FLD = {
+    title: 'fldeRsOE3DM3R2vbX',
+    type: 'fldBc9YIDhjmu58f3',
+    source: 'flddKkVy62MAZ8M0J',
+    status: 'fldTXGYOoXcUApaI2',
+    proposal: 'fldgl9Ny2jnu8T0Da',
+    targetTable: 'fld45SUjstUZROuXl',
+    targetRecord: 'fldszXtLdUijgFG4l',
+    rejectReason: 'fldYa0cnc5rQxAfAa',
+    rejectReply: 'fldUQqwJn7btv6EBP',
+    decidedAt: 'fldtt7z4lYvAR5t94',
+    appliedAt: 'fldML8YnyaDYaAmTb',
+    error: 'fldrJcvFN3FCcyQPn',
+  }
+  const TRAINING = 'tbli1YSCpIuNY2DvL'
+  const proposal = {
+    kind: 'add',
+    table: TRAINING,
+    record: rid('gone'),
+    page: '/training',
+    name: 'AI Safety Essentials Fellowship',
+    fields: { Name: 'AI Safety Essentials Fellowship' },
+    reply: { to: 'a@b.org', thread: '1a134783d32333a4' },
+  }
+  const deleted: Record<string, unknown> = {
+    [FLD.title]: 'AI Safety Essentials Fellowship',
+    [FLD.type]: 'Add',
+    [FLD.source]: 'Form',
+    [FLD.status]: 'Applied',
+    [FLD.proposal]: JSON.stringify(proposal),
+    [FLD.targetTable]: TRAINING,
+    [FLD.targetRecord]: rid('gone'),
+    [FLD.rejectReason]: 'Expressions of interest only',
+    [FLD.decidedAt]: '2026-10-13T09:46:27.169Z',
+    [FLD.appliedAt]: '2026-10-14T09:50:16.000Z',
+  }
+  let row: Record<string, unknown>
+
+  beforeEach(() => {
+    row = { ...deleted }
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(
+      async (path: string, init?: RequestInit) => {
+        if (!path.startsWith(`${QUEUE}/${ID}`)) {
+          return new Response('gone', { status: 403 })
+        }
+        if (init?.method === 'PATCH') {
+          const body = JSON.parse(String(init.body)) as {
+            fields: Record<string, unknown>
+          }
+          for (const [k, v] of Object.entries(body.fields)) {
+            if (v === null) delete row[k]
+            else row[k] = v
+          }
+        }
+        return new Response(
+          JSON.stringify({
+            id: ID,
+            createdTime: '2026-10-13T08:54:00.000Z',
+            fields: row,
+          }),
+          { status: 200 }
+        )
+      }
+    )
+  })
+
+  const current = async () => {
+    const i = await getQueueItem(ID)
+    if (!i) throw new Error('row gone')
+    return i
+  }
+
+  it('reads a deleted rejection as declined, not as a publish', async () => {
+    const item = await current()
+    expect(item.declined).toBe(true)
+    expect(item.reopening).toBeNull()
+  })
+
+  it('marks the row for the Mac and leaves the decision standing', async () => {
+    row[FLD.error] = 'Reopen failed: boom'
+    await reopenItem(await current())
+    expect(row[FLD.status]).toBe('Applied')
+    expect(row[FLD.error]).toBeUndefined()
+    const saved = JSON.parse(String(row[FLD.proposal]))
+    expect(saved.reopen).toMatchObject({ by: 'page' })
+    expect(saved.reply).toEqual(proposal.reply)
+    const item = await current()
+    expect(item.reopening).toMatchObject({ by: 'page', error: null })
+    // On its way: a second press is refused.
+    await expect(reopenItem(item)).rejects.toMatchObject({ status: 409 })
+  })
+
+  it('refuses a publish, a change and an open item', async () => {
+    row[FLD.rejectReason] = undefined
+    row[FLD.appliedAt] = row[FLD.decidedAt]
+    await expect(reopenItem(await current())).rejects.toMatchObject({
+      status: 409,
+    })
+    row[FLD.type] = 'Change'
+    await expect(reopenItem(await current())).rejects.toMatchObject({
+      status: 400,
+    })
+  })
+
+  it('tells Undo to leave it to Reopen once the record is gone', async () => {
+    await expect(undoItem(await current())).rejects.toMatchObject({
+      status: 409,
+      detail: expect.stringContaining('Reopen brings it back'),
+    })
+  })
+
+  it('saves no second decline after a reopen with no reply from them', async () => {
+    row[FLD.status] = 'Pending'
+    delete row[FLD.decidedAt]
+    delete row[FLD.appliedAt]
+    delete row[FLD.rejectReason]
+    row[FLD.proposal] = JSON.stringify({
+      ...proposal,
+      reply: {
+        ...proposal.reply,
+        declined: { date: '13 October 2026', text: 'Thanks for submitting…' },
+      },
+    })
+    const item = await current()
+    expect(item.declinedBefore?.date).toBe('13 October 2026')
+    await rejectItem(item, 'Still EOI only', 'Thanks again, but…')
+    expect(row[FLD.status]).toBe('Rejected')
+    expect(row[FLD.rejectReply]).toBeUndefined()
   })
 })
 

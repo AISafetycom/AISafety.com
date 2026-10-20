@@ -63,6 +63,11 @@ function item(over: Partial<QueueItem>): QueueItem {
     error: null,
     reviewAgainOn: null,
     flagUndo: false,
+    declined: false,
+    reopening: null,
+    pushback: null,
+    reopened: null,
+    declinedBefore: null,
     ...over,
   }
 }
