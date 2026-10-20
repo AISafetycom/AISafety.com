@@ -234,7 +234,7 @@ export default function AboutPage() {
               research.
             </p>
             <a
-              href="mailto:bryceerobertson@gmail.com?subject=Volunteering%20for%20AISafety.com"
+              href="https://discord.gg/faamWzPcv8"
               target="_blank"
               rel="noopener noreferrer"
               className="button-secondary"
@@ -257,7 +257,7 @@ export default function AboutPage() {
               thoughts, we&apos;re listening.
             </p>
             <a
-              href="https://discord.gg/faamWzPcv8"
+              href="https://airtable.com/appF8XfZUGXtfi40E/pageXZp18w3Sqm1Z7/form?prefill_Page=about&hide_Page=true"
               target="_blank"
               rel="noopener noreferrer"
               className="button-secondary"

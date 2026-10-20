@@ -144,6 +144,10 @@ export interface QueueItem {
   /** Rule: the Mac's test of the rule on the owner's past decisions
    *  (proposal `replay`, ~/Queue/replay.py); null until it has run. */
   ruleTest: RuleTest | null
+  /** Rule: it only changes the public listing policy page (the Mac's
+   *  policy check, proposal `public_policy`), which no bot reads, so it is
+   *  never tested on past decisions. */
+  rulePublicPolicy: boolean
   verdict: Verdict | null
   reasons: string[]
   rejectChips: string[]
@@ -528,6 +532,7 @@ function rowToItem(
   let ruleWording: string | null = null
   let ruleWas: string | null = null
   let ruleTest: RuleTest | null = null
+  let rulePublicPolicy = false
   let replyTo: string | null = null
   let noReply: NoReply | null = null
   let alreadyReplied: AlreadyReplied | null = null
@@ -541,6 +546,7 @@ function rowToItem(
     ruleWording = str(proposal.wording)
     ruleWas = str(proposal.was)
     ruleTest = ruleTestOf(proposal.replay)
+    rulePublicPolicy = proposal.public_policy === true
     name = str(proposal.name)
     url = str(proposal.url)
     if (isRecord(proposal.reply)) {
@@ -640,6 +646,7 @@ function rowToItem(
     ruleWording,
     ruleWas,
     ruleTest,
+    rulePublicPolicy,
     verdict: str(f[F.verdict]) as Verdict | null,
     reasons: lines(f[F.reasons]),
     rejectChips: lines(f[F.rejectChips]),

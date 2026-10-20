@@ -2,7 +2,7 @@
 
 ## What this is
 
-The code behind [aisafety.com](https://aisafety.com): a Next.js 16 (App Router) + TypeScript site on Vercel. It is a directory of AI safety resources across twelve resource pages (events, training, field map, communities, self-study, jobs, funding, media channels, advisors, volunteer projects, donation guide, founder toolkit), all fed from one Airtable base. Around that sit a chatbot, a public read-only Data API, first-party analytics, and a password-gated admin area.
+The code behind [aisafety.com](https://aisafety.com): a Next.js 16 (App Router) + TypeScript site on Vercel. It is a directory of AI safety resources across eleven resource pages (events, training, field map, communities, self-study, jobs, funding, media channels, advisors, donation guide, founder toolkit), all fed from one Airtable base. Around that sit a chatbot, a public read-only Data API, first-party analytics, and a password-gated admin area.
 
 The site was migrated from Webflow in 2026 and the migration is finished. **The code is the source of truth now.** `backup/` is the old Webflow snapshot, kept only for reference until issue #297 removes it. Do not copy from it, and do not treat the live site as a spec to replicate.
 

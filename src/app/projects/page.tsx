@@ -7,6 +7,9 @@ import { getProjects } from '@/lib/data/projects'
 import { pageMetadata } from '@/lib/page-metadata'
 import { SITE_PAGES } from '@/lib/site-pages'
 
+// Retired on 19 October 2026: next.config.ts redirects /projects to /about,
+// so this page is never served, and the nav, sitemap, search and chatbot no
+// longer point here. The code stays for the rebuilt projects page.
 export const metadata = pageMetadata(SITE_PAGES.projects)
 
 export default async function ProjectsPage() {

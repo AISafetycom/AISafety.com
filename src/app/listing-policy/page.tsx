@@ -27,7 +27,6 @@ const PAGE_PATHS = new Set([
   '/media-channels',
   '/founders',
   '/advisors',
-  '/projects',
   '/jobs',
   '/donation-guide',
 ])

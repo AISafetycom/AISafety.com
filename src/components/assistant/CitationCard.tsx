@@ -27,8 +27,6 @@ function TypeIcon({ type }: { type: ListingType }) {
       return <Icon src="/images/icons/book.svg" size={16} />
     case 'founder-resource':
       return <Icon src="/images/icons/rocket.svg" size={16} />
-    case 'project':
-      return <Icon src="/images/icons/clipboard.svg" size={16} />
     case 'media-channel':
       return <Icon src="/images/icons/megaphone.svg" size={16} />
     case 'org':
@@ -70,8 +68,6 @@ export default function CitationCard({ citation, note, onClick }: Props) {
   // lands somewhere useful and the user gets the full listing for context:
   //   - "#" — a listing with no link of its own (e.g. a community with no
   //     website or join link).
-  //   - mailto: — volunteer projects expose only the contact's email; the user
-  //     should read the project on the Projects page before emailing anyone.
   // The assistant is also prompted to point to the resource page in these cases.
   const href = isExternal ? citation.url : citation.pageUrl || citation.url
   const summary = metaSummary(citation)

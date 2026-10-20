@@ -218,6 +218,16 @@ const NAV_OVERFLOW_OPEN_LABEL: Record<string, string> = {
   tap: 'Tap',
 }
 
+/** Dashboard labels for what a press-page click did (press_action.source):
+ *  the same four words Matomo records as the event's action, so the two
+ *  read side by side. */
+const PRESS_ACTION_LABEL: Record<string, string> = {
+  copy: 'Copy',
+  download: 'Download',
+  contact: 'Contact',
+  jump: 'Jump',
+}
+
 // ─── Redis backend ───────────────────────────────────────────────────────────
 
 // The Vercel-Upstash Marketplace integration provisions KV_REST_API_URL /
@@ -623,6 +633,23 @@ export interface MapSearchPanelData {
   picked: ListingRow[]
 }
 
+export interface PressPanelData {
+  /** Clicks per action ('Copy', 'Download', 'Contact', 'Jump'), busiest
+   *  first. Built from the same clicks as `byItem`, so both add up to the
+   *  same total. */
+  byAction: Counted[]
+  /** Clicks per item, by the event's label ('Copied full boilerplate',
+   *  'Downloaded press kit', 'Jumped to the boilerplate', …), busiest
+   *  first. */
+  byItem: Counted[]
+  /** Per action: distinct visitors who did it vs the press page's distinct
+   *  visitors. Keyed by the names `byAction` uses. */
+  actionShare: VisitorShare[]
+  /** The Total row's share: distinct visitors who did any of them vs the
+   *  press page's distinct visitors. */
+  anyShare: VisitorShare
+}
+
 export interface VisitsData {
   /** Page views bucketed by page, busiest first — visitors or raw views,
    *  depending on the dashboard's count mode. */
@@ -866,6 +893,9 @@ export interface DashboardData {
   /** The +N table's Total row: distinct visitors who opened the menu at all
    *  vs distinct visitors site-wide. */
   anyNavOverflowOpenShare: VisitorShare
+  /** The press and media page (/media, from 19 September 2026): its copy,
+   *  download, email and jump-button clicks, per action and per item. */
+  press: PressPanelData
   /** For pages with a map (Map, Communities): `selectedPage`'s most-hovered
    *  map listings — tooltip dwells (500 ms cursor rest on desktop, first tap
    *  on mobile), grouped like `topListings` and following the same unique/
@@ -986,6 +1016,12 @@ const EMPTY: Omit<DashboardData, 'source'> = {
   navOverflowOpens: [],
   navOverflowOpenShare: [],
   anyNavOverflowOpenShare: { name: 'Any open', active: 0, visitors: 0 },
+  press: {
+    byAction: [],
+    byItem: [],
+    actionShare: [],
+    anyShare: { name: 'Any action', active: 0, visitors: 0 },
+  },
   topHovered: [],
   areaClicks: [],
   funnel: { opened: 0, typed: 0, clicked: 0 },
@@ -1540,6 +1576,7 @@ function aggregateSite(
     )
   )
   const anyNavOverflowOpenShare = anyOnSite(navOpens, 'Any open')
+  const press = pressPanel(inRange, unique, viewVidsByPage.get('/media'))
 
   const newsletterResults = newsletterSignupResults(inRange, unique)
 
@@ -1604,6 +1641,7 @@ function aggregateSite(
       navOverflowOpens,
       navOverflowOpenShare,
       anyNavOverflowOpenShare,
+      press,
       funnel: {
         opened: usersOf('chatbot_open'),
         typed: usersOf('chatbot_message'),
@@ -3648,6 +3686,36 @@ function optOutSplit(events: AnalyticsEvent[]): { off: number; on: number } {
     else on++
   }
   return { off, on }
+}
+
+/** The press page's clicks (press_action), per action and per item. Follows
+ *  the count mode like the footer's links: unique = one click per visitor per
+ *  item per day, and the action rows add up those same clicks. The shares
+ *  divide by `pageVids`, the distinct visitors who viewed /media in range.
+ *  Exported for the unit test. */
+export function pressPanel(
+  inRange: AnalyticsEvent[],
+  unique: boolean,
+  pageVids: ReadonlySet<string> | undefined
+): PressPanelData {
+  const hits = inRange.filter(
+    e => e.type === 'press_action' && e.page === 'Press'
+  )
+  const clicks = unique ? uniqueClicks(hits) : hits
+  const actionOf = (e: AnalyticsEvent) =>
+    PRESS_ACTION_LABEL[e.source ?? ''] ?? 'Unknown'
+  const byAction = tally(clicks.map(actionOf))
+  const visitors = pageVids?.size ?? 0
+  return {
+    byAction,
+    byItem: tally(clicks.map(e => listingMember(e))),
+    actionShare: byAction.map(row => ({
+      name: row.name,
+      active: distinctVids(hits.filter(e => actionOf(e) === row.name)),
+      visitors,
+    })),
+    anyShare: { name: 'Any action', active: distinctVids(hits), visitors },
+  }
 }
 
 /** Distinct users in a set of events: distinct vids, plus each vid-less event
