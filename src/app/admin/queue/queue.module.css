@@ -290,6 +290,81 @@
   box-shadow: inset 0 -1px 0 var(--q-warn);
 }
 
+/* Past decisions in the search results (20 Oct 2026): quieter than the
+   live matches – a small muted heading, one muted line per decision, the
+   matched words underlined only. */
+.earlierGroup {
+  padding: 6px 0 8px;
+  border-top: 1px solid var(--q-border);
+}
+
+.earlierHead {
+  padding: 6px 16px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--q-muted);
+}
+
+.earlierRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 4px 16px 4px 14px;
+  border: none;
+  border-left: 3px solid transparent;
+  background: none;
+  text-align: left;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--q-muted);
+  cursor: pointer;
+}
+
+.earlierRow:hover {
+  background: var(--q-sel);
+  color: var(--q-text-2);
+}
+
+.earlierRowActive,
+.earlierRowActive:hover {
+  background: var(--q-sel);
+  border-left-color: var(--q-border-strong);
+  color: var(--q-text-2);
+}
+
+.earlierName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  mask-image: linear-gradient(to right, #000 85%, transparent);
+}
+
+.earlierName .mark {
+  background: none;
+  box-shadow: inset 0 -1px 0 var(--q-border-strong);
+}
+
+.earlierWhat {
+  flex: none;
+  font-size: 11.5px;
+}
+
+.earlierMore {
+  display: block;
+  padding: 4px 16px 0 17px;
+  font-size: 12px;
+  color: var(--q-muted);
+}
+
+button.earlierMore {
+  padding: 4px 16px 0 17px;
+  color: var(--q-accent);
+}
+
 /* Where the search found a word that is not on the row itself: one line,
    clipped by a fade rather than an ellipsis. */
 .rowExcerpt {
@@ -1377,6 +1452,47 @@ p.tabDoneTitle {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--q-muted);
+}
+
+/* Their reply to a decline, on top of the item it brought back, with
+   Fable's one line on it (20 Oct 2026). Amber like Unsure: it waits on a
+   decision. */
+.pushback {
+  padding: 12px 14px;
+  border: 1px solid var(--q-border-strong);
+  border-left: 3px solid var(--q-warn);
+  border-radius: 6px;
+  background: var(--q-panel);
+}
+
+.pushback .h3 {
+  flex-wrap: wrap;
+}
+
+.pushbackLink {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--q-muted);
+}
+
+.pushbackText {
+  margin: 0;
+  color: var(--q-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.pushbackTake {
+  margin: 0;
+  font-size: 13px;
+  color: var(--q-text-2);
+}
+
+.reopenedNote {
+  display: flex;
 }
 
 .summary {

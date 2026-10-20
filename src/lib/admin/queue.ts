@@ -19,6 +19,9 @@
                       review it again when it is due (queue-later.ts)
     undo            → reverse an accept or reject made in the last day, or
                       bring back an item set aside
+    reopen          → bring a declined addition back, however old: marks the
+                      row and the Mac rebuilds the record if it was deleted,
+                      then reopens the row (queue-reopen.ts)
     flag            → the verdict, reasons and reject buttons Fable gave in
                       the chat onto the row ("Update flag", queue-flag.ts);
                       its Undo puts back what they replaced
@@ -48,6 +51,18 @@ import { ruleTestOf, type RuleTest } from './queue-rule-test'
 import { alreadyRepliedOf, type AlreadyReplied } from './queue-already'
 import { reasonsText, type FlagUpdate } from './queue-flag'
 import { LEFT_OUT_KEY, leftOutOf, withLeftOut } from './queue-left-out'
+import {
+  declinedBeforeOf,
+  pushbackOf,
+  reopenedOf,
+  reopeningOf,
+  wasDeclined,
+  withReopenMarker,
+  type DeclinedBefore,
+  type Pushback,
+  type Reopened,
+  type Reopening,
+} from './queue-reopen'
 
 export const QUEUE_TABLE_ID = 'tblonlKwIFJ7Aa8QN'
 const BROOM_ISSUES_TABLE_ID = 'tblntD3WITPEgjHRK'
@@ -206,6 +221,19 @@ export interface QueueItem {
   /** The flag was updated from the chat (queue-flag.ts) and what it said
    *  before is kept, so Undo can put it back. */
   flagUndo: boolean
+  /** The decision was a Reject of an addition – also once the Mac deleted
+   *  the record and marked the row Applied (queue-reopen.ts). */
+  declined: boolean
+  /** Reopen pressed (or their reply to the decline came): the Mac is
+   *  bringing it back, or could not (`error`). */
+  reopening: Reopening | null
+  /** Their reply to the decline, which brought the item back. */
+  pushback: Pushback | null
+  /** When and how it came back. */
+  reopened: Reopened | null
+  /** Brought back with no word from them since: the decline they already
+   *  have, so Reject saves no second one. */
+  declinedBefore: DeclinedBefore | null
 }
 
 export type NoReply = 'no email' | 'no notification'
@@ -538,7 +566,20 @@ function rowToItem(
   let alreadyReplied: AlreadyReplied | null = null
   let rejectReply: RejectReply | null = null
   let saidBy: SaidBy | null = null
+  let rejectReplied = false
+  let reopening: Reopening | null = null
+  let pushback: Pushback | null = null
+  let reopened: Reopened | null = null
+  let declinedBefore: DeclinedBefore | null = null
   if (isRecord(proposal)) {
+    reopening = reopeningOf(proposal.reopen)
+    pushback = pushbackOf(proposal.pushback)
+    reopened = reopenedOf(proposal.reopened)
+    declinedBefore = declinedBeforeOf(proposal.reply, pushback)
+    rejectReplied =
+      isRecord(proposal.reply) &&
+      isRecord(proposal.reply.reject) &&
+      Boolean(str(proposal.reply.reject.since))
     changes = toChanges(proposal.changes)
     diff = str(proposal.diff)
     summary = str(proposal.summary)
@@ -581,7 +622,10 @@ function rowToItem(
           k !== 'name' &&
           k !== 'url' &&
           k !== 'no_reply' &&
-          k !== FLAG_BEFORE_KEY
+          k !== FLAG_BEFORE_KEY &&
+          k !== 'reopen' &&
+          k !== 'pushback' &&
+          k !== 'reopened'
         )
           rest[k] = v
       }
@@ -669,6 +713,19 @@ function rowToItem(
     error: str(f[F.error]),
     reviewAgainOn: str(f[F.reviewAgainOn]),
     flagUndo: isRecord(proposal) && isRecord(proposal[FLAG_BEFORE_KEY]),
+    declined: wasDeclined({
+      type: str(f[F.type]) ?? 'Add',
+      status: str(f[F.status]) ?? 'Pending',
+      decidedAt: str(f[F.decidedAt]),
+      appliedAt: str(f[F.appliedAt]),
+      rejectReason: str(f[F.rejectReason]),
+      rejectReplied: rejectReplied || Boolean(str(f[F.rejectReply])),
+      error: str(f[F.error]),
+    }),
+    reopening,
+    pushback,
+    reopened,
+    declinedBefore,
   }
 }
 
@@ -692,6 +749,27 @@ export async function listQueue(): Promise<QueueItem[]> {
   params.set('filterByFormula', LIST_FORMULA)
   const rows = await listAll<RawFields>(QUEUE_TABLE_ID, params)
   return rows.map(r => rowToItem(r))
+}
+
+// Every decision ever made, newest first, for the search's "Earlier" group
+// (Bryce, 20 Oct 2026: a decline from a week before could not be found).
+// Only read while a search is typed, once per page visit.
+const DECIDED_FORMULA = 'NOT({Decided at} = BLANK())'
+
+/** Every decided row, newest decision first. The rejection replies written
+ *  in advance are left off: nobody decides from this list. */
+export async function listDecided(): Promise<QueueItem[]> {
+  const params = new URLSearchParams()
+  params.set('returnFieldsByFieldId', 'true')
+  params.set('filterByFormula', DECIDED_FORMULA)
+  params.set('sort[0][field]', F.decidedAt)
+  params.set('sort[0][direction]', 'desc')
+  const rows = await listAll<RawFields>(QUEUE_TABLE_ID, params)
+  return rows.map(r => {
+    const fields = { ...r.fields }
+    delete fields[F.rejectDrafts]
+    return rowToItem({ ...r, fields })
+  })
 }
 
 /** Logo and link by target record for the rows that came without one:
@@ -1886,7 +1964,12 @@ export async function rejectItem(
   const stamp = now()
   // The rejection reply as the page showed it, saved by the Mac as it
   // reads; none (a typed reason) and Fable writes it from the reason.
-  const words = item.replyTo ? (reply ?? '').trim().slice(0, 5000) : ''
+  // None for an item brought back after a decline with no word from them
+  // since: they have the first one (queue-reopen.ts).
+  const words =
+    item.replyTo && !item.declinedBefore
+      ? (reply ?? '').trim().slice(0, 5000)
+      : ''
   const fields: Record<string, unknown> = {
     [F.status]: 'Rejected',
     [F.rejectReason]: why || null,
@@ -2050,6 +2133,34 @@ export async function saveEdits(
   await patchQueueRow(item.id, fields)
 }
 
+/** Reopen a declined addition, however old (queue-reopen.ts): the row gets
+ *  the marker and stays decided until the Mac has the record back – the
+ *  same one when it still exists, else one rebuilt from the row's saved
+ *  copy – and then reopens it in one write. The page asks the Mac's agent
+ *  to do that at once; the worker is the fallback. */
+export async function reopenItem(item: QueueItem): Promise<void> {
+  if (item.type !== 'Add') {
+    throw new QueueError('Only an addition can be reopened.', 400)
+  }
+  if (!item.declined) {
+    throw new QueueError(
+      `Only a declined addition can be reopened; this one is ${item.status.toLowerCase()}.`,
+      409
+    )
+  }
+  if (item.reopening && !item.reopening.error) {
+    throw new QueueError('It is on its way back already.', 409)
+  }
+  const raw = parseJson((await rawQueueFields(item.id))[F.proposal])
+  if (!isRecord(raw)) {
+    throw new QueueError('This item has no saved copy to bring back.', 409)
+  }
+  await patchQueueRow(item.id, {
+    [F.proposal]: JSON.stringify(withReopenMarker(raw, now()), null, 1),
+    [F.error]: null,
+  })
+}
+
 export async function undoItem(item: QueueItem): Promise<void> {
   // An item set aside: back in the list now.
   if (
@@ -2079,6 +2190,14 @@ export async function undoItem(item: QueueItem): Promise<void> {
     !(await recordExists(BROOM_ISSUES_TABLE_ID, item.issueRow))
   ) {
     reopen[F.issueRow] = null
+  }
+  // A rejected suggestion the Mac has deleted is marked Applied, but there
+  // is no publish to take back: Reopen brings it back instead.
+  if (item.declined && item.status !== 'Rejected') {
+    throw new QueueError(
+      'Too late to undo: the record was deleted after the decline. Reopen brings it back.',
+      409
+    )
   }
   if (item.status === 'Applied' && item.type === 'Add') {
     const t = target(item)
@@ -2125,7 +2244,7 @@ export async function undoItem(item: QueueItem): Promise<void> {
       const t = target(item)
       if (!(await recordExists(t.table, t.record))) {
         throw new QueueError(
-          'Too late: the record has already been deleted.',
+          'Too late to undo: the record has already been deleted. Reopen brings it back.',
           409
         )
       }
