@@ -179,7 +179,8 @@ export default function CommunitiesClient({
   const filtering =
     platformFilters.length > 0 ||
     activityFilters.length > 0 ||
-    focusFilters.length > 0
+    focusFilters.length > 0 ||
+    countryFilters.length > 0
   const gridCommunities = gridListings(
     filteredCommunities,
     placements,
