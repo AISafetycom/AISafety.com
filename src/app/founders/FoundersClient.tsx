@@ -8,7 +8,7 @@ import { founderResourceCardProps } from './card'
 import ContributeButtons from '@/components/ContributeButtons'
 import { FounderResource } from '@/lib/data/founders'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
-import { placementsById } from '@/lib/placements'
+import { gridListings, placementsById } from '@/lib/placements'
 
 interface FoundersClientProps {
   resources: FounderResource[]
@@ -82,6 +82,14 @@ export default function FoundersClient({ resources }: FoundersClientProps) {
     }
   }, [filteredResources])
 
+  // Featured resources show in the grid only once a filter is on; unfiltered,
+  // the featured row above already has them.
+  const gridResources = gridListings(
+    filteredResources,
+    placements,
+    typeFilters.length > 0
+  )
+
   return (
     <>
       <FilterBar count={filteredResources.length} noun="resource">
@@ -98,7 +106,7 @@ export default function FoundersClient({ resources }: FoundersClientProps) {
 
       <div className="flex gap-56px">
         <div className="collection-list padding-bottom-40px width-9-col">
-          {filteredResources.map(resource => (
+          {gridResources.map(resource => (
             <ListingCard
               key={resource.id}
               {...founderResourceCardProps(resource)}

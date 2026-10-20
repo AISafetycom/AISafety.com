@@ -2,10 +2,11 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { trackFooterClick } from '@/lib/analytics'
+import { trackFooterClick, trackedPath } from '@/lib/analytics'
 
-/** An external footer link that records its clicks — outbound, so nothing
- *  else would. The tiny client wrapper keeps Footer itself server-rendered. */
+/** A footer link that records its clicks — the outbound ones especially,
+ *  which nothing else would. The tiny client wrapper keeps Footer itself
+ *  server-rendered. */
 export default function FooterLink({
   href,
   section,
@@ -26,7 +27,8 @@ export default function FooterLink({
   // new tab as before.
   const external = href.startsWith('http')
   const pathname = usePathname()
-  const pageValue = pathname.replace(/^\//, '') || 'home'
+  // An org's private page is recorded as 'stats', never its token.
+  const pageValue = trackedPath(pathname).replace(/^\//, '') || 'home'
 
   const field = airtablePrefillField && encodeURIComponent(airtablePrefillField)
   const finalHref = field

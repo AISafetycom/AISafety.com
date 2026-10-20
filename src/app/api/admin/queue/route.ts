@@ -11,10 +11,16 @@
        now for the page's refreshes. A write, so it takes the edit grant;
        a viewer gets the plain list.
   GET  /api/admin/queue?target=<tbl>/<rec>     → { fields, attachments, schema } (live)
+  GET  /api/admin/queue?order=<tbl>            → { order } – the page's published
+       listings by Sort, for placing an addition (null for a table with no Sort)
   POST /api/admin/queue  body { id, action, edits?, reason?, replyDraft? } → { item }
-       action: accept | reject | edit | undo
-       (edit keeps the page's pending edits, and the reply draft as
-       edited, on the row – nothing more)
+       action: accept | reject | edit | later | undo | flag
+       (later sets the item aside for a week, Fable reviews it again then;
+       undo also brings back an item set aside; edit keeps the page's pending edits, and the reply draft as
+       edited, on the row – nothing more; flag writes the verdict, reasons
+       and reject buttons Fable gave in the chat onto the row, body
+       { flag } – or { undo: true } to put back what it replaced –
+       queue-flag.ts)
 
   `agent` is { port, token } for the local agent on the owner's Mac (null
   when QUEUE_AGENT_SECRET is not set): the page calls it after an accept so
@@ -32,16 +38,21 @@ import {
   acceptItem,
   agentInfo,
   closeHandledRows,
+  flagItem,
+  getPageOrder,
   getQueueItem,
   getTableSchema,
   getTargetFields,
+  laterItem,
   listQueue,
   QueueError,
   rejectItem,
   sanitiseEdits,
   saveEdits,
   undoItem,
+  unflagItem,
 } from '@/lib/admin/queue'
+import { parseFlag } from '@/lib/admin/queue-flag'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -78,6 +89,8 @@ export async function GET(req: NextRequest) {
   const auth = await ensureAuth(false)
   if (auth) return auth
   try {
+    const orderOf = req.nextUrl.searchParams.get('order')
+    if (orderOf) return json({ order: await getPageOrder(orderOf) })
     const target = req.nextUrl.searchParams.get('target')
     if (target) {
       const [table = '', record = ''] = target.split('/')
@@ -107,7 +120,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-const ACTIONS = new Set(['accept', 'reject', 'edit', 'undo'])
+const ACTIONS = new Set(['accept', 'reject', 'edit', 'later', 'undo', 'flag'])
 
 export async function POST(req: NextRequest) {
   const auth = await ensureAuth(true)
@@ -132,17 +145,38 @@ export async function POST(req: NextRequest) {
       await acceptItem(
         item,
         sanitiseEdits(body.edits),
-        typeof body.replyDraft === 'string' ? body.replyDraft : null
+        typeof body.replyDraft === 'string' ? body.replyDraft : null,
+        // Proposed fields Fable has already changed on the record.
+        Array.isArray(body.keep)
+          ? body.keep.filter((k): k is string => typeof k === 'string')
+          : []
       )
     } else if (action === 'reject') {
-      await rejectItem(item, typeof body.reason === 'string' ? body.reason : '')
+      await rejectItem(
+        item,
+        typeof body.reason === 'string' ? body.reason : '',
+        typeof body.rejectReply === 'string' ? body.rejectReply : null
+      )
     } else if (action === 'edit') {
       await saveEdits(
         item,
         sanitiseEdits(body.edits),
-        typeof body.replyDraft === 'string' ? body.replyDraft : undefined
+        typeof body.replyDraft === 'string' ? body.replyDraft : undefined,
+        Array.isArray(body.keys)
+          ? body.keys.filter((k): k is string => typeof k === 'string')
+          : undefined
       )
       return json({ item: await getQueueItem(id) })
+    } else if (action === 'later') {
+      await laterItem(item)
+    } else if (action === 'flag') {
+      if (body.undo === true) {
+        await unflagItem(item)
+      } else {
+        const parsed = parseFlag(body.flag, item.type)
+        if ('error' in parsed) return json({ error: parsed.error }, 400)
+        await flagItem(item, parsed.flag)
+      }
     } else {
       await undoItem(item)
     }

@@ -1,6 +1,15 @@
+import { timingSafeEqual } from 'node:crypto'
 import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
 import { cache } from 'react'
-import { canEdit, canOpen, NO_ACCESS, type AccessFlags } from './access'
+import { adminHomeHref } from '@/app/admin/nav'
+import {
+  canEdit,
+  canOpen,
+  NO_ACCESS,
+  type AccessArea,
+  type AccessFlags,
+} from './access'
 import { openToken, sealToken } from './session'
 import { findAdminUser } from './users'
 
@@ -37,12 +46,14 @@ const SESSION_MAX_AGE = 60 * 60 * 24 * 7
 /** A Google sign-in must complete within this long of starting. */
 const OAUTH_MAX_AGE = 60 * 10
 /** How recently a session must have been minted by Google for the actions
- *  that matter most: approving a newsletter send, and changing who can sign
- *  in. A stolen session cookie can't pass this on its own: the
+ *  that matter most: changing who can sign in, and (below) approving a
+ *  newsletter send. A stolen session cookie can't pass this on its own: the
  *  re-confirmation is a full trip through Google, which needs the live Google
  *  login in the browser, not just our cookie. */
 export const SENSITIVE_FRESH_SECONDS = 60 * 30
-export const NEWSLETTER_FRESH_SECONDS = SENSITIVE_FRESH_SECONDS
+/** Newsletter approvers work in the editor for long stretches, so its
+ *  re-confirmation comes every 4 hours rather than every 30 minutes. */
+export const NEWSLETTER_FRESH_SECONDS = 60 * 60 * 4
 
 interface SessionPayload {
   v: 1
@@ -136,6 +147,19 @@ export async function currentAccess(): Promise<AccessFlags> {
   return (await currentSession())?.access ?? NO_ACCESS
 }
 
+/** The first line of every admin page: carries on when this session can open
+ *  `area`, else sends it to the first area it can open (the login page when
+ *  signed out). The section layouts check too, but that is not enough on its
+ *  own: a client navigation (a tab click, a preload) asks the server for the
+ *  page without rendering the layouts the browser already has, so a page
+ *  that relied on its layout would hand its data to anyone replaying that
+ *  request without a cookie. page-guards.test.ts holds every page to it. */
+export async function requireAccess(area: AccessArea): Promise<AccessFlags> {
+  const access = await currentAccess()
+  if (!canOpen(access, area)) redirect(adminHomeHref(access))
+  return access
+}
+
 /** Who is signed in, for attribution and the header. Null when signed out. */
 export async function currentAdmin(): Promise<AdminIdentity | null> {
   return currentSession()
@@ -225,6 +249,23 @@ export async function canViewUsers(): Promise<boolean> {
  *  hasFreshSession(SENSITIVE_FRESH_SECONDS). */
 export async function canManageUsers(): Promise<boolean> {
   return canEdit(await currentAccess(), 'manageUsers')
+}
+
+/** A cron route's check: Vercel sends `Authorization: Bearer <CRON_SECRET>`.
+ *  Refuses outright when CRON_SECRET isn't set. Preview deployments have
+ *  none and are open to anyone, yet share the production database and the
+ *  owner's mail script, so a route that waved requests through without the
+ *  secret could be set off from any preview URL. Vercel only runs crons on
+ *  production, where the secret is set; to try one on a laptop, set
+ *  CRON_SECRET in .env.local and send the same header. */
+export function cronAuthorized(
+  header: string | null,
+  secret: string | undefined
+): boolean {
+  if (!secret) return false
+  const got = Buffer.from(header ?? '')
+  const want = Buffer.from(`Bearer ${secret}`)
+  return got.length === want.length && timingSafeEqual(got, want)
 }
 
 /** True when the session was minted by Google within the last

@@ -8,7 +8,7 @@ import ContributeButtons from '@/components/ContributeButtons'
 import { Funder } from '@/lib/data/funding'
 import { isAcceptingApplications } from '@/lib/funding-status'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
-import { placementsById } from '@/lib/placements'
+import { gridListings, placementsById } from '@/lib/placements'
 import { funderCardProps } from './card'
 
 interface FundingClientProps {
@@ -103,6 +103,11 @@ export default function FundingClient({ funders }: FundingClientProps) {
 
   const count = filteredFunders.length
 
+  // Featured funders show in the grid only once a filter is on; unfiltered,
+  // the featured row above already has them.
+  const filtering = acceptingFilters.length > 0 || typeFilters.length > 0
+  const gridFunders = gridListings(filteredFunders, placements, filtering)
+
   return (
     <>
       <FilterBar count={count} noun="funder">
@@ -128,7 +133,7 @@ export default function FundingClient({ funders }: FundingClientProps) {
 
       <div className="flex gap-56px">
         <div className="collection-list padding-bottom-40px width-9-col">
-          {filteredFunders.map(funder => (
+          {gridFunders.map(funder => (
             <ListingCard
               key={funder.id}
               {...funderCardProps(funder)}

@@ -12,7 +12,6 @@ const RESOURCE_TO_PATH: Record<string, string> = {
   funding: '/funding',
   'media-channels': '/media-channels',
   advisors: '/advisors',
-  projects: '/projects',
   founders: '/founders',
   'donation-guide': '/donation-guide',
 }

@@ -9,7 +9,6 @@ import { getFunders } from './funding'
 import { getJobs } from './jobs'
 import { getMapData } from './map'
 import { getMediaChannels } from './media-channels'
-import { getProjects } from './projects'
 import { getCourses } from './self-study'
 import { getTrainingPrograms, getRecurringPrograms } from './training'
 import { hasAirtableCredentials } from './public-api'
@@ -62,7 +61,6 @@ export async function fetchAllCounts(): Promise<Counts> {
       '/funding': (await getFunders()).length,
       '/media-channels': (await getMediaChannels()).length,
       '/advisors': (await getAdvisors()).length,
-      '/projects': (await getProjects()).length,
       '/founders': (await getFounderResources()).length,
       '/self-study': (await getCourses()).length,
       '/events': (await getEvents()).length,
@@ -133,7 +131,6 @@ async function readAllCounts(): Promise<Counts> {
   counts['/jobs'] = (await getJobs()).length
   counts['/media-channels'] = (await getMediaChannels()).length
   counts['/advisors'] = (await getAdvisors()).length
-  counts['/projects'] = (await getProjects()).length
   counts['/founders'] = (await getFounderResources()).length
   counts['/self-study'] = (await getCourses()).length
   counts['/events'] = (await getEvents()).length

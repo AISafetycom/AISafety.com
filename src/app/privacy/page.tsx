@@ -92,14 +92,32 @@ export default function PrivacyPage() {
             deleted, contact us using the form below.
           </p>
 
+          <h3 className="padding-bottom-16px">Newsletters</h3>
+          <p className="color-teal-300 padding-bottom-40px">
+            When you sign up for the AI Safety Events or AI Safety Training
+            newsletter on this site, your email address goes to ActiveCampaign,
+            the service that sends them, and you&apos;ll get an email asking you
+            to confirm – you&apos;re only subscribed once you do. If you
+            subscribed to the AI Safety Events &amp; Training newsletter on
+            Substack, your email address moved to ActiveCampaign with the
+            newsletter in October 2026. ActiveCampaign records, for each reader,
+            which emails they open and when they unsubscribe. When you click a
+            link in one of those emails, the click is counted by aisafety.com
+            itself, anonymously – it isn&apos;t tied to you or your email
+            address. Every email has an unsubscribe link at the bottom. The AI
+            Safety Funding and AISafety.com Updates newsletters are hosted on
+            Substack – when you subscribe to those, Substack&apos;s own privacy
+            policy applies.
+          </p>
+
           <h3 className="padding-bottom-16px">Services we rely on</h3>
           <p className="color-teal-300 padding-bottom-40px">
             The site runs on Vercel (hosting), Matomo Cloud (analytics),
             Airtable (our listings database, forms, and chatbot logs), Anthropic
-            (Claude, the AI model behind the chatbot), and ipapi.co (the
-            approximate-location lookup for chatbot conversations). Our
-            newsletters are hosted on Substack – when you subscribe there,
-            Substack&apos;s own privacy policy applies.
+            (Claude, the AI model behind the chatbot), ipapi.co (the
+            approximate-location lookup for chatbot conversations),
+            ActiveCampaign (the Events and Training newsletters), and Substack
+            (the Funding and Updates newsletters).
           </p>
 
           <h3 className="padding-bottom-16px">Your choices</h3>
@@ -114,14 +132,15 @@ export default function PrivacyPage() {
             >
               sending us a message
             </a>
-            . Because our analytics is anonymous, a chatbot conversation is
-            likely the only thing of yours we&apos;d be able to find – mention
-            roughly when it happened and what it was about, and we&apos;ll
-            delete it.
+            . Because our analytics is anonymous, the only things of yours
+            we&apos;d be able to find are a chatbot conversation and, if you
+            signed up for the Events or Training newsletter, your subscription.
+            For a conversation, mention roughly when it happened and what it was
+            about, and we&apos;ll delete it.
           </p>
 
           <p className="paragraph-small color-teal-300 padding-bottom-80px">
-            Last updated: 16 July 2026
+            Last updated: 8 October 2026
           </p>
         </div>
       </div>

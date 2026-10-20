@@ -152,20 +152,6 @@ export const PAGES: PageInfo[] = [
     ],
   },
   {
-    path: '/projects',
-    title: 'Volunteer projects',
-    purpose:
-      'Initiatives seeking your volunteer help. These projects are focused on supporting and improving the AI safety field.',
-    audience: 'People with time to volunteer on AI safety work.',
-    greeting:
-      'Want to volunteer on AI safety work? I can match you to an active project.',
-    chips: [
-      'I can code – show me projects',
-      'Non-technical ways to volunteer',
-      'Projects needing the least time',
-    ],
-  },
-  {
     path: '/media-channels',
     title: 'Media channels',
     purpose:
@@ -225,6 +211,21 @@ export const PAGES: PageInfo[] = [
     greeting:
       'What are you looking for? I can point you to jobs, funders, communities, courses, and other curated listings, or answer a quick question about AI safety.',
     chips: ['Who maintains this site?', 'How is this site funded?'],
+  },
+  {
+    path: '/listing-policy',
+    title: 'Listing policy',
+    purpose:
+      'What the site lists on each resource page, and how suggestions are decided.',
+    audience:
+      'People deciding whether to suggest a listing, or asking why one was declined.',
+    greeting:
+      'Wondering whether something would be listed? Tell me what it is and which page it fits, and I can check it against the policy.',
+    chips: [
+      'Would my local group qualify?',
+      'Why was my suggestion declined?',
+      'What counts as AI safety here?',
+    ],
   },
 ]
 

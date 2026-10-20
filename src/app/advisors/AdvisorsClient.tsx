@@ -8,7 +8,7 @@ import { advisorCardProps } from './card'
 import ContributeButtons from '@/components/ContributeButtons'
 import { Advisor } from '@/lib/data/advisors'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
-import { placementsById } from '@/lib/placements'
+import { gridListings, placementsById } from '@/lib/placements'
 
 interface AdvisorsClientProps {
   advisors: Advisor[]
@@ -73,6 +73,14 @@ export default function AdvisorsClient({ advisors }: AdvisorsClientProps) {
     }
   }, [filteredAdvisors])
 
+  // Featured advisors show in the grid only once a filter is on; unfiltered,
+  // the featured row above already has them.
+  const gridAdvisors = gridListings(
+    filteredAdvisors,
+    placements,
+    focusFilters.length > 0
+  )
+
   return (
     <>
       <FilterBar count={filteredAdvisors.length} noun="advisor">
@@ -89,7 +97,7 @@ export default function AdvisorsClient({ advisors }: AdvisorsClientProps) {
 
       <div className="flex gap-56px">
         <div className="collection-list padding-bottom-40px width-9-col">
-          {filteredAdvisors.map(advisor => (
+          {gridAdvisors.map(advisor => (
             <ListingCard
               key={advisor.id}
               {...advisorCardProps(advisor)}

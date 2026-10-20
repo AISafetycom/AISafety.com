@@ -4,11 +4,14 @@ import { getCourses } from './self-study'
 import { getEvents } from './events'
 import { getFounderResources } from './founders'
 import { getFunders } from './funding'
-import { getJobs } from './jobs'
+import { getJobs, type Job } from './jobs'
 import { getMapData } from './map'
 import { getMediaChannels } from './media-channels'
-import { getProjects } from './projects'
-import { getTrainingPrograms, getRecurringPrograms } from './training'
+import {
+  getTrainingPrograms,
+  getRecurringPrograms,
+  type ProgramBase,
+} from './training'
 
 export type SearchType =
   | 'advisor'
@@ -20,7 +23,6 @@ export type SearchType =
   | 'job'
   | 'map'
   | 'media'
-  | 'project'
   | 'training'
   | 'page'
 
@@ -32,13 +34,19 @@ export interface SearchEntry {
   category: string
   url: string
   logo: string | null
+  /** More card text that search matches but the result row doesn't show
+   *  (stipend, experience level, cost, …), matched like category. */
+  keywords?: string
+  /** Shown only for a search for its name (see search() in lib/search). */
+  nameOnly?: boolean
 }
 
 function page(
   title: string,
   url: string,
   icon: string | null,
-  description = ''
+  description = '',
+  nameOnly = false
 ): SearchEntry {
   return {
     type: 'page',
@@ -48,6 +56,7 @@ function page(
     category: '',
     url,
     logo: icon,
+    ...(nameOnly && { nameOnly }),
   }
 }
 
@@ -108,12 +117,6 @@ const STATIC_PAGES: SearchEntry[] = [
     'Talk to a 1-1 advisor.'
   ),
   page(
-    'Volunteer projects',
-    '/projects',
-    '/images/icons/clipboard.svg',
-    'Volunteer projects you can join.'
-  ),
-  page(
     'Hackathon 2026',
     '/hackathon',
     '/images/icons/calendar.svg',
@@ -129,13 +132,40 @@ const STATIC_PAGES: SearchEntry[] = [
     'Donation guide',
     '/donation-guide',
     '/images/icons/heart.svg',
-    'How to donate effectively.'
+    'How to donate effectively at any budget, including via regrantors or a donor lottery.'
   ),
   page(
     'About',
     '/about',
     '/images/icons/people.svg',
     'Mission, team, and how to contribute.'
+  ),
+  // The three footer pages that aren't in the nav.
+  page(
+    'Press and media',
+    '/media',
+    '/images/icons/paper.svg',
+    'Press kit for journalists, with boilerplate, logo files, and team bios.'
+  ),
+  page(
+    'Data API',
+    '/developers',
+    '/images/icons/computer.svg',
+    'Read-only JSON API for developers.'
+  ),
+  page(
+    'Privacy',
+    '/privacy',
+    '/images/icons/shield.svg',
+    'What the site collects, why, and your choices. No cookies, no ads.'
+  ),
+  // Name-only: "policy" alone is a common search for governance orgs.
+  page(
+    'Listing policy',
+    '/listing-policy',
+    '/images/icons/document.svg',
+    'What AISafety.com lists on each resource page, and how suggestions are decided.',
+    true
   ),
 ]
 
@@ -189,6 +219,21 @@ function dateRange(start: string | null, end: string | null): string {
   return `${shortDate(start)} – ${shortDate(end)}`
 }
 
+// A subtitle only when it has a word the title lacks: the map pin's "EA
+// Forum" says something under "Effective Altruism Forum", "LASR Labs" under
+// "London AI Safety Research (LASR) Labs" doesn't, and nor does a course
+// "By ARENA" called ARENA.
+function addedName(name: string | null, title: string): string {
+  if (!name) return ''
+  // Lowercased words, singular, so "Researchers" adds nothing to "Researcher".
+  const words = (s: string) =>
+    (s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).map(w =>
+      w.length > 3 ? w.replace(/s$/, '') : w
+    )
+  const titleWords = new Set(words(title))
+  return words(name).every(w => titleWords.has(w)) ? '' : name.trim()
+}
+
 async function getEventEntries(): Promise<SearchEntry[]> {
   const events = await getEvents()
   return events.map(e => {
@@ -197,6 +242,16 @@ async function getEventEntries(): Promise<SearchEntry[]> {
       e.applicationStatus === 'Open' && e.deadlineType && e.applicationsClose
         ? `${e.deadlineType} by ${shortDate(e.applicationsClose)}`
         : ''
+    // Same place line as the card: "Online", "Online & Oxford, UK" for a
+    // Hybrid event, else the city.
+    const where =
+      e.mode === 'Online'
+        ? 'Online'
+        : e.location
+          ? e.mode === 'Hybrid'
+            ? `Online & ${e.location}`
+            : e.location
+          : e.mode
     return {
       type: 'event' as const,
       title: e.name,
@@ -205,15 +260,30 @@ async function getEventEntries(): Promise<SearchEntry[]> {
       category: [
         dateRange(e.startDate, e.endDate),
         e.type.join(', '),
-        e.location || e.mode,
+        where,
         deadline,
       ]
         .filter(Boolean)
         .join(' · '),
+      keywords: e.cost.join(', '),
       url: url || '/events',
       logo: e.logo ?? faviconFor(url),
     }
   })
+}
+
+// The card's stipend, time commitment and focus rows, minus the values most
+// programs share ("No stipend", "Full-time": those words, and "full-time"
+// searches for jobs, would pull in dozens of programs) and the row labels
+// ("Entry bar:", "Focus:"), which would match every program.
+function trainingKeywords(p: ProgramBase): string {
+  return [
+    p.stipend !== 'No stipend' ? p.stipend : null,
+    p.timeCommitment === 'Part-time' ? p.timeCommitment : null,
+    p.focus.join(', '),
+  ]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 async function getTrainingEntries(): Promise<SearchEntry[]> {
@@ -245,6 +315,7 @@ async function getTrainingEntries(): Promise<SearchEntry[]> {
       ]
         .filter(Boolean)
         .join(' · '),
+      keywords: trainingKeywords(p),
       url: url || '/training',
       logo: p.logo ?? faviconFor(url),
     })
@@ -260,6 +331,7 @@ async function getTrainingEntries(): Promise<SearchEntry[]> {
       category: ['Recurring', p.type.join(', '), p.location || p.mode]
         .filter(Boolean)
         .join(' · '),
+      keywords: trainingKeywords(p),
       url: url || '/training',
       logo: p.logo ?? faviconFor(url),
     })
@@ -291,6 +363,7 @@ async function getCommunityEntries(): Promise<SearchEntry[]> {
     category: [c.platformText, c.focus, c.location ?? '']
       .filter(Boolean)
       .join(' · '),
+    keywords: c.activityLevel,
     url: c.joinLink !== '#' ? c.joinLink : '/communities',
     logo: c.logo,
   }))
@@ -301,7 +374,8 @@ async function getCourseEntries(): Promise<SearchEntry[]> {
   return courses.map(c => ({
     type: 'course' as const,
     title: c.name,
-    subtitle: '',
+    // The card's "By <organizer>" line.
+    subtitle: addedName(c.organizer, c.name),
     description: c.description,
     category: [c.category, c.courseType].filter(Boolean).join(' · '),
     url: c.url || '/self-study',
@@ -335,6 +409,32 @@ async function getFunderEntries(): Promise<SearchEntry[]> {
   }))
 }
 
+// The card's experience, degree and salary rows. Experience drops the
+// "(1–4 years experience)" glosses and the catch-all "Multiple experience
+// levels"; the degree row skips the baseline the card hides too. A job the
+// /jobs Remote filter lists but whose location labels don't say so gets
+// "Remote".
+function jobKeywords(j: Job): string {
+  const levels = j.minimumExperience
+    .split(',')
+    .map(level => level.replace(/\(.*?\)/g, '').trim())
+    .filter(level => level && level !== 'Multiple experience levels')
+    .join(', ')
+  const remote =
+    j.workLocation
+      .split(',')
+      .map(w => w.trim())
+      .includes('Remote') && !j.locations.some(l => l.startsWith('Remote'))
+  return [
+    levels,
+    j.requiredDegree !== 'Undergraduate degree or less' ? j.requiredDegree : '',
+    remote ? 'Remote' : '',
+    j.salary,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
 async function getJobEntries(): Promise<SearchEntry[]> {
   const jobs = await getJobs()
   return jobs.map(j => ({
@@ -343,6 +443,7 @@ async function getJobEntries(): Promise<SearchEntry[]> {
     subtitle: j.organization,
     description: j.description,
     category: [j.location, j.roleType, j.skillSet].filter(Boolean).join(' · '),
+    keywords: jobKeywords(j),
     url: j.url || '/jobs',
     logo: j.logo,
   }))
@@ -358,7 +459,8 @@ async function getMapEntries(): Promise<SearchEntry[]> {
     entries.push({
       type: 'map',
       title: o.title,
-      subtitle: '',
+      // The short name on the map pin.
+      subtitle: addedName(o.shortName, o.title),
       description: o.description,
       category: [o.category, o.status].filter(Boolean).join(' · '),
       url: o.link || '/map',
@@ -381,19 +483,6 @@ async function getMediaEntries(): Promise<SearchEntry[]> {
   }))
 }
 
-async function getProjectEntries(): Promise<SearchEntry[]> {
-  const projects = await getProjects()
-  return projects.map(p => ({
-    type: 'project' as const,
-    title: p.name,
-    subtitle: '',
-    description: p.description,
-    category: p.status,
-    url: p.email ? `mailto:${p.email}` : '/projects',
-    logo: p.logo,
-  }))
-}
-
 /** Every search type with listings behind it — all but the static pages. */
 export type ListingSearchType = Exclude<SearchType, 'page'>
 
@@ -410,7 +499,6 @@ const ENTRY_BUILDERS: Record<ListingSearchType, () => Promise<SearchEntry[]>> =
     job: getJobEntries,
     map: getMapEntries,
     media: getMediaEntries,
-    project: getProjectEntries,
   }
 
 export function isListingSearchType(type: string): type is ListingSearchType {

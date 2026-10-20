@@ -8,6 +8,7 @@ import {
   type TrainingType,
 } from '../training-types'
 import { parseFeaturedRank } from '../featured'
+import { lastDayListed } from '../training-listing'
 
 // The redesigned /training page reads from two tables: "Training" holds
 // dated upcoming iterations, "Recurring training" holds evergreen programs
@@ -24,6 +25,7 @@ const TRAINING_FIELD = {
   name: 'fldNq08J2QqQ8SreD',
   logo: 'fldlVUH5xZ7sNGv0j',
   description: 'fldIRngvk0vjSwjh8',
+  homepageBlurb: 'fldeFSq8sk9zwJIGh',
   url: 'fld1dv9ed8uwiaHh4',
   type: 'fldYhxEyLrNOBWIpY',
   mode: 'fldh2n93X7R478mDW',
@@ -107,6 +109,13 @@ export interface TrainingProgram extends ProgramBase {
   applicationsClose: string | null
   /** Announced but not yet accepting applications (outranks the deadline). */
   notYetOpen: boolean
+  /**
+   * Short version of the description for the homepage training card (the
+   * "Homepage blurb (auto)" field), written by the featured-queue job.
+   * Absent from the public Data API, so contributor mode falls back to
+   * trimming the description.
+   */
+  homepageBlurb?: string | null
 }
 
 export interface RecurringProgram extends ProgramBase {
@@ -342,6 +351,8 @@ export function trainingProgramFromRecord(
     applicationStatus,
     applicationsClose: closesOn,
     notYetOpen,
+    homepageBlurb:
+      optionalString(f[TRAINING_FIELD.homepageBlurb])?.trim() || null,
     lengthBucket: lengthBucketFor(startDate, endDate),
   }
 }
@@ -376,8 +387,14 @@ export async function getTrainingPrograms(): Promise<TrainingProgram[]> {
 
     // A program leaves the page once its start date has passed; until then
     // a passed deadline only marks it Closed, and the Applications filter
-    // (defaulting to Open) hides it. Dateless programs stay indefinitely.
-    if (startDate && startDate < today) continue
+    // (defaulting to Open) hides it. With only rough timing on file it stays
+    // until that period is over (training-listing.ts). Dateless programs
+    // stay indefinitely.
+    const lastDay = lastDayListed(
+      startDate,
+      optionalString(f[TRAINING_FIELD.startDateApprox])?.trim() || null
+    )
+    if (lastDay && lastDay < today) continue
 
     const program = trainingProgramFromRecord(record, today)
     if (!program) continue
@@ -400,7 +417,8 @@ export async function getTrainingPrograms(): Promise<TrainingProgram[]> {
 /**
  * Every published, non-hidden round in the Training table, past and
  * upcoming, in table order. getTrainingPrograms() drops rounds once they've
- * started; the chatbot's round-history tool needs those too. Same raw fetch
+ * started (or their rough start period is over); the chatbot's round-history
+ * tool needs those too. Same raw fetch
  * (identical arguments) as getTrainingPrograms, so both read one cached
  * Airtable result.
  */

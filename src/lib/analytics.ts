@@ -99,13 +99,24 @@ function getVisitorId(): string | undefined {
   }
 }
 
+/** An org's page (/stats/<token>) is a private link, so its token never goes
+ *  into either analytics system, the chatbot's log, or the footer's feedback
+ *  form: every one is recorded as '/stats'. */
+export function trackedPath(pathname: string): string {
+  return pathname.startsWith('/stats/') ? '/stats' : pathname
+}
+
 /** Fire a first-party event to /api/track. Prefers sendBeacon so it survives the
  *  navigation a click triggers; falls back to keepalive fetch. */
 function sendTrackEvent(payload: TrackPayload): void {
   // The owner can exclude their own browser from the stats.
   if (isTrackingOptedOut()) return
   try {
-    const body = JSON.stringify({ ...payload, vid: getVisitorId() })
+    const body = JSON.stringify({
+      ...payload,
+      ...(payload.page != null && { page: trackedPath(payload.page) }),
+      vid: getVisitorId(),
+    })
     if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
       const queued = navigator.sendBeacon(
         '/api/track',
@@ -234,9 +245,11 @@ export function trackContributeClick(
 
 /**
  * Track a submit of the newsletter signup box (arrow click or Enter — both
- * fire the form's submit). Counts the attempt: the submit opens Substack's
- * subscribe page, so completion happens off-site. The email itself is never
- * recorded.
+ * fire the form's submit). Counts the attempt. On /events and /training the
+ * box signs the reader up on the site (through ActiveCampaign), and how that
+ * ended is tracked too (trackNewsletterSignupSuccess / …Error); on /funding
+ * it opens Substack's subscribe page, so completion happens off-site. The
+ * email itself is never recorded.
  */
 export function trackNewsletterSignup(page: string): void {
   if (typeof window === 'undefined') return
@@ -250,9 +263,49 @@ export function trackNewsletterSignup(page: string): void {
 }
 
 /**
- * Track a click on the newsletter signup box outside the email pill — the
- * card doubles as a link to the newsletter's own page, for visitors who want
- * to read it before subscribing.
+ * Track a signup through the box that went through: ActiveCampaign took the
+ * address and emailed the reader a link to confirm (/events, /training). The
+ * email itself is never recorded.
+ */
+export function trackNewsletterSignupSuccess(page: string): void {
+  if (typeof window === 'undefined') return
+  if (isTrackingOptedOut()) return
+  window._paq?.push(['trackEvent', `Newsletter - ${page}`, 'Signup success'])
+  sendTrackEvent({
+    type: 'newsletter_signup_success',
+    page,
+    label: 'Newsletter signup success',
+  })
+}
+
+/**
+ * Track a signup through the box that showed the visitor an error instead
+ * (/events, /training). `reason` is the short code /api/subscribe answered
+ * with ('invalid_email', 'rate_limited', 'upstream', …), 'network' when the
+ * site couldn't be reached, or 'http_<status>' for an answer without one.
+ * The email itself is never recorded.
+ */
+export function trackNewsletterSignupError(page: string, reason: string): void {
+  if (typeof window === 'undefined') return
+  if (isTrackingOptedOut()) return
+  window._paq?.push([
+    'trackEvent',
+    `Newsletter - ${page}`,
+    'Signup error',
+    reason,
+  ])
+  sendTrackEvent({
+    type: 'newsletter_signup_error',
+    page,
+    label: 'Newsletter signup error',
+    source: reason,
+  })
+}
+
+/**
+ * Track a click on the newsletter signup box outside the email pill — in the
+ * Substack mode (/funding) the card doubles as a link to the newsletter's own
+ * page, for visitors who want to read it before subscribing.
  */
 export function trackNewsletterView(page: string): void {
   if (typeof window === 'undefined') return
@@ -266,8 +319,9 @@ export function trackNewsletterView(page: string): void {
 }
 
 /**
- * Track a click on one of the footer's external links (the "Help us out" and
- * "Newsletters" columns) — outbound, so nothing else would record them.
+ * Track a click on one of the footer's links (the "Help us out",
+ * "Newsletters", and "For press and developers" columns) — mostly outbound,
+ * so nothing else would record them.
  * `section` is the column heading, `label` the link text; `page` is stamped
  * with the path the footer was on, like page views.
  */

@@ -1,48 +1,11 @@
 /* The Queue's own look. Bryce works in this page for long stretches, so it
    is built for triage rather than to match the admin's teal card stack
-   (his call, 9 Sept 2026): a light, calm surface by default with a dark
-   option, one item in focus, short labels, generous spacing. The palette is
-   scoped to .queue so nothing here leaks into the rest of the admin. */
+   (his call, 9 Sept 2026): a calm dark surface, one item in focus, short
+   labels, generous spacing. Dark only since 8 Oct 2026 (Bryce: "Let's get
+   rid of light mode"). The palette is scoped to .queue so nothing here leaks
+   into the rest of the admin. */
 
 .queue {
-  --q-bg: #f6f5f1;
-  --q-panel: #ffffff;
-  --q-panel-2: #faf9f6;
-  --q-border: #e7e4dc;
-  --q-border-strong: #d6d2c8;
-  --q-text: #1f2328;
-  --q-text-2: #4b5157;
-  --q-muted: #7a8188;
-  --q-accent: #0f766e;
-  --q-accent-text: #ffffff;
-  --q-accent-soft: #e4f3ef;
-  --q-danger: #b42318;
-  --q-danger-soft: #fdecea;
-  --q-warn: #9a5b00;
-  --q-warn-soft: #fff4e0;
-  --q-sel: #eaf4f1;
-  --q-shadow: 0 1px 2px rgba(20, 24, 28, 0.06);
-  --q-email: #c2410c;
-  --q-discord: #5b4bd6;
-  --q-broom: #b45309;
-  --q-rule: #6d28d9;
-  --q-comb: #0f766e;
-
-  margin: 0;
-  /* Height is set from JS to fill the viewport below the admin header. */
-  min-height: 320px;
-  overflow: hidden;
-  background: var(--q-bg);
-  color: var(--q-text);
-  font-family: var(--font-inter), Inter, system-ui, sans-serif;
-  font-size: 14px;
-  line-height: 1.5;
-  letter-spacing: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.dark {
   --q-bg: #15171b;
   --q-panel: #1d2025;
   --q-panel-2: #22262c;
@@ -60,11 +23,19 @@
   --q-warn-soft: #3a2d14;
   --q-sel: #1f2c2a;
   --q-shadow: none;
-  --q-email: #fb923c;
-  --q-discord: #a78bfa;
-  --q-broom: #f59e0b;
-  --q-rule: #c084fc;
-  --q-comb: #5ed1c1;
+
+  margin: 0;
+  /* Height is set from JS to fill the viewport below the admin header. */
+  min-height: 320px;
+  overflow: hidden;
+  background: var(--q-bg);
+  color: var(--q-text);
+  font-family: var(--font-inter), Inter, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .queue a {
@@ -164,6 +135,17 @@
   opacity: 0.75;
 }
 
+/* Beside a kind that is not on screen: how many of its items can't wait. */
+.segUrgent {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 6px;
+  color: var(--q-text);
+  font-weight: 600;
+  vertical-align: -2px;
+}
+
 .segmented .segOn {
   background: var(--q-panel);
   color: var(--q-text);
@@ -194,50 +176,198 @@
   min-height: 0;
 }
 
-.list {
+/* The left column: the search box, then the list scrolling beneath it. */
+.listCol {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
   border-right: 1px solid var(--q-border);
   background: var(--q-panel-2);
+}
+
+.list {
+  flex: 1;
   overflow-y: auto;
   min-height: 0;
 }
 
+/* ─── Search ─────────────────────────────────────────────────────────── */
+
+.searchBar {
+  flex: none;
+  padding: 12px 12px 8px;
+  border-bottom: 1px solid var(--q-border);
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--q-border-strong);
+  border-radius: 8px;
+  background: var(--q-panel);
+  color: var(--q-muted);
+  cursor: text;
+  transition:
+    border-color 120ms,
+    box-shadow 120ms;
+}
+
+.search:focus-within {
+  border-color: var(--q-accent);
+  box-shadow: 0 0 0 3px var(--q-accent-soft);
+}
+
+.searchOn {
+  border-color: var(--q-accent);
+  color: var(--q-accent);
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: none;
+  color: var(--q-text);
+  font: inherit;
+  font-size: 13.5px;
+}
+
+.searchInput::placeholder {
+  color: var(--q-muted);
+}
+
+.searchKey {
+  flex: none;
+  margin: 0;
+}
+
+.searchClear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--q-muted);
+  cursor: pointer;
+}
+
+.searchClear:hover {
+  background: var(--q-sel);
+  color: var(--q-text);
+}
+
+.searchMeta {
+  padding: 6px 4px 0;
+  font-size: 12px;
+  color: var(--q-muted);
+}
+
+.searchEmpty {
+  margin: 0;
+  padding: 16px;
+  font-size: 13px;
+  color: var(--q-muted);
+}
+
+/* A word the search matched, in a row's name or excerpt. */
+.mark {
+  padding: 0 1px;
+  border-radius: 3px;
+  background: var(--q-warn-soft);
+  color: inherit;
+  box-shadow: inset 0 -1px 0 var(--q-warn);
+}
+
+/* Where the search found a word that is not on the row itself: one line,
+   clipped by a fade rather than an ellipsis. */
+.rowExcerpt {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--q-text-2);
+  mask-image: linear-gradient(to right, #000 85%, transparent);
+}
+
+.rowExcerptLabel {
+  margin-right: 6px;
+  color: var(--q-muted);
+  font-weight: 600;
+}
+
 .group {
+  --q-group-head: 40px;
   padding: 0 0 10px;
 }
 
-/* Stays put at the top of the list while its group scrolls under it. Its
-   height is fixed so a page sub-head can sit exactly beneath it. */
+/* A section (Requests, Broom, Rules, Comb) is a shaded band with its icon
+   and a count pill, so it reads as a different level from the resource-page
+   lines inside it (Bryce, 24 Sept 2026: "Can we distinguish between these
+   better?"). It stays put at the top of the list while its group scrolls
+   under it; its height is fixed so a page sub-head can sit exactly beneath. */
 .groupHead {
   position: sticky;
   top: 0;
   z-index: 2;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   box-sizing: border-box;
   width: 100%;
-  height: 34px;
-  padding: 12px 16px 8px;
-  line-height: 14px;
+  height: var(--q-group-head);
+  padding: 0 16px;
   border: none;
-  background: var(--q-panel-2);
+  border-top: 1px solid var(--q-border);
+  border-bottom: 1px solid var(--q-border);
+  background: color-mix(in srgb, var(--q-text) 5%, var(--q-panel-2));
   font: inherit;
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.06em;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: var(--q-muted);
+  color: var(--q-text);
   text-align: left;
   cursor: pointer;
 }
 
+.group:first-child .groupHead {
+  border-top-color: transparent;
+}
+
 .groupHead:hover {
-  color: var(--q-text);
+  background: color-mix(in srgb, var(--q-text) 8%, var(--q-panel-2));
+}
+
+/* A search's groups (name matches, other matches) do not fold. */
+.groupHeadStatic,
+.groupHeadStatic:hover {
+  background: color-mix(in srgb, var(--q-text) 5%, var(--q-panel-2));
+  cursor: default;
+}
+
+/* Where an item came from is shown in grey (the heads, the source pill, a
+   row with no logo): colour is kept for the verdicts. */
+.groupIcon {
+  display: inline-flex;
+  color: var(--q-muted);
 }
 
 .groupChevron {
   display: inline-flex;
   margin-left: auto;
+  color: var(--q-muted);
   transition: transform 120ms;
 }
 
@@ -246,44 +376,71 @@
 }
 
 .groupCount {
-  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--q-border-strong);
+  font-size: 11px;
+  font-weight: 600;
   letter-spacing: 0;
+  line-height: 16px;
   text-transform: none;
+  color: var(--q-text-2);
 }
 
 .groupEmpty {
-  padding: 4px 16px 8px;
+  padding: 10px 16px 4px;
   font-size: 13px;
   color: var(--q-muted);
 }
 
 .pageGroup {
-  padding: 0 0 6px;
+  padding: 0 0 4px;
 }
 
-/* A resource page within a section: sticks just under the section's head
-   while its rows scroll past, so the page in hand is always named. */
+/* A resource page within a section: a light divider line (fold arrow, page,
+   count, then a hairline to the edge) on the list's own background. It
+   sticks just under the section's band while its rows scroll past, so the
+   page in hand is always named. */
 .pageHead {
   position: sticky;
-  top: 34px;
+  top: var(--q-group-head);
   z-index: 1;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   width: 100%;
-  padding: 5px 16px 5px;
+  padding: 12px 16px 6px;
   border: none;
   background: var(--q-panel-2);
   font: inherit;
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
-  color: var(--q-muted);
+  color: var(--q-text-2);
   text-align: left;
   cursor: pointer;
 }
 
+.pageHead::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  margin-left: 6px;
+  background: var(--q-border);
+}
+
 .pageHead:hover {
   color: var(--q-text);
+}
+
+.pageChevron {
+  display: inline-flex;
+  color: var(--q-muted);
+  transition: transform 120ms;
+}
+
+.pageCount {
+  font-weight: 500;
+  color: var(--q-muted);
 }
 
 .row {
@@ -311,6 +468,50 @@
   border-left-color: var(--q-accent);
 }
 
+/* Fable is answering in this row's chat (the bar pulses), or has answered
+   since the row was last open: a short teal bar inside the right edge,
+   apart from the left one that marks the open row. */
+.rowFable {
+  position: relative;
+}
+
+.rowFable::after {
+  content: '';
+  position: absolute;
+  top: 9px;
+  right: 5px;
+  bottom: 9px;
+  width: 4px;
+  border-radius: 2px;
+  background: var(--q-accent);
+}
+
+.rowFableLive::after {
+  animation: chatPulse 1.2s ease-in-out infinite;
+}
+
+/* The same news on a folded heading, or on the other kinds' tabs. */
+.fableDot {
+  flex: none;
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 2px;
+  border-radius: 50%;
+  background: var(--q-accent);
+}
+
+.fableDotLive {
+  animation: chatPulse 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rowFableLive::after,
+  .fableDotLive {
+    animation: none;
+  }
+}
+
 .withIcon {
   display: inline-flex;
   align-items: center;
@@ -319,26 +520,6 @@
 
 .undoIcon {
   margin-right: 2px;
-}
-
-.dotEmail {
-  color: var(--q-email);
-}
-
-.dotDiscord {
-  color: var(--q-discord);
-}
-
-.dotBroom {
-  color: var(--q-broom);
-}
-
-.dotRule {
-  color: var(--q-rule);
-}
-
-.dotComb {
-  color: var(--q-comb);
 }
 
 .rowBody {
@@ -359,6 +540,13 @@
   flex-wrap: wrap;
   font-size: 12px;
   color: var(--q-muted);
+}
+
+/* Why an Urgent row can't wait: brighter than the rest of the line, but
+   not in a verdict's colour (colour in the list means the verdict). */
+.urgentTag {
+  color: var(--q-text);
+  font-weight: 600;
 }
 
 .yes {
@@ -426,14 +614,19 @@
   top: 0;
   display: grid;
   gap: 12px;
+  /* A long link in Fable's reasons wraps rather than widening the panel
+     past its column and cutting the text off (Bryce, 30 Sept 2026). */
+  overflow-wrap: anywhere;
   padding: 16px 18px;
   border: 1px solid var(--q-border);
   border-top: 5px solid var(--q-border-strong);
   border-radius: 8px;
   background: var(--aside-bg);
   /* The chat below the verdict can run long: the panel scrolls on its
-     own, the box to type in stays at its foot. */
-  max-height: calc(100vh - 200px);
+     own, the box to type in stays at its foot. The height leaves room for
+     the two bars above and the Accept bar below, which otherwise covered
+     the foot and left "Start over" on its edge (Bryce, 24 Sept 2026). */
+  max-height: calc(100vh - 250px);
   overflow-y: auto;
 }
 
@@ -512,6 +705,74 @@
   font-size: 15px;
 }
 
+/* A tab with nothing left (TabDone). */
+.tabDone {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 96px 40px;
+  text-align: center;
+}
+
+.tabDoneTitle {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--q-accent);
+  font: inherit;
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+button.tabDoneTitle {
+  cursor: pointer;
+}
+
+p.tabDoneTitle {
+  color: var(--q-text-2);
+  font-size: 28px;
+}
+
+.tabDonePop {
+  animation: tabDonePop 700ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+@keyframes tabDonePop {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.tabDoneNote {
+  margin: 0 0 14px;
+  color: var(--q-muted);
+  font-size: 15px;
+}
+
+/* Over the whole page, taking no clicks (Fireworks.tsx). */
+.fireworks {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 50;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tabDonePop {
+    animation: none;
+  }
+}
+
 .detailHead {
   display: grid;
   gap: 10px;
@@ -532,7 +793,8 @@
   border-radius: 999px;
   font-size: 12px;
   font-weight: 500;
-  border: 1px solid currentColor;
+  color: var(--q-text-2);
+  border: 1px solid var(--q-border-strong);
 }
 
 /* The page, in the top row: the same small caps as the section headings. */
@@ -598,6 +860,7 @@
   justify-content: center;
   background: none;
   border: 1px dashed var(--q-border-strong);
+  color: var(--q-muted);
 }
 
 .finding {
@@ -651,6 +914,19 @@
   overflow-wrap: anywhere;
 }
 
+.findingLead a,
+.findingDetail a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--q-border-strong);
+  text-underline-offset: 2px;
+}
+
+.findingLead a:hover,
+.findingDetail a:hover {
+  text-decoration-color: currentColor;
+}
+
 /* The links sit at the right end of the pills row. */
 .links {
   display: flex;
@@ -667,6 +943,9 @@
   background: var(--q-panel);
   color: var(--q-text-2);
   white-space: pre-wrap;
+  /* A long link (a WhatsApp invite) wraps instead of widening the box
+     under the reply beside it (Bryce, 5 Oct 2026). */
+  overflow-wrap: anywhere;
   border-radius: 0 6px 6px 0;
 }
 
@@ -736,6 +1015,15 @@
 
 /* A request and its reply side by side, so the two read as one exchange
    (Bryce, 14 Sept 2026); one column when the detail column is narrow. */
+/* The accept reply and, under it, the rejection reply (Bryce, 5 Oct 2026:
+   both shown, both written in advance). */
+.replies {
+  min-width: 0;
+  display: grid;
+  gap: 22px;
+  align-content: start;
+}
+
 .exchange {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -770,6 +1058,12 @@
   border-radius: 8px;
 }
 
+/* While the rows can show their crosses, each keeps a last column for one,
+   so the columns line up whether a row has a cross or not. */
+.droppable .diffRow {
+  grid-template-columns: 150px minmax(0, 1fr) 16px minmax(0, 1fr) 16px;
+}
+
 .label {
   font-size: 12px;
   color: var(--q-muted);
@@ -799,11 +1093,11 @@
   overflow-wrap: anywhere;
 }
 
+/* Same weight as the old value, so the two read side by side word for word. */
 .to {
   color: var(--q-text);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-weight: 500;
 }
 
 /* A change to a logo or image field: the picture itself, the site's dark
@@ -1092,6 +1386,80 @@
   color: var(--q-text);
 }
 
+/* A rule's one line on its test (RuleCard): how many past decisions, then
+   each outcome's count as its small coloured label. */
+.ruleStat {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  font-size: 14px;
+  color: var(--q-text-2);
+}
+
+/* The rest of a rule's summary and Fable's take, behind Details. */
+.ruleMore {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--q-text-2);
+}
+
+/* A rule's test on past decisions (RuleCard): one line per decision
+   it would have changed, its outcome as a small coloured label. */
+.ruleTest {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.ruleTestLine {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--q-text-2);
+  overflow-wrap: anywhere;
+}
+
+.ruleTestTitle {
+  font-weight: 600;
+  color: var(--q-text);
+}
+
+.ruleTestOutcome {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--q-muted);
+  border: 1px solid var(--q-border-strong);
+}
+
+.ruleTestOutcome[data-outcome='breaks'] {
+  color: var(--q-danger);
+  background: var(--q-danger-soft);
+  border-color: transparent;
+}
+
+.ruleTestOutcome[data-outcome='unclear'] {
+  color: var(--q-warn);
+  background: var(--q-warn-soft);
+  border-color: transparent;
+}
+
+.ruleTestOutcome[data-outcome='fixes'] {
+  color: var(--q-accent);
+  background: var(--q-accent-soft);
+  border-color: transparent;
+}
+
 .siteFrame {
   /* The site's own ground and column width (.collection-list is 369px), so
      the card reads exactly as a visitor sees it. */
@@ -1135,6 +1503,18 @@
   }
 }
 
+/* Name, link, description and logo beside an addition's card: the column
+   is narrow, so each name sits over its value, as in the grid below. */
+@container (min-width: 720px) {
+  .fieldsBeside {
+    gap: 14px;
+  }
+  .fieldsBeside .fieldRow {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}
+
 .siteFrame > * {
   /* the site's list grid blockifies the card; on its own the <a> would be
      inline and its padding would paint as a strip */
@@ -1156,6 +1536,13 @@
   border-radius: 8px;
   background: var(--q-panel);
   border: 1px solid var(--q-border);
+}
+
+.thumbEmpty {
+  display: block;
+  box-sizing: border-box;
+  background: none;
+  border: 1px dashed var(--q-border-strong);
 }
 
 .imageSlot {
@@ -1248,8 +1635,6 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 14px 22px;
-  padding-top: 12px;
-  border-top: 1px dashed var(--q-border);
 }
 
 .fieldCell {
@@ -1281,8 +1666,7 @@
 
 /* A training or event Type as the site's pill: the type's colour (the
    site's own variable, set per pill as --pill) as text, a 30% border and a
-   12% wash. The site's colours are made for its dark cards, so on the light
-   panel the text is darkened to read while the wash keeps the hue. */
+   12% wash, as on the site's own dark cards. */
 .typePills {
   display: inline-flex;
   flex-wrap: wrap;
@@ -1299,14 +1683,8 @@
   font-size: 12.5px;
   font-weight: 600;
   letter-spacing: -0.2px;
-  color: color-mix(in srgb, var(--pill) 45%, #1f2328);
-  border: 1px solid color-mix(in srgb, var(--pill) 60%, transparent);
-  background: color-mix(in srgb, var(--pill) 18%, transparent);
-}
-
-.dark .typePill {
   color: var(--pill);
-  border-color: color-mix(in srgb, var(--pill) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--pill) 30%, transparent);
   background: color-mix(in srgb, var(--pill) 12%, transparent);
 }
 
@@ -1604,6 +1982,13 @@ select.input {
   flex: 1;
 }
 
+/* The decision picked in the search results, marked as a list row is. */
+.doneRowActive {
+  background: var(--q-sel);
+  border-color: var(--q-accent);
+  box-shadow: inset 3px 0 0 var(--q-accent);
+}
+
 .doneActions {
   display: flex;
   align-items: center;
@@ -1746,6 +2131,11 @@ select.input {
   margin-right: 8px;
 }
 
+/* The Discord reply went on the clipboard with the decision. */
+.toastCopied {
+  color: var(--q-accent);
+}
+
 .toastUndo {
   display: inline-flex;
   align-items: center;
@@ -1767,17 +2157,23 @@ select.input {
   border-color: var(--q-border-strong);
 }
 
+/* Over the admin header (z-index 50) too, and scrolling when the card is
+   taller than the window, so its first lines are never hidden. */
 .help {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.35);
   display: flex;
-  align-items: center;
   justify-content: center;
-  z-index: 30;
+  padding: 16px;
+  overflow-y: auto;
+  z-index: 51;
 }
 
+/* Auto margins center the card when it fits and let it start at the top
+   when it does not. */
 .helpCard {
+  margin: auto 0;
   width: 420px;
   padding: 20px 22px;
   background: var(--q-panel);
@@ -1813,7 +2209,7 @@ select.input {
     grid-template-columns: 1fr;
   }
 
-  .list {
+  .listCol {
     max-height: 40vh;
     border-right: none;
     border-bottom: 1px solid var(--q-border);
@@ -1829,13 +2225,20 @@ select.input {
   }
 
   .fieldRow,
-  .diffRow {
+  .diffRow,
+  .droppable .diffRow {
     grid-template-columns: 1fr;
     gap: 4px;
   }
 
   .arrow {
     transform: rotate(90deg);
+  }
+
+  /* The row's cross sits on the field name's line. */
+  .dropEdit {
+    grid-row: 1;
+    grid-column: 1;
   }
 }
 
@@ -1975,18 +2378,28 @@ select.input {
   font-weight: 600;
 }
 
+/* The panel gives up its bottom padding to the box to type in, which then
+   sits flush on the panel's edge with its own padding under "Start over"
+   (a negative margin here left 30px in one browser and none in another). */
+.detailAside:has(.chatInputRow) {
+  padding-bottom: 0;
+}
+
 .chatInputRow {
   position: sticky;
   bottom: 0;
   display: grid;
   gap: 6px;
-  margin: 0 -18px -16px;
+  margin: 0 -18px;
   padding: 10px 18px 14px;
   background: var(--aside-bg);
   border-top: 1px solid var(--q-border);
 }
 
 .chatInput {
+  /* A block, not inline: an inline box leaves a line's worth of space
+     under itself, which pushed the paperclip below the middle. */
+  display: block;
   width: 100%;
   min-height: 36px;
   max-height: 180px;
@@ -2181,4 +2594,245 @@ select.input {
 
 .chatCardFoot .chatTool::before {
   content: '✓';
+}
+
+/* A decided item's card whose values did not go with the decision. */
+.chatCardFoot .chatTool.chatNotApplied::before {
+  content: '·';
+}
+
+/* Files in the chat (20 Sept 2026): the dashed frame while one is dragged
+   over the panel, the clip in the box, the chips waiting to go, and the
+   pictures and files shown under a sent message. */
+.chatDropping {
+  outline: 2px dashed var(--q-accent);
+  outline-offset: 6px;
+  border-radius: 6px;
+}
+
+.chatBox {
+  position: relative;
+}
+
+.chatBox .chatInput {
+  padding-right: 38px;
+}
+
+.chatAttach {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--q-muted);
+  cursor: pointer;
+}
+
+.chatAttach:hover {
+  background: var(--q-border);
+  color: var(--q-text);
+}
+
+.chatFiles,
+.chatSent {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chatSent {
+  margin-top: 6px;
+}
+
+.chatFileChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--q-border);
+  border-radius: 8px;
+  background: var(--q-panel);
+  color: var(--q-text-2);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.3;
+  text-align: left;
+}
+
+button.chatFileChip {
+  cursor: pointer;
+}
+
+button.chatFileChip:hover {
+  border-color: var(--q-border-strong);
+  color: var(--q-text);
+}
+
+.chatFileThumb {
+  display: block;
+  width: 40px;
+  height: 40px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.chatFileName {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chatSentPic {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 1px solid var(--q-border);
+  border-radius: 8px;
+  background: var(--q-panel);
+  overflow: hidden;
+  cursor: zoom-in;
+}
+
+.chatSentPic img {
+  display: block;
+  max-width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+}
+
+/* A field Fable changed straight in Airtable from the chat (4 Oct 2026):
+   the "edited" mark's place, in its own words. */
+.byFable {
+  margin-left: 8px;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 400;
+  color: var(--q-accent);
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: help;
+}
+
+/* Done today: a decision opens on a click, like a row in the list
+   (Bryce, 4 Oct 2026: "Would be good if I could click on a listing in
+   Done somehow"). */
+.doneRowOpen {
+  cursor: pointer;
+}
+
+.doneRowOpen:hover {
+  border-color: var(--q-accent);
+}
+
+.backLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--q-accent);
+  cursor: pointer;
+}
+
+.backLink:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.backLink kbd {
+  margin-left: 2px;
+}
+
+.backArrow {
+  display: inline-flex;
+  transform: scaleX(-1);
+}
+
+/* The cross at the end of a change's row: a proposed field is left out, an
+   edit beyond the proposal dropped. Shown on the row's hover like the
+   pencil, level with the value's first line. */
+.dropEdit {
+  display: inline-flex;
+  align-items: center;
+  align-self: start;
+  justify-self: end;
+  margin-top: 3px;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--q-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+
+.diffRow:hover .dropEdit,
+.dropEdit:focus-visible {
+  opacity: 1;
+}
+
+.dropEdit:hover {
+  color: var(--q-danger);
+}
+
+/* No hover on a touch screen: the cross is always there. */
+@media (hover: none) {
+  .dropEdit {
+    opacity: 1;
+  }
+}
+
+/* A proposed field left out with the cross (Bryce, 15 Oct 2026: "I want to
+   be able to delete a suggested field change"): what the listing keeps
+   reads as it is, and the proposal is crossed out and faded. */
+.leftOut .from {
+  color: var(--q-text);
+  text-decoration: none;
+}
+
+.leftOut .arrow {
+  opacity: 0.4;
+}
+
+.leftOutValue {
+  color: var(--q-muted);
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.leftOutMark {
+  margin-left: 8px;
+  font-size: 12px;
+  font-style: normal;
+  color: var(--q-warn);
+  white-space: nowrap;
+}
+
+.putBack {
+  margin-left: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--q-muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.putBack:hover,
+.putBack:focus-visible {
+  color: var(--q-text);
 }

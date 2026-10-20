@@ -94,6 +94,7 @@ export default function AboutPage() {
           <div className="width-6-col-narrow">
             <div className="flex gap-16px items-center padding-bottom-24px">
               <Image
+                className={styles.teamPhoto}
                 src="/images/soeren.png"
                 alt="Søren Elverlin"
                 width={72}
@@ -120,6 +121,7 @@ export default function AboutPage() {
           <div className="width-6-col-narrow">
             <div className="flex gap-16px items-center padding-bottom-24px">
               <Image
+                className={styles.teamPhoto}
                 src="/images/bryce.png"
                 alt="Bryce Robertson"
                 width={72}
@@ -149,6 +151,7 @@ export default function AboutPage() {
           <div className="width-6-col-narrow">
             <div className="flex gap-16px items-center padding-bottom-24px">
               <Image
+                className={styles.teamPhoto}
                 src="/images/melissa.png"
                 alt="Melissa Samworth"
                 width={72}
@@ -159,7 +162,7 @@ export default function AboutPage() {
                   Melissa Samworth
                 </p>
                 <p className="paragraph-small color-teal-300">
-                  Product design, front-end development
+                  Product, strategy, design
                 </p>
               </div>
             </div>
@@ -174,7 +177,13 @@ export default function AboutPage() {
 
           <div className="width-6-col-narrow">
             <div className="flex gap-16px items-center padding-bottom-24px">
-              <Image src="/images/plex.png" alt="plex" width={72} height={72} />
+              <Image
+                className={styles.teamPhoto}
+                src="/images/plex.png"
+                alt="plex"
+                width={72}
+                height={72}
+              />
               <div>
                 <p className="paragraph-default-bold padding-bottom-4px">
                   plex
@@ -225,7 +234,7 @@ export default function AboutPage() {
               research.
             </p>
             <a
-              href="mailto:bryceerobertson@gmail.com?subject=Volunteering%20for%20AISafety.com"
+              href="https://discord.gg/faamWzPcv8"
               target="_blank"
               rel="noopener noreferrer"
               className="button-secondary"
@@ -248,7 +257,7 @@ export default function AboutPage() {
               thoughts, we&apos;re listening.
             </p>
             <a
-              href="https://discord.gg/faamWzPcv8"
+              href="https://airtable.com/appF8XfZUGXtfi40E/pageXZp18w3Sqm1Z7/form?prefill_Page=about&hide_Page=true"
               target="_blank"
               rel="noopener noreferrer"
               className="button-secondary"

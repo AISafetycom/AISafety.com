@@ -13,6 +13,7 @@ import { trackCardsButtonClick } from '@/lib/analytics'
 import CardsViewTracker from '@/components/CardsViewTracker'
 import { placementsById } from '@/lib/placements'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
+import { foldForSearch } from '@/lib/search'
 import { isPlacedOnMap } from '@/lib/map-images'
 import { SITE_PAGES } from '@/lib/site-pages'
 import styles from './page.module.css'
@@ -134,11 +135,15 @@ export default function MapClient({
     (org: MapOrg) => {
       if (org.isMagic) return false
       if (!searchQuery) return true
-      const query = searchQuery.toLowerCase()
-      return (
-        org.title.toLowerCase().includes(query) ||
-        org.description.toLowerCase().includes(query)
-      )
+      // Folded like the site search: "tubingen" finds Tübingen.
+      const query = foldForSearch(searchQuery)
+      // The pin label ("EA Forum") and pin tooltip name count as names too.
+      return [
+        org.title,
+        org.shortName ?? '',
+        org.tooltipTitle,
+        org.description,
+      ].some(text => foldForSearch(text).includes(query))
     },
     [searchQuery]
   )

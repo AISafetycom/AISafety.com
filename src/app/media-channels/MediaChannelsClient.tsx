@@ -8,7 +8,7 @@ import { mediaChannelCardProps } from './card'
 import ContributeButtons from '@/components/ContributeButtons'
 import { MediaChannel } from '@/lib/data/media-channels'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
-import { placementsById } from '@/lib/placements'
+import { gridListings, placementsById } from '@/lib/placements'
 
 interface MediaChannelsClientProps {
   channels: MediaChannel[]
@@ -88,6 +88,14 @@ export default function MediaChannelsClient({
     }
   }, [filteredChannels])
 
+  // Featured channels show in the grid only once a filter is on; unfiltered,
+  // the featured row above already has them.
+  const gridChannels = gridListings(
+    filteredChannels,
+    placements,
+    typeFilters.length > 0
+  )
+
   return (
     <>
       <FilterBar count={filteredChannels.length} noun="media source">
@@ -104,7 +112,7 @@ export default function MediaChannelsClient({
 
       <div className="flex gap-56px">
         <div className="collection-list padding-bottom-40px width-9-col">
-          {filteredChannels.map(channel => (
+          {gridChannels.map(channel => (
             <ListingCard
               key={channel.id}
               {...mediaChannelCardProps(channel)}

@@ -1,0 +1,58 @@
+.policy {
+  padding-bottom: 80px;
+}
+
+.policy strong {
+  color: var(--white);
+  font-weight: 600;
+}
+
+.p {
+  color: var(--teal-300);
+  padding-bottom: 20px;
+}
+
+.note {
+  color: var(--teal-300);
+  margin-bottom: 48px;
+  padding: 24px 28px;
+  border-radius: 16px;
+  background-color: var(--teal-850);
+  border: 1px solid color-mix(in srgb, var(--bright-teal-300) 30%, transparent);
+}
+
+.h2 {
+  padding-top: 40px;
+  padding-bottom: 16px;
+}
+
+.h3 {
+  color: var(--white);
+  font-weight: 600;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.list {
+  color: var(--teal-300);
+  margin: 0 0 24px;
+  padding-left: 22px;
+}
+
+.list li {
+  padding-bottom: 8px;
+}
+
+.pageLink {
+  color: var(--bright-teal-300);
+  font-weight: 600;
+}
+
+.lastUpdated {
+  color: var(--teal-400);
+  padding-top: 24px;
+}
+
+.footer {
+  padding-top: 8px;
+}

@@ -42,3 +42,28 @@ export function placementsById(
   }
   return placements
 }
+
+/** The listings the grid below the featured row should render.
+ *
+ *  With no filter active the featured cards stay out of the grid: they
+ *  already sit in the featured row just above, and seeing the same program
+ *  twice on a fresh page load read as a mistake to visitors (feedback,
+ *  September 2026). The moment any filter is on they come back, so a
+ *  filtered grid is complete — someone narrowing to "Fellowship" must find
+ *  the featured fellowship too, and by then the featured row may have
+ *  scrolled out of view anyway. Nothing else moves: the grid keeps its
+ *  full-order numbering and the featured cards keep their F-slots, so
+ *  click analytics read the same either way.
+ *
+ *  `placements` is the page's placementsById() map — a card is featured
+ *  when its slot is an F-slot, which covers both the fixed-slot pages
+ *  (ranks 1 and 2) and the queue pages (whatever the row displays,
+ *  random stand-ins included). */
+export function gridListings<T extends { id: string }>(
+  items: T[],
+  placements: Map<string, string>,
+  filtering: boolean
+): T[] {
+  if (filtering) return items
+  return items.filter(item => !placements.get(item.id)?.startsWith('F'))
+}

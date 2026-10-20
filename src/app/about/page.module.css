@@ -16,3 +16,9 @@
   background-color: var(--teal-800);
   border-radius: 16px;
 }
+
+/* Team photos are shown as circles regardless of the source image's crop */
+.teamPhoto {
+  border-radius: 50%;
+  object-fit: cover;
+}

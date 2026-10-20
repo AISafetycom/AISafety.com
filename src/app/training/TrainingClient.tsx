@@ -24,7 +24,7 @@ import {
   trainingTypeColor,
 } from '@/lib/training-types'
 import { selectFeatured, withRandomStandIns } from '@/lib/featured'
-import { placementsById } from '@/lib/placements'
+import { gridListings, placementsById } from '@/lib/placements'
 import {
   compareByDeadline,
   SECTION_LABELS,
@@ -272,6 +272,22 @@ export default function TrainingClient({
     selectedLocation,
   ])
 
+  const anyFilterActive =
+    selectedTypes.length > 0 ||
+    selectedFocus.length > 0 ||
+    selectedEntryBar.length > 0 ||
+    selectedStipend.length > 0 ||
+    selectedLocation.length > 0 ||
+    selectedLength.length > 0 ||
+    (mode === 'upcoming' && selectedStatus.length > 0)
+
+  // The featured programs show in the grid only once a filter is on;
+  // unfiltered, the featured row above already has them.
+  const gridPrograms = useMemo(
+    () => gridListings(filtered, placements, anyFilterActive),
+    [filtered, placements, anyFilterActive]
+  )
+
   // Upcoming programs are one deadline-ordered list; each card carries its
   // own "Apply by" line, so no month headings. Programs that can't be applied
   // to sit at the bottom, and once the Applications filter shows more than
@@ -280,7 +296,7 @@ export default function TrainingClient({
   const sections = useMemo(() => {
     if (mode !== 'upcoming') return []
     const groups: { key: Section; programs: TrainingProgram[] }[] = []
-    for (const program of filtered as TrainingProgram[]) {
+    for (const program of gridPrograms as TrainingProgram[]) {
       const key = sectionFor(program)
       let group = groups.find(g => g.key === key)
       if (!group) {
@@ -290,7 +306,7 @@ export default function TrainingClient({
       group.programs.push(program)
     }
     return groups
-  }, [mode, filtered])
+  }, [mode, gridPrograms])
 
   const savedScrollY = useRef<number | null>(null)
   const toggleFilter = (
@@ -311,15 +327,6 @@ export default function TrainingClient({
       savedScrollY.current = null
     }
   }, [filtered])
-
-  const anyFilterActive =
-    selectedTypes.length > 0 ||
-    selectedFocus.length > 0 ||
-    selectedEntryBar.length > 0 ||
-    selectedStipend.length > 0 ||
-    selectedLocation.length > 0 ||
-    selectedLength.length > 0 ||
-    (mode === 'upcoming' && selectedStatus.length > 0)
 
   const renderCard = (program: ProgramBase) => (
     <ListingCard
@@ -485,7 +492,7 @@ export default function TrainingClient({
             ))
           ) : (
             <div className="collection-list">
-              {filtered.map(program => renderCard(program))}
+              {gridPrograms.map(program => renderCard(program))}
             </div>
           )}
           {filtered.length === 0 && (

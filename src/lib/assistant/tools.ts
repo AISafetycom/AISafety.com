@@ -9,6 +9,7 @@ import {
   MAX_ROUNDS,
   type IndexedRound,
 } from './program-history'
+import { datedRoundsByProgram } from './dated-rounds'
 
 export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
@@ -19,14 +20,14 @@ You should call this tool LIBERALLY. By default there is NO limit — the tool r
 
 ARGUMENTS:
 
-• \`type\` — listing type. One of: 'job', 'funder', 'advisor', 'community', 'course', 'founder-resource', 'project', 'media-channel', 'org', 'event', 'training'. Highly recommended.
+• \`type\` — listing type. One of: 'job', 'funder', 'advisor', 'community', 'course', 'founder-resource', 'media-channel', 'org', 'event', 'training'. Highly recommended.
 
 • \`query\` — optional free-text terms. Tokens are matched against name (×5 weight), organization (×3), meta fields (×2), and description (×1). Use the user's words, related keywords, or leave empty to browse by filter alone.
 
 • \`filters\` — optional object of meta-field constraints. Values can be a string OR an array of strings (array means OR semantics: matches if ANY value substring matches). Substring match is case-insensitive.
 
   Per type:
-    job: skillSet ("Policy"|"Research"|"Software engineering"|"Operations"|"Outreach"|"Strategy"|"Legal"|"Data"|"Information security"|"Management"), minimumExperience ("Entry-level"|"Junior"|"Mid"|"Senior"), roleType ("Full-time"|"Part-time"|"Internship"), workLocation ("Remote"|"On-site"), location (city or country)
+    job: skillSet ("Policy"|"Research"|"Software engineering"|"Operations"|"Outreach"|"Strategy"|"Legal"|"Data"|"Information security"|"Management"), minimumExperience ("Entry-level"|"Junior"|"Mid"|"Senior"), requiredDegree ("Master's degree"|"Doctoral degree" — only set when a role asks for more than an undergraduate degree), roleType ("Full-time"|"Part-time"|"Internship"), workLocation ("Remote"|"On-site"), location (city or country)
     funder: type ("Fund"|"Grant program"|"Platform"), recipientType ("Individuals"|"Organizations"), applicationStatus ("Open"|"Closed" — use this to filter open/closed funders; acceptingApplications holds display text like "Applications close 31 October 2026" and is NOT reliably filterable)
     community: platform ("Slack"|"Discord"|"In-person"), type, activityLevel ("Active"|"Quiet"), location
     course: category, courseType
@@ -68,6 +69,9 @@ EXAMPLES:
   // Junior or mid-level remote policy + research roles
   search_listings({ type: 'job', filters: { skillSet: ['Policy', 'Research'], minimumExperience: ['Junior', 'Mid'], workLocation: 'Remote' } })
 
+  // PhD-level research roles
+  search_listings({ type: 'job', filters: { skillSet: 'Research', requiredDegree: 'Doctoral degree' } })
+
   // Browse all advisors
   search_listings({ type: 'advisor' })
 
@@ -94,7 +98,6 @@ EXAMPLES:
             'community',
             'course',
             'founder-resource',
-            'project',
             'media-channel',
             'org',
             'event',
@@ -173,7 +176,7 @@ Rules:
   },
   {
     name: 'get_program_history',
-    description: `Every round of a training program or event that the site has on file — PAST rounds included, which search_listings never shows (the catalog holds only upcoming or running rounds). Use it whenever the user asks how often something runs, when previous rounds ran, whether or when there will be another round ("would there be one starting in January?"), what its usual season or deadline is, or how many times it has run — and BEFORE telling the user a program's next dates aren't known, since the pattern of past rounds is usually the most useful thing you can offer them.
+    description: `Every round of a training program or event that the site has on file — PAST rounds included, which search_listings never shows (the catalog holds only upcoming or running rounds). Use it whenever the user asks how often something runs, when previous rounds ran, whether or when there will be another round ("would there be one starting in January?"), what its usual season or deadline is, or how many times it has run — and BEFORE telling the user a program's next dates aren't known, since the pattern of past rounds is usually the most useful thing you can offer them. Also use it before telling the user the site has no record of a program or event they name: a training round leaves search_listings once it starts and an event once it ends, so a round the site listed a few weeks ago may only be here.
 
 Pass \`id\` (the catalog id of the training / event / org listing in question, copied from a search_listings or get_listing result — use it whenever you have one) and/or \`query\` (the program's short name: "Pathfinder Fellowship", "MATS", "EA Global London"). Season, year and "cohort" words are ignored, so a dated listing's full name works fine as the query. Matching is deliberately generous, so results can include sub-streams or sibling programs from the same organizer — read the names and use only the rounds that are actually the same program.
 
@@ -227,12 +230,15 @@ interface ProgramHistoryInput {
  *  A deadline that falls today still counts as open (you can apply through the
  *  last day). An EMPTY close date is deliberately 'unknown' (rolling, walk-in,
  *  not yet announced) — never assume an empty deadline means "open".
- *  Two flags outrank the deadline: recurring programs have no dated round at
- *  all, and "not yet open" means the round is announced but you can't apply
- *  yet (orgs sometimes publish the deadline before opening applications). */
+ *  Two flags outrank the deadline: recurring programs carry no dates of their
+ *  own (their dated rounds, when the site lists any, ride along separately as
+ *  `datedRounds` – `hasDatedRounds` says whether they do), and "not yet open"
+ *  means the round is announced but you can't apply yet (orgs sometimes
+ *  publish the deadline before opening applications). */
 function eventApplicationStatus(
   meta: Record<string, unknown>,
-  today: string
+  today: string,
+  hasDatedRounds = false
 ): {
   applicationsStatus:
     | 'open'
@@ -242,11 +248,18 @@ function eventApplicationStatus(
     | 'recurring'
   applicationsNote: string
 } {
+  if (meta.recurring === 'Yes' && hasDatedRounds) {
+    return {
+      applicationsStatus: 'recurring',
+      applicationsNote:
+        "An evergreen program that runs repeatedly, and the site ALSO lists dated rounds of it: see datedRounds. Those are its next rounds — when the user asks about this program, when it runs, or how to apply, give their dates and application status, and never say no dates are listed. Whether to card a round is up to that round's own applicationsNote; this program listing is fine to card either way. For rounds before these, call get_program_history with this listing's id.",
+    }
+  }
   if (meta.recurring === 'Yes') {
     return {
       applicationsStatus: 'recurring',
       applicationsNote:
-        "An evergreen program that runs repeatedly — no dates for the next round are listed here. Fine to recommend the program itself. If the user asks when it runs, how often, or whether there'll be another round, call get_program_history with this listing's id first — the site usually has its earlier rounds on file, and their pattern is the honest answer. For the current round's dates and deadline, point the user to the program's own page, and suggest the AI Safety Events & Training newsletter to catch new rounds as they are announced.",
+        "An evergreen program that runs repeatedly — the site lists no dated round of it right now. Fine to recommend the program itself. If the user asks when it runs, how often, or whether there'll be another round, call get_program_history with this listing's id first — the site usually has its earlier rounds on file, and their pattern is the honest answer. For the current round's dates and deadline, point the user to the program's own page, and suggest the AI Safety Training newsletter (signed up for on /training) to catch new rounds as they are announced.",
     }
   }
   const close =
@@ -289,11 +302,20 @@ function summariseListing(
   // it is served in full and can run to thousands of chars, so a browse-all
   // search must not carry it for every match. The note travels with the data
   // so the model sees the handling rules at the moment it reads the text.
-  includeDetails?: boolean
+  includeDetails?: boolean,
+  // A recurring program's dated rounds listed elsewhere in the catalog
+  // (dated-rounds.ts), summarised with their own dates and status so the
+  // model can answer "when is the next one?" from the program's card.
+  datedRounds?: Listing[]
 ): object {
+  const rounds = datedRounds ?? []
   const eventStatus =
     l.type === 'event' || l.type === 'training'
-      ? eventApplicationStatus(l.meta as Record<string, unknown>, today)
+      ? eventApplicationStatus(
+          l.meta as Record<string, unknown>,
+          today,
+          rounds.length > 0
+        )
       : null
   return {
     id: l.id,
@@ -303,6 +325,21 @@ function summariseListing(
     description: l.description,
     meta: l.meta,
     ...(eventStatus ?? {}),
+    ...(rounds.length > 0
+      ? {
+          datedRounds: rounds.map(r => ({
+            id: r.id,
+            name: r.name,
+            ...(r.meta.startDate ? { startDate: r.meta.startDate } : {}),
+            ...(r.meta.startDateApprox
+              ? { startDateApprox: r.meta.startDateApprox }
+              : {}),
+            ...(r.meta.endDate ? { endDate: r.meta.endDate } : {}),
+            ...(r.meta.location ? { location: r.meta.location } : {}),
+            ...eventApplicationStatus(r.meta, today),
+          })),
+        }
+      : {}),
     ...(includeDates && l.dateAdded ? { dateAdded: l.dateAdded } : {}),
     ...(includeDates && l.lastModified ? { lastModified: l.lastModified } : {}),
     ...(includeDetails && l.details
@@ -350,22 +387,37 @@ async function executeSearch(
     sort,
   })
   if (hits.length === 0) {
+    // A program the site listed a few weeks ago may only be in its round
+    // history now, so a named search that could be one points there too.
+    const historyNote =
+      input.query &&
+      (!input.type || ['training', 'event', 'course'].includes(input.type))
+        ? ' If the user named a program or event, also call get_program_history with that name before saying the site has no record of it — a training round leaves the catalog once it starts and an event once it ends, but the site keeps every round on file.'
+        : ''
     return {
       ok: true,
       content: JSON.stringify({
         matches: 0,
-        note: 'Nothing matched. BEFORE giving up, try broader: drop a filter, expand radiusKm, drop the type, try synonyms. Only after a couple of broader retries should you tell the user nothing matched and offer [[suggest:TYPE:USER_QUERY]], where TYPE is the listing type you searched (community, event, training, funder, course, media-channel, founder-resource, advisor, project, org). Do NOT offer a suggest form for jobs — the job board comes from 80,000 Hours and is not curated here; instead point the user to the 80,000 Hours job board.',
+        note: `Nothing matched. BEFORE giving up, try broader: drop a filter, expand radiusKm, drop the type, try synonyms.${historyNote} Only after a couple of broader retries should you tell the user nothing matched and offer [[suggest:TYPE:USER_QUERY]], where TYPE is the listing type you searched (community, event, training, funder, course, media-channel, founder-resource, advisor, project, org). Do NOT offer a suggest form for jobs — the job board comes from 80,000 Hours and is not curated here; instead point the user to the 80,000 Hours job board.`,
       }),
       listings: [],
     }
   }
   const today = new Date().toISOString().slice(0, 10)
+  const rounds = datedRoundsByProgram(catalog.listings)
   return {
     ok: true,
     content: JSON.stringify({
       matches: hits.length,
       results: hits.map(h =>
-        summariseListing(h.listing, today, h.distanceKm, Boolean(sort))
+        summariseListing(
+          h.listing,
+          today,
+          h.distanceKm,
+          Boolean(sort),
+          false,
+          rounds.get(h.listing.id)
+        )
       ),
     }),
     listings: hits.map(h => h.listing),
@@ -390,7 +442,14 @@ function executeGetListing(
   return {
     ok: true,
     content: JSON.stringify(
-      summariseListing(listing, today, undefined, true, true)
+      summariseListing(
+        listing,
+        today,
+        undefined,
+        true,
+        true,
+        datedRoundsByProgram(catalog.listings).get(listing.id)
+      )
     ),
     listings: [listing],
   }

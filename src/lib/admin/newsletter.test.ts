@@ -1,14 +1,45 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   cardGroups,
   contentDigest,
+  DraftProblemError,
+  FieldError,
   FitError,
   formatLocal,
+  isLiveCampaign,
+  liveCampaignsNamed,
   previewText,
+  RemoveCardError,
+  removeCardHtml,
   ReorderError,
   reorderHtml,
+  sendTestCopy,
+  setFieldsHtml,
   setFitHtml,
+  TestSendError,
+  baseIssueName,
+  editLockFor,
+  groupSends,
+  holdsAt,
+  parseWaveSegments,
+  scheduleWaves,
+  sdateInstant,
+  sendDelayMinutes,
+  stopActionsFor,
+  sumIssues,
+  waveCampaignName,
+  waveList,
+  waveOf,
+  waveProgress,
+  waveSchedule,
+  wavesStillToGo,
+  waveTags,
+  waveTiming,
 } from './newsletter'
+import { createHash } from 'node:crypto'
+import cardEdit from './__fixtures__/newsletter-card-edit.json'
+import cardRemove from './__fixtures__/newsletter-card-remove.json'
+import siteCardEdit from './__fixtures__/newsletter-site-card-edit.json'
 
 // Fixtures generated with the pipeline's own function
 // (~/Newsletter/ac.py content_digest) on 3 September 2026. The two sides
@@ -96,6 +127,7 @@ describe('cardGroups', () => {
             logo: null,
             fit: null,
             pipelineFit: null,
+            fields: [],
           },
           {
             key: 'b',
@@ -103,6 +135,7 @@ describe('cardGroups', () => {
             logo: null,
             fit: null,
             pipelineFit: null,
+            fields: [],
           },
           {
             key: 'c',
@@ -110,6 +143,7 @@ describe('cardGroups', () => {
             logo: null,
             fit: null,
             pipelineFit: null,
+            fields: [],
           },
         ],
       },
@@ -161,6 +195,66 @@ describe('reorderHtml', () => {
   })
   it('refuses an email without a manifest', () => {
     expect(() => reorderHtml('<p>x</p>', { g0: ['a'] })).toThrow(ReorderError)
+  })
+})
+
+describe('removeCardHtml (mirrors ~/Newsletter/render.py remove_card)', () => {
+  const html = issue([
+    { id: 'g0', label: 'Closing soon', keys: ['a', 'b', 'c'] },
+    { id: 'g1', label: 'New', keys: ['x', 'y'] },
+  ])
+  const removedList = (email: string) =>
+    JSON.parse(
+      Buffer.from(
+        /<!--aisafety-cards:([A-Za-z0-9+/=]+)-->/.exec(email)![1],
+        'base64'
+      ).toString('utf8')
+    ).removed
+  it('takes out the card, its text and its manifest entry', () => {
+    const out = removeCardHtml(html, 'g0', 'b')
+    expect(cardGroups(out.html)?.map(g => g.cards.map(c => c.key))).toEqual([
+      ['a', 'c'],
+      ['x', 'y'],
+    ])
+    expect(out.text).toBe(
+      'HEAD\n== Closing soon ==\n* a\n* c\n== New ==\n* x\n* y\nTAIL\n'
+    )
+    expect(out.html).not.toContain('<!--card:g0:b-->')
+    expect(
+      out.html.startsWith(
+        '<html><body><p>intro</p><h2>Closing soon</h2><!--card:g0:a-->'
+      )
+    ).toBe(true)
+  })
+  it('rebuilds the text in the current order after a reorder', () => {
+    const moved = reorderHtml(html, { g0: ['c', 'a', 'b'] })
+    expect(removeCardHtml(moved.html, 'g0', 'a').text).toBe(
+      'HEAD\n== Closing soon ==\n* c\n* b\n== New ==\n* x\n* y\nTAIL\n'
+    )
+  })
+  it('records every removal in the manifest, so a rebuild leaves them out', () => {
+    const once = removeCardHtml(html, 'g0', 'b')
+    const twice = removeCardHtml(once.html, 'g1', 'x')
+    expect(removedList(html)).toBeUndefined()
+    expect(removedList(twice.html)).toEqual([
+      { g: 'g0', key: 'b', title: 'Title b' },
+      { g: 'g1', key: 'x', title: 'Title x' },
+    ])
+  })
+  it('refuses the last card of a section, an unknown card and an email without a manifest', () => {
+    const one = removeCardHtml(html, 'g1', 'x')
+    expect(() => removeCardHtml(one.html, 'g1', 'y')).toThrow(RemoveCardError)
+    expect(() => removeCardHtml(html, 'g0', 'zz')).toThrow(RemoveCardError)
+    expect(() => removeCardHtml(html, 'g1', 'a')).toThrow(RemoveCardError)
+    expect(() => removeCardHtml('<p>x</p>', 'g0', 'a')).toThrow(RemoveCardError)
+  })
+  it('gives byte-identical output to the pipeline (render.py remove_card)', () => {
+    const moved = reorderHtml(cardEdit.input, cardRemove.order)
+    const out = removeCardHtml(moved.html, cardRemove.group, cardRemove.key)
+    expect(createHash('sha256').update(out.html, 'utf8').digest('hex')).toBe(
+      cardRemove.expectedHtmlSha256
+    )
+    expect(out.text).toBe(cardRemove.expectedText)
   })
 })
 
@@ -329,5 +423,888 @@ describe('setFitHtml', () => {
     expect(() => setFitHtml(html, 'g0', 'zz', 'x')).toThrow(FitError)
     expect(() => setFitHtml(html, 'g9', 'a', 'x')).toThrow(FitError)
     expect(() => setFitHtml('<p>x</p>', 'g0', 'a', 'x')).toThrow(FitError)
+  })
+})
+
+describe('liveCampaignsNamed', () => {
+  const name = 'Events · Week 40, 2026'
+  const c = (id: string, status: string, n = name, send_amt?: string) => ({
+    id,
+    name: n,
+    status,
+    send_amt,
+  })
+
+  it('finds live campaigns of the same issue: scheduled, sending, paused, sent, held', () => {
+    const found = liveCampaignsNamed(
+      [c('1', '1'), c('2', '2'), c('3', '3'), c('5', '5'), c('7', '7')],
+      '99',
+      name
+    )
+    expect(found.map(x => x.id)).toEqual(['1', '2', '3', '5', '7'])
+  })
+
+  it('ignores the draft itself, other drafts, sends stopped before anyone got them, and other issues', () => {
+    const found = liveCampaignsNamed(
+      [
+        c('99', '1'),
+        c('10', '0'),
+        c('11', '4', name, '0'),
+        c('12', '6', name, '0'),
+        c('13', '5', 'Events · Week 39, 2026'),
+      ],
+      '99',
+      name
+    )
+    expect(found).toEqual([])
+  })
+
+  it('counts a stop that already reached people, an unknown send count and unknown statuses', () => {
+    const found = liveCampaignsNamed(
+      [
+        c('20', '4', name, '1200'),
+        c('21', '6'),
+        c('22', '9'),
+        c('23', '4', name, ''),
+      ],
+      '99',
+      name
+    )
+    expect(found.map(x => x.id)).toEqual(['20', '21', '22', '23'])
+  })
+
+  it('matches every wave of the issue by its base name', () => {
+    const campaigns = [
+      c('30', '5', `${name} · wave 1/4`),
+      c('31', '1', `${name} · wave 2/4`),
+      c('32', '5', 'Events · Week 41, 2026 · wave 1/4'),
+    ]
+    expect(liveCampaignsNamed(campaigns, '99', name).map(x => x.id)).toEqual([
+      '30',
+      '31',
+    ])
+    // A wave send only clashes with the same wave or a whole-list send.
+    expect(liveCampaignsNamed(campaigns, '99', name, 2).map(x => x.id)).toEqual(
+      ['31']
+    )
+    expect(
+      liveCampaignsNamed([...campaigns, c('33', '5')], '99', name, 3).map(
+        x => x.id
+      )
+    ).toEqual(['33'])
+  })
+})
+
+describe('isLiveCampaign', () => {
+  it('only a draft, or a stop/disable that provably reached nobody, is not live', () => {
+    expect(isLiveCampaign({ status: '0' })).toBe(false)
+    expect(isLiveCampaign({ status: '4', send_amt: '0' })).toBe(false)
+    expect(isLiveCampaign({ status: '6', send_amt: '0' })).toBe(false)
+    expect(isLiveCampaign({ status: '4', send_amt: '3' })).toBe(true)
+    expect(isLiveCampaign({ status: '4', send_amt: null })).toBe(true)
+    for (const s of ['1', '2', '3', '5', '7', '8', '42'])
+      expect(isLiveCampaign({ status: s, send_amt: '0' })).toBe(true)
+  })
+})
+
+describe('wave names', () => {
+  it('builds and strips the wave suffix', () => {
+    const issue = 'Events · Week 41, 2026'
+    expect(waveCampaignName(issue, 2, 4)).toBe(
+      'Events · Week 41, 2026 · wave 2/4'
+    )
+    expect(baseIssueName('Events · Week 41, 2026 · wave 2/4')).toBe(issue)
+    expect(baseIssueName(issue)).toBe(issue)
+    expect(waveOf('Events · Week 41, 2026 · wave 2/4')).toEqual({
+      wave: 2,
+      waves: 4,
+    })
+    expect(waveOf(issue)).toBeNull()
+    // Only the exact suffix counts.
+    expect(baseIssueName('Events · Week 41, 2026 · wave 2')).toBe(
+      'Events · Week 41, 2026 · wave 2'
+    )
+  })
+})
+
+/* ─── Card text edits (mirrors ~/Newsletter/render.py set_fields) ─────── */
+
+describe('card text fields', () => {
+  const { input, group, key, values } = cardEdit
+
+  it('lists every piece of text on a card, labelled by what it is', () => {
+    const card = cardGroups(input)![0].cards.find(c => c.key === key)!
+    expect(card.fields.map(f => [f.name, f.label])).toEqual([
+      ['title', 'Title'],
+      ['m0', 'Location'],
+      ['m1', 'Dates'],
+      ['desc', 'Description'],
+      ['b0', 'Stipend'],
+      ['b1', 'Time commitment'],
+      ['b2', 'Entry bar'],
+      ['b3', 'Applications'],
+    ])
+    expect(card.fields[2].value).toBe('1 week · Starts 5–11 October')
+    expect(card.fields.every(f => f.original === null)).toBe(true)
+  })
+
+  it('gives byte-identical output to the pipeline (render.py set_fields)', () => {
+    const out = setFieldsHtml(input, group, key, values)
+    expect(createHash('sha256').update(out.html, 'utf8').digest('hex')).toBe(
+      cardEdit.expectedHtmlSha256
+    )
+    expect(out.text).toBe(cardEdit.expectedText)
+  })
+
+  it('remembers the text as built, so the edit shows and can be undone', () => {
+    const out = setFieldsHtml(input, group, key, values)
+    const card = cardGroups(out.html)![0].cards.find(c => c.key === key)!
+    expect(card.title).toBe('Lens Academy: Deep Learning Theory')
+    const desc = card.fields.find(f => f.name === 'desc')!
+    expect(desc.value).toBe('A new description & more <b>.')
+    expect(desc.original).toMatch(/^Studies the mathematics/)
+    // Putting Pen's text back clears the "edited" state.
+    const back = setFieldsHtml(out.html, group, key, {
+      desc: desc.original!,
+    })
+    const again = cardGroups(back.html)![0].cards.find(c => c.key === key)!
+    expect(again.fields.find(f => f.name === 'desc')!.original).toBeNull()
+  })
+
+  it('leaves the other cards alone', () => {
+    const before = cardGroups(input)![0].cards.filter(c => c.key !== key)
+    const out = setFieldsHtml(input, group, key, values)
+    const after = cardGroups(out.html)![0].cards.filter(c => c.key !== key)
+    expect(after).toEqual(before)
+  })
+
+  it('refuses empty text, unknown fields and unknown cards', () => {
+    expect(() => setFieldsHtml(input, group, key, { title: '  ' })).toThrow(
+      FieldError
+    )
+    expect(() => setFieldsHtml(input, group, key, { b9: 'x' })).toThrow(
+      FieldError
+    )
+    expect(() =>
+      setFieldsHtml(input, group, 'recNope', { title: 'x' })
+    ).toThrow(FieldError)
+  })
+})
+
+/* ─── Card text edits on site cards (sitecards.py layout, 3 Oct 2026) ─── */
+
+describe('card text fields on site cards', () => {
+  const { group, training, events } = siteCardEdit
+
+  it('gives byte-identical output to the pipeline for both issues', () => {
+    for (const c of [training, events]) {
+      const out = setFieldsHtml(c.input, group, c.key, c.values)
+      expect(createHash('sha256').update(out.html, 'utf8').digest('hex')).toBe(
+        c.expectedHtmlSha256
+      )
+      expect(out.text).toBe(c.expectedText)
+    }
+  })
+
+  it('never rewrites the title line for an edit to another field', () => {
+    // "Hong Kong" is both the location and part of the program's name.
+    const out = setFieldsHtml(
+      training.input,
+      group,
+      training.key,
+      training.values
+    )
+    expect(out.text).toContain('* ML4Good Governance: Hong Kong October 2026\n')
+    expect(out.text).toContain(
+      '  Bootcamp · Hong Kong & Shenzhen · 9 days · Starts 12 Oct 2026\n'
+    )
+  })
+
+  it('swaps a whole part of a detail line before a match inside another part', () => {
+    const out = setFieldsHtml(events.input, group, events.key, events.values)
+    expect(out.text).toContain(
+      '  By Free Software Foundation · Free (donations welcome) · Register by 7 Oct 2026\n'
+    )
+  })
+
+  it("labels an event's time of day as Time, not Time commitment", () => {
+    const card = cardGroups(events.input)![0].cards.find(
+      c => c.key === events.key
+    )!
+    expect(card.fields.map(f => [f.name, f.label])).toEqual([
+      ['title', 'Title'],
+      ['m0', 'Location'],
+      ['m1', 'Dates'],
+      ['m2', 'Time'],
+      ['desc', 'Description'],
+      ['b0', 'Host'],
+      ['b1', 'Cost'],
+      ['b2', 'Applications'],
+    ])
+    const program = cardGroups(training.input)![0].cards[0]
+    expect(program.fields.find(f => f.name === 'b1')!.label).toBe(
+      'Time commitment'
+    )
+  })
+})
+
+/* ─── Test copies ───────────────────────────────────────────────────── */
+
+describe('sendTestCopy', () => {
+  // A pretend ActiveCampaign: one draft (campaign 42, message 77, list 6)
+  // and the v1 endpoint, which records what it was asked to do.
+  const body = '<p>Week 40</p>'
+  let html = ''
+  let v1calls: URLSearchParams[] = []
+  let v1answer: Record<string, unknown> = {}
+  const env = { ...process.env }
+
+  beforeEach(() => {
+    process.env.ACTIVECAMPAIGN_URL = 'https://ac.example'
+    process.env.ACTIVECAMPAIGN_KEY = 'key'
+    html = `<!--aisafety-issue:${contentDigest(body)}-->${body}`
+    v1calls = []
+    v1answer = { result_code: 1, result_message: 'Message sent' }
+    const reads: Record<string, unknown> = {
+      'campaigns/42': {
+        campaign: { id: '42', name: 'Events · Week 40, 2026', status: '0' },
+      },
+      'campaigns/42/campaignLists': { campaignLists: [{ list: '6' }] },
+      'campaigns/42/campaignMessages': {
+        campaignMessages: [{ messageid: '77' }],
+      },
+    }
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      const url = new URL(String(input))
+      if (url.pathname === '/admin/api.php') {
+        const call = new URLSearchParams(String(init?.body ?? ''))
+        call.set('api_action', url.searchParams.get('api_action') ?? '')
+        v1calls.push(call)
+        return Response.json(v1answer)
+      }
+      const path = url.pathname.replace('/api/3/', '')
+      if (path === 'messages/77')
+        return Response.json({
+          message: { id: '77', subject: 'Week 40, 2026', html },
+        })
+      return path in reads
+        ? Response.json(reads[path])
+        : new Response('not found', { status: 404 })
+    })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    process.env = { ...env }
+  })
+
+  it('mails ActiveCampaign’s test copy to the one address, and does nothing else', async () => {
+    await expect(sendTestCopy('42', 'owner@example.com')).resolves.toEqual({
+      to: 'owner@example.com',
+    })
+    expect(v1calls).toHaveLength(1)
+    const [call] = v1calls
+    expect(call.get('api_action')).toBe('campaign_send')
+    expect(call.get('action')).toBe('test')
+    expect(call.get('email')).toBe('owner@example.com')
+    expect(call.get('campaignid')).toBe('42')
+    expect(call.get('messageid')).toBe('77')
+  })
+
+  it('refuses a draft that fails the approval checks, before asking ActiveCampaign', async () => {
+    html = body // the marker is gone: someone saved it in AC's designer
+    await expect(sendTestCopy('42', 'owner@example.com')).rejects.toThrow(
+      DraftProblemError
+    )
+    expect(v1calls).toHaveLength(0)
+  })
+
+  it('passes on ActiveCampaign’s reason when it won’t send', async () => {
+    v1answer = { result_code: 0, result_message: 'Daily test limit reached' }
+    const err = await sendTestCopy('42', 'owner@example.com').catch(e => e)
+    expect(err).toBeInstanceOf(TestSendError)
+    expect((err as TestSendError).detail).toContain('Daily test limit reached')
+  })
+})
+
+/* ─── Waves and stopping (pure parts) ─────────────────────────────────── */
+
+const U = (n: number) =>
+  `${String(n).repeat(8)}-${String(n).repeat(4)}-4${String(n).repeat(3)}-8${String(n).repeat(3)}-${String(n).repeat(12)}`
+
+describe('parseWaveSegments', () => {
+  const P = 'Newsletter wave '
+  it('finds the waves by name, in order, and ignores other segments', () => {
+    expect(
+      parseWaveSegments(P, [
+        { name: 'Newsletter wave 2', segmentId: U(2) },
+        { name: 'Engaged readers', segmentId: U(9) },
+        { name: 'Newsletter wave 3 (everyone else)', segmentId: U(3) },
+        { name: 'Newsletter wave 1', segmentId: U(1) },
+        { name: 'Newsletter waves old', segmentId: U(8) },
+      ])
+    ).toEqual([
+      { wave: 1, name: 'Newsletter wave 1', segmentId: U(1), last: false },
+      { wave: 2, name: 'Newsletter wave 2', segmentId: U(2), last: false },
+      {
+        wave: 3,
+        name: 'Newsletter wave 3 (everyone else)',
+        segmentId: U(3),
+        last: true,
+      },
+    ])
+    expect(parseWaveSegments(P, [])).toEqual([])
+  })
+
+  it('refuses a set that isn’t 1…N with only the last one “(everyone else)”', () => {
+    const bad = [
+      // a gap
+      [
+        { name: 'Newsletter wave 1', segmentId: U(1) },
+        { name: 'Newsletter wave 3 (everyone else)', segmentId: U(3) },
+      ],
+      // no catch-all
+      [
+        { name: 'Newsletter wave 1', segmentId: U(1) },
+        { name: 'Newsletter wave 2', segmentId: U(2) },
+      ],
+      // the catch-all not last
+      [
+        { name: 'Newsletter wave 1 (everyone else)', segmentId: U(1) },
+        { name: 'Newsletter wave 2', segmentId: U(2) },
+      ],
+      // one wave twice
+      [
+        { name: 'Newsletter wave 1', segmentId: U(1) },
+        { name: 'Newsletter wave 1', segmentId: U(4) },
+        { name: 'Newsletter wave 2 (everyone else)', segmentId: U(2) },
+      ],
+      // only one
+      [{ name: 'Newsletter wave 1 (everyone else)', segmentId: U(1) }],
+    ]
+    for (const saved of bad)
+      expect(parseWaveSegments(P, saved)).toEqual({
+        error: expect.stringMatching(/aren’t numbered 1 to N/),
+      })
+    expect(
+      parseWaveSegments(P, [
+        { name: 'Newsletter wave 1', segmentId: '12' },
+        { name: 'Newsletter wave 2 (everyone else)', segmentId: U(2) },
+      ])
+    ).toEqual({ error: expect.stringMatching(/unexpected id/) })
+  })
+})
+
+describe('waveTags', () => {
+  const def = (
+    wave: number,
+    last: boolean,
+    conditions: Array<[string, string, string]>,
+    groupOps = ['and', 'AND']
+  ) => ({
+    wave,
+    name: `Newsletter wave ${wave}`,
+    last,
+    conditions: conditions.map(([field, op, value]) => ({ field, op, value })),
+    groupOps,
+  })
+
+  it('reads each wave’s tag; the last wave has none', () => {
+    expect(
+      waveTags([
+        def(1, false, [['tagid', '=', '101']]),
+        def(2, false, [['tagid', '=', '102']]),
+        def(3, true, [
+          ['tagid', '!=', '102'],
+          ['tagid', '!=', '101'],
+        ]),
+      ])
+    ).toEqual({ tags: ['101', '102', null] })
+  })
+
+  it('refuses conditions that could send an issue twice or never', () => {
+    const cases = [
+      // wave 1 isn't "has tag X"
+      [
+        def(1, false, [['tagid', '!=', '101']]),
+        def(2, true, [['tagid', '!=', '101']]),
+      ],
+      // two conditions on a tagged wave
+      [
+        def(1, false, [
+          ['tagid', '=', '101'],
+          ['tagid', '=', '102'],
+        ]),
+        def(2, true, [['tagid', '!=', '101']]),
+      ],
+      // the last wave misses a tag
+      [
+        def(1, false, [['tagid', '=', '101']]),
+        def(2, false, [['tagid', '=', '102']]),
+        def(3, true, [['tagid', '!=', '101']]),
+      ],
+      // the last wave's conditions joined with OR
+      [
+        def(1, false, [['tagid', '=', '101']]),
+        def(2, false, [['tagid', '=', '102']]),
+        def(
+          3,
+          true,
+          [
+            ['tagid', '!=', '101'],
+            ['tagid', '!=', '102'],
+          ],
+          ['or', 'AND']
+        ),
+      ],
+      // something other than a tag (fields read back as "list.listid")
+      [
+        def(1, false, [['list.listid', '=', '6']]),
+        def(2, true, [['tagid', '!=', '101']]),
+      ],
+      // two waves on one tag
+      [
+        def(1, false, [['tagid', '=', '101']]),
+        def(2, false, [['tagid', '=', '101']]),
+        def(3, true, [['tagid', '!=', '101']]),
+      ],
+    ]
+    for (const c of cases) expect(waveTags(c)).toHaveProperty('error')
+  })
+})
+
+describe('waveProgress', () => {
+  const ISSUE = 'Events · Week 41, 2026'
+  const w = (
+    id: string,
+    k: number,
+    status: string,
+    more: { send_amt?: string; ldate?: string | null; n?: number } = {}
+  ) => ({
+    id,
+    name: `${ISSUE} · wave ${k}/${more.n ?? 4}`,
+    status,
+    send_amt: more.send_amt ?? '500',
+    ldate: more.ldate === undefined ? '2026-10-08T09:30:00-05:00' : more.ldate,
+  })
+
+  it('starts at wave 1, then the wave after the last one sent', () => {
+    expect(waveProgress(4, [])).toMatchObject({
+      next: 1,
+      notBefore: null,
+      holds: [],
+      wait: null,
+      blocked: null,
+      done: false,
+    })
+    const p = waveProgress(4, [w('2', 2, '5'), w('1', 1, '5')])
+    expect(p).toMatchObject({ next: 3, done: false })
+    expect(p.notBefore).toBe(Date.parse('2026-10-09T08:30:00Z'))
+    expect(p.byWave.map(c => c?.id ?? null)).toEqual(['1', '2', null, null])
+  })
+
+  it('waits while an earlier wave is scheduled, sending, paused or held', () => {
+    for (const s of ['1', '2', '3', '7']) {
+      const p = waveProgress(4, [w('1', 1, s, { ldate: null })])
+      expect(p.wait).toMatch(
+        /^waves 2–4 can go once wave 1 has finished sending/
+      )
+      expect(p.going).toBe(true)
+    }
+    // The one to wait for is the last unfinished one before the next wave.
+    expect(
+      waveProgress(4, [
+        w('1', 1, '5'),
+        w('2', 2, '1', { ldate: null }),
+        w('3', 3, '1', { ldate: null }),
+      ]).wait
+    ).toBe(
+      'wave 4 can go once wave 3 has finished sending (it is scheduled now)'
+    )
+  })
+
+  it('every wave scheduled at once (approve once): going, nothing next, not done', () => {
+    const p = waveProgress(4, [
+      w('1', 1, '5'),
+      w('2', 2, '1', { ldate: null }),
+      w('3', 3, '1', { ldate: null }),
+      w('4', 4, '7', { ldate: null }),
+    ])
+    expect(p).toMatchObject({
+      next: null,
+      going: true,
+      done: false,
+      wait: null,
+      blocked: null,
+    })
+  })
+
+  it('a wave stopped after reaching people ends the run', () => {
+    const p = waveProgress(4, [w('1', 1, '4', { send_amt: '300' })])
+    expect(p.next).toBeNull()
+    expect(p.blocked).toMatch(/wave 1 was stopped after reaching 300 people/)
+    // …whatever was scheduled after it, which should be canceled.
+    const later = waveProgress(4, [
+      w('1', 1, '5'),
+      w('2', 2, '4', { send_amt: '120' }),
+      w('3', 3, '1', { ldate: null }),
+      w('4', 4, '1', { ldate: null }),
+    ])
+    expect(later.next).toBeNull()
+    expect(later.blocked).toMatch(
+      /wave 2 was stopped after reaching 120 people.* – cancel the waves still scheduled$/
+    )
+  })
+
+  it('is done after the last wave, or after a whole-list send', () => {
+    const all = [1, 2, 3, 4].map(k => w(String(k), k, '5'))
+    expect(waveProgress(4, all)).toMatchObject({ done: true, next: null })
+    const whole = waveProgress(4, [
+      { id: '9', name: ISSUE, status: '5', send_amt: '3' },
+    ])
+    expect(whole).toMatchObject({ done: true, next: null })
+    expect(whole.blocked).toMatch(
+      /already went to the whole list as campaign 9/
+    )
+  })
+
+  it('refuses mixed-up sends: another number of waves, a wave twice, a gap', () => {
+    expect(waveProgress(3, [w('1', 1, '5', { n: 4 })]).blocked).toMatch(
+      /the waves changed/
+    )
+    expect(waveProgress(4, [w('1', 1, '5'), w('5', 1, '1')]).blocked).toMatch(
+      /wave 1 of this issue went out twice \(campaigns 1 and 5\)/
+    )
+    expect(waveProgress(4, [w('2', 2, '5')]).blocked).toMatch(
+      /wave 1 of this issue never went out, but wave 2 did/
+    )
+    expect(waveProgress(4, [w('7', 7, '5')]).blocked).toMatch(/can’t be/)
+  })
+
+  it('holds the next wave on a red verdict (not a small sample), or when the finish time is unknown', () => {
+    const red = new Map([
+      ['1', { verdict: 'red', reasons: ['spam complaints 0.3%'] }],
+    ])
+    expect(waveProgress(4, [w('1', 1, '5')], red).holds).toEqual([
+      'the send watcher flagged wave 1 red: spam complaints 0.3%',
+    ])
+    const small = new Map([['1', { verdict: 'red', smallSample: true }]])
+    expect(waveProgress(4, [w('1', 1, '5')], small).holds).toEqual([])
+    const amber = new Map([['1', { verdict: 'amber', reasons: ['x'] }]])
+    expect(waveProgress(4, [w('1', 1, '5')], amber).holds).toEqual([])
+    expect(waveProgress(4, [w('1', 1, '5', { ldate: null })]).holds[0]).toMatch(
+      /doesn’t say when wave 1 finished/
+    )
+  })
+
+  it('the 18-hour gap sets when the next wave starts, plus room for the verdict until it is in', () => {
+    // Wave 1 finished 8 October, 14:30 UTC.
+    const pending = waveProgress(4, [w('1', 1, '5')])
+    expect(pending.notBefore).toBe(Date.parse('2026-10-09T08:30:00Z'))
+    expect(pending.verdictPending).toBe(true)
+    expect(pending.startFrom).toBe(Date.parse('2026-10-09T10:00:00Z'))
+    const judged = waveProgress(
+      4,
+      [w('1', 1, '5')],
+      new Map([['1', { verdict: 'green', reasons: [] }]])
+    )
+    expect(judged.verdictPending).toBe(false)
+    expect(judged.startFrom).toBe(Date.parse('2026-10-09T08:30:00Z'))
+    // Funding isn't judged by the watcher: no room kept for a verdict.
+    const funding = waveProgress(
+      4,
+      [w('1', 1, '5')],
+      new Map(),
+      '-05:00',
+      waveTiming('8')
+    )
+    expect(funding.verdictPending).toBe(false)
+    expect(funding.startFrom).toBe(Date.parse('2026-10-09T08:30:00Z'))
+    // A test list waits ten minutes after the wave before it finished.
+    const test = waveProgress(
+      4,
+      [w('1', 1, '5')],
+      new Map(),
+      '-05:00',
+      waveTiming('5')
+    )
+    expect(test.startFrom).toBe(Date.parse('2026-10-08T14:40:00Z'))
+  })
+
+  it('holdsAt: the gap holds nothing; a verdict that should be in but isn’t does', () => {
+    const p = waveProgress(4, [w('1', 1, '5')])
+    // Before the 18 hours, and while there is still room for the verdict.
+    expect(holdsAt(p, new Date('2026-10-09T08:29:00Z'))).toEqual([])
+    expect(holdsAt(p, new Date('2026-10-09T08:49:00Z'))).toEqual([])
+    // Once wave 2 would start inside the watcher's hour with no verdict.
+    expect(holdsAt(p, new Date('2026-10-09T08:50:00Z'))).toEqual([
+      'the send watcher hasn’t checked wave 1 yet (it was due 9 October 2026, 08:30 UTC), so it would cancel wave 2 before it starts',
+    ])
+    const judged = waveProgress(
+      4,
+      [w('1', 1, '5')],
+      new Map([['1', { verdict: 'amber', reasons: ['x'] }]])
+    )
+    expect(holdsAt(judged, new Date('2026-10-10T08:00:00Z'))).toEqual([])
+  })
+})
+
+/* ─── Approve once: when the waves start (8 Oct 2026) ─────────────────── */
+
+describe('waveSchedule: when each wave of one approval starts', () => {
+  const at = (iso: string) => Date.parse(iso)
+  const times = (slots: Array<{ wave: number; startsAt: number }>) =>
+    slots.map(s => [s.wave, new Date(s.startsAt).toISOString()])
+
+  it('nothing sent yet: wave 1 five minutes out, then a day apart', () => {
+    expect(
+      times(scheduleWaves('6', 1, 4, at('2026-10-08T21:00:00Z'), null))
+    ).toEqual([
+      [1, '2026-10-08T21:05:00.000Z'],
+      [2, '2026-10-09T21:05:00.000Z'],
+      [3, '2026-10-10T21:05:00.000Z'],
+      [4, '2026-10-11T21:05:00.000Z'],
+    ])
+  })
+
+  it('wave 1 already sent tonight: waves 2–4 from the 18-hour gap, plus room for the verdict', () => {
+    // Wave 1 (the old one-press flow) finished 8 October, 21:40 UTC; Bryce
+    // approves the rest the next morning, before its verdict is in.
+    const p = waveProgress(4, [
+      {
+        id: '180',
+        name: 'Events · Week 41, 2026 · wave 1/4',
+        status: '5',
+        send_amt: '541',
+        ldate: '2026-10-08T16:40:00-05:00',
+      },
+    ])
+    expect(new Date(p.startFrom!).toISOString()).toBe(
+      '2026-10-09T17:10:00.000Z'
+    )
+    expect(
+      times(scheduleWaves('6', 2, 4, at('2026-10-09T09:00:00Z'), p.startFrom))
+    ).toEqual([
+      [2, '2026-10-09T17:10:00.000Z'],
+      [3, '2026-10-10T17:10:00.000Z'],
+      [4, '2026-10-11T17:10:00.000Z'],
+    ])
+    // Pressed later than that: five minutes from the press.
+    expect(
+      times(scheduleWaves('6', 2, 4, at('2026-10-09T18:00:00Z'), p.startFrom))
+    ).toEqual([
+      [2, '2026-10-09T18:05:00.000Z'],
+      [3, '2026-10-10T18:05:00.000Z'],
+      [4, '2026-10-11T18:05:00.000Z'],
+    ])
+  })
+
+  it('one wave left: just that one', () => {
+    expect(
+      times(scheduleWaves('7', 4, 4, at('2026-10-11T12:00:00Z'), null))
+    ).toEqual([[4, '2026-10-11T12:05:00.000Z']])
+  })
+
+  it('test lists: two minutes out, then ten minutes apart', () => {
+    for (const list of ['4', '5'])
+      expect(
+        times(scheduleWaves(list, 1, 3, at('2026-10-08T21:00:00Z'), null))
+      ).toEqual([
+        [1, '2026-10-08T21:02:00.000Z'],
+        [2, '2026-10-08T21:12:00.000Z'],
+        [3, '2026-10-08T21:22:00.000Z'],
+      ])
+  })
+
+  it('is the plain rule underneath: the later of now + delay and notBefore, then the spacing', () => {
+    expect(
+      waveSchedule({
+        from: 2,
+        waves: 3,
+        now: 1000,
+        notBefore: 5000,
+        delayMs: 100,
+        spacingMs: 10,
+      })
+    ).toEqual([
+      { wave: 2, startsAt: 5000 },
+      { wave: 3, startsAt: 5010 },
+    ])
+    expect(
+      waveSchedule({
+        from: 1,
+        waves: 1,
+        now: 1000,
+        notBefore: 500,
+        delayMs: 100,
+        spacingMs: 10,
+      })
+    ).toEqual([{ wave: 1, startsAt: 1100 }])
+  })
+
+  it('timing per list: real lists 18 hours + verdict room on Events and Training', () => {
+    expect(waveTiming('6')).toEqual({
+      gapMs: 18 * 3_600_000,
+      leadMs: 90 * 60_000,
+      judged: true,
+      delayMs: 5 * 60_000,
+      spacingMs: 24 * 3_600_000,
+    })
+    expect(waveTiming('8')).toMatchObject({ judged: false, leadMs: 0 })
+    expect(waveTiming('5')).toEqual({
+      gapMs: 10 * 60_000,
+      leadMs: 0,
+      judged: false,
+      delayMs: 2 * 60_000,
+      spacingMs: 10 * 60_000,
+    })
+  })
+})
+
+describe('stopActionsFor', () => {
+  it('cancel before it starts, pause while sending, stop or resume once paused', () => {
+    expect(stopActionsFor('1', ['6'])).toEqual(['cancel'])
+    expect(stopActionsFor('7', ['7'])).toEqual(['cancel'])
+    expect(stopActionsFor('2', ['8'])).toEqual(['pause'])
+    expect(stopActionsFor('3', ['5'])).toEqual(['stop', 'resume'])
+    for (const s of ['0', '4', '5', '6', '9'])
+      expect(stopActionsFor(s, ['6'])).toEqual([])
+  })
+
+  it('only for single-list sends on lists 5–8', () => {
+    expect(stopActionsFor('1', ['4'])).toEqual([])
+    expect(stopActionsFor('1', ['9'])).toEqual([])
+    expect(stopActionsFor('1', ['6', '7'])).toEqual([])
+    expect(stopActionsFor('1', [])).toEqual([])
+  })
+})
+
+describe('editLockFor', () => {
+  it('locks card edits while a send of the issue is still going out', () => {
+    const c = (status: string, name = 'Events · Week 41, 2026 · wave 1/4') => ({
+      id: '5',
+      name,
+      status,
+      send_amt: '10',
+    })
+    for (const s of ['1', '2', '3', '7', '9'])
+      expect(editLockFor([c(s)])).toMatch(
+        /^Wave 1 of this issue \(campaign 5\) is /
+      )
+    for (const s of ['4', '5', '6']) expect(editLockFor([c(s)])).toBeNull()
+    expect(editLockFor([c('1', 'Events · Week 41, 2026')])).toMatch(
+      /^This issue \(campaign 5\) is scheduled/
+    )
+    expect(editLockFor([])).toBeNull()
+  })
+
+  it('locks them from the approval until the last wave has gone (approve once)', () => {
+    const wave = (id: string, k: number, status: string) => ({
+      id,
+      name: `Events · Week 41, 2026 · wave ${k}/4`,
+      status,
+      send_amt: status === '5' ? '500' : '0',
+    })
+    expect(
+      editLockFor([
+        wave('1', 1, '5'),
+        wave('2', 2, '1'),
+        wave('3', 3, '1'),
+        wave('4', 4, '1'),
+      ])
+    ).toBe(
+      'Waves 2–4 of this issue are scheduled or going out and send this draft’s email as it was approved, so card edits are off until the last of them has gone (or the rest are canceled)'
+    )
+    expect(
+      editLockFor([1, 2, 3, 4].map(k => wave(String(k), k, '5')))
+    ).toBeNull()
+  })
+})
+
+describe('wavesStillToGo', () => {
+  it('keeps the draft while a wave of the issue is still to go, not after', () => {
+    const wave = (k: number, status: string) => ({
+      id: String(k),
+      name: `Events · Week 41, 2026 · wave ${k}/4`,
+      status,
+      send_amt: '10',
+    })
+    expect(wavesStillToGo([wave(1, '5'), wave(2, '1'), wave(3, '7')])).toMatch(
+      /^Waves 2–3 of this issue are still to go out/
+    )
+    expect(wavesStillToGo([wave(1, '5'), wave(2, '5')])).toBeNull()
+    // A whole-list send isn't a wave: the draft isn't needed after it.
+    expect(
+      wavesStillToGo([
+        { id: '9', name: 'Events · Week 41, 2026', status: '1', send_amt: '0' },
+      ])
+    ).toBeNull()
+  })
+
+  it('waveList names a run, a gap or one', () => {
+    expect(waveList([4, 2, 3])).toBe('waves 2–4')
+    expect(waveList([2, 4])).toBe('waves 2, 4')
+    expect(waveList([3])).toBe('wave 3')
+  })
+})
+
+describe('send delay', () => {
+  it('five minutes on the real lists, two on the test lists', () => {
+    for (const l of ['6', '7', '8']) expect(sendDelayMinutes(l)).toBe(5)
+    for (const l of ['4', '5']) expect(sendDelayMinutes(l)).toBe(2)
+  })
+})
+
+describe('sdateInstant', () => {
+  it('reads AC’s send date as an instant, in the account’s offset when it has none', () => {
+    expect(sdateInstant('2026-10-09 09:00:00', '-05:00')).toBe(
+      '2026-10-09T14:00:00.000Z'
+    )
+    expect(sdateInstant('2026-10-09T09:00:00-05:00', '+02:00')).toBe(
+      '2026-10-09T14:00:00.000Z'
+    )
+    expect(sdateInstant(null, '-05:00')).toBeNull()
+    expect(sdateInstant('soon', '-05:00')).toBeNull()
+  })
+})
+
+describe('grouping by issue', () => {
+  it('groupSends puts an issue’s rows together where its newest stands, highest wave first', () => {
+    const r = (id: string, group: string, wave: number | null) => ({
+      id,
+      group,
+      wave: wave == null ? null : { wave },
+    })
+    expect(
+      groupSends([
+        r('9', 'a', 2),
+        r('8', 'b', null),
+        r('7', 'a', 1),
+        r('6', 'c', null),
+        r('5', 'a', 3),
+      ]).map(x => x.id)
+    ).toEqual(['5', '9', '7', '8', '6'])
+  })
+
+  it('sumIssues groups per list and base name, newest first', () => {
+    const s = (name: string, listId: string, ldate: string) => ({
+      c: { name, ldate },
+      listId,
+      list: `list ${listId}`,
+    })
+    const out = sumIssues([
+      s('Events · Week 41, 2026 · wave 1/2', '6', '2026-10-08T10:00:00Z'),
+      s('Training · Week 41, 2026', '7', '2026-10-08T12:00:00Z'),
+      s('Events · Week 41, 2026 · wave 2/2', '6', '2026-10-09T10:00:00Z'),
+      s('Events · Week 41, 2026 · wave 1/2', '5', '2026-10-07T10:00:00Z'),
+    ])
+    expect(out.map(g => g.rows.map(r => `${r.listId}:${r.c.name}`))).toEqual([
+      [
+        '6:Events · Week 41, 2026 · wave 2/2',
+        '6:Events · Week 41, 2026 · wave 1/2',
+      ],
+      ['7:Training · Week 41, 2026'],
+      ['5:Events · Week 41, 2026 · wave 1/2'],
+    ])
   })
 })

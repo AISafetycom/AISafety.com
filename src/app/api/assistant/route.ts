@@ -77,6 +77,13 @@ function readGeo(
 }
 
 export async function POST(req: NextRequest) {
+  // When the visitor's message reached us — the turn's time in the log.
+  // Taken before anything that can stall (the rate-limit check, the body,
+  // the catalog load, which takes seconds on a cold instance), because the
+  // log orders a conversation's turns by it: a turn stamped late could pass
+  // for one sent after the visitor's next message, and the log would then
+  // drop that next turn as superseded (see placeTurn).
+  const arrivedAt = Date.now()
   if (!process.env.ANTHROPIC_API_KEY) {
     return new Response(
       JSON.stringify({ error: 'ANTHROPIC_API_KEY not configured' }),
@@ -223,8 +230,9 @@ export async function POST(req: NextRequest) {
       after(
         storeConversationTurn({
           // When the user's message arrived (not when the log write runs), so
-          // the admin transcript can show real gaps between turns.
-          ts: new Date(startedAt).toISOString(),
+          // the admin transcript can show real gaps between turns, and the
+          // log can tell a late write from a re-send.
+          ts: new Date(arrivedAt).toISOString(),
           sessionId: body.sessionId ?? null,
           currentPage: ctx.currentPage,
           pageState: ctx.pageState ?? null,

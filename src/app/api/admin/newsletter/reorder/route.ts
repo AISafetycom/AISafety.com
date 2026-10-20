@@ -7,11 +7,13 @@
   so the draft still verifies. Approvers only (canSendNewsletter) — it edits
   the email, but sends nothing, so no fresh-session requirement.
   → { cards } (the new order)   409 with { problems } when the draft fails
-  verification, 400 for a bad order.
+  verification (or sits on a real list, 6/7/8, and this isn't production),
+  400 for a bad order, 403 when not posted from the admin page itself.
 */
 
 import { NextRequest } from 'next/server'
 import { canSendNewsletter } from '@/lib/admin/auth'
+import { isSameOriginRequest } from '@/lib/admin/origin'
 import {
   DraftProblemError,
   isNewsletterConfigured,
@@ -33,6 +35,9 @@ function json(body: unknown, status = 200): Response {
 }
 
 export async function POST(req: NextRequest) {
+  // Only the admin page itself may post here (see isSameOriginRequest).
+  if (!isSameOriginRequest(req))
+    return json({ error: 'cross-site request refused' }, 403)
   if (!(await canSendNewsletter())) return json({ error: 'unauthorized' }, 401)
   if (!isNewsletterConfigured()) {
     return json(
@@ -46,13 +51,17 @@ export async function POST(req: NextRequest) {
   } catch {
     return json({ error: 'body must be JSON' }, 400)
   }
-  const { campaign, order } = (body ?? {}) as {
+  const { campaign, order, message } = (body ?? {}) as {
     campaign?: unknown
     order?: unknown
+    /** The message id the page listed: read alongside the checks. */
+    message?: unknown
   }
   const campaignId = String(campaign ?? '')
   const valid =
     /^\d+$/.test(campaignId) &&
+    (message === undefined ||
+      (typeof message === 'string' && /^\d+$/.test(message))) &&
     order != null &&
     typeof order === 'object' &&
     !Array.isArray(order) &&
@@ -72,7 +81,8 @@ export async function POST(req: NextRequest) {
   try {
     const result = await reorderDraft(
       campaignId,
-      order as Record<string, string[]>
+      order as Record<string, string[]>,
+      message as string | undefined
     )
     return json(result)
   } catch (err) {

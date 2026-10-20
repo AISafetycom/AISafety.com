@@ -5,14 +5,23 @@
   Fable Review, the Secretary, the Discord intake); this file is the site's
   side — list the rows, and carry out a decision:
 
-    accept  Add     → tick Publish? on the target record (plus any edits)
-            Change  → write the proposed field values, drop the Broom flag row
+    accept  Add     → tick Publish? on the target record (plus any edits;
+                      a Sort already taken moves the listings below down)
+            Change  → write the proposed field values (a proposed Publish? or
+                      Hide? box included), drop the Broom flag row
             Rule    → mark Accepted; the Mac worker patches the rulebook
     reject          → mark Rejected with the reason (the worker deletes a
                       rejected suggestion 24 hours later, so there is an undo)
     revise          → mark Revising with a note; the worker asks Claude to
                       rewrite the proposal and puts it back as Pending
-    undo            → reverse an accept or reject made in the last day
+    later           → set Review again on a week ahead: the page sets the
+                      item aside until then, and the Mac worker has Fable
+                      review it again when it is due (queue-later.ts)
+    undo            → reverse an accept or reject made in the last day, or
+                      bring back an item set aside
+    flag            → the verdict, reasons and reject buttons Fable gave in
+                      the chat onto the row ("Update flag", queue-flag.ts);
+                      its Undo puts back what they replaced
 
   Writes to the resource tables go through the raw admin client (no cache);
   after a publish or a field change the public cache tag is revalidated so
@@ -30,7 +39,15 @@ import {
   type AirtableRow,
 } from './airtable'
 import { sealToken } from './session'
+import { parseRejectDrafts } from './queue-decline'
 import { isExpiredAttachment } from './attachment-url'
+import { roomFor, SORT_FIELD, type Placed } from './queue-place'
+import type { ListingDates } from './queue-urgent'
+import { reviewAgainAt } from './queue-later'
+import { ruleTestOf, type RuleTest } from './queue-rule-test'
+import { alreadyRepliedOf, type AlreadyReplied } from './queue-already'
+import { reasonsText, type FlagUpdate } from './queue-flag'
+import { LEFT_OUT_KEY, leftOutOf, withLeftOut } from './queue-left-out'
 
 export const QUEUE_TABLE_ID = 'tblonlKwIFJ7Aa8QN'
 const BROOM_ISSUES_TABLE_ID = 'tblntD3WITPEgjHRK'
@@ -59,6 +76,13 @@ const F = {
   appliedAt: 'fldML8YnyaDYaAmTb',
   error: 'fldrJcvFN3FCcyQPn',
   dedupKey: 'fldHuxapq09JkiohE',
+  // Rejection replies written in advance by the Mac worker, one per reject
+  // chip (JSON), and the one the page showed when Reject was pressed – the
+  // Mac saves exactly that (Bryce, 5 Oct 2026).
+  rejectDrafts: 'fldPusDzL9nnzibyt',
+  rejectReply: 'fldUQqwJn7btv6EBP',
+  // "Review again in a week": when the item comes back (queue-later.ts).
+  reviewAgainOn: 'fldm9eFBj0iWuN23P',
 } as const
 
 export type QueueType = 'Add' | 'Change' | 'Rule'
@@ -112,6 +136,18 @@ export interface QueueItem {
   /** Rule: what changes, in plain words, and which rulebook it touches. */
   summary: string | null
   appliesTo: string | null
+  /** Rule: the new rulebook text as it will read, and the text it takes
+   *  the place of (null when it only adds). Shown on the card so the rule
+   *  is judged on its words (Bryce, 5 Oct 2026, the teach loop). */
+  ruleWording: string | null
+  ruleWas: string | null
+  /** Rule: the Mac's test of the rule on the owner's past decisions
+   *  (proposal `replay`, ~/Queue/replay.py); null until it has run. */
+  ruleTest: RuleTest | null
+  /** Rule: it only changes the public listing policy page (the Mac's
+   *  policy check, proposal `public_policy`), which no bot reads, so it is
+   *  never tested on past decisions. */
+  rulePublicPolicy: boolean
   verdict: Verdict | null
   reasons: string[]
   rejectChips: string[]
@@ -125,11 +161,62 @@ export interface QueueItem {
   /** Email/Discord: who the reply draft goes to (from the proposal's
    *  `reply` block, written at intake by the Secretary). */
   replyTo: string | null
+  /** Form: why the Mac wrote no reply draft – the form came in without an
+   *  email, or its Airtable notification isn't in Gmail to reply in. From
+   *  the proposal's `no_reply` (worker duty f); shown where the draft would
+   *  be (Bryce, 8 Oct 2026). Null once a `reply` block is there. */
+  noReply: NoReply | null
+  /** Email/Form: the owner already replied to them by hand in the
+   *  request's Gmail thread, so neither Publish nor Reject saves a draft.
+   *  From the proposal's reply.already, written by the Mac (Bryce, 12 Oct
+   *  2026: a second decline nearly went to someone he had already
+   *  answered). Null when he hasn't. */
+  alreadyReplied: AlreadyReplied | null
+  /** Rejected Email/Form: the reply the Mac wrote for this rejection and
+   *  saved as a Gmail draft (Bryce, 4 Oct 2026: "when I reject something
+   *  which was suggested, it should have an email response like when I
+   *  accept something"). Rejected Discord: Fable's decline, kept here to
+   *  copy (5 Oct 2026). From the proposal's reply.reject block; null
+   *  when there is none for this decision. */
+  rejectReply: RejectReply | null
+  /** Open Email/Form/Discord rows: the rejection reply written in advance
+   *  for each reject chip (chip → reply), shown under the accept reply.
+   *  Empty until the Mac worker has written them. */
+  rejectDrafts: Record<string, string>
   rejectReason: string | null
   note: string | null
   edits: Record<string, unknown> | null
+  /** Applied Change: what the fields edited beyond the proposal held
+   *  before Accept wrote them, for Undo to put back. */
+  before?: Record<string, unknown> | null
+  /** Applied Change: the proposed fields Accept left alone because Fable
+   *  had already changed them on the record from the chat; Undo leaves
+   *  them too. */
+  keptByFable?: string[] | null
+  /** Change: the proposed fields the admin left out with the cross
+   *  (queue-left-out.ts) – a draft while the item is open; once applied,
+   *  the fields Accept did not write, which Undo leaves alone too. */
+  leftOut?: string[] | null
   decidedAt: string | null
   appliedAt: string | null
+  error: string | null
+  /** Set aside with "Review again in a week": when it comes back. The Mac
+   *  worker clears it once Fable has looked again. */
+  reviewAgainOn: string | null
+  /** The flag was updated from the chat (queue-flag.ts) and what it said
+   *  before is kept, so Undo can put it back. */
+  flagUndo: boolean
+}
+
+export type NoReply = 'no email' | 'no notification'
+const NO_REPLY: readonly string[] = ['no email', 'no notification']
+
+export interface RejectReply {
+  /** The words saved in Gmail (or, for Discord, to copy); null until they
+   *  are written. */
+  text: string | null
+  /** saved = a Gmail draft · ready = a Discord reply to copy and send by hand */
+  state: 'saved' | 'ready' | 'writing' | 'failed'
   error: string | null
 }
 
@@ -151,6 +238,51 @@ export class QueueError extends Error {
 
 const TABLE_ID_RE = /^tbl[A-Za-z0-9]{14}$/
 const PROTECTED_FIELDS = new Set(['Publish?', 'Hide?'])
+
+/** A proposed Publish?/Hide? value as the box Airtable stores – ticked only
+ *  for a real yes. The two boxes stay out of hand edits, but a change that
+ *  proposes one is the reviewer's call: Accept writes it and Undo puts it
+ *  back (6 Oct 2026: The Big Tent's proposed Hide? was skipped while its row
+ *  went to Applied, so the postponed event stayed on /events). */
+function asBox(v: unknown): boolean {
+  if (v === true || v === 1) return true
+  return typeof v === 'string' && /^(true|yes|ticked|1)$/i.test(v.trim())
+}
+
+/** The key in a row's saved edits (JSON) that keeps, once a Change is
+ *  applied, what its extra fields held before; never a field name. */
+const BEFORE_KEY = '(before)'
+
+/** The key in a row's saved edits (JSON) that keeps, once a Change is
+ *  applied, the proposed fields Accept did not write because Fable had
+ *  changed them on the record already; never a field name. */
+const KEPT_KEY = '(kept by Fable)'
+
+/** The key in a row's Proposal (JSON) that keeps the verdict, reasons,
+ *  reject buttons and title – and the field changes, when those were
+ *  replaced too – as they were before the flag was updated from the chat,
+ *  for Undo. Raw, as the row held them. */
+const FLAG_BEFORE_KEY = 'flag_before'
+
+/** Columns Airtable fills itself, and ones the page has no editor for
+ *  (pictures, links to other records): never written as an extra field. */
+const UNWRITABLE_TYPES = new Set([
+  'formula',
+  'rollup',
+  'lookup',
+  'multipleLookupValues',
+  'count',
+  'autoNumber',
+  'createdTime',
+  'lastModifiedTime',
+  'createdBy',
+  'lastModifiedBy',
+  'button',
+  'multipleAttachments',
+  'multipleRecordLinks',
+  'singleCollaborator',
+  'multipleCollaborators',
+])
 
 function str(v: unknown): string | null {
   return typeof v === 'string' && v.trim() !== '' ? v : null
@@ -190,25 +322,47 @@ function toChanges(v: unknown): ProposedChange[] {
   return out
 }
 
-/** Record id → logo URL for every published listing, from the chatbot's
- *  catalog (cached five minutes; its ids are "<type>:<record id>"). Empty
- *  when the catalog cannot be built: the list is not worth an error. */
-async function catalogLogos(): Promise<Map<string, string>> {
-  const out = new Map<string, string>()
+/** What the page shows for a target record beyond the row itself: its
+ *  logo and the listing's own link (a web address; the catalog's "#" and
+ *  mailto: stand-ins are left out). */
+export interface TargetLookup {
+  logos: Record<string, string>
+  links: Record<string, string>
+  /** A published event's or training's start date and deadline, so the
+   *  page can tell which Changes touch a listing that is about to happen
+   *  (queue-urgent.ts). */
+  dates: Record<string, ListingDates>
+}
+
+/** Record id → logo, link and (events, training) dates for every published
+ *  listing, from the chatbot's catalog (cached five minutes; its ids are
+ *  "<type>:<record id>"). Empty when the catalog cannot be built: the list
+ *  is not worth an error. */
+async function catalogTargets(): Promise<{
+  logos: Map<string, string>
+  links: Map<string, string>
+  dates: Map<string, ListingDates>
+}> {
+  const logos = new Map<string, string>()
+  const links = new Map<string, string>()
+  const dates = new Map<string, ListingDates>()
   try {
     for (const l of (await getCatalog()).listings) {
       const rec = l.id.slice(l.id.indexOf(':') + 1)
-      if (l.logo && isRecordId(rec) && !isExpiredAttachment(l.logo)) {
-        out.set(rec, l.logo)
-      }
+      if (!isRecordId(rec)) continue
+      if (l.logo && !isExpiredAttachment(l.logo)) logos.set(rec, l.logo)
+      if (l.url && /^https?:\/\//.test(l.url)) links.set(rec, l.url)
+      const start = l.meta.startDate ?? null
+      const closes = l.meta.applicationsClose ?? null
+      if (start || closes) dates.set(rec, { start, closes })
     }
   } catch (e) {
     console.error(
-      '[admin-queue] catalog logos',
+      '[admin-queue] catalog targets',
       e instanceof Error ? e.message : e
     )
   }
-  return out
+  return { logos, links, dates }
 }
 
 /** Airtable attachment links carry their expiry (ms since the epoch) as a
@@ -260,12 +414,9 @@ async function targetLogos(
               const v = r.fields[f.name]
               const first: unknown = Array.isArray(v) ? v[0] : null
               if (!isRecord(first)) continue
-              const large =
-                isRecord(first.thumbnails) && isRecord(first.thumbnails.large)
-                  ? first.thumbnails.large.url
-                  : first.url
-              if (typeof large === 'string') {
-                url = large
+              const shown = pictureUrl(first)
+              if (typeof shown === 'string') {
+                url = shown
                 break
               }
             }
@@ -330,6 +481,37 @@ function discordCdnUrl(url: string | null): string | null {
   }
 }
 
+/** The reply.reject block the Mac writes (actions.reject_draft), when it
+ *  belongs to the row's current decision: an Undo and a fresh Reject make
+ *  an older block stale. */
+export function rejectReplyOf(
+  v: unknown,
+  decidedAt: string | null
+): RejectReply | null {
+  if (!isRecord(v)) return null
+  const since = Date.parse(str(v.since) ?? '')
+  const decided = Date.parse(decidedAt ?? '')
+  if (!Number.isFinite(since) || (Number.isFinite(decided) && since < decided))
+    return null
+  const text = str(v.text)
+  if (str(v.draft)) return { text, state: 'saved', error: null }
+  if (str(v.ready) && text) return { text, state: 'ready', error: null }
+  if (str(v.failed)) return { text, state: 'failed', error: str(v.failed) }
+  if (str(v.writing)) return { text, state: 'writing', error: null }
+  return null
+}
+
+/** Why a Form row has no reply draft (the proposal's `no_reply`, written by
+ *  the Mac's forms duty), or null: none given, or a `reply` block is there. */
+export function noReplyOf(proposal: Record<string, unknown>): NoReply | null {
+  if (isRecord(proposal.reply)) return null
+  const why = str(proposal.no_reply)
+  if (!why) return null
+  if (NO_REPLY.includes(why)) return why as NoReply
+  console.warn(`Queue: unknown no_reply "${why}"`)
+  return null
+}
+
 function rowToItem(
   row: {
     id: string
@@ -347,19 +529,32 @@ function rowToItem(
   let diff: string | null = null
   let summary: string | null = null
   let appliesTo: string | null = null
+  let ruleWording: string | null = null
+  let ruleWas: string | null = null
+  let ruleTest: RuleTest | null = null
+  let rulePublicPolicy = false
   let replyTo: string | null = null
+  let noReply: NoReply | null = null
+  let alreadyReplied: AlreadyReplied | null = null
+  let rejectReply: RejectReply | null = null
   let saidBy: SaidBy | null = null
   if (isRecord(proposal)) {
     changes = toChanges(proposal.changes)
     diff = str(proposal.diff)
     summary = str(proposal.summary)
     appliesTo = str(proposal.applies_to) ?? str(proposal.appliesTo)
+    ruleWording = str(proposal.wording)
+    ruleWas = str(proposal.was)
+    ruleTest = ruleTestOf(proposal.replay)
+    rulePublicPolicy = proposal.public_policy === true
     name = str(proposal.name)
     url = str(proposal.url)
     if (isRecord(proposal.reply)) {
       const to = str(proposal.reply.to)
       const who = str(proposal.reply.name)
       replyTo = to ? (who ? `${who} <${to}>` : to) : null
+      rejectReply = rejectReplyOf(proposal.reply.reject, str(f[F.decidedAt]))
+      alreadyReplied = alreadyRepliedOf(proposal.reply.already)
       if (proposal.reply.platform === 'discord' && who) {
         const how = str(proposal.reply.how)
         saidBy = {
@@ -376,17 +571,55 @@ function rowToItem(
         }
       }
     }
+    noReply = noReplyOf(proposal)
     if (isRecord(proposal.fields)) {
       fields = proposal.fields
     } else if (changes.length === 0 && !diff) {
       const rest: Record<string, unknown> = {}
       for (const [k, v] of Object.entries(proposal)) {
-        if (k !== 'name' && k !== 'url') rest[k] = v
+        if (
+          k !== 'name' &&
+          k !== 'url' &&
+          k !== 'no_reply' &&
+          k !== FLAG_BEFORE_KEY
+        )
+          rest[k] = v
       }
       fields = rest
     }
   }
-  const edits = parseJson(f[F.edits])
+  const saved = parseJson(f[F.edits])
+  let edits: Record<string, unknown> | null = null
+  let before: Record<string, unknown> | null = null
+  let keptByFable: string[] | null = null
+  let leftOut: string[] | null = null
+  if (isRecord(saved)) {
+    const {
+      [BEFORE_KEY]: was,
+      [KEPT_KEY]: kept,
+      [LEFT_OUT_KEY]: left,
+      ...rest
+    } = saved
+    edits = rest
+    before = isRecord(was) ? was : null
+    keptByFable = Array.isArray(kept)
+      ? kept.filter((k): k is string => typeof k === 'string')
+      : null
+    const names = leftOutOf(
+      left,
+      changes.map(c => c.field)
+    )
+    leftOut = names.length ? names : null
+  }
+  // The reply the page sent with Reject shows at once, before the Mac has
+  // saved it (Undo clears it, so it always belongs to this decision).
+  const chosenReject = str(f[F.rejectReply])
+  if (chosenReject && str(f[F.status]) === 'Rejected') {
+    rejectReply =
+      rejectReply === null
+        ? { text: chosenReject, state: 'writing', error: null }
+        : { ...rejectReply, text: rejectReply.text ?? chosenReject }
+  }
   return {
     id: row.id,
     createdAt: row.createdTime,
@@ -410,19 +643,32 @@ function rowToItem(
     diff,
     summary,
     appliesTo,
+    ruleWording,
+    ruleWas,
+    ruleTest,
+    rulePublicPolicy,
     verdict: str(f[F.verdict]) as Verdict | null,
     reasons: lines(f[F.reasons]),
     rejectChips: lines(f[F.rejectChips]),
     replyDraft: str(f[F.replyDraft]),
     replyStatus: str(f[F.replyStatus]),
     replyTo,
+    noReply,
+    alreadyReplied,
+    rejectReply,
+    rejectDrafts: parseRejectDrafts(f[F.rejectDrafts]),
     saidBy,
     rejectReason: str(f[F.rejectReason]),
     note: str(f[F.note]),
-    edits: isRecord(edits) ? edits : null,
+    edits,
+    before,
+    keptByFable,
+    leftOut,
     decidedAt: str(f[F.decidedAt]),
     appliedAt: str(f[F.appliedAt]),
     error: str(f[F.error]),
+    reviewAgainOn: str(f[F.reviewAgainOn]),
+    flagUndo: isRecord(proposal) && isRecord(proposal[FLAG_BEFORE_KEY]),
   }
 }
 
@@ -436,7 +682,7 @@ const LIST_FORMULA =
 
 /** The rows, and nothing else: one paginated read of the Queue table, so
  *  the page has its list in about a second. A logo here comes only from
- *  the proposal snapshot; the rest arrive through queueLogos() once the
+ *  the proposal snapshot; the rest arrive through queueTargets() once the
  *  list is on screen, because those need the site's catalog (every table,
  *  seconds when its cache is cold, which every accept makes it) and a read
  *  per table for unpublished targets. */
@@ -448,14 +694,17 @@ export async function listQueue(): Promise<QueueItem[]> {
   return rows.map(r => rowToItem(r))
 }
 
-/** Logo URL by target record for the rows that came without one: the
- *  site's catalog for published listings, then one batched read per table
- *  for the rest (Comb's unpublished Adds). Records without a picture are
- *  left out. Never throws: a missing logo is not worth an error. */
-export async function queueLogos(
+/** Logo and link by target record for the rows that came without one:
+ *  the site's catalog for published listings (which is where a Change's
+ *  link comes from: its proposal names only the fields it edits), then
+ *  one batched read per table for the logos of the rest (Comb's
+ *  unpublished Adds, whose link the proposal carries). Records without a
+ *  picture, or without a link, are left out of that map. Never throws: a
+ *  missing logo or link is not worth an error. */
+export async function queueTargets(
   targets: { table: string; record: string }[]
-): Promise<Record<string, string>> {
-  const out: Record<string, string> = {}
+): Promise<TargetLookup> {
+  const out: TargetLookup = { logos: {}, links: {}, dates: {} }
   // record → table, deduplicated
   const wanted = new Map<string, string>()
   for (const t of targets) {
@@ -464,15 +713,21 @@ export async function queueLogos(
     }
   }
   if (!wanted.size) return out
-  const catalog = await catalogLogos()
+  const catalog = await catalogTargets()
   const rest: { table: string; record: string }[] = []
   for (const [record, table] of wanted) {
-    const url = catalog.get(record)
-    if (url) out[record] = url
+    const link = catalog.links.get(record)
+    if (link) out.links[record] = link
+    const dates = catalog.dates.get(record)
+    if (dates) out.dates[record] = dates
+    const logo = catalog.logos.get(record)
+    if (logo) out.logos[record] = logo
     else rest.push({ table, record })
   }
   if (rest.length) {
-    for (const [record, url] of await targetLogos(rest)) out[record] = url
+    for (const [record, url] of await targetLogos(rest)) {
+      out.logos[record] = url
+    }
   }
   return out
 }
@@ -514,6 +769,9 @@ export interface FieldInfo {
 
 const schemaCache = new Map<string, { at: number; fields: FieldInfo[] }>()
 const SCHEMA_TTL_MS = 10 * 60 * 1000
+/** Each table's name column (Projects calls it "Project Name"), filled
+ *  with the schema. */
+const primaryNames = new Map<string, string>()
 
 /** Every field of a resource table, in Airtable's column order, so the page
  *  can list what is EMPTY on a record (a missing logo, an empty location)
@@ -536,6 +794,7 @@ export async function getTableSchema(table: string): Promise<FieldInfo[]> {
   const data = (await res.json()) as {
     tables: {
       id: string
+      primaryFieldId: string
       fields: {
         id: string
         name: string
@@ -545,6 +804,8 @@ export async function getTableSchema(table: string): Promise<FieldInfo[]> {
     }[]
   }
   for (const t of data.tables) {
+    const primary = t.fields.find(f => f.id === t.primaryFieldId)
+    if (primary) primaryNames.set(t.id, primary.name)
     schemaCache.set(t.id, {
       at: Date.now(),
       fields: t.fields
@@ -577,14 +838,25 @@ export interface AttachmentInfo {
   type: string | null
 }
 
-function attachmentInfo(x: Record<string, unknown>): AttachmentInfo | null {
-  if (typeof x.url !== 'string') return null
+/** Airtable's "large" thumbnail is a JPEG, so a transparent logo (PNG,
+ *  WebP, GIF, SVG) comes back on a black square – on 12 Oct 2026 AI Safety
+ *  Purdue's prepared WebP showed that way on its card. For those types the
+ *  page shows the file itself; anything else keeps the thumbnail. */
+const TRANSPARENT_TYPES = /^image\/(png|webp|gif|svg\+xml)$/
+export function pictureUrl(x: Record<string, unknown>): unknown {
   const large =
     isRecord(x.thumbnails) && isRecord(x.thumbnails.large)
       ? x.thumbnails.large.url
       : null
+  if (typeof x.type === 'string' && TRANSPARENT_TYPES.test(x.type)) return x.url
+  return typeof large === 'string' ? large : x.url
+}
+
+function attachmentInfo(x: Record<string, unknown>): AttachmentInfo | null {
+  if (typeof x.url !== 'string') return null
+  const shown = pictureUrl(x)
   return {
-    url: typeof large === 'string' ? large : x.url,
+    url: typeof shown === 'string' ? shown : x.url,
     filename: typeof x.filename === 'string' ? x.filename : null,
     width: typeof x.width === 'number' ? x.width : null,
     height: typeof x.height === 'number' ? x.height : null,
@@ -639,6 +911,75 @@ export async function getTargetFields(
     }
   }
   return { fields: out, attachments }
+}
+
+// ─── Where a new listing sits on its page ───────────────────────────────────
+
+/** The table's published listings in the order its page shows them (Sort
+ *  ascending, a listing with no Sort first, as the site reads them), for
+ *  the Position picker on an addition. Null when the table keeps no Sort:
+ *  its page orders itself (events, dated training, the map). */
+export async function getPageOrder(table: string): Promise<Placed[] | null> {
+  if (!TABLE_ID_RE.test(table)) return null
+  const schema = await getTableSchema(table)
+  if (!schema.some(f => f.name === SORT_FIELD && f.type === 'number')) {
+    return null
+  }
+  const name = primaryNames.get(table) ?? 'Name'
+  const featured = schema.some(f => f.name === 'Featured')
+  const params = new URLSearchParams({
+    filterByFormula: 'AND({Publish?}, NOT({Hide?}))',
+    'sort[0][field]': SORT_FIELD,
+    'sort[0][direction]': 'asc',
+  })
+  params.append('fields[]', name)
+  params.append('fields[]', SORT_FIELD)
+  if (featured) params.append('fields[]', 'Featured')
+  let rows: AirtableRow<RawFields>[]
+  try {
+    rows = await listAll<RawFields>(table, params)
+  } catch (e) {
+    throw new QueueError(
+      `Airtable read failed: ${e instanceof Error ? e.message : String(e)}`,
+      502
+    )
+  }
+  return rows.map(r => ({
+    id: r.id,
+    name: str(r.fields[name]) ?? '(no name)',
+    sort:
+      typeof r.fields[SORT_FIELD] === 'number' ? r.fields[SORT_FIELD] : null,
+    featured: Boolean(str(r.fields.Featured)),
+  }))
+}
+
+/** Frees a Sort value for the addition being published: the listing that
+ *  holds it, and each one straight after it with no gap, moves down one
+ *  (roomFor), ten records a request. Nothing to do when it is free. */
+async function makeRoom(
+  table: string,
+  record: string,
+  sort: number
+): Promise<void> {
+  const order = await getPageOrder(table)
+  if (!order) return
+  const moves = roomFor(order, sort, record)
+  for (let i = 0; i < moves.length; i += 10) {
+    const res = await airtableRequest(table, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        records: moves
+          .slice(i, i + 10)
+          .map(m => ({ id: m.id, fields: { [SORT_FIELD]: m.sort } })),
+      }),
+    })
+    if (!res.ok) {
+      throw new QueueError(
+        `Airtable refused to move the listings below it down: ${res.status} ${(await res.text()).slice(0, 300)}`,
+        502
+      )
+    }
+  }
 }
 
 // ─── Preview through the site's own code ────────────────────────────────────
@@ -713,10 +1054,8 @@ export async function getPreviewListing(
   )
   if (!res.ok) return null
   const raw = (await res.json()) as AirtableRow<Record<string, unknown>>
-  const byName = Object.keys(edits).length
-    ? new Map((await getTableSchema(table)).map(f => [f.name, f.id]))
-    : new Map<string, string>()
-  return mapPreview(table, raw, edits, byName)
+  const schema = Object.keys(edits).length ? await getTableSchema(table) : []
+  return mapPreview(table, raw, edits, schema)
 }
 
 export interface PreviewTarget {
@@ -741,9 +1080,7 @@ export async function getPreviewListings(
     byTable.set(t.table, list)
   }
   for (const [table, list] of byTable) {
-    const byName = new Map(
-      (await getTableSchema(table)).map(f => [f.name, f.id])
-    )
+    const schema = await getTableSchema(table)
     for (let i = 0; i < list.length; i += 40) {
       const chunk = list.slice(i, i + 40)
       const params = new URLSearchParams()
@@ -765,7 +1102,7 @@ export async function getPreviewListings(
               table,
               { ...r, fields: { ...r.fields } },
               t.edits,
-              byName
+              schema
             )
           : null
       }
@@ -774,17 +1111,43 @@ export async function getPreviewListings(
   return out
 }
 
+/** A picture edit as the page's mappers read one: `[{url, filename}]`.
+ *  The chat and the row's saved edits name a picture by its link (text, or
+ *  links separated by commas), and a mapper sees only Airtable's shape –
+ *  so a link stayed invisible on the card until Accept (Bryce, 23 Sept
+ *  2026: "I don't see the logos in their fields"). Anything that is not a
+ *  picture link is left as it came. */
+export function asAttachmentPreview(v: unknown): unknown {
+  const parts =
+    typeof v === 'string'
+      ? v
+          .split(',')
+          .map(x => x.trim())
+          .filter(Boolean)
+      : v
+  const files = asAttachmentWrite(parts)
+  if (!files || !files.length) return v
+  const shown = files.filter(
+    (f): f is { url: string; filename: string } =>
+      isRecord(f) && typeof f.url === 'string'
+  )
+  return shown.length ? shown : v
+}
+
 /** The record with the edits laid over it (by field name → id), mapped by
  *  that table's own record-to-listing function. */
 function mapPreview(
   table: string,
   raw: AirtableRow<Record<string, unknown>>,
   edits: Record<string, unknown>,
-  byName: Map<string, string>
+  schema: FieldInfo[]
 ): PreviewListing | null {
+  const byName = new Map(schema.map(f => [f.name, f]))
   for (const [name, value] of Object.entries(edits)) {
-    const id = byName.get(name)
-    if (id) raw.fields[id] = value
+    const f = byName.get(name)
+    if (!f) continue
+    raw.fields[f.id] =
+      f.type === 'multipleAttachments' ? asAttachmentPreview(value) : value
   }
   const rec = raw as unknown as AirtableRawRecord
   const wrap = (kind: PreviewKind, listing: unknown): PreviewListing | null =>
@@ -1078,6 +1441,70 @@ export function asAttachments(
   return out
 }
 
+const ATTACHMENT_ID_RE = /^att[A-Za-z0-9]{14}$/
+
+/** What an attachment field is written with: each picture as `{url,
+ *  filename}` – a link as plain text counts, since Broom's proposals and the
+ *  page's edits name a picture by its link, and Airtable answers the bare
+ *  string with 422 "parameters must be objects, not strings" – or `{id}`
+ *  for a picture the field already holds. Null when an entry is neither
+ *  (a description of the old file, say). Nothing clears the field. */
+export function asAttachmentWrite(v: unknown): unknown[] | null {
+  if (v === null || v === undefined) return []
+  const list = Array.isArray(v) ? v : [v]
+  const out: unknown[] = []
+  for (const x of list) {
+    const files = asAttachments(typeof x === 'string' ? { url: x } : x)
+    if (files) {
+      out.push(files[0])
+    } else if (
+      isRecord(x) &&
+      typeof x.id === 'string' &&
+      ATTACHMENT_ID_RE.test(x.id)
+    ) {
+      out.push({ id: x.id })
+    } else {
+      return null
+    }
+  }
+  return out
+}
+
+/** The fields of one write, with every attachment field of the table put
+ *  in the shape Airtable takes (asAttachmentWrite). Other fields pass
+ *  through, and so does everything when the table's schema cannot be read.
+ *  A value that is not a picture either stops the write (`throw`, for an
+ *  Apply the admin is watching) or leaves that one field as it is (`skip`,
+ *  for an Undo that should still put the other fields back). */
+async function withAttachmentShapes(
+  table: string,
+  fields: Record<string, unknown>,
+  onText: 'throw' | 'skip'
+): Promise<Record<string, unknown>> {
+  const schema = await getTableSchema(table)
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(fields)) {
+    if (schema.find(f => f.name === k)?.type !== 'multipleAttachments') {
+      out[k] = v
+      continue
+    }
+    const files = asAttachmentWrite(v)
+    if (files) {
+      out[k] = files
+      continue
+    }
+    const shown = (typeof v === 'string' ? v : JSON.stringify(v)).slice(0, 80)
+    if (onText === 'throw') {
+      throw new QueueError(
+        `"${k}" takes a picture link, and "${shown}" is not one.`,
+        400
+      )
+    }
+    console.warn(`[admin-queue] ${table}: left "${k}" alone – "${shown}"`)
+  }
+  return out
+}
+
 export function sanitiseEdits(input: unknown): Record<string, unknown> {
   if (!isRecord(input)) return {}
   const out: Record<string, unknown> = {}
@@ -1225,14 +1652,80 @@ export async function closeHandledRows(items: QueueItem[]): Promise<string[]> {
 
 // ─── Decisions ──────────────────────────────────────────────────────────────
 
-export async function acceptItem(
+/** A Change's edits to fields its proposal does not name (Bryce, 5 Oct
+ *  2026: "I want a way of editing other random fields too"), the ones that
+ *  can be written: not Publish?/Hide?, nor a column Airtable fills itself,
+ *  a picture or a link to other records. */
+export function extraEdits(
   item: QueueItem,
   edits: Record<string, unknown>,
-  replyDraft: string | null = null
+  schema: FieldInfo[]
+): Record<string, unknown> {
+  const proposed = new Set(item.changes.map(c => c.field))
+  const types = new Map(schema.map(f => [f.name, f.type]))
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(edits)) {
+    if (
+      proposed.has(k) ||
+      k === BEFORE_KEY ||
+      k === KEPT_KEY ||
+      k === LEFT_OUT_KEY
+    ) {
+      continue
+    }
+    if (PROTECTED_FIELDS.has(k) || k.length > 100) continue
+    if (UNWRITABLE_TYPES.has(types.get(k) ?? '')) continue
+    out[k] = v
+  }
+  return out
+}
+
+/** What these fields of the record hold now (an empty one as null, an
+ *  unticked box as false). */
+async function currentValues(
+  table: string,
+  record: string,
+  names: string[]
+): Promise<Record<string, unknown>> {
+  const res = await airtableRequest(`${table}/${record}`)
+  if (!res.ok) {
+    throw new QueueError(
+      `Airtable read failed: ${res.status} ${(await res.text()).slice(0, 300)}`,
+      502
+    )
+  }
+  const data = (await res.json()) as { fields?: RawFields }
+  const types = new Map(
+    (await getTableSchema(table)).map(f => [f.name, f.type])
+  )
+  const out: Record<string, unknown> = {}
+  for (const k of names) {
+    const v = data.fields?.[k]
+    out[k] = v ?? (types.get(k) === 'checkbox' ? false : null)
+  }
+  return out
+}
+
+export async function acceptItem(
+  item: QueueItem,
+  pageEdits: Record<string, unknown>,
+  replyDraft: string | null = null,
+  keep: string[] = []
 ): Promise<void> {
   requireOpen(item)
   const stamp = now()
-  const editsJson = Object.keys(edits).length ? JSON.stringify(edits) : null
+  // The proposed fields left out with the cross come with the page's edits
+  // under their own key, which is never a field to write.
+  const { [LEFT_OUT_KEY]: left, ...edits } = pageEdits
+  const leftOut =
+    item.type === 'Change'
+      ? leftOutOf(
+          left,
+          item.changes.map(c => c.field)
+        )
+      : []
+  const saved: Record<string, unknown> = { ...edits }
+  for (const k of leftOut) delete saved[k]
   // The reply draft as it reads on the page goes on the row first, so the
   // Mac agent (or the worker) saves exactly what the admin approved.
   const draft =
@@ -1244,18 +1737,71 @@ export async function acceptItem(
   try {
     if (item.type === 'Add') {
       const t = target(item)
-      await patchRecord(t.table, t.record, { ...edits, 'Publish?': true })
+      const fields = await withAttachmentShapes(t.table, edits, 'throw')
+      // A place picked on the page whose Sort a listing already holds:
+      // that one and the run after it move down one first.
+      const sort = fields[SORT_FIELD]
+      if (typeof sort === 'number') await makeRoom(t.table, t.record, sort)
+      await patchRecord(t.table, t.record, { ...fields, 'Publish?': true })
     } else if (item.type === 'Change') {
-      const t = target(item)
+      // A row with no listing at all is a correction the Mac could not place
+      // (no page named, no listing plainly the one): nothing to apply, so
+      // accepting it just marks it done (12 Oct 2026).
+      const t = item.targetTable || item.targetRecord ? target(item) : null
       const fields: Record<string, unknown> = {}
+      // A proposed field Fable has since changed on the record from the
+      // chat holds Fable's value, which the page shows in the proposal's
+      // place: Accept leaves it, so the older proposal never lands over it
+      // (Threading the Needle, 7 Oct 2026: Broom's raw logo and a "dark
+      // version of the same new mark" placeholder sat above Fable's
+      // finished logos, and Apply would have written them back). One the
+      // admin edited on the page is written as edited (Bryce, 12 Oct 2026).
+      const kept = item.changes
+        .map(c => c.field)
+        .filter(k => keep.includes(k) && !(k in edits))
+      if (kept.length > 0) saved[KEPT_KEY] = kept
+      // A proposed field the admin left out is not written at all: the
+      // listing keeps what it holds there (Bryce, 15 Oct 2026: "I want to
+      // be able to delete a suggested field change"). The row keeps which,
+      // for the Done view and for Undo.
+      if (leftOut.length > 0) saved[LEFT_OUT_KEY] = leftOut
       for (const c of item.changes) {
-        if (PROTECTED_FIELDS.has(c.field) || c.field.length > 100) continue
+        if (
+          c.field.length > 100 ||
+          kept.includes(c.field) ||
+          leftOut.includes(c.field)
+        ) {
+          continue
+        }
+        if (PROTECTED_FIELDS.has(c.field)) {
+          fields[c.field] = asBox(c.to)
+          continue
+        }
         // A proposed picture goes to Airtable as an attachment list.
         fields[c.field] =
           c.field in edits ? edits[c.field] : (asAttachments(c.to) ?? c.to)
       }
+      // Fields edited beyond the proposal go in the same write; what they
+      // held is kept on the row so Undo can put it back.
+      const extra = t
+        ? extraEdits(item, edits, await getTableSchema(t.table))
+        : {}
+      if (t && Object.keys(extra).length > 0) {
+        const before = await currentValues(
+          t.table,
+          t.record,
+          Object.keys(extra)
+        )
+        Object.assign(fields, extra)
+        saved[BEFORE_KEY] = before
+      }
       if (Object.keys(fields).length > 0) {
-        await patchRecord(t.table, t.record, fields)
+        const to = t ?? target(item) // fields but no listing: the usual error
+        await patchRecord(
+          to.table,
+          to.record,
+          await withAttachmentShapes(to.table, fields, 'throw')
+        )
       }
       // The Broom flag row goes either way: an applied fix clears it, and
       // so does accepting a flag with nothing to apply – the flag was right
@@ -1289,7 +1835,7 @@ export async function acceptItem(
     [F.status]: 'Applied',
     [F.decidedAt]: stamp,
     [F.appliedAt]: stamp,
-    [F.edits]: editsJson,
+    [F.edits]: Object.keys(saved).length ? JSON.stringify(saved) : null,
     [F.error]: null,
   })
   refreshCache()
@@ -1330,19 +1876,23 @@ export function agentInfo(email: string): AgentInfo | null {
 
 export async function rejectItem(
   item: QueueItem,
-  reason: string
+  reason: string,
+  reply: string | null = null
 ): Promise<void> {
   requireOpen(item)
+  // The reason is optional (Bryce, 24 Sept 2026: "I should be able to
+  // reject without a reason").
   const why = reason.trim()
-  if (!why && item.type !== 'Rule') {
-    throw new QueueError('A reason is needed so the bots can learn from it.')
-  }
   const stamp = now()
+  // The rejection reply as the page showed it, saved by the Mac as it
+  // reads; none (a typed reason) and Fable writes it from the reason.
+  const words = item.replyTo ? (reply ?? '').trim().slice(0, 5000) : ''
   const fields: Record<string, unknown> = {
     [F.status]: 'Rejected',
     [F.rejectReason]: why || null,
     [F.decidedAt]: stamp,
     [F.error]: null,
+    [F.rejectReply]: words || null,
   }
   if (item.type === 'Change' && item.issueRow && isRecordId(item.issueRow)) {
     // A dismissed Broom flag is done with: clear the flag row now.
@@ -1350,6 +1900,122 @@ export async function rejectItem(
     fields[F.appliedAt] = stamp
   }
   await patchQueueRow(item.id, fields)
+}
+
+/** "Review again in a week": the item leaves the list until then, and the
+ *  Mac worker has Fable review it again when it is due. Nothing else on the
+ *  row changes, so its edits and chat are there when it comes back. */
+export async function laterItem(item: QueueItem): Promise<void> {
+  requireOpen(item)
+  await patchQueueRow(item.id, { [F.reviewAgainOn]: reviewAgainAt(Date.now()) })
+}
+
+/** The row's fields as Airtable holds them, for a write that must keep
+ *  what it does not change (the Proposal JSON). */
+async function rawQueueFields(id: string): Promise<RawFields> {
+  const res = await airtableRequest(
+    `${QUEUE_TABLE_ID}/${id}?returnFieldsByFieldId=true`
+  )
+  if (!res.ok) {
+    throw new QueueError(
+      `Airtable read failed: ${res.status} ${await res.text()}`,
+      502
+    )
+  }
+  return ((await res.json()) as { fields: RawFields }).fields
+}
+
+/** "Update flag" from the chat (queue-flag.ts): Fable's new verdict,
+ *  reasons and reject buttons – and title and field changes, when it gave
+ *  them – onto the row, keeping what they replace for Undo. Reply draft,
+ *  Reply status and the page's edits stay as they are, and nothing is
+ *  written to the listing. */
+export async function flagItem(
+  item: QueueItem,
+  flag: FlagUpdate
+): Promise<void> {
+  requireOpen(item)
+  const f = await rawQueueFields(item.id)
+  const proposal = parseJson(f[F.proposal])
+  const next: Record<string, unknown> = isRecord(proposal)
+    ? { ...proposal }
+    : {}
+  // What the row says now – Undo goes back one step, so a review that ran
+  // again in between is what comes back, not an older one.
+  const before: Record<string, unknown> = {
+    verdict: f[F.verdict] ?? null,
+    reasons: f[F.reasons] ?? null,
+    chips: f[F.rejectChips] ?? null,
+    title: f[F.title] ?? null,
+  }
+  const fields: Record<string, unknown> = {
+    [F.verdict]: flag.verdict,
+    [F.reasons]: reasonsText(flag.reasons),
+    [F.rejectChips]: flag.chips ? flag.chips.join('\n') : null,
+  }
+  if (flag.title) fields[F.title] = flag.title
+  if (flag.changes) {
+    before.changes = next.changes ?? null
+    // The shape the Mac writes: each change names its record.
+    next.changes = flag.changes.map(c => ({
+      ...(item.targetTable && item.targetRecord
+        ? { table: item.targetTable, record: item.targetRecord }
+        : {}),
+      field: c.field,
+      from: c.from,
+      to: c.to,
+    }))
+  }
+  next[FLAG_BEFORE_KEY] = before
+  fields[F.proposal] = JSON.stringify(next, null, 1)
+  await patchQueueRow(item.id, fields)
+}
+
+/** Undo for "Update flag": the row says again what it said before. */
+export async function unflagItem(item: QueueItem): Promise<void> {
+  requireOpen(item)
+  const f = await rawQueueFields(item.id)
+  const proposal = parseJson(f[F.proposal])
+  const before = isRecord(proposal) ? proposal[FLAG_BEFORE_KEY] : null
+  if (!isRecord(proposal) || !isRecord(before)) {
+    throw new QueueError('Nothing to undo: the flag has not been updated.', 409)
+  }
+  const next: Record<string, unknown> = { ...proposal }
+  delete next[FLAG_BEFORE_KEY]
+  if ('changes' in before) {
+    if (before.changes === null) delete next.changes
+    else next.changes = before.changes
+  }
+  const fields: Record<string, unknown> = {
+    [F.verdict]: before.verdict ?? null,
+    [F.reasons]: before.reasons ?? null,
+    [F.rejectChips]: before.chips ?? null,
+    [F.proposal]: JSON.stringify(next, null, 1),
+  }
+  if (typeof before.title === 'string') fields[F.title] = before.title
+  await patchQueueRow(item.id, fields)
+}
+
+/** What one save changes on the row: with `keys` (the fields the page
+ *  touched since its last save), only those keys move – set to the page's
+ *  value, or dropped when the page no longer edits them – and every other
+ *  key keeps what the row holds. So a page that opened the item before
+ *  another page (or the chat) edited it cannot wipe those edits with its
+ *  own save (Bryce, 23 Sept 2026: a Short name edit took a logo edit off
+ *  the row – "it and the logos disappeared"). Without `keys` the page's
+ *  edits replace the row's, as before. */
+export function mergeEdits(
+  current: Record<string, unknown> | null,
+  edits: Record<string, unknown>,
+  keys?: string[]
+): Record<string, unknown> {
+  if (!keys) return edits
+  const out: Record<string, unknown> = { ...(current ?? {}) }
+  for (const k of keys) {
+    if (k in edits) out[k] = edits[k]
+    else delete out[k]
+  }
+  return out
 }
 
 /** The page's pending edits, kept on the row so they are still there after
@@ -1361,11 +2027,19 @@ export async function rejectItem(
 export async function saveEdits(
   item: QueueItem,
   edits: Record<string, unknown>,
-  replyDraft?: string
+  replyDraft?: string,
+  keys?: string[]
 ): Promise<void> {
   requireOpen(item)
+  // The fields left out sit on the row with the edits, under their own key,
+  // so a save that does not touch them keeps them.
+  const merged = mergeEdits(
+    withLeftOut(item.edits ?? {}, item.leftOut ?? []),
+    edits,
+    keys
+  )
   const fields: Record<string, unknown> = {
-    [F.edits]: Object.keys(edits).length ? JSON.stringify(edits) : null,
+    [F.edits]: Object.keys(merged).length ? JSON.stringify(merged) : null,
   }
   // The reply draft as edited on the page (the chat can rewrite it) is
   // kept on the row too; only for items that carry one, and it stays a
@@ -1377,12 +2051,34 @@ export async function saveEdits(
 }
 
 export async function undoItem(item: QueueItem): Promise<void> {
+  // An item set aside: back in the list now.
+  if (
+    (item.status === 'Pending' || item.status === 'Failed') &&
+    item.reviewAgainOn
+  ) {
+    await patchQueueRow(item.id, { [F.reviewAgainOn]: null })
+    return
+  }
   const reopen: Record<string, unknown> = {
     [F.status]: 'Pending',
     [F.decidedAt]: null,
     [F.appliedAt]: null,
     [F.rejectReason]: null,
     [F.error]: null,
+    [F.rejectReply]: null,
+  }
+  // Accept and Reject both clear a Broom flag's row, and it cannot come
+  // back. The reopened item lets go of it: the Mac worker takes a flag
+  // whose row is gone for one cleared in Airtable and closes the item
+  // within five minutes (Bryce, 12 Oct 2026: SteadRise, rejected and
+  // undone, then "already closed" on the second Reject).
+  if (
+    item.type === 'Change' &&
+    item.issueRow &&
+    isRecordId(item.issueRow) &&
+    !(await recordExists(BROOM_ISSUES_TABLE_ID, item.issueRow))
+  ) {
+    reopen[F.issueRow] = null
   }
   if (item.status === 'Applied' && item.type === 'Add') {
     const t = target(item)
@@ -1395,10 +2091,31 @@ export async function undoItem(item: QueueItem): Promise<void> {
     const t = target(item)
     const fields: Record<string, unknown> = {}
     for (const c of item.changes) {
-      if (PROTECTED_FIELDS.has(c.field)) continue
-      fields[c.field] = c.from ?? null
+      // Accept did not write it (Fable had changed it, or it was left
+      // out), so it stays.
+      if (
+        item.keptByFable?.includes(c.field) ||
+        item.leftOut?.includes(c.field)
+      ) {
+        continue
+      }
+      fields[c.field] = PROTECTED_FIELDS.has(c.field)
+        ? asBox(c.from)
+        : (c.from ?? null)
     }
-    if (Object.keys(fields).length) await patchRecord(t.table, t.record, fields)
+    // The fields edited beyond the proposal, as they were before Accept.
+    for (const [k, v] of Object.entries(item.before ?? {})) {
+      if (PROTECTED_FIELDS.has(k) || k in fields) continue
+      fields[k] = v
+    }
+    const back = await withAttachmentShapes(t.table, fields, 'skip')
+    if (Object.keys(back).length) await patchRecord(t.table, t.record, back)
+    // The edits stay as the page's draft, the fields left out too; what
+    // they replaced is spent.
+    if (item.before || item.keptByFable) {
+      const kept = withLeftOut(item.edits ?? {}, item.leftOut ?? [])
+      reopen[F.edits] = Object.keys(kept).length ? JSON.stringify(kept) : null
+    }
     await patchQueueRow(item.id, reopen)
     refreshCache()
     return

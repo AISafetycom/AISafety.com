@@ -1,4 +1,4 @@
-import { canEditDonationGuide } from '@/lib/admin/auth'
+import { canEditDonationGuide, requireAccess } from '@/lib/admin/auth'
 import GuideEditor from './GuideEditor'
 
 // Nothing here is prerendered: the editor loads the draft, the live version
@@ -7,6 +7,8 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 export default async function DonationGuideEditorPage() {
+  // Checked here, not only in the layout: see requireAccess.
+  await requireAccess('donationGuide')
   // View-only sessions see the draft, the preview and the history with
   // nothing to change; the API refuses their writes regardless.
   return <GuideEditor canEdit={await canEditDonationGuide()} />

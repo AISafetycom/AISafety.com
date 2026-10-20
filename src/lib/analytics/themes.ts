@@ -13,7 +13,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { Redis } from '@upstash/redis'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { DEFAULT_MODEL_ID } from '@/lib/assistant/models'
+import { DEFAULT_MODEL_ID, outputConfig } from '@/lib/assistant/models'
 import { listTypedQuestions } from './conversations'
 
 export interface QuestionTheme {
@@ -118,10 +118,13 @@ Reply with ONLY this JSON, no other text:
 
   const response = await client.messages.create({
     model: MODEL,
-    // Opus 5 thinks before answering out of this same budget, and the JSON
+    // Opus 5.5 thinks before answering out of this same budget, and the JSON
     // for 800 questions is a few thousand tokens on its own — 4000 risked a
     // truncated reply that would fail the JSON parse.
     max_tokens: 16000,
+    // Nobody is waiting on this weekly call, so it gets high effort for the
+    // best grouping (Opus 5.5 would otherwise default to medium).
+    output_config: outputConfig(MODEL, 'high'),
     messages: [{ role: 'user', content: prompt }],
   })
   const text = response.content

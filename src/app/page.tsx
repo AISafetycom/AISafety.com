@@ -79,10 +79,17 @@ function programDateLine(program: TrainingProgram): string {
 }
 
 // The featured box fits three lines, like the events card's blurb, while
-// Airtable descriptions run longer. Show whole sentences up to that budget —
-// never a cut-off sentence or an ellipsis. When even the first sentence is
-// too long, end it at its last clause break instead ("…risks from advanced
-// AI, for professionals…" → "…risks from advanced AI.").
+// Airtable descriptions run longer. The Training table's "Homepage blurb
+// (auto)" field holds a short version written for this box
+// (~/featured-queue/blurbs.py has Opus write one for every live program);
+// this trim is the fallback while it's empty. Show whole sentences up to that budget — never a cut-off sentence
+// or an ellipsis. When even the first sentence is too long, end it at its
+// last clause break instead ("…risks from advanced AI, for professionals…"
+// → "…risks from advanced AI."), which can leave a list cut short.
+function homepageBlurb(program: TrainingProgram): string {
+  return program.homepageBlurb || leadSentences(program.description)
+}
+
 function leadSentences(text: string, max = 125): string {
   const sentences = text.split(/(?<=[.!?])\s+(?=[A-Z])/)
   let out = ''
@@ -169,8 +176,8 @@ export default async function Home() {
             <div className="featured-img">
               <Image
                 loading="lazy"
-                src="/images/ea-global-logo.webp"
-                alt="EA Global logo"
+                src="/images/ai-horizons-forum-logo.webp"
+                alt="AI Horizons Forum logo"
                 width={64}
                 height={64}
                 className="card-image"
@@ -178,25 +185,26 @@ export default async function Home() {
             </div>
             <div>
               <h3 className="shadow-text padding-bottom-8px">
-                EA Global: New York City 2026
+                AI Horizons Forum
               </h3>
               <p className="paragraph-small-bold shadow-text">
-                {/* Location omitted – obvious from event name. Format: "DATE – CITY, COUNTRY" */}
-                16–18 October 2026
+                {/* Format: "DATE · CITY, COUNTRY" – short month so it stays on one line */}
+                12–13 Dec 2026 · San Francisco, USA
               </p>
             </div>
           </div>
           <p className="padding-bottom-40px">
-            3-day conference with talks, workshops, and networking in AI safety
-            and other effective altruism cause areas.
+            Talks, 1-1s, and structured networking for people working to make
+            transformative AI go well, and those well-positioned to join them.
           </p>
           <TrackedLink
-            href="https://www.effectivealtruism.org/ea-global/events/ea-global-new-york-city-2026"
+            href="https://www.aihorizonsforum.org/"
             target="_blank"
             rel="noopener noreferrer"
             className="button-secondary"
             trackingPage="Home"
-            trackingName="EA Global: New York City 2026"
+            trackingName="AI Horizons Forum"
+            trackingId="rec53p2JXaFG6dsEO"
           >
             Learn more
           </TrackedLink>
@@ -274,7 +282,7 @@ export default async function Home() {
               </div>
             </div>
             <p className={`${styles['max-3-lines']} margin-bottom-40px`}>
-              {leadSentences(featuredProgram.description)}
+              {homepageBlurb(featuredProgram)}
             </p>
             {featuredProgram.url !== '#' && (
               <TrackedLink

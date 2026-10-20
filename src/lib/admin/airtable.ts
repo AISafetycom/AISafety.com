@@ -45,9 +45,10 @@
 */
 
 import {
+  placePerTurn,
+  placeTurn,
   replyIndexOf,
-  slicePerTurn,
-  turnsToKeep,
+  type TurnPlacement,
 } from '@/lib/admin/conversation-turns'
 import { readTranscript, writeTranscript } from '@/lib/admin/transcript-blob'
 import {
@@ -123,19 +124,22 @@ export function isRecordId(id: string): boolean {
   return RECORD_ID_RE.test(id)
 }
 
+/** The shapes a request path takes: a table id, optionally a record id in
+ *  it (optionally its comments), optionally a query string as
+ *  URLSearchParams writes it. Checked right before the URL is built, so a
+ *  value that reached here from a request body or query string can only
+ *  name a table or record of this base. */
+const REQUEST_PATH_RE =
+  /^tbl[A-Za-z0-9]{14}(\/rec[A-Za-z0-9]{14}(\/comments)?)?(\?[A-Za-z0-9%&=+*._-]*)?$/
+
 export async function airtableRequest(
   path: string,
   init: RequestInit = {}
 ): Promise<Response> {
-  // Resolve the path against this base's URL and refuse anything that
-  // escapes it, so a request-supplied value can never point the call at
-  // another table, another base, or another host.
-  const base = `${AIRTABLE_ORIGIN}/v0/${BASE}/`
-  const url = new URL(path, base)
-  if (url.origin !== AIRTABLE_ORIGIN || !url.href.startsWith(base)) {
+  if (!REQUEST_PATH_RE.test(path)) {
     throw new Error('Airtable request path escapes the base')
   }
-  return fetch(url, {
+  return fetch(`${AIRTABLE_ORIGIN}/v0/${BASE}/${path}`, {
     ...init,
     headers: {
       Authorization: `Bearer ${TOKEN}`,
@@ -198,7 +202,9 @@ export interface ConversationData {
    *  `pages`) are never windowed, so their length is the true turn count and
    *  they align with `history` from the END. A re-sent turn (the widget's
    *  Edit / Try again) replaces its earlier entries rather than adding to
-   *  them, so the count stays true. */
+   *  them, so the count stays true; a turn whose write lands after a later
+   *  turn's slots its entries in at its own position and leaves `history`
+   *  as the later write stored it (see placeTurn). */
   history: HistoryTurn[]
   /** Each history message's position in the VISITOR's message list — the
    *  indexing the widget's delivery/rating/click reports key on. Aligned
@@ -250,7 +256,10 @@ export interface ConversationData {
 /** What the visitor's browser reported about one reply — the signals the
  *  server can't see. Every duration is milliseconds from the moment the
  *  visitor sent their message. Exactly one of received/stopped/error/left is
- *  expected per turn (the outcome); the rest are context around it. Absent
+ *  expected per send (the outcome); the rest are context around it. A failed
+ *  reply the visitor retried (Try again, or the same message re-sent) gets a
+ *  second outcome on the same entry, so an error, stop or page-leave next to
+ *  `received` means the retry worked; its times are from the re-send. Absent
  *  entirely on turns from before this was tracked, on browsers the owner
  *  excluded from logging, and when the report never reached us (e.g. the tab
  *  was closed and the browser dropped the final request). */
@@ -590,8 +599,37 @@ export async function listConversationsForStats(range: {
   endMs: number | null
 }): Promise<ConversationRow[]> {
   ensureConfig(CONVERSATIONS_TABLE)
-  // IS_AFTER/IS_BEFORE are strict, so widen each bound by 1ms to keep the
-  // range's own endpoints included.
+  const params = createdInRange(range)
+  params.set('returnFieldsByFieldId', 'true')
+  params.append('fields[]', FIELD.data)
+  params.append('fields[]', FIELD.clicked)
+  params.append('fields[]', FIELD.ratings)
+  const rows = await listAll<ConversationFields>(CONVERSATIONS_TABLE, params)
+  return rows.map(rowToConversation)
+}
+
+/** When each conversation in a range began (epoch ms), reading one short
+ *  field per row rather than the transcripts: the Chatbot tab's comparison
+ *  with the stretch before its range. */
+export async function listConversationTimes(range: {
+  startMs: number | null
+  endMs: number | null
+}): Promise<number[]> {
+  ensureConfig(CONVERSATIONS_TABLE)
+  const params = createdInRange(range)
+  params.set('returnFieldsByFieldId', 'true')
+  params.append('fields[]', FIELD.session)
+  const rows = await listAll<ConversationFields>(CONVERSATIONS_TABLE, params)
+  return rows.map(r => Date.parse(r.createdTime))
+}
+
+/** The filter for rows created inside a range. IS_AFTER/IS_BEFORE are
+ *  strict, so each bound is widened by 1ms to keep the range's own endpoints
+ *  included. */
+function createdInRange(range: {
+  startMs: number | null
+  endMs: number | null
+}): URLSearchParams {
   const parts: string[] = []
   if (range.startMs != null) {
     const iso = new Date(range.startMs - 1).toISOString()
@@ -608,12 +646,7 @@ export async function listConversationsForStats(range: {
       parts.length === 1 ? parts[0] : `AND(${parts.join(', ')})`
     )
   }
-  params.set('returnFieldsByFieldId', 'true')
-  params.append('fields[]', FIELD.data)
-  params.append('fields[]', FIELD.clicked)
-  params.append('fields[]', FIELD.ratings)
-  const rows = await listAll<ConversationFields>(CONVERSATIONS_TABLE, params)
-  return rows.map(rowToConversation)
+  return params
 }
 
 export async function updateConversation(
@@ -812,7 +845,8 @@ async function findConversationBySession(
   return data.records[0] ?? null
 }
 
-export async function upsertConversation(input: {
+/** One turn of a conversation, as the chat route logs it. */
+export interface ConversationTurnWrite {
   /** ISO timestamp of when this turn's user message arrived. */
   turnAt: string
   session: string | null
@@ -841,7 +875,74 @@ export async function upsertConversation(input: {
    *  Deliberately not patched onto an existing row: later turns must never
    *  overwrite labels a reviewer added by hand in the log. */
   tags?: string[]
-}): Promise<void> {
+}
+
+/** Logs a turn that finished after a later turn of the same conversation
+ *  had already been written (see placeTurn). The visitor's chat moved on
+ *  without it, so the row keeps what the newer write stored — history,
+ *  latest message and reply, status, latency, prompt version — and gains
+ *  only this turn's per-turn entry (its tool calls, fallback cards, time and
+ *  page, at its own position) and the listings it cited: the later turns'
+ *  history can quote this reply, and its cards need their snapshots. A turn
+ *  the visitor's chat has since re-sent or edited away adds nothing. */
+async function writeLateTurn(
+  rowId: string,
+  previous: ConversationData,
+  input: ConversationTurnWrite,
+  placement: TurnPlacement,
+  perTurn: <T>(arr: T[] | undefined, next: T) => T[]
+): Promise<void> {
+  if (!placement.insert) {
+    // Rare, and it drops a turn from the log, so say exactly which turns
+    // were compared: a wrong drop shows up here with both times.
+    const by = placement.supersededBy
+    console.warn(
+      `[assistant] late turn write skipped for session ${input.session}: reply ${replyIndexOf(input.historyIndices)} (message at ${input.turnAt}) was re-sent or edited away by reply ${by?.position} (message at ${by?.turnAt}) before it landed`
+    )
+    return
+  }
+  const data: ConversationData = {
+    ...previous,
+    tools: perTurn(previous.tools, input.tools),
+    fallbackCards: perTurn(previous.fallbackCards, input.fallbackCards),
+    turnTimes: perTurn(previous.turnTimes, input.turnAt),
+    pages: perTurn(previous.pages, input.page),
+    turnIndices: perTurn(
+      previous.turnIndices,
+      replyIndexOf(input.historyIndices)
+    ),
+    citations: Array.from(new Set([...previous.citations, ...input.citations])),
+    // The newer turns' snapshot wins for a listing both cited.
+    citationRefs: dedupeCitationRefs([
+      ...input.citationRefs,
+      ...(previous.citationRefs ?? []),
+    ]),
+    zeroMatches: previous.zeroMatches || input.zeroMatches,
+  }
+  const serialized = JSON.stringify(data)
+  // The newer write fitted the row to the size limit and mirrored anything
+  // it cut. Trimming history here would cut messages with no mirror, so a
+  // row with no room left keeps the newer write's version untouched.
+  if (serialized.length > MAX_DATA_CHARS) {
+    console.warn(
+      `[assistant] late turn write skipped for session ${input.session}: the row is at its size limit`
+    )
+    return
+  }
+  const res = await airtableRequest(`${CONVERSATIONS_TABLE}/${rowId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ fields: { [FIELD.data]: serialized } }),
+  })
+  if (!res.ok) {
+    throw new Error(
+      `Airtable late-turn update failed: ${res.status} ${await res.text()}`
+    )
+  }
+}
+
+export async function upsertConversation(
+  input: ConversationTurnWrite
+): Promise<void> {
   ensureConfig(CONVERSATIONS_TABLE)
 
   // Without a session id we can't dedupe across turns; just create a new row.
@@ -860,13 +961,21 @@ export async function upsertConversation(input: {
   // one. Appending regardless let the arrays outgrow the transcript, and the
   // viewer (which lines them up from the end) then pinned tool calls and
   // times on the wrong turns.
+  //
+  // A LATE write — a slow request that finished after the visitor had sent
+  // a later message, whose write already landed — is not a re-send, and
+  // must neither truncate the later turns nor put its older history back.
+  // placeTurn tells the two apart by when each turn's message arrived.
   const replyIndex = replyIndexOf(input.historyIndices)
   const loggedTurns = previous?.tools.length ?? 0
-  const keptTurns = previous ? turnsToKeep(previous, replyIndex) : 0
-  const perTurn = <T>(arr: T[] | undefined, next: T): T[] => [
-    ...slicePerTurn(arr, loggedTurns, keptTurns),
-    next,
-  ]
+  const placement = placeTurn(previous, replyIndex, input.turnAt)
+  const perTurn = <T>(arr: T[] | undefined, next: T): T[] =>
+    placePerTurn(arr, loggedTurns, placement, next)
+
+  if (existing && previous && !placement.latest) {
+    await writeLateTurn(existing.id, previous, input, placement, perTurn)
+    return
+  }
 
   const data: ConversationData = {
     user: input.user,

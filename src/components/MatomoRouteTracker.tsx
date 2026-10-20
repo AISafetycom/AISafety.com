@@ -2,7 +2,7 @@
 
 import { usePathname, useSearchParams } from 'next/navigation'
 import { useEffect, useRef } from 'react'
-import { trackPageView, isTrackingOptedOut } from '@/lib/analytics'
+import { trackPageView, trackedPath, isTrackingOptedOut } from '@/lib/analytics'
 
 /**
  * Notifies Matomo AND our first-party analytics about page views on Next.js
@@ -46,7 +46,14 @@ export default function MatomoRouteTracker() {
     // trackPageView above already checks the same flag internally.
     if (isTrackingOptedOut()) return
 
-    window._paq.push(['setCustomUrl', window.location.href])
+    // An org's private page goes in as '/stats', never its token.
+    const path = trackedPath(window.location.pathname)
+    window._paq.push([
+      'setCustomUrl',
+      path === window.location.pathname
+        ? window.location.href
+        : window.location.origin + path,
+    ])
     window._paq.push(['setDocumentTitle', document.title])
     window._paq.push(['trackPageView'])
   }, [pathname, searchParams])

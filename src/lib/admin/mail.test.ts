@@ -1,5 +1,11 @@
-import { describe, expect, it } from 'vitest'
-import { approvedMail, requestMail, sendAdminMail } from './mail'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  approvedMail,
+  newsletterApprovalMail,
+  requestMail,
+  sendAdminMail,
+  signupAlertMail,
+} from './mail'
 
 describe('requestMail', () => {
   it('names the person, the time and the approval link in both bodies', () => {
@@ -102,5 +108,136 @@ describe('sendAdminMail', () => {
     )
     delete process.env.ADMIN_MAIL_SCRIPT_URL
     delete process.env.ADMIN_MAIL_SECRET
+  })
+
+  it('logs a failed send with the subject as a plain value, not a format string', async () => {
+    process.env.ADMIN_MAIL_SCRIPT_URL = 'https://script.example/exec'
+    process.env.ADMIN_MAIL_SECRET = 'shared-secret'
+    const odd = requestMail({
+      email: 'someone@example.com',
+      name: 'Some %d One',
+      at: '2026-09-04T16:30:00.000Z',
+      count: 1,
+      adminUrl: 'https://aisafety.com/admin/users',
+    })
+    const failing = (async () => {
+      throw new Error('network down')
+    }) as typeof fetch
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(
+        await sendAdminMail('request', 'o@example.com', odd, failing)
+      ).toBe(false)
+      expect(warn).toHaveBeenCalledTimes(1)
+      const [format, ...args] = warn.mock.calls[0]
+      expect(String(format)).not.toContain('Some %d One')
+      expect(args[0]).toBe('Admin access requested by Some %d One')
+      expect(args[1]).toBe('request')
+      expect(args[2]).toBeInstanceOf(Error)
+    } finally {
+      warn.mockRestore()
+      delete process.env.ADMIN_MAIL_SCRIPT_URL
+      delete process.env.ADMIN_MAIL_SECRET
+    }
+  })
+})
+
+describe('newsletterApprovalMail', () => {
+  const base = {
+    name: 'Events · Week 41, 2026 · wave 2/4',
+    listId: '6',
+    listName: 'AISafety.com Events',
+    wave: 2,
+    waves: 4,
+    expected: 986,
+    approver: 'plex',
+    sendAt: '2026-10-09T14:10:00.000Z',
+    campaignId: '212',
+    held: false,
+    maybe: false,
+    override: null,
+    adminUrl: 'https://aisafety.com/admin/newsletter',
+  }
+
+  it('says what, which wave, how many, when (UTC), who, and where to stop it', () => {
+    const m = newsletterApprovalMail(base)
+    expect(m.subject).toBe(
+      'Newsletter approved: Events · Week 41, 2026 · wave 2/4 (986 people)'
+    )
+    expect(m.text).toBe(
+      [
+        '“Events · Week 41, 2026 · wave 2/4” was approved by plex and is scheduled to send.',
+        '',
+        'Wave: 2 of 4',
+        'To: 986 people on AISafety.com Events (list 6)',
+        'Sends: 9 October 2026, 14:10 UTC',
+        'Approved by: plex',
+        'Campaign: 212',
+        '',
+        'To cancel it before it sends, or pause or stop it while it’s sending: https://aisafety.com/admin/newsletter',
+        '',
+        'This email was sent by the admin itself, about an approval of a real newsletter list.',
+      ].join('\n')
+    )
+    expect(m.html).toContain('<li><strong>Approved by:</strong> plex</li>')
+  })
+
+  it('covers a whole-list send, a held one, an early wave and an unclear approval, escaping HTML', () => {
+    const whole = newsletterApprovalMail({
+      ...base,
+      name: 'Events · Week 41, 2026',
+      wave: null,
+      waves: null,
+      expected: 3,
+    })
+    expect(whole.text).toContain('Wave: none – the whole list')
+    expect(whole.subject).toContain('(3 people)')
+    const held = newsletterApprovalMail({ ...base, held: true })
+    expect(held.text).toContain(
+      'ActiveCampaign is holding it for its own review'
+    )
+    expect(held.text).toContain('Sends: once ActiveCampaign approves it')
+    const early = newsletterApprovalMail({
+      ...base,
+      override: 'Deadline <Friday>',
+    })
+    expect(early.text).toContain(
+      'Sent before its wave was due, because: Deadline <Friday>'
+    )
+    expect(early.html).toContain('Deadline &lt;Friday&gt;')
+    const maybe = newsletterApprovalMail({
+      ...base,
+      maybe: true,
+      campaignId: null,
+      expected: null,
+    })
+    expect(maybe.subject).toBe(
+      'Newsletter: “Events · Week 41, 2026 · wave 2/4” may have been scheduled – check'
+    )
+    expect(maybe.text).toContain('Campaign: unknown')
+    expect(maybe.text).toContain('an unknown number of people')
+    expect(maybe.text).toContain('Check Recent sends, and cancel it there')
+  })
+})
+
+describe('signupAlertMail', () => {
+  it('says what happened, what it may mean, and where to look, in both bodies', () => {
+    const m = signupAlertMail({
+      day: '2026-10-08',
+      alertAfter: 100,
+      cap: 1000,
+      analyticsUrl: 'https://aisafety.com/admin/analytics?tab=newsletters',
+    })
+    expect(m.subject).toBe('Newsletter signups passed 100 today')
+    for (const body of [m.text, m.html]) {
+      expect(body).toContain('More than 100 signups')
+      expect(body).toContain('8 October 2026, UTC')
+      expect(body).toContain('/events and /training')
+      expect(body).toContain('Above 1,000 signups in a day')
+      expect(body).toContain(
+        'https://aisafety.com/admin/analytics?tab=newsletters'
+      )
+      expect(body).toContain('at most once a day')
+    }
   })
 })

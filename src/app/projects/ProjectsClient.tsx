@@ -8,6 +8,7 @@ import { projectCardProps } from './card'
 import ContributeButtons from '@/components/ContributeButtons'
 import { Project } from '@/lib/data/projects'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
+import { gridListings, placementsById } from '@/lib/placements'
 
 interface ProjectsClientProps {
   projects: Project[]
@@ -19,6 +20,10 @@ const allPass = () => true
 
 export default function ProjectsClient({ projects }: ProjectsClientProps) {
   const [statusFilters, setStatusFilters] = useState<string[]>([])
+
+  // Each project's slot in the full page order; here it only tells the grid
+  // which two cards are the featured ones.
+  const placements = useMemo(() => placementsById(projects), [projects])
 
   const groups = useMemo(
     () => ({
@@ -68,6 +73,14 @@ export default function ProjectsClient({ projects }: ProjectsClientProps) {
     }
   }, [filteredProjects])
 
+  // Featured projects show in the grid only once a filter is on; unfiltered,
+  // the featured row above already has them.
+  const gridProjects = gridListings(
+    filteredProjects,
+    placements,
+    statusFilters.length > 0
+  )
+
   return (
     <>
       <FilterBar count={filteredProjects.length} noun="project">
@@ -84,7 +97,7 @@ export default function ProjectsClient({ projects }: ProjectsClientProps) {
 
       <div className="flex gap-56px">
         <div className="collection-list padding-bottom-40px width-9-col">
-          {filteredProjects.map(project => (
+          {gridProjects.map(project => (
             <ListingCard
               key={project.id}
               {...projectCardProps(project)}
