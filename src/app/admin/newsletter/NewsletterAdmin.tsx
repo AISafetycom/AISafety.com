@@ -15,6 +15,7 @@ import {
   wavesLabel,
 } from '@/lib/admin/newsletter-warmup'
 import Icon from '@/components/Icon'
+import { webPath } from '@/lib/newsletter-web'
 import adminStyles from '../admin.module.css'
 import styles from './newsletter.module.css'
 import NewsletterAlerts from './NewsletterAlerts'
@@ -3064,28 +3065,58 @@ function SendRows({
         ? null
         : first.listNames.join(', ')
 
+  // The issue opens its web version (Bryce, 20 Oct 2026), which shows an
+  // issue once a send of it has reached readers on the newsletter's own
+  // list (reachedReaders in src/lib/admin/newsletter.ts); before that, or
+  // for a test send, the page would only say it isn't online.
+  const reached = (r: Recent) =>
+    r.status === 'sending' ||
+    r.status === 'sent' ||
+    ((r.status === 'paused' || r.status === 'stopped') && r.sentTo > 0)
+  const webHref =
+    !isTest && otherList == null && rows.some(reached)
+      ? webPath(first.baseName)
+      : null
+
+  const nameParts = (
+    <>
+      {newsletter && (
+        <>
+          <span
+            className={`${styles.dot} ${NEWSLETTER_DOTS[newsletter] ?? ''}`}
+            aria-hidden="true"
+          />
+          <span className={styles.newsletterName}>{newsletter}</span>
+        </>
+      )}
+      <span className={webHref ? styles.issueLinkText : undefined}>
+        {issue}
+      </span>
+      {isTest && (
+        <span
+          className={styles.tag}
+          title={`Sent to the test list ${first.listNames.join(', ')}`}
+        >
+          Test
+        </span>
+      )}
+    </>
+  )
   const issueCell = (sub: string | null) => (
     <td>
-      <span className={styles.issueName}>
-        {newsletter && (
-          <>
-            <span
-              className={`${styles.dot} ${NEWSLETTER_DOTS[newsletter] ?? ''}`}
-              aria-hidden="true"
-            />
-            <span className={styles.newsletterName}>{newsletter}</span>
-          </>
-        )}
-        <span>{issue}</span>
-        {isTest && (
-          <span
-            className={styles.tag}
-            title={`Sent to the test list ${first.listNames.join(', ')}`}
-          >
-            Test
-          </span>
-        )}
-      </span>
+      {webHref ? (
+        <a
+          href={webHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`${styles.issueName} ${styles.issueLink}`}
+          title="Open the web version"
+        >
+          {nameParts}
+        </a>
+      ) : (
+        <span className={styles.issueName}>{nameParts}</span>
+      )}
       {(otherList || sub) && (
         <span className={styles.subline}>
           {[otherList && `to ${otherList}`, sub].filter(Boolean).join(' · ')}
