@@ -14,7 +14,11 @@
     a noted baseline (a laptop has no store) Funding isn't counted.
   - Funding, closing soon (step 3): accepting, with "Applications close
     DATE" in the next two weeks. A funder appears once in an issue, so one
-    already counted as new isn't counted again here.
+    already counted as new isn't counted again here. Nor is one an issue
+    has already reminded readers of (Bryce, 20 Oct 2026: the panel shows
+    what goes out next): it was under "Closing in the next two weeks" in a
+    Funding issue sent in the last two weeks (remindedFunders). One featured
+    only as new can still come back as a reminder, as Pen's rules say.
 
   Listings already in a draft waiting for approval are left out: they're in
   that issue. (Pen ticks Newsletter as it drafts, so this only changes the
@@ -22,11 +26,14 @@
 */
 
 import { Redis } from '@upstash/redis'
+import { cardGroups, sentIssuesOn } from '@/lib/admin/newsletter'
 import { fetchAirtableRecords } from '@/lib/data/airtable'
 import { getEvents, TABLE_ID as EVENTS_TABLE } from '@/lib/data/events'
 import { getFunders } from '@/lib/data/funding'
 import { getTrainingPrograms, TRAINING_TABLE_ID } from '@/lib/data/training'
 import { isAcceptingApplications } from '@/lib/funding-status'
+import { issueSlug } from '@/lib/newsletter-archive'
+import { sentEmail } from '@/lib/newsletter-web-copy'
 
 /** The real Funding list (newsletter.ts REAL_LISTS). */
 export const FUNDING_LIST_ID = '8'
@@ -159,19 +166,33 @@ export function addDays(day: string, n: number): string {
 }
 
 /** Pure: the funders whose applications close from `today` to two weeks on,
- *  leaving out `isNew` (already counted as new opportunities). */
+ *  leaving out `skip` (already counted as new opportunities, or already
+ *  reminded of). */
 export function pickClosingFunders(
   funders: Array<{ id: string; name: string; acceptingApplications: string }>,
   today: string,
-  isNew: ReadonlySet<string>
+  skip: ReadonlySet<string>
 ): LineupItem[] {
   const last = addDays(today, CLOSING_DAYS)
   return funders
     .filter(f => {
       const day = closingDay(f.acceptingApplications)
-      return day != null && day >= today && day <= last && !isNew.has(f.id)
+      return day != null && day >= today && day <= last && !skip.has(f.id)
     })
     .map(({ id, name }) => ({ id, name }))
+}
+
+/** Pure: the record ids an issue listed as closing soon: its "Closing in
+ *  the next two weeks" section ("Closing soon" before 7 September 2026). */
+export function closingKeys(
+  groups: ReadonlyArray<{
+    label: string
+    cards: ReadonlyArray<{ key: string }>
+  }>
+): string[] {
+  return groups
+    .filter(g => /^closing\b/i.test(g.label.trim()))
+    .flatMap(g => g.cards.map(c => c.key))
 }
 
 /** Pure: `lineup` without the listings in `waiting` (the card keys of the
@@ -237,6 +258,34 @@ export async function readFundingBaseline(): Promise<FundingBaseline> {
   return noted
 }
 
+/** The funders a Funding issue sent in the last CLOSING_DAYS days listed
+ *  as closing soon, read from the emails as sent (the kept copy, else
+ *  ActiveCampaign). A reminder sent before that was for a deadline that
+ *  has passed by now. An issue whose email can't be read is logged and
+ *  skipped: the panel is a count, not the issue. */
+async function remindedFunders(today: string): Promise<Set<string>> {
+  const from = addDays(today, -CLOSING_DAYS)
+  const recent = (await sentIssuesOn(FUNDING_LIST_ID)).filter(
+    i => i.sentAt == null || i.sentAt.slice(0, 10) >= from
+  )
+  const reminded = new Set<string>()
+  await Promise.all(
+    recent.map(async i => {
+      const slug = issueSlug('funding', i.name)
+      const email = slug ? await sentEmail('funding', slug) : null
+      const groups = email ? cardGroups(email) : null
+      if (!groups) {
+        console.warn(
+          `[newsletter] ${i.name}: no email with cards to read its closing-soon funders from`
+        )
+        return
+      }
+      for (const key of closingKeys(groups)) reminded.add(key)
+    })
+  )
+  return reminded
+}
+
 /** Note which Funding listings accept applications as `issue` goes out to
  *  the real list. A later wave or a second approval of the same issue keeps
  *  the first note. (An approval canceled and never sent again still moves
@@ -284,8 +333,12 @@ export async function readLineup(
       }),
       err => failed('training', err)
     ),
-    Promise.all([getFunders(), readFundingBaseline()]).then(
-      ([funders, baseline]): LineupSection => {
+    Promise.all([
+      getFunders(),
+      readFundingBaseline(),
+      remindedFunders(today),
+    ]).then(
+      ([funders, baseline, reminded]): LineupSection => {
         const items = pickNewFunders(funders, new Set(baseline.accepting))
         return {
           items,
@@ -293,7 +346,7 @@ export async function readLineup(
           closing: pickClosingFunders(
             funders,
             today,
-            new Set(items.map(i => i.id))
+            new Set([...items.map(i => i.id), ...reminded])
           ),
         }
       },
