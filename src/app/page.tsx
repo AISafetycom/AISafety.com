@@ -4,6 +4,7 @@ import Link from 'next/link'
 import RelativeDate from '@/components/RelativeDate'
 import TrackedLink from '@/components/TrackedLink'
 import CardLogo from '@/components/CardLogo'
+import { getCommunities } from '@/lib/data/communities'
 import { fetchAllLastUpdated } from '@/lib/data/last-updated'
 import { getTrainingPrograms, type TrainingProgram } from '@/lib/data/training'
 import { selectFeatured, withRandomStandIns } from '@/lib/featured'
@@ -107,12 +108,26 @@ function leadSentences(text: string, max = 125): string {
   return out
 }
 
+// The AI Alignment Slack record on /communities. Its invite link is renewed
+// every time one fills up (Slack caps a link at 400 joins), so the home card
+// reads it from Airtable rather than holding its own copy.
+const SLACK_COMMUNITY_ID = 'recUK7qaYdSXNHfoc'
+
 export default async function Home() {
-  const [dates, programs] = await Promise.all([
+  const [dates, programs, communities] = await Promise.all([
     fetchAllLastUpdated(),
     getTrainingPrograms(),
+    getCommunities(),
   ])
   const featuredProgram = pickFeaturedProgram(programs)
+  const slackJoinLink = communities.find(
+    c => c.id === SLACK_COMMUNITY_ID
+  )?.joinLink
+  if (!slackJoinLink || slackJoinLink === '#') {
+    throw new Error(
+      `Home: the AI Alignment Slack record (${SLACK_COMMUNITY_ID}) is unpublished or has no Link in Communities`
+    )
+  }
 
   return (
     <div className="container-default home-page">
@@ -351,7 +366,7 @@ export default async function Home() {
             opportunities, and connect.
           </p>
           <TrackedLink
-            href="https://join.slack.com/t/ai-alignment/shared_invite/zt-46igeclhz-5mzaevYc__pKUIGX6Fe4lQ"
+            href={slackJoinLink}
             target="_blank"
             rel="noopener noreferrer"
             className="button-secondary"
