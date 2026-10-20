@@ -1379,6 +1379,47 @@ p.tabDoneTitle {
   color: var(--q-muted);
 }
 
+/* Their reply to a decline, on top of the item it brought back, with
+   Fable's one line on it (20 Oct 2026). Amber like Unsure: it waits on a
+   decision. */
+.pushback {
+  padding: 12px 14px;
+  border: 1px solid var(--q-border-strong);
+  border-left: 3px solid var(--q-warn);
+  border-radius: 6px;
+  background: var(--q-panel);
+}
+
+.pushback .h3 {
+  flex-wrap: wrap;
+}
+
+.pushbackLink {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--q-muted);
+}
+
+.pushbackText {
+  margin: 0;
+  color: var(--q-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.pushbackTake {
+  margin: 0;
+  font-size: 13px;
+  color: var(--q-text-2);
+}
+
+.reopenedNote {
+  display: flex;
+}
+
 .summary {
   margin: 0;
   font-size: 15px;
