@@ -678,7 +678,7 @@ export default async function MediaPage() {
               </a>
               , or{' '}
               <a
-                href="mailto:bryceerobertson@gmail.com?subject=Volunteering%20for%20AISafety.com"
+                href="https://discord.gg/faamWzPcv8"
                 target="_blank"
                 rel="noopener noreferrer"
                 className={styles.inlineLink}
