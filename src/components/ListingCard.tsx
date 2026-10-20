@@ -115,7 +115,9 @@ export default function ListingCard({
               width={64}
               height={64}
               unoptimized
-              loading="eager"
+              // Fetch each logo only as its card nears the screen: loading
+              // them all up front added megabytes to the long lists (#739).
+              loading="lazy"
               onError={e => {
                 ;(e.target as HTMLImageElement).style.display = 'none'
               }}
