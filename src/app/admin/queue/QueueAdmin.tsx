@@ -177,6 +177,11 @@ const SEARCH_GROUPS: { key: SearchGroup; label: string }[] = [
 ]
 /** The most earlier decisions a search lists; more words narrow it. */
 const EARLIER_MAX = 60
+/** Earlier decisions shown before "Show N more": the live matches stay the
+ *  loud part of the results (Bryce, 20 Oct 2026: "probably avoid the search
+ *  results from being too crowded somehow e.g. by making past decisions
+ *  less loud"). */
+const EARLIER_FEW = 3
 
 const KIND_WORD: Record<QueueItem['type'], string> = {
   Add: 'Addition',
@@ -1483,6 +1488,8 @@ export default function QueueAdmin({
   // Older items opened from it (or from a link): they stay in the list the
   // page holds, though each refresh reads only open rows and today's.
   const keptRef = useRef<Set<string>>(new Set())
+  // The search whose Earlier group was opened past its first few rows.
+  const [earlierMoreFor, setEarlierMoreFor] = useState<string | null>(null)
   // The item in focus, for work that lands later (a Reopen) to tell
   // whether the admin is still on it.
   const selectedIdRef = useRef<string | null>(null)
@@ -2246,17 +2253,6 @@ export default function QueueAdmin({
   }, [items, selectedId])
   selectedIdRef.current = selectedId
 
-  // The Earlier rows on screen get their pictures the way the list's do;
-  // only those, never every decision read.
-  const earlierShown = ordered.found.earlier
-  useEffect(() => {
-    if (!earlierShown.length) return
-    void loadTargets(earlierShown).then(found => {
-      if (!Object.keys(found.logos).length) return
-      setEarlier(prev => (prev ? prev.map(i => withTarget(i, found)) : prev))
-    })
-  }, [earlierShown])
-
   // Midnight can empty the done list while it is open; back to the queue.
   useEffect(() => {
     if (showDone && items && !ordered.done.length) setShowDone(false)
@@ -2374,12 +2370,10 @@ export default function QueueAdmin({
   // hours): show the plain box and ask for a fresh link.
   const logoDied = useCallback((item: QueueItem) => {
     if (item.logo) deadLogos.add(item.logo)
-    const setLogo = (logo: string | null) => {
-      const put = (prev: QueueItem[] | null) =>
+    const setLogo = (logo: string | null) =>
+      setItems(prev =>
         prev ? prev.map(i => (i.id === item.id ? { ...i, logo } : i)) : prev
-      setItems(put)
-      setEarlier(put)
-    }
+      )
     setLogo(null)
     // The load-time lookup already asked for this record; ask once more.
     if (item.targetRecord) askedTargets.delete(item.targetRecord)
@@ -3809,9 +3803,44 @@ export default function QueueAdmin({
                 SEARCH_GROUPS.map(g => {
                   const list = ordered.found[g.key]
                   if (!list.length) return null
-                  const decided = g.key === 'done' || g.key === 'earlier'
-                  const total =
-                    g.key === 'earlier' ? ordered.earlierCount : list.length
+                  if (g.key === 'earlier') {
+                    // Past decisions, quietly: one muted line each, a few
+                    // at first.
+                    const more = earlierMoreFor === query
+                    const shown = more ? list : list.slice(0, EARLIER_FEW)
+                    const rest = ordered.earlierCount - shown.length
+                    return (
+                      <div key={g.key} className={styles.earlierGroup}>
+                        <div className={styles.earlierHead}>
+                          Earlier decisions · {ordered.earlierCount}
+                        </div>
+                        {shown.map(item => (
+                          <EarlierRow
+                            key={item.id}
+                            item={item}
+                            active={item.id === selectedId && showDone}
+                            search={search}
+                            onClick={() => openEarlier(item)}
+                          />
+                        ))}
+                        {rest > 0 &&
+                          (more ? (
+                            <div className={styles.earlierMore}>
+                              {rest} more · add a word to narrow it
+                            </div>
+                          ) : (
+                            <button
+                              className={`${styles.linkButton} ${styles.earlierMore}`}
+                              onClick={() => setEarlierMoreFor(query)}
+                            >
+                              Show {rest} more
+                            </button>
+                          ))}
+                      </div>
+                    )
+                  }
+                  const decided = g.key === 'done'
+                  const total = list.length
                   return (
                     <div key={g.key} className={styles.group}>
                       <div
@@ -3836,20 +3865,11 @@ export default function QueueAdmin({
                           search={search}
                           hit={ordered.hits.get(item.id)}
                           onClick={() =>
-                            g.key === 'earlier'
-                              ? openEarlier(item)
-                              : decided
-                                ? showDecided(item.id)
-                                : select(item.id)
+                            decided ? showDecided(item.id) : select(item.id)
                           }
                           onLogoError={() => logoDied(item)}
                         />
                       ))}
-                      {total > list.length && (
-                        <div className={styles.groupEmpty}>
-                          {total - list.length} more · add a word to narrow it
-                        </div>
-                      )}
                     </div>
                   )
                 })}
@@ -4446,6 +4466,37 @@ function Row({
             <Marked text={hit.excerpt.text} marks={hit.excerpt.marks} />
           </span>
         )}
+      </span>
+    </button>
+  )
+}
+
+/** A past decision in the search results: one quiet line – the name, what
+ *  was decided and when – with no logo or excerpt, so the live matches
+ *  above stay the loud part. */
+function EarlierRow({
+  item,
+  active,
+  search,
+  onClick,
+}: {
+  item: QueueItem
+  active: boolean
+  search: SearchQuery | null
+  onClick: () => void
+}) {
+  return (
+    <button
+      data-id={item.id}
+      className={`${styles.earlierRow} ${active ? styles.earlierRowActive : ''}`}
+      onClick={onClick}
+      title={`${KIND_WORD[item.type]}${item.page ? ` · ${pageLabel(item)}` : ''}`}
+    >
+      <span className={styles.earlierName}>
+        <Marked text={splitTitle(item).name ?? item.title} search={search} />
+      </span>
+      <span className={styles.earlierWhat}>
+        {doneLabel(item)} · {ago(decidedAtOf(item))}
       </span>
     </button>
   )
