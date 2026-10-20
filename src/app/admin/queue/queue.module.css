@@ -1491,7 +1491,8 @@ p.tabDoneTitle {
   color: var(--q-text-2);
 }
 
-.reopenedNote {
+/* Brought back after a decline, or back from "Review again in a week". */
+.returnNote {
   display: flex;
 }
 
