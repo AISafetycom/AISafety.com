@@ -17,6 +17,9 @@ import {
 import Icon from '@/components/Icon'
 import { webPath } from '@/lib/newsletter-web'
 import adminStyles from '../admin.module.css'
+import { Collapse } from '../Collapse'
+import { useClosing } from '../motion'
+import motion from '../motion.module.css'
 import styles from './newsletter.module.css'
 import NewsletterAlerts from './NewsletterAlerts'
 
@@ -568,6 +571,9 @@ export default function NewsletterAdmin({
   const [stopBusyId, setStopBusyId] = useState<string | null>(null)
   /** The draft whose Delete dialog is open, and the one being deleted. */
   const [deleting, setDeleting] = useState<Draft | null>(null)
+  const [confirmShown, confirmClosing] = useClosing(confirming)
+  const [deleteShown, deleteClosing] = useClosing(deleting)
+  const [stopShown, stopClosing] = useClosing(stopping)
   const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null)
   const [notice, setNotice] = useState<{
     kind: 'ok' | 'error'
@@ -1524,7 +1530,7 @@ export default function NewsletterAdmin({
               )}
               {/* The preview brings the reorder panel with it (approvers only;
                   no separate button — Bryce, 11 Sept 2026). */}
-              {previewId === draft.id && (
+              <Collapse open={previewId === draft.id}>
                 <div className={styles.previewRow}>
                   {data.canSend && draft.cards && draft.editable && (
                     <div className={styles.reorderSide}>
@@ -1543,7 +1549,9 @@ export default function NewsletterAdmin({
                     </div>
                   )}
                   <iframe
-                    ref={previewFrame}
+                    // Only the open preview holds the ref: one that is still
+                    // closing must not take it from the one opening.
+                    ref={previewId === draft.id ? previewFrame : undefined}
                     title={`Preview of ${draft.subject}`}
                     className={styles.previewFrame}
                     // Links in the email open in a new, ordinary tab (the
@@ -1557,7 +1565,7 @@ export default function NewsletterAdmin({
                     }&v=${previewNonce}#y=${previewY}`}
                   />
                 </div>
-              )}
+              </Collapse>
             </div>
           )
         })}
@@ -1620,37 +1628,45 @@ export default function NewsletterAdmin({
         )}
       </div>
 
-      {confirming && (
+      {confirmShown && (
         <ConfirmSend
           // New warnings or holds (after a refused approval) start afresh.
           key={[
-            ...confirming.draft.warnings.map(w => w.id),
-            ...confirming.holds,
+            ...confirmShown.draft.warnings.map(w => w.id),
+            ...confirmShown.holds,
           ].join(' ')}
-          draft={confirming.draft}
-          choice={confirming.choice}
-          holds={confirming.holds}
-          changed={alertsFor(confirming.draft.id)}
-          schedule={confirming.schedule}
+          draft={confirmShown.draft}
+          choice={confirmShown.choice}
+          holds={confirmShown.holds}
+          changed={alertsFor(confirmShown.draft.id)}
+          schedule={confirmShown.schedule}
+          closing={confirmClosing}
           onCancel={() => setConfirming(null)}
           onConfirm={(confirmed, override) =>
-            void send(confirming.draft, confirming.choice, confirmed, override)
+            void send(
+              confirmShown.draft,
+              confirmShown.choice,
+              confirmed,
+              override
+            )
           }
         />
       )}
-      {deleting && (
+      {deleteShown && (
         <ConfirmDelete
-          draft={deleting}
+          draft={deleteShown}
+          closing={deleteClosing}
           onCancel={() => setDeleting(null)}
-          onConfirm={() => void removeDraft(deleting)}
+          onConfirm={() => void removeDraft(deleteShown)}
         />
       )}
-      {stopping && (
+      {stopShown && (
         <ConfirmStop
-          target={stopping.target}
-          action={stopping.action}
+          target={stopShown.target}
+          action={stopShown.action}
+          closing={stopClosing}
           onCancel={() => setStopping(null)}
-          onConfirm={() => void stopSend(stopping.target, stopping.action)}
+          onConfirm={() => void stopSend(stopShown.target, stopShown.action)}
         />
       )}
     </div>
@@ -1743,6 +1759,7 @@ function ReorderPanel({
     gid: string
     card: CardInfo
   } | null>(null)
+  const [removeShown, removeClosing] = useClosing(removing)
   /** A removal in flight, or how the last one went (said in the panel). */
   const [removeNote, setRemoveNote] = useState<{
     kind: 'busy' | 'ok' | 'error'
@@ -2243,8 +2260,8 @@ function ReorderPanel({
                     <Icon src="/images/icons/trash.svg" size={16} />
                   </button>
                 </li>,
-                open && (
-                  <li key={`${c.key}-edit`} className={styles.fitEditor}>
+                <Collapse as="li" key={`${c.key}-edit`} open={open}>
+                  <div className={styles.fitEditor}>
                     {c.fields.map((f, n) => {
                       const v = values[f.name] ?? f.value
                       const vPlain = v.replace(/\s+/g, ' ').trim()
@@ -2372,8 +2389,8 @@ function ReorderPanel({
                                 ? 'All changes saved to the draft.'
                                 : 'Changes save by themselves as you type.'}
                     </p>
-                  </li>
-                ),
+                  </div>
+                </Collapse>,
               ]
             })}
           </ol>
@@ -2422,11 +2439,12 @@ function ReorderPanel({
           {removeNote.kind === 'busy' && slowNote}
         </p>
       )}
-      {removing && (
+      {removeShown && (
         <ConfirmRemoveCard
-          title={removing.card.title}
+          title={removeShown.card.title}
+          closing={removeClosing}
           onCancel={() => setRemoving(null)}
-          onConfirm={() => void removeCard(removing.gid, removing.card)}
+          onConfirm={() => void removeCard(removeShown.gid, removeShown.card)}
         />
       )}
     </div>
@@ -2561,9 +2579,12 @@ function ConfirmSend({
   holds,
   schedule,
   changed = [],
+  closing = false,
   onCancel,
   onConfirm,
 }: {
+  /** Playing its closing animation: shown, but no longer usable. */
+  closing?: boolean
   draft: Draft
   /** Listings in the email that changed since it was built, still unfixed:
    *  sending anyway takes its own tick. */
@@ -2625,9 +2646,13 @@ function ConfirmSend({
   }, [onCancel])
 
   return (
-    <div className={styles.overlay} onClick={onCancel}>
+    <div
+      className={`${styles.overlay} ${closing ? motion.fadeOut : motion.fade}`}
+      onClick={onCancel}
+      inert={closing}
+    >
       <div
-        className={styles.dialog}
+        className={`${styles.dialog} ${closing ? motion.riseOut : motion.rise}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-send-title"
@@ -3274,9 +3299,12 @@ function Countdown({ to }: { to: string }) {
 /** Confirmation for a draft's Delete button. Focus starts on "Go back". */
 function ConfirmDelete({
   draft,
+  closing = false,
   onCancel,
   onConfirm,
 }: {
+  /** Playing its closing animation: shown, but no longer usable. */
+  closing?: boolean
   draft: Draft
   onCancel: () => void
   onConfirm: () => void
@@ -3293,9 +3321,13 @@ function ConfirmDelete({
   const midWaves =
     !draft.alreadySent && (draft.waves?.waves.some(w => w.sent) ?? false)
   return (
-    <div className={styles.overlay} onClick={onCancel}>
+    <div
+      className={`${styles.overlay} ${closing ? motion.fadeOut : motion.fade}`}
+      onClick={onCancel}
+      inert={closing}
+    >
       <div
-        className={styles.dialog}
+        className={`${styles.dialog} ${closing ? motion.riseOut : motion.rise}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-delete-title"
@@ -3336,9 +3368,12 @@ function ConfirmDelete({
  *  words. Focus starts on "Go back". */
 function ConfirmRemoveCard({
   title,
+  closing = false,
   onCancel,
   onConfirm,
 }: {
+  /** Playing its closing animation: shown, but no longer usable. */
+  closing?: boolean
   title: string
   onCancel: () => void
   onConfirm: () => void
@@ -3353,9 +3388,13 @@ function ConfirmRemoveCard({
     return () => window.removeEventListener('keydown', onKey)
   }, [onCancel])
   return (
-    <div className={styles.overlay} onClick={onCancel}>
+    <div
+      className={`${styles.overlay} ${closing ? motion.fadeOut : motion.fade}`}
+      onClick={onCancel}
+      inert={closing}
+    >
       <div
-        className={styles.dialog}
+        className={`${styles.dialog} ${closing ? motion.riseOut : motion.rise}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-remove-card-title"
@@ -3397,9 +3436,12 @@ function ConfirmRemoveCard({
 function ConfirmStop({
   target: row,
   action,
+  closing = false,
   onCancel,
   onConfirm,
 }: {
+  /** Playing its closing animation: shown, but no longer usable. */
+  closing?: boolean
   target: StopTarget
   action: StopAction
   onCancel: () => void
@@ -3467,9 +3509,13 @@ function ConfirmStop({
     }
   const t = text[action]
   return (
-    <div className={styles.overlay} onClick={onCancel}>
+    <div
+      className={`${styles.overlay} ${closing ? motion.fadeOut : motion.fade}`}
+      onClick={onCancel}
+      inert={closing}
+    >
       <div
-        className={styles.dialog}
+        className={`${styles.dialog} ${closing ? motion.riseOut : motion.rise}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-stop-title"

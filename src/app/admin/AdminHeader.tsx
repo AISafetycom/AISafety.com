@@ -4,7 +4,9 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { NAV_MENUS } from './nav'
+import { useClosing } from './motion'
 import styles from './admin.module.css'
+import motion from './motion.module.css'
 
 export interface AdminTab {
   href: string
@@ -136,6 +138,7 @@ function NavMenu({
   pathname: string
 }) {
   const [open, setOpen] = useState(false)
+  const [shown, closing] = useClosing(open)
   const box = useRef<HTMLDivElement | null>(null)
   // Leaving is forgiven for a moment so the pointer can cross the small gap
   // between the button and the list.
@@ -192,8 +195,12 @@ function NavMenu({
           ▾
         </span>
       </button>
-      {open && (
-        <div className={styles.adminNavMenuList} role="menu">
+      {shown && (
+        <div
+          className={`${styles.adminNavMenuList} ${closing ? motion.popOut : motion.pop}`}
+          role="menu"
+          inert={closing}
+        >
           {tabs.map(tab => (
             <Link
               key={tab.href}
