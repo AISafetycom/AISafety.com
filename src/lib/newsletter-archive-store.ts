@@ -69,6 +69,16 @@ async function recorded(key: WebKey): Promise<ArchiveIssue[]> {
   }))
 }
 
+/** The site's record of this newsletter's sent issues alone, with no
+ *  ActiveCampaign read: what /admin/analytics' Org lookup reads to find the
+ *  issues whose link clicks to count. Null when there's no store (a laptop
+ *  without the Upstash keys); throws when the store can't be read. */
+export async function recordedIssues(
+  key: WebKey
+): Promise<ArchiveIssue[] | null> {
+  return store ? recorded(key) : null
+}
+
 /** ActiveCampaign's sent issues of this newsletter, as addresses: those
  *  that have gone to at least MIN_READERS people. */
 async function live(key: WebKey): Promise<ArchiveIssue[]> {
@@ -188,6 +198,33 @@ export async function countFeedFetch(
   }
 }
 
+/** A reader of an issue's web or text version as the day's anonymous id:
+ *  a salted hash of their address and browser (`fetcher`), under the same
+ *  daily salt as the feed's reader apps, so it changes every day and
+ *  nothing can later tell who it was. Off the live site (a laptop, where
+ *  the shared salt mustn't be written) the salt is this server's own. */
+export async function dailyReaderId(
+  fetcher: string,
+  at: Date
+): Promise<string> {
+  const day = utcDay(at)
+  const salt =
+    store && writesRecord() ? await daySalt(store, day) : localSalt(day)
+  return `d:${createHmac('sha256', salt).update(fetcher).digest('base64url').slice(0, 22)}`
+}
+
+const localSalts = new Map<string, string>()
+
+function localSalt(day: string): string {
+  let salt = localSalts.get(day)
+  if (!salt) {
+    salt = randomBytes(16).toString('hex')
+    localSalts.clear()
+    localSalts.set(day, salt)
+  }
+  return salt
+}
+
 export interface FeedReaders {
   newsletter: WebKey
   /** The UTC day these are for. */
@@ -200,16 +237,26 @@ export interface FeedReaders {
 
 /** Each newsletter's feed readers on the UTC day `day`. */
 export async function readFeedReaders(day: string): Promise<FeedReaders[]> {
+  return readFeedHistory([day])
+}
+
+/** Each newsletter's feed readers on each of the UTC days `days`, day by
+ *  day in the order given: one pipelined read of two keys per newsletter
+ *  per day (the Newsletters tab's chart reads a range's days at once). */
+export async function readFeedHistory(days: string[]): Promise<FeedReaders[]> {
   const keys = Object.keys(WEB_NEWSLETTERS) as WebKey[]
-  if (!store)
-    return keys.map(newsletter => ({ newsletter, day, services: 0, direct: 0 }))
+  const pairs = days.flatMap(day =>
+    keys.map(newsletter => ({ newsletter, day }))
+  )
+  if (!store || pairs.length === 0)
+    return pairs.map(p => ({ ...p, services: 0, direct: 0 }))
   const pipe = store.pipeline()
-  for (const k of keys) {
-    pipe.hgetall(`${FEED_PREFIX}${k}:${day}:services`)
-    pipe.pfcount(`${FEED_PREFIX}${k}:${day}:direct`)
+  for (const { newsletter, day } of pairs) {
+    pipe.hgetall(`${FEED_PREFIX}${newsletter}:${day}:services`)
+    pipe.pfcount(`${FEED_PREFIX}${newsletter}:${day}:direct`)
   }
   const out = (await pipe.exec()) as unknown[]
-  return keys.map((newsletter, i) => {
+  return pairs.map(({ newsletter, day }, i) => {
     const services = (out[i * 2] ?? {}) as Record<string, unknown>
     return {
       newsletter,

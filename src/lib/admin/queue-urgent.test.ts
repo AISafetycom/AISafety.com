@@ -206,4 +206,59 @@ describe('byUrgency', () => {
     ]
     expect(rows.sort(byUrgency).map(r => r.id)).toEqual(['d', 'b', 'c', 'a'])
   })
+
+  // September 2026's visitors: /jobs 5,864, /events 2,052, /advisors 502.
+  const row = (
+    id: string,
+    days: number | null,
+    visitors: number,
+    createdAt = '2026-10-01'
+  ) => ({ id, urgency: { days, label: '' }, createdAt, visitors })
+
+  it('puts a busier page first among items due as soon', () => {
+    const rows = [row('events', 1, 2052), row('jobs', 1, 5864)]
+    expect(rows.sort(byUrgency).map(r => r.id)).toEqual(['jobs', 'events'])
+  })
+
+  it('weighs the visitors against the days left', () => {
+    // /jobs has under three times /events' visitors: an /events listing
+    // closing today stays above a /jobs one closing in two days, but not
+    // above one closing tomorrow.
+    const rows = [
+      row('jobs in 2 days', 2, 5864),
+      row('events today', 0, 2052),
+      row('jobs tomorrow', 1, 5864),
+    ]
+    expect(rows.sort(byUrgency).map(r => r.id)).toEqual([
+      'jobs tomorrow',
+      'events today',
+      'jobs in 2 days',
+    ])
+  })
+
+  it('keeps undated fixes after dated items, busiest page first', () => {
+    const rows = [
+      row('advisors link', null, 502, '2026-09-01'),
+      row('advisors closing', 3, 502),
+      row('jobs link', null, 5864, '2026-10-02'),
+    ]
+    expect(rows.sort(byUrgency).map(r => r.id)).toEqual([
+      'advisors closing',
+      'jobs link',
+      'advisors link',
+    ])
+  })
+
+  it('falls back to the date, then age, on equal weight', () => {
+    const rows = [
+      row('newer', 1, 1000, '2026-10-03'),
+      row('older', 1, 1000, '2026-10-01'),
+      row('same weight, later', 3, 2000),
+    ]
+    expect(rows.sort(byUrgency).map(r => r.id)).toEqual([
+      'older',
+      'newer',
+      'same weight, later',
+    ])
+  })
 })

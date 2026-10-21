@@ -35,14 +35,22 @@
 
 /* Fill + border come from the global .border-plus-fill class; shadow from
    the global .drop-shadow-dark class. */
-/* position: fixed (placed via JS in FilterDropdown.tsx) so it isn't clipped by
-   the filter bar's horizontal-scroll overflow on mobile. */
+/* Hangs under the pill in the page, so it scrolls with it. The sideways nudge
+   that keeps it on screen is set inline by FilterDropdown.tsx. */
 .popover {
-  position: fixed;
+  position: absolute;
+  top: calc(100% + 8px);
   z-index: 10;
   width: max-content;
   border-radius: 16px;
   padding: 20px;
+}
+
+/* Opt-in (maxListHeight): long lists scroll inside the popover. */
+.scrollList {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
 }
 
 /* Keep each option on one line so the popover hugs the widest one. */

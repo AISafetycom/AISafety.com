@@ -28,14 +28,21 @@ import {
   asAttachmentWrite,
   closeHandledRows,
   extraEdits,
+  flagItem,
+  getQueueItem,
   handledOutside,
   mergeEdits,
   queueTargets,
   noReplyOf,
+  rejectItem,
   rejectReplyOf,
+  reopenItem,
+  saveEdits,
   undoItem,
+  unflagItem,
   type QueueItem,
 } from './queue'
+import { LEFT_OUT_KEY } from './queue-left-out'
 
 const QUEUE = 'tblonlKwIFJ7Aa8QN'
 const EVENTS = 'tblXbN9swwldwq8f7'
@@ -71,6 +78,7 @@ function item(over: Partial<QueueItem>): QueueItem {
     ruleWording: null,
     ruleWas: null,
     ruleTest: null,
+    rulePublicPolicy: false,
     verdict: null,
     reasons: [],
     rejectChips: [],
@@ -79,6 +87,7 @@ function item(over: Partial<QueueItem>): QueueItem {
     saidBy: null,
     replyTo: null,
     noReply: null,
+    alreadyReplied: null,
     rejectReply: null,
     rejectDrafts: {},
     rejectReason: null,
@@ -88,6 +97,13 @@ function item(over: Partial<QueueItem>): QueueItem {
     appliedAt: null,
     error: null,
     reviewAgainOn: null,
+    cameBackOn: null,
+    flagUndo: false,
+    declined: false,
+    reopening: null,
+    pushback: null,
+    reopened: null,
+    declinedBefore: null,
     ...over,
   }
 }
@@ -424,6 +440,25 @@ describe('picture fields on Apply and Undo', () => {
     })
     expect(patches[1].fields[STATUS]).toBe('Pending')
     expect(patches[1].fields[EDITS]).toBeNull()
+  })
+
+  // Algoverse, 12 Oct 2026: Fable's rows could not be edited at all.
+  it('writes a field Fable changed when it was edited on the page', async () => {
+    const twoFields = logoChange({
+      changes: [
+        { field: 'Logo', from: 'old.jpg', to: 'dark version of the new mark' },
+        { field: 'Host name', from: 'Mangrove', to: 'Mangrove Games' },
+      ],
+    })
+    await acceptItem(twoFields, { 'Host name': 'Mangrove Studio' }, null, [
+      'Logo',
+      'Host name',
+    ])
+    expect(patches[0].fields).toEqual({ 'Host name': 'Mangrove Studio' })
+    expect(JSON.parse(String(patches[1].fields[EDITS]))).toEqual({
+      'Host name': 'Mangrove Studio',
+      '(kept by Fable)': ['Logo'],
+    })
   })
 
   it('clears the flag and writes nothing when Fable changed every proposed field', async () => {
@@ -789,5 +824,475 @@ describe('noReplyOf', () => {
     expect(noReplyOf({ no_reply: 'mailbox full' })).toBeNull()
     expect(warn).toHaveBeenCalledOnce()
     warn.mockRestore()
+  })
+})
+
+// "Update flag" from the chat (queue-flag.ts): against a stand-in Queue row
+// that reads and patches like Airtable.
+describe('flagItem / unflagItem', () => {
+  const ID = rid('bruin')
+  const FLD = {
+    title: 'fldeRsOE3DM3R2vbX',
+    type: 'fldBc9YIDhjmu58f3',
+    status: 'fldTXGYOoXcUApaI2',
+    proposal: 'fldgl9Ny2jnu8T0Da',
+    verdict: 'fld835yJytaSRAuvB',
+    reasons: 'fldvEp4bscGNzBcSJ',
+    chips: 'fldw42wRz08vO5Xzq',
+    targetTable: 'fld45SUjstUZROuXl',
+    targetRecord: 'fldszXtLdUijgFG4l',
+  }
+  const proposal = {
+    kind: 'change',
+    table: 'tblvzbGL9q9dOO9Nc',
+    record: rid('club'),
+    page: '/map',
+    changes: [
+      {
+        table: 'tblvzbGL9q9dOO9Nc',
+        record: rid('club'),
+        field: 'Logo',
+        from: null,
+        to: 'x.png',
+      },
+    ],
+  }
+  const original: Record<string, unknown> = {
+    [FLD.title]: 'Bruin AI Safety: logo changed',
+    [FLD.type]: 'Change',
+    [FLD.status]: 'Pending',
+    [FLD.proposal]: JSON.stringify(proposal),
+    [FLD.verdict]: 'Dismiss',
+    [FLD.reasons]: '– Recolored logo, same mark.',
+    [FLD.chips]: 'Same mark, recolored',
+    [FLD.targetTable]: 'tblvzbGL9q9dOO9Nc',
+    [FLD.targetRecord]: rid('club'),
+  }
+  let row: Record<string, unknown>
+
+  beforeEach(() => {
+    row = { ...original }
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(
+      async (path: string, init?: RequestInit) => {
+        if (!path.startsWith(`${QUEUE}/${ID}`)) {
+          return new Response('not here', { status: 404 })
+        }
+        if (init?.method === 'PATCH') {
+          const body = JSON.parse(String(init.body)) as {
+            fields: Record<string, unknown>
+          }
+          for (const [k, v] of Object.entries(body.fields)) {
+            if (v === null) delete row[k]
+            else row[k] = v
+          }
+        }
+        return new Response(
+          JSON.stringify({
+            id: ID,
+            createdTime: '2026-10-12T00:00:00.000Z',
+            fields: row,
+          }),
+          { status: 200 }
+        )
+      }
+    )
+  })
+
+  const current = async () => {
+    const i = await getQueueItem(ID)
+    if (!i) throw new Error('row gone')
+    return i
+  }
+
+  it('writes the new flag and puts back exactly what it replaced', async () => {
+    await flagItem(await current(), {
+      verdict: 'Unsure',
+      reasons: ['The domain expired.', 'The logo cannot be checked.'],
+      chips: ['The club renews the domain soon'],
+      title: 'Bruin AI Safety: domain expired',
+      changes: [{ field: 'Hide?', from: false, to: true }],
+    })
+    const flagged = await current()
+    expect(flagged.verdict).toBe('Unsure')
+    expect(flagged.reasons).toEqual([
+      'The domain expired.',
+      'The logo cannot be checked.',
+    ])
+    expect(row[FLD.reasons]).toBe(
+      '– The domain expired.\n– The logo cannot be checked.'
+    )
+    expect(flagged.rejectChips).toEqual(['The club renews the domain soon'])
+    expect(flagged.title).toBe('Bruin AI Safety: domain expired')
+    expect(flagged.changes).toEqual([{ field: 'Hide?', from: false, to: true }])
+    expect(JSON.parse(String(row[FLD.proposal])).changes[0]).toMatchObject({
+      table: 'tblvzbGL9q9dOO9Nc',
+      record: rid('club'),
+    })
+    expect(flagged.flagUndo).toBe(true)
+
+    await unflagItem(flagged)
+    expect(row).toEqual({
+      ...original,
+      [FLD.proposal]: JSON.stringify(proposal, null, 1),
+    })
+    expect((await current()).flagUndo).toBe(false)
+  })
+
+  it('clears the reject buttons when Fable gave none, keeps the rest', async () => {
+    await flagItem(await current(), {
+      verdict: 'Fix',
+      reasons: ['The new logo is theirs.'],
+      chips: null,
+      title: null,
+      changes: null,
+    })
+    const flagged = await current()
+    expect(flagged.rejectChips).toEqual([])
+    expect(flagged.title).toBe('Bruin AI Safety: logo changed')
+    expect(flagged.changes).toEqual([
+      { field: 'Logo', from: null, to: 'x.png' },
+    ])
+    await unflagItem(flagged)
+    expect(row[FLD.chips]).toBe('Same mark, recolored')
+    expect(JSON.parse(String(row[FLD.proposal]))).toEqual(proposal)
+  })
+
+  it('keeps the saved flag out of a no-change proposal shown as fields', async () => {
+    row[FLD.proposal] = JSON.stringify({ kind: 'change', page: '/map' })
+    await flagItem(await current(), {
+      verdict: 'Dismiss',
+      reasons: ['Nothing to fix.'],
+      chips: null,
+      title: null,
+      changes: null,
+    })
+    expect(Object.keys((await current()).fields ?? {})).not.toContain(
+      'flag_before'
+    )
+  })
+
+  it('refuses a decided item, and an undo with nothing to undo', async () => {
+    await expect(unflagItem(await current())).rejects.toMatchObject({
+      status: 409,
+    })
+    row[FLD.status] = 'Rejected'
+    await expect(
+      flagItem(await current(), {
+        verdict: 'Fix',
+        reasons: ['x'],
+        chips: null,
+        title: null,
+        changes: null,
+      })
+    ).rejects.toMatchObject({ status: 409 })
+  })
+})
+
+// Bringing a declined addition back (Bryce, 20 Oct 2026: AI Safety
+// Essentials Fellowship, declined 13 Oct; the Mac had deleted its record
+// a day later and marked the row Applied).
+describe('reopenItem', () => {
+  const ID = rid('fellowship')
+  const FLD = {
+    title: 'fldeRsOE3DM3R2vbX',
+    type: 'fldBc9YIDhjmu58f3',
+    source: 'flddKkVy62MAZ8M0J',
+    status: 'fldTXGYOoXcUApaI2',
+    proposal: 'fldgl9Ny2jnu8T0Da',
+    targetTable: 'fld45SUjstUZROuXl',
+    targetRecord: 'fldszXtLdUijgFG4l',
+    rejectReason: 'fldYa0cnc5rQxAfAa',
+    rejectReply: 'fldUQqwJn7btv6EBP',
+    decidedAt: 'fldtt7z4lYvAR5t94',
+    appliedAt: 'fldML8YnyaDYaAmTb',
+    error: 'fldrJcvFN3FCcyQPn',
+  }
+  const TRAINING = 'tbli1YSCpIuNY2DvL'
+  const proposal = {
+    kind: 'add',
+    table: TRAINING,
+    record: rid('gone'),
+    page: '/training',
+    name: 'AI Safety Essentials Fellowship',
+    fields: { Name: 'AI Safety Essentials Fellowship' },
+    reply: { to: 'a@b.org', thread: '1a134783d32333a4' },
+  }
+  const deleted: Record<string, unknown> = {
+    [FLD.title]: 'AI Safety Essentials Fellowship',
+    [FLD.type]: 'Add',
+    [FLD.source]: 'Form',
+    [FLD.status]: 'Applied',
+    [FLD.proposal]: JSON.stringify(proposal),
+    [FLD.targetTable]: TRAINING,
+    [FLD.targetRecord]: rid('gone'),
+    [FLD.rejectReason]: 'Expressions of interest only',
+    [FLD.decidedAt]: '2026-10-13T09:46:27.169Z',
+    [FLD.appliedAt]: '2026-10-14T09:50:16.000Z',
+  }
+  let row: Record<string, unknown>
+
+  beforeEach(() => {
+    row = { ...deleted }
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(
+      async (path: string, init?: RequestInit) => {
+        if (!path.startsWith(`${QUEUE}/${ID}`)) {
+          return new Response('gone', { status: 403 })
+        }
+        if (init?.method === 'PATCH') {
+          const body = JSON.parse(String(init.body)) as {
+            fields: Record<string, unknown>
+          }
+          for (const [k, v] of Object.entries(body.fields)) {
+            if (v === null) delete row[k]
+            else row[k] = v
+          }
+        }
+        return new Response(
+          JSON.stringify({
+            id: ID,
+            createdTime: '2026-10-13T08:54:00.000Z',
+            fields: row,
+          }),
+          { status: 200 }
+        )
+      }
+    )
+  })
+
+  const current = async () => {
+    const i = await getQueueItem(ID)
+    if (!i) throw new Error('row gone')
+    return i
+  }
+
+  it('reads a deleted rejection as declined, not as a publish', async () => {
+    const item = await current()
+    expect(item.declined).toBe(true)
+    expect(item.reopening).toBeNull()
+  })
+
+  it('marks the row for the Mac and leaves the decision standing', async () => {
+    row[FLD.error] = 'Reopen failed: boom'
+    await reopenItem(await current())
+    expect(row[FLD.status]).toBe('Applied')
+    expect(row[FLD.error]).toBeUndefined()
+    const saved = JSON.parse(String(row[FLD.proposal]))
+    expect(saved.reopen).toMatchObject({ by: 'page' })
+    expect(saved.reply).toEqual(proposal.reply)
+    const item = await current()
+    expect(item.reopening).toMatchObject({ by: 'page', error: null })
+    // On its way: a second press is refused.
+    await expect(reopenItem(item)).rejects.toMatchObject({ status: 409 })
+  })
+
+  it('refuses a publish, a change and an open item', async () => {
+    row[FLD.rejectReason] = undefined
+    row[FLD.appliedAt] = row[FLD.decidedAt]
+    await expect(reopenItem(await current())).rejects.toMatchObject({
+      status: 409,
+    })
+    row[FLD.type] = 'Change'
+    await expect(reopenItem(await current())).rejects.toMatchObject({
+      status: 400,
+    })
+  })
+
+  it('tells Undo to leave it to Reopen once the record is gone', async () => {
+    await expect(undoItem(await current())).rejects.toMatchObject({
+      status: 409,
+      detail: expect.stringContaining('Reopen brings it back'),
+    })
+  })
+
+  it('saves no second decline after a reopen with no reply from them', async () => {
+    row[FLD.status] = 'Pending'
+    delete row[FLD.decidedAt]
+    delete row[FLD.appliedAt]
+    delete row[FLD.rejectReason]
+    row[FLD.proposal] = JSON.stringify({
+      ...proposal,
+      reply: {
+        ...proposal.reply,
+        declined: { date: '13 October 2026', text: 'Thanks for submitting…' },
+      },
+    })
+    const item = await current()
+    expect(item.declinedBefore?.date).toBe('13 October 2026')
+    await rejectItem(item, 'Still EOI only', 'Thanks again, but…')
+    expect(row[FLD.status]).toBe('Rejected')
+    expect(row[FLD.rejectReply]).toBeUndefined()
+  })
+})
+
+// The cross on a proposed row (Bryce, 15 Oct 2026: "I want to be able to
+// delete a suggested field change"): the field stays as the listing has it,
+// through saves, Apply and Undo.
+describe('proposed fields left out', () => {
+  const ID = rid('fellow')
+  const LISTING = `${EVENTS}/${rid('event')}`
+  const FLD = {
+    type: 'fldBc9YIDhjmu58f3',
+    proposal: 'fldgl9Ny2jnu8T0Da',
+    edits: 'fldzCgKQbopgcbrwq',
+    targetTable: 'fld45SUjstUZROuXl',
+    targetRecord: 'fldszXtLdUijgFG4l',
+  }
+  let row: Record<string, unknown>
+  let writes: { path: string; fields: Record<string, unknown> }[]
+
+  beforeEach(() => {
+    row = {
+      [FLD.type]: 'Change',
+      [STATUS]: 'Pending',
+      [FLD.proposal]: JSON.stringify({
+        kind: 'change',
+        table: EVENTS,
+        record: rid('event'),
+        page: '/events',
+        changes: [
+          { field: 'Deadline', from: '2026-10-17', to: '2026-10-21' },
+          { field: 'Stipend', from: null, to: 'Stipend included' },
+        ],
+      }),
+      [FLD.targetTable]: EVENTS,
+      [FLD.targetRecord]: rid('event'),
+    }
+    writes = []
+    process.env.AIRTABLE_TOKEN = 'test-token'
+    process.env.AIRTABLE_BASE_ID = 'appTest'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          tables: [
+            {
+              id: EVENTS,
+              fields: [
+                { id: 'fldDeadline', name: 'Deadline', type: 'date' },
+                { id: 'fldStipend', name: 'Stipend', type: 'singleLineText' },
+              ],
+            },
+          ],
+        })
+      )
+    )
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(
+      async (path: string, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          const { fields } = JSON.parse(String(init.body)) as {
+            fields: Record<string, unknown>
+          }
+          if (!path.startsWith(`${QUEUE}/${ID}`)) {
+            writes.push({ path, fields })
+          } else {
+            for (const [k, v] of Object.entries(fields)) {
+              if (v === null) delete row[k]
+              else row[k] = v
+            }
+          }
+        }
+        return Response.json({
+          id: ID,
+          createdTime: '2026-10-15T00:00:00.000Z',
+          fields: row,
+        })
+      }
+    )
+  })
+
+  const current = async () => {
+    const i = await getQueueItem(ID)
+    if (!i) throw new Error('row gone')
+    return i
+  }
+  const saved = () => JSON.parse(String(row[FLD.edits])) as unknown
+
+  it('is saved with the edits, kept by a save that does not touch it, and put back', async () => {
+    await saveEdits(
+      await current(),
+      { Deadline: '2026-10-22', [LEFT_OUT_KEY]: ['Stipend'] },
+      undefined,
+      ['Deadline', LEFT_OUT_KEY]
+    )
+    const item = await current()
+    expect(item.edits).toEqual({ Deadline: '2026-10-22' })
+    expect(item.leftOut).toEqual(['Stipend'])
+
+    await saveEdits(item, { Deadline: '2026-10-23' }, undefined, ['Deadline'])
+    expect(saved()).toEqual({
+      Deadline: '2026-10-23',
+      [LEFT_OUT_KEY]: ['Stipend'],
+    })
+
+    await saveEdits(await current(), { Deadline: '2026-10-23' }, undefined, [
+      LEFT_OUT_KEY,
+    ])
+    expect(saved()).toEqual({ Deadline: '2026-10-23' })
+    expect((await current()).leftOut).toBeNull()
+  })
+
+  it('is not written by Apply, and Undo leaves it alone', async () => {
+    await acceptItem(await current(), { [LEFT_OUT_KEY]: ['Stipend'] })
+    expect(writes).toEqual([
+      { path: LISTING, fields: { Deadline: '2026-10-21' } },
+    ])
+    const applied = await current()
+    expect(applied.status).toBe('Applied')
+    expect(applied.leftOut).toEqual(['Stipend'])
+
+    writes = []
+    await undoItem(applied)
+    expect(writes).toEqual([
+      { path: LISTING, fields: { Deadline: '2026-10-17' } },
+    ])
+    const reopened = await current()
+    expect(reopened.status).toBe('Pending')
+    expect(reopened.leftOut).toEqual(['Stipend'])
+  })
+
+  it('wins over an edit to the same field, and forgets a field not proposed', async () => {
+    await acceptItem(await current(), {
+      Stipend: 'No stipend',
+      [LEFT_OUT_KEY]: ['Stipend', 'Logo'],
+    })
+    expect(writes).toEqual([
+      { path: LISTING, fields: { Deadline: '2026-10-21' } },
+    ])
+    expect(saved()).toEqual({ [LEFT_OUT_KEY]: ['Stipend'] })
+  })
+
+  it('writes nothing to the listing when every proposed field is left out', async () => {
+    await acceptItem(await current(), {
+      [LEFT_OUT_KEY]: ['Deadline', 'Stipend'],
+    })
+    expect(writes).toEqual([])
+    expect((await current()).status).toBe('Applied')
+  })
+
+  it('stays in the draft when Undo clears what Fable kept', async () => {
+    await acceptItem(await current(), { [LEFT_OUT_KEY]: ['Stipend'] }, null, [
+      'Deadline',
+    ])
+    expect(writes).toEqual([])
+    expect(saved()).toEqual({
+      '(kept by Fable)': ['Deadline'],
+      [LEFT_OUT_KEY]: ['Stipend'],
+    })
+    await undoItem(await current())
+    expect(writes).toEqual([])
+    expect(saved()).toEqual({ [LEFT_OUT_KEY]: ['Stipend'] })
+  })
+
+  it('is never written as a field beyond the proposal', async () => {
+    expect(
+      extraEdits(
+        await current(),
+        { [LEFT_OUT_KEY]: ['Stipend'], Host: 'Rob Miles' },
+        []
+      )
+    ).toEqual({ Host: 'Rob Miles' })
   })
 })

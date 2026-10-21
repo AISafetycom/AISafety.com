@@ -52,11 +52,6 @@ const nextConfig: NextConfig = {
       { source: '/courses', destination: '/self-study', permanent: true },
       { source: '/funders', destination: '/funding', permanent: true },
       {
-        source: '/volunteer-projects',
-        destination: '/projects',
-        permanent: true,
-      },
-      {
         source: '/stay-informed',
         destination: '/media-channels',
         permanent: true,
@@ -65,6 +60,18 @@ const nextConfig: NextConfig = {
         source: '/learn-and-stay-informed',
         destination: '/media-channels',
         permanent: true,
+      },
+      // /projects (Volunteer projects) was retired on 19 October 2026: few of
+      // the people it sent to listing contacts went on to help. Temporary on
+      // purpose, because a rebuilt projects page is on the way and should be
+      // able to take the address back without browsers remembering /about.
+      // The page's code is still in src/app/projects for that rebuild.
+      // /volunteer-projects was its Webflow-era alias.
+      { source: '/projects', destination: '/about', permanent: false },
+      {
+        source: '/volunteer-projects',
+        destination: '/about',
+        permanent: false,
       },
       // /media used to redirect to /media-channels (a Webflow-era alias). It
       // is the press and media page since September 2026; /press is its
@@ -82,6 +89,21 @@ const nextConfig: NextConfig = {
         destination:
           'https://www.every.org/aisafetycom?donateTo=aisafetycom#/donate/card',
         permanent: false,
+      },
+    ]
+  },
+  async headers() {
+    return [
+      // An org's private page (/stats/<token>): its address never goes out
+      // in a Referer, not even on the logo requests that start before the
+      // page's own meta tag is read, and it's never indexed, its 404s
+      // included.
+      {
+        source: '/stats/:path*',
+        headers: [
+          { key: 'Referrer-Policy', value: 'no-referrer' },
+          { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
+        ],
       },
     ]
   },

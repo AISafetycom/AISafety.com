@@ -8,7 +8,9 @@
 // - a fix to a live listing that is sending visitors wrong now: a closed
 //   listing still shown, a wrong link, a wrong date or application status.
 // Items Fable says to skip (Don't publish, Dismiss) and rule changes are
-// never urgent: leaving them costs nothing.
+// never urgent: leaving them costs nothing. Among the urgent ones, those on
+// the pages more people visit come first: a mistake there misleads more of
+// them (byUrgency).
 
 /** How many days ahead a start date or deadline makes an item urgent. */
 export const ADD_URGENT_DAYS = 4
@@ -176,14 +178,35 @@ export function urgencyOf(
   return null
 }
 
-/** Order for the urgent list: dated items soonest first, then undated
- *  fixes; ties go to the older item. */
-export function byUrgency(
-  a: { urgency: Urgency; createdAt: string },
-  b: { urgency: Urgency; createdAt: string }
-): number {
+/** An urgent item as the list orders it. `visitors` is how many people saw
+ *  its resource page last month, or null when that isn't known. */
+export interface UrgentRow {
+  urgency: Urgency
+  createdAt: string
+  visitors?: number | null
+}
+
+/** How much waiting costs: the page's visitors per day left before the
+ *  date (today counts as one day), so a listing on a page with four times
+ *  the visitors outranks one closing today once it is three days off or
+ *  nearer. An undated fix has no days left to divide by: the page's
+ *  visitors alone. */
+function weight(row: UrgentRow): number {
+  return (row.visitors ?? 0) / ((row.urgency.days ?? 0) + 1)
+}
+
+/** Order for the urgent list: dated items first, then undated fixes. Within
+ *  each, a busier page and a closer date go first (Bryce, 13 Oct 2026:
+ *  "rank listings on the pages that have more visitors higher"); without
+ *  visitor numbers, soonest first. Ties go to the older item. */
+export function byUrgency(a: UrgentRow, b: UrgentRow): number {
   const da = a.urgency.days ?? Infinity
   const db = b.urgency.days ?? Infinity
+  if ((da === Infinity) !== (db === Infinity)) return da - db
+  if (a.visitors != null && b.visitors != null) {
+    const w = weight(b) - weight(a)
+    if (w !== 0) return w
+  }
   if (da !== db) return da - db
   return a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0
 }

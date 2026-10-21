@@ -130,6 +130,7 @@ import {
   noteTestCopy,
   readClicks,
 } from '@/lib/newsletter-clicks'
+import { MIN_READERS } from '@/lib/newsletter-archive'
 
 /** Re-exported for callers that already import them from here. */
 export {
@@ -287,7 +288,7 @@ const READ_TIMEOUT_MS = 20_000
  *  SITE_MAX_HTML_BYTES in ~/Newsletter/issue.py in step. */
 const MAX_HTML_BYTES = 96 * 1024
 /** How many campaigns one read covers (AC's page maximum). */
-const CAMPAIGN_READ_WINDOW = 100
+export const CAMPAIGN_READ_WINDOW = 100
 
 export function isNewsletterConfigured(): boolean {
   return Boolean(
@@ -519,13 +520,21 @@ async function v1report(
     ...params,
   })
   try {
-    const res = await fetch(`${base()}/admin/api.php?${qs}`, {
-      cache: 'no-store',
-      signal: AbortSignal.timeout(READ_TIMEOUT_MS),
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const out = (await res.json()) as Record<string, unknown>
-    return Number(out.result_code) === 1 ? out : null
+    // A busy or gateway answer is tried again, as v3 reads are.
+    for (let attempt = 0; ; attempt++) {
+      const res = await fetch(`${base()}/admin/api.php?${qs}`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(READ_TIMEOUT_MS),
+      })
+      const delay = READ_RETRY_DELAYS_MS[attempt]
+      if (!res.ok && TRANSIENT_STATUSES.has(res.status) && delay != null) {
+        await new Promise(r => setTimeout(r, delay))
+        continue
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const out = (await res.json()) as Record<string, unknown>
+      return Number(out.result_code) === 1 ? out : null
+    }
   } catch (err) {
     console.warn(
       `[newsletter] ActiveCampaign ${action} unreadable: ${err instanceof Error ? err.message : String(err)}`
@@ -657,8 +666,6 @@ export interface SentSummary {
   scheduledAt: string | null
   sentAt: string | null
   sentTo: number
-  uniqueOpens: number | null
-  unsubscribes: number | null
   listNames: string[]
   /** The issue's name without any wave suffix. */
   baseName: string
@@ -668,14 +675,8 @@ export interface SentSummary {
    *  (or went) to the whole list. An approval deletes such a send at once,
    *  but not if it was cut off before its read back. */
   segmentLost: boolean
-  /** Rows of one issue on one list share this: they are shown together, and
-   *  the clicks (counted per issue) once for the lot. */
+  /** Rows of one issue on one list share this: they are shown together. */
   group: string
-  /** Clicks counted on aisafety.com (the email's links go through
-   *  /api/nl since 28 Sept 2026); zero for older sends, whose links went
-   *  through ActiveCampaign's tracker. Per issue: every wave of it carries
-   *  the same numbers. */
-  clicks: CampaignClicks
   /** What may be done to it from the page right now (approvers only). */
   actions: StopAction[]
 }
@@ -1590,6 +1591,10 @@ async function wavePlanFor(
   }
 }
 
+/** How many campaigns ActiveCampaign held at the last read (its
+ *  meta.total), so Analytics can say when the read window left some out. */
+let campaignTotal: number | null = null
+
 /** The newest CAMPAIGN_READ_WINDOW campaigns, newest first. AC ignores
  *  `orders[cdate]` (it returned the OLDEST first, 29 Sept 2026) but honours
  *  `orders[id]`, and ids only grow. `fresh` skips the few seconds' sharing
@@ -1601,6 +1606,7 @@ async function allCampaigns({ fresh = false } = {}): Promise<RawCampaign[]> {
       meta?: { total?: string | number }
     }>(`campaigns?limit=${CAMPAIGN_READ_WINDOW}&orders[id]=DESC`)
     const total = Number(data.meta?.total ?? 0)
+    campaignTotal = Number.isFinite(total) ? total : null
     if (total > CAMPAIGN_READ_WINDOW) {
       console.warn(
         `[newsletter] ActiveCampaign has ${total} campaigns; only the newest ${CAMPAIGN_READ_WINDOW} are read`
@@ -1609,6 +1615,79 @@ async function allCampaigns({ fresh = false } = {}): Promise<RawCampaign[]> {
     return data.campaigns ?? []
   }
   return fresh ? read() : sharedRead('campaigns', 5_000, read)
+}
+
+/** How far back Analytics reads campaigns, a page of CAMPAIGN_READ_WINDOW
+ *  at a time, at most. */
+export const CAMPAIGN_READ_MAX = 2_000
+/** Each later page starts this many campaigns before the one before ended,
+ *  so a campaign deleted between two page reads (an approval deletes an
+ *  issue's draft) can't push another one past both. */
+const CAMPAIGN_PAGE_OVERLAP = 10
+/** An issue's sending campaigns are made at most this long before it first
+ *  goes out (approve once makes every wave at the press, the first five
+ *  minutes later; a canceled wave approved again is made later still), so
+ *  reading back to a week before a range finds every send of the issues
+ *  first sent in it, and the earlier waves of any issue only some of whose
+ *  waves fall in it. */
+const MADE_BEFORE_FIRST_SEND_MS = 7 * 24 * HOUR_MS
+
+/** Pure: whether Analytics should read another, older page of campaigns:
+ *  ActiveCampaign holds more than the `read` so far (`total`, its
+ *  meta.total; null = unknown, read no more), `max` isn't reached, and the
+ *  oldest one read (`oldestMs`, its creation) isn't before `fromMs` (null =
+ *  all of them). */
+export function wantsOlderCampaigns(
+  read: number,
+  total: number | null,
+  oldestMs: number,
+  fromMs: number | null,
+  max: number = CAMPAIGN_READ_MAX
+): boolean {
+  if (total == null || read >= total || read >= max) return false
+  return fromMs == null || Number.isNaN(oldestMs) || oldestMs >= fromMs
+}
+
+/** The campaigns, newest first, back to the first one made before `fromMs`
+ *  (every one for null), at most about CAMPAIGN_READ_MAX. The newest page
+ *  is the one every other reader shares; the older ones are kept a minute.
+ *  `complete` is false when the cap stopped the read short of `fromMs`. */
+async function campaignsBackTo(
+  fromMs: number | null
+): Promise<{ campaigns: RawCampaign[]; complete: boolean }> {
+  const newest = await allCampaigns()
+  const byId = new Map(newest.map(c => [c.id, c]))
+  const oldest = () => {
+    const t = [...byId.values()]
+      .map(c => timeOfCampaign(c.cdate))
+      .filter(t => !Number.isNaN(t))
+      .reduce((a, b) => Math.min(a, b), Infinity)
+    return Number.isFinite(t) ? t : NaN
+  }
+  let end = newest.length
+  let exhausted = newest.length < CAMPAIGN_READ_WINDOW
+  while (
+    !exhausted &&
+    wantsOlderCampaigns(end, campaignTotal, oldest(), fromMs)
+  ) {
+    const offset = Math.max(0, end - CAMPAIGN_PAGE_OVERLAP)
+    const page = await sharedRead(`campaigns@${offset}`, 60_000, async () => {
+      const data = await v3<{ campaigns: RawCampaign[] }>(
+        `campaigns?limit=${CAMPAIGN_READ_WINDOW}&offset=${offset}&orders[id]=DESC`
+      )
+      return data.campaigns ?? []
+    })
+    // A newer page's copy of a campaign is the fresher one.
+    for (const c of page) if (!byId.has(c.id)) byId.set(c.id, c)
+    end = offset + page.length
+    exhausted = page.length < CAMPAIGN_READ_WINDOW
+  }
+  return {
+    campaigns: [...byId.values()].sort((a, b) => Number(b.id) - Number(a.id)),
+    complete:
+      exhausted ||
+      !wantsOlderCampaigns(end, campaignTotal, oldest(), fromMs, Infinity),
+  }
 }
 
 /** The checks `ac.py verify` runs, as a list of problems (empty = OK), on
@@ -2312,24 +2391,32 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-/** The most recent sends (and anything scheduled or stuck), newest first. */
+/** The most recent sends (and anything scheduled or stuck), newest first.
+ *  Their opens, clicks and the rest are on /admin/analytics' Newsletters
+ *  tab (readSendStats). */
 export async function listRecent(limit = 12): Promise<SentSummary[]> {
   const [campaigns, names] = await Promise.all([allCampaigns(), listNames()])
   // A send that can still be canceled, paused, stopped or resumed stays on
   // the page however old it is: one held for ActiveCampaign's review for
   // days must keep its Cancel button.
-  const recent = campaigns
+  const sends = campaigns
     .filter(c => c.status in STATUS_NAMES)
     .sort((a, b) =>
       String(b.ldate ?? b.sdate ?? '').localeCompare(
         String(a.ldate ?? a.sdate ?? '')
       )
     )
-    .filter((c, i) => i < limit || STILL_GOING.has(c.status))
-  // Clicks are counted per issue: every wave of one shares its base name.
-  const [lists, clicks, offset] = await Promise.all([
+  const shown = sends.filter((c, i) => i < limit || STILL_GOING.has(c.status))
+  // Every send of an issue that's shown, so its row adds up all its waves
+  // (the newest 12 left out Training Week 41's first wave, 15 Oct 2026).
+  const issues = new Set(
+    shown.map(c => baseIssueName(c.name)).filter(n => n !== '')
+  )
+  const recent = sends.filter(
+    c => shown.includes(c) || issues.has(baseIssueName(c.name))
+  )
+  const [lists, offset] = await Promise.all([
     mapLimit(recent, 3, knownListIds),
-    readClicks([...new Set(recent.map(c => baseIssueName(c.name)))]),
     accountUtcOffset(campaigns),
   ])
   const rows = recent.map((c, i): SentSummary => {
@@ -2343,8 +2430,6 @@ export async function listRecent(limit = 12): Promise<SentSummary[]> {
       scheduledAt: sdateInstant(c.sdate, offset),
       sentAt: c.ldate,
       sentTo: Number(c.send_amt ?? 0),
-      uniqueOpens: c.uniqueopens == null ? null : Number(c.uniqueopens),
-      unsubscribes: c.unsubscribes == null ? null : Number(c.unsubscribes),
       listNames: listIds.map(id => names.get(id) ?? `list ${id}`),
       baseName,
       wave: waveOf(c.name),
@@ -2355,7 +2440,6 @@ export async function listRecent(limit = 12): Promise<SentSummary[]> {
         c.segmentid != null &&
         String(c.segmentid).trim() === '0',
       group: `${listIds.join(',')}|${baseName}`,
-      clicks: clicks.get(baseName) ?? { total: 0, links: [] },
       actions: stopActionsFor(c.status, listIds),
     }
   })
@@ -3154,78 +3238,216 @@ async function rewriteDraft(
 export interface SendStats {
   id: string
   name: string
-  /** 'Events', 'Training', 'Funding' — the list's name without the site's. */
+  /** 'Events', 'Training', 'Funding'. */
   newsletter: string
+  /** When the issue first went out (its first send's start, ISO): the date
+   *  the past issues pages give it. */
   sentAt: string | null
-  delivered: number
+  /** Emails ActiveCampaign sent (send_amt), bounced ones included. */
+  sent: number
   opens: number | null
   unsubscribes: number | null
-  clicks: CampaignClicks
+  /** Addresses that don't exist: ActiveCampaign sends them nothing more. */
+  hardBounces: number | null
+  /** Turned away for now (a full mailbox, a server down): tried again on
+   *  the next send. */
+  softBounces: number | null
+  /** Readers who pressed "Report spam", where their mail service tells the
+   *  sender (Yahoo, Outlook, AOL and others; Gmail tells nobody about one
+   *  reader). Null when ActiveCampaign's report for a send didn't load. */
+  spamComplaints: number | null
+  /** Null when the click counts couldn't be read: unknown, not zero. */
+  clicks: CampaignClicks | null
   /** How many waves the numbers add up (0 = one whole-list send). */
   waves: number
+  /** How many waves the issue was sent in, by its waves' names ("wave 2/4"):
+   *  more than `waves` when some were canceled, are still to go, or fell
+   *  outside the campaigns read. 0 for a whole-list send. */
+  wavesPlanned: number
+  /** A send of it that reached readers but hasn't finished (still going,
+   *  paused, or stopped partway), or a wave of it still scheduled. Null once
+   *  every send has finished. */
+  unfinished: 'sending' | 'paused' | 'stopped' | 'scheduled' | null
 }
 
-/** The sent issues of the real newsletter lists (test lists left out) whose
- *  send finished inside [startMs, endMs], newest first, with the clicks
- *  counted on aisafety.com. An issue sent in waves is one row: its waves'
- *  numbers added up, its clicks (counted per issue) once. For
- *  /admin/analytics' Newsletters tab. */
+export interface SendStatsResult {
+  issues: SendStats[]
+  /** The range reaches back past the newest CAMPAIGN_READ_MAX campaigns,
+   *  which is as far as Analytics reads: when the oldest one read was made
+   *  (ISO). An issue first sent before then may be missing. Null when every
+   *  campaign the range needs was read. */
+  readFrom: string | null
+}
+
+/** The issues that reached readers on the real newsletter lists and first
+ *  went out inside [startMs, endMs], newest first, with the clicks counted
+ *  on aisafety.com. An issue sent in waves is one row with every wave added
+ *  up, however the range falls across them: its clicks are counted per
+ *  issue and can't be split by wave or by date. Practice sends to the lists
+ *  while they held only the team's own addresses (under MIN_READERS, the
+ *  past issues pages' rule) are left out. For /admin/analytics' Newsletters
+ *  tab. */
 export async function readSendStats(range: {
   startMs: number | null
   endMs: number | null
-}): Promise<SendStats[]> {
-  const [campaigns, names] = await Promise.all([allCampaigns(), listNames()])
-  const inRange = campaigns.filter(c => {
-    if (c.status !== '5') return false
-    const at = Date.parse(c.ldate ?? c.sdate ?? '')
-    if (Number.isNaN(at)) return false
-    return (
-      (range.startMs == null || at >= range.startMs) &&
-      (range.endMs == null || at <= range.endMs)
-    )
-  })
-  const lists = await mapLimit(inRange, 3, async c => {
-    const known = sentListIds.get(c.id)
-    if (known) return known
-    const ids = await campaignListIds(c.id)
-    sentListIds.set(c.id, ids)
-    return ids
-  })
-  const real = inRange
-    .map((c, i) => ({
-      c,
-      listId: lists[i][0] ?? '',
-      list: names.get(lists[i][0] ?? '') ?? '',
-    }))
-    .filter(
-      ({ c, list }, i) =>
-        lists[i].length === 1 &&
-        list !== '' &&
-        !/\(test\)/i.test(list) &&
-        c.name !== ''
-    )
-  const clicks = await readClicks([
-    ...new Set(real.map(({ c }) => baseIssueName(c.name))),
+}): Promise<SendStatsResult> {
+  const { campaigns, complete } = await campaignsBackTo(
+    range.startMs == null ? null : range.startMs - MADE_BEFORE_FIRST_SEND_MS
+  )
+  const offset = await accountUtcOffset(campaigns)
+  const startOf = (c: RawCampaign) =>
+    instantMs((c.sdate || c.ldate) ?? null, offset)
+  const inRange = (at: number) =>
+    Number.isNaN(at)
+      ? range.startMs == null && range.endMs == null
+      : (range.startMs == null || at >= range.startMs) &&
+        (range.endMs == null || at <= range.endMs)
+  // Issues carry their newsletter's name in front ("Events · Week 41,
+  // 2026"; sendChecks holds every real-list send to it). An issue first
+  // sent in the range has a send that started in it: only those names'
+  // lists are read, so a short range costs a few reads, not one per send.
+  const prefixes = Object.values(REAL_LISTS).map(l => `${l.prefix} · `)
+  const named = campaigns.filter(c =>
+    prefixes.some(p => baseIssueName(c.name).startsWith(p))
+  )
+  // Every send that reached readers, finished or not: a wave stopped after
+  // 1,200 people still went to them.
+  const reached = named.filter(c => reachedReaders(c))
+  const names = new Set(
+    reached.filter(c => inRange(startOf(c))).map(c => baseIssueName(c.name))
+  )
+  const wanted = reached.filter(c => names.has(baseIssueName(c.name)))
+  // Waves of those issues still to go (approve once schedules them all).
+  const toGo = named.filter(
+    c =>
+      (c.status === '1' || c.status === '7') && names.has(baseIssueName(c.name))
+  )
+  const [lists, toGoLists] = await Promise.all([
+    mapLimit(wanted, 3, knownListIds),
+    mapLimit(toGo, 3, knownListIds),
   ])
-  return sumIssues(real).map(({ rows, list }) => {
+  const real = wanted
+    .map((c, i) => ({ c, listId: lists[i].length === 1 ? lists[i][0] : '' }))
+    .filter(({ listId }) => isRealList(listId))
+    .map(r => ({ ...r, list: REAL_LISTS[r.listId].prefix }))
+  const scheduled = new Set(
+    toGo.flatMap((c, i) =>
+      toGoLists[i].map(l => `${l}|${baseIssueName(c.name)}`)
+    )
+  )
+  const kept = sumIssues(real)
+    .map(g => {
+      // First send: when the earliest wave started, as sentIssuesOn has it.
+      const starts = g.rows.map(r => startOf(r.c)).filter(t => !Number.isNaN(t))
+      return {
+        ...g,
+        first: starts.length ? Math.min(...starts) : NaN,
+        sent: g.rows.reduce((n, r) => n + (Number(r.c.send_amt ?? 0) || 0), 0),
+      }
+    })
+    .filter(g => g.sent >= MIN_READERS && inRange(g.first))
+    .sort((a, b) => (b.first || 0) - (a.first || 0))
+  const keptRows = kept.flatMap(g => g.rows)
+  const [clicks, reports] = await Promise.all([
+    readClicks([...new Set(kept.map(g => baseIssueName(g.rows[0].c.name)))]),
+    mapLimit(keptRows, 3, ({ c }) => spamReport(c)),
+  ])
+  const reportOf = new Map(keptRows.map(({ c }, i) => [c.id, reports[i]]))
+  const issues = kept.map(({ rows, list, first, sent }): SendStats => {
+    const listId = rows[0].listId
     const newest = rows[0].c
     const name = baseIssueName(newest.name)
     const sum = (pick: (c: RawCampaign) => string | null | undefined) => {
       const vals = rows.map(r => pick(r.c)).filter(v => v != null)
       return vals.length === 0 ? null : vals.reduce((n, v) => n + Number(v), 0)
     }
+    // One wave's report missing leaves the issue's count unknown, not short.
+    const complaints = rows.map(r =>
+      countOrNull(reportOf.get(r.c.id)?.spam_complaints)
+    )
+    const statuses = new Set(rows.map(r => r.c.status))
+    const waveNames = rows.map(r => waveOf(r.c.name))
     return {
       id: newest.id,
       name,
-      newsletter: list.replace(/^AISafety\.com\s+/i, ''),
-      sentAt: newest.ldate ?? newest.sdate,
-      delivered: sum(c => c.send_amt ?? '0') ?? 0,
+      newsletter: list,
+      sentAt: Number.isNaN(first) ? null : new Date(first).toISOString(),
+      sent,
       opens: sum(c => c.uniqueopens),
       unsubscribes: sum(c => c.unsubscribes),
-      clicks: clicks.get(name) ?? { total: 0, links: [] },
-      waves: rows.filter(r => waveOf(r.c.name) != null).length,
+      hardBounces: sum(c => c.hardbounces),
+      softBounces: sum(c => c.softbounces),
+      spamComplaints: complaints.some(n => n == null)
+        ? null
+        : complaints.reduce((n: number, v) => n + v!, 0),
+      // readClicks answers every name it was asked for, or none when the
+      // read failed.
+      clicks: clicks.get(name) ?? null,
+      waves: new Set(waveNames.filter(w => w != null).map(w => w.wave)).size,
+      wavesPlanned: Math.max(0, ...waveNames.map(w => w?.waves ?? 0)),
+      unfinished: statuses.has('2')
+        ? 'sending'
+        : statuses.has('3')
+          ? 'paused'
+          : statuses.has('4')
+            ? 'stopped'
+            : scheduled.has(`${listId}|${name}`)
+              ? 'scheduled'
+              : null,
     }
   })
+  const oldest = campaigns
+    .map(c => timeOfCampaign(c.cdate))
+    .filter(t => !Number.isNaN(t))
+    .reduce((a, b) => Math.min(a, b), Infinity)
+  return {
+    issues,
+    readFrom:
+      !complete && Number.isFinite(oldest)
+        ? new Date(oldest).toISOString()
+        : null,
+  }
+}
+
+/** A send's v1 unsubscription report, for its spam complaints (the field is
+ *  there even at zero: read live from campaigns 165 and 166, 29 Sept 2026).
+ *  Kept an hour once the send is three days old, when its numbers have
+ *  mostly settled, else a minute. A failed read isn't kept: null, and the
+ *  next load tries again. */
+async function spamReport(
+  c: RawCampaign
+): Promise<Record<string, unknown> | null> {
+  const finished = timeOfCampaign(c.ldate)
+  const settled =
+    c.status === '5' &&
+    !Number.isNaN(finished) &&
+    Date.now() - finished > 72 * HOUR_MS
+  return sharedRead(
+    `spamtotals:${c.id}`,
+    settled ? 60 * 60_000 : 60_000,
+    async () => {
+      const report = await v1report('campaign_report_unsubscription_totals', {
+        campaignid: c.id,
+      })
+      if (!report) throw new Error('no report')
+      return report
+    }
+  ).catch(() => null)
+}
+
+/** A campaign's cdate (it carries the account's offset) as epoch ms; NaN
+ *  when unreadable. */
+function timeOfCampaign(cdate: string | null | undefined): number {
+  const at = Date.parse(cdate ?? '')
+  return Number.isNaN(at) ? NaN : at
+}
+
+/** A count ActiveCampaign sent as a string or number; null when it's
+ *  missing or not a number. */
+function countOrNull(v: unknown): number | null {
+  return v == null || String(v).trim() === '' || Number.isNaN(Number(v))
+    ? null
+    : Number(v)
 }
 
 /** Pure: sends grouped per list + issue (base name), each group newest
@@ -4357,7 +4579,10 @@ async function createAndConfirm(a: {
         `The draft (campaign ${a.draftId}) couldn’t be deleted; it now shows as already sent.`
       )
     }
-    notes.push(...(await noteFirstSend(a.baseName, facts.sendAt, newId)))
+    // Only a real send ends the hold on test copies' clicks: a practice send
+    // to a test list mustn't (newsletter-clicks.ts).
+    if (isRealList(a.listId))
+      notes.push(...(await noteFirstSend(a.baseName, facts.sendAt, newId)))
     if (isRealList(a.listId)) {
       const note = await recordFor(newId, a.listId, a.baseName, facts, null)
       if (note) notes.push(note)
@@ -4553,9 +4778,10 @@ async function createWaves(a: {
   try {
     const soonest = [...made].reverse()
     const first = soonest[0]
-    notes.push(
-      ...(await noteFirstSend(a.baseName, first.facts.sendAt, first.newId))
-    )
+    if (isRealList(a.listId))
+      notes.push(
+        ...(await noteFirstSend(a.baseName, first.facts.sendAt, first.newId))
+      )
     const scheduled: ScheduledWave[] = soonest.map(m => ({
       wave: m.slot.wave,
       waves: range.waves,

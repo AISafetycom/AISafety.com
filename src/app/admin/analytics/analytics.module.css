@@ -26,6 +26,29 @@
   border-radius: 999px;
 }
 
+/* A saved copy on show while the server reads the latest events (page.tsx):
+   muted, and breathing gently until the live figures replace it. */
+.badgeUpdating {
+  color: var(--teal-300);
+  background-color: var(--teal-800);
+  animation: updatingPulse 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes updatingPulse {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.5;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .badgeUpdating {
+    animation: none;
+  }
+}
+
 .total {
   font-size: 12px;
   color: var(--teal-300);
@@ -54,9 +77,11 @@
   border-radius: 8px;
 }
 
+/* minmax(0, …) so a wide table scrolls inside its panel rather than
+   stretching the column. */
 .grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 20px;
   align-items: start;
   margin-bottom: 20px;
@@ -64,7 +89,17 @@
 
 @media (max-width: 991px) {
   .grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* On a phone a table scrolls sideways before a name gets this narrow,
+     and headings like "% of visitors" wrap so the figures fit beside it. */
+  .nameCell {
+    min-width: 128px;
+  }
+
+  .table th {
+    white-space: normal;
   }
 }
 
@@ -87,6 +122,10 @@
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+}
+
+.tableScroll {
+  overflow-x: auto;
 }
 
 .table th {
@@ -592,6 +631,7 @@
 
 .presets {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
 }
 
@@ -605,6 +645,8 @@
   background-color: transparent;
   border: 1px solid var(--teal-800);
   border-radius: 999px;
+  text-decoration: none;
+  white-space: nowrap;
   cursor: pointer;
   transition:
     color var(--hover-transition),
@@ -625,6 +667,7 @@
 
 .custom {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
@@ -743,22 +786,25 @@
 /* New figures take a moment to work out, so a click shows at once: the
    clicked tab or pill lights up (PendingMark gives it a data-pending child
    while its page loads), the one it replaces steps back, and the figures
-   below fade until the new ones arrive. The date presets do the same in
-   DateRangePicker. The fade waits a beat so quick loads don't flicker. */
+   below fade until the new ones arrive. The date presets do the same, and
+   DateRangePicker's custom range. The fade waits a beat so quick loads don't
+   flicker; a preloaded view arrives before it starts. */
 .dashboard:has([data-pending]) :is(.panel, .empty) {
   opacity: 0.45;
   transition: opacity 0.2s 0.15s;
 }
 
 .pageTabs:has([data-pending]) .pageTabActive,
-.clickToggle:has([data-pending]) .clickToggleBtnActive {
+.clickToggle:has([data-pending]) .clickToggleBtnActive,
+.presets:has([data-pending]) .presetBtnActive {
   color: var(--teal-300);
   background-color: transparent;
   border-color: var(--teal-800);
 }
 
 .pageTabs .pageTab:has([data-pending]),
-.clickToggle .clickToggleBtn:has([data-pending]) {
+.clickToggle .clickToggleBtn:has([data-pending]),
+.presets .presetBtn:has([data-pending]) {
   color: var(--teal-900);
   background-color: var(--bright-teal-300);
   border-color: var(--bright-teal-300);
@@ -790,4 +836,453 @@
   .sourceStat:has([data-pending])
   :is(.sourceStatName, .sourceStatCount, .sourceStatPct) {
   color: var(--teal-900);
+}
+
+/* ─── Org lookup ──────────────────────────────────────────────────────── */
+
+.orgSearch {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.orgSearchInput {
+  height: 32px;
+  width: 340px;
+  max-width: 100%;
+  padding: 0 12px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--white);
+  background-color: var(--teal-900);
+  border: 1px solid var(--teal-800);
+  border-radius: 6px;
+  outline: none;
+}
+
+.orgSearchInput:focus {
+  border-color: var(--teal-500);
+}
+
+.orgSearchInput::placeholder {
+  color: var(--teal-500);
+}
+
+.orgSearch .applyBtn {
+  height: 32px;
+  padding: 0 16px;
+  font-size: 13px;
+}
+
+/* The Org lookup's "Share with the org" box: the button that makes the org's
+   page, or that page's link with Copy, Open, and Stop sharing. */
+.shareBox {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 20px;
+  padding: 12px 14px;
+  background-color: var(--teal-900);
+  border: 1px solid var(--teal-800);
+  border-radius: 8px;
+}
+
+.shareText {
+  flex: 1 1 320px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--teal-300);
+}
+
+.shareLabel {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.shareLink {
+  flex: 1 1 260px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--white);
+  background-color: var(--teal-850);
+  border: 1px solid var(--teal-800);
+  border-radius: 6px;
+  outline: none;
+}
+
+.shareLink:focus {
+  border-color: var(--teal-500);
+}
+
+.shareNote {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--teal-400);
+}
+
+/* A button that reads as a link inside a sentence. */
+.shareInline {
+  padding: 0;
+  font: inherit;
+  color: var(--teal-300);
+  background: none;
+  border: none;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.shareInline:hover:not(:disabled) {
+  color: var(--white);
+}
+
+.shareName {
+  display: flex;
+  flex: 1 1 260px;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--teal-400);
+  white-space: nowrap;
+}
+
+.shareConfirm {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--teal-300);
+}
+
+/* The org pages shared so far, before a search: name, how often opened,
+   and each page's own Copy link and Stop sharing. */
+.sharedPages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.sharedPages li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.sharedPagesNote {
+  font-size: 12px;
+  color: var(--teal-400);
+}
+
+.sharedPagesActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.empty + .panel {
+  margin-top: 20px;
+}
+
+.copyBtn {
+  flex: none;
+  padding: 3px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--teal-300);
+  background-color: transparent;
+  border: 1px solid var(--teal-700);
+  border-radius: 999px;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color var(--hover-transition),
+    background-color var(--hover-transition);
+}
+
+.copyBtn:hover:not(:disabled) {
+  color: var(--white);
+  background-color: var(--teal-800);
+}
+
+.copyBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* A listing's small notes under its name (featured, why it matched, no
+   longer listed). */
+.orgName {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.orgNotes {
+  font-size: 11px;
+  color: var(--teal-400);
+}
+
+/* A listing no longer on the site: faded, cells only, so the row keeps its
+   stripe. */
+.pastRow > td {
+  opacity: 0.5;
+}
+
+.leaveOut {
+  font-size: 12px;
+  color: var(--teal-400);
+  white-space: nowrap;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.leaveOut:hover {
+  color: var(--white);
+}
+
+/* Clicked, while the figures without it (or with it back) load: the link
+   lights up at once and its row fades away. */
+.leaveOut:has([data-pending]) {
+  color: var(--white);
+  text-decoration-style: solid;
+}
+
+.table tr:has(.leaveOut [data-pending]) > td:not(:has(.leaveOut)) {
+  opacity: 0.25;
+  transition: opacity 0.15s;
+}
+
+/* Full strength even on a faded "No longer listed" row. */
+.table tr:has(.leaveOut [data-pending]) > td:has(.leaveOut) {
+  opacity: 1;
+}
+
+.leftOutList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--teal-300);
+}
+
+.leftOutList li {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.orgWarning {
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: var(--teal-300);
+}
+
+/* Clicks over time: one series, so no legend. Each day (or week) is a slot
+   the full height of the plot, so the whole slot answers the pointer; its
+   column sits on the baseline, at most 24px wide, rounded only at the top,
+   with a 2px gap between slots. */
+.chart {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chartReadout {
+  min-height: 20px;
+  font-size: 12px;
+  color: var(--teal-400);
+}
+
+.chartReadout strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--white);
+  margin-right: 6px;
+}
+
+.chartBody {
+  display: flex;
+  gap: 8px;
+  height: 160px;
+}
+
+.chartAxis {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  width: 40px;
+  margin: -7px 0;
+  font-size: 11px;
+  color: var(--teal-400);
+  font-variant-numeric: tabular-nums;
+}
+
+.chartPlot {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  /* 2px between columns, less on a phone, so 91 days still fit. */
+  gap: min(2px, 0.3%);
+  border-bottom: 1px solid var(--teal-700);
+}
+
+.chartGrid {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background-color: var(--teal-800);
+  pointer-events: none;
+}
+
+.chartCol {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 1px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: default;
+}
+
+.chartCol:focus-visible {
+  outline: 1px solid var(--teal-500);
+  outline-offset: 1px;
+}
+
+.chartBar {
+  width: 100%;
+  max-width: 24px;
+  min-height: 2px;
+  background-color: var(--bright-teal-300);
+  border-radius: 4px 4px 0 0;
+  transition: background-color var(--hover-transition);
+}
+
+.chartColActive .chartBar {
+  background-color: var(--white);
+}
+
+/* A week only partly inside the range: lighter, so its shorter count isn't
+   read as a dip. */
+.chartBarPartial {
+  opacity: 0.45;
+}
+
+/* Lines up under the plot: the axis's 40px plus the 8px gap. Its labels
+   (chart-dates.ts picks them) are positioned, so it holds one line's height
+   itself, and it is the container they thin out against. */
+.chartDates {
+  container-type: inline-size;
+  position: relative;
+  height: 1lh;
+  margin-left: 48px;
+  font-size: 11px;
+  color: var(--teal-400);
+}
+
+/* A box exactly as wide as its column, so the date centers under the bar;
+   a date wider than its column spills evenly both ways (the oldest one can
+   reach into the empty space under the axis, never past the panel). */
+.chartDate {
+  position: absolute;
+  top: 0;
+  display: flex;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+/* The newest date centers under its column while it fits there, and
+   otherwise ends flush with the plot rather than running past the panel's
+   edge: auto margins take any spare room and drop to zero when there's
+   none, leaving flex-end in charge. */
+.chartDate:last-child {
+  justify-content: flex-end;
+}
+
+.chartDate:last-child > span {
+  margin: 0 auto;
+}
+
+.chartDateYear {
+  display: none;
+}
+
+.chartDateYear[data-year-from='1'] {
+  display: inline;
+}
+
+/* Fewer dates as the plot narrows: every other one, then every fourth,
+   always keeping the newest. A date is up to ~35px wide and ~61px with its
+   year; the breakpoints (the plot's width) are measured so plain neighbors
+   keep 20px apart and a dated one 12px, even when the newest date carries
+   a year and ends flush: up to 13 labels from 990px, 7 from 535px, 4 from
+   270px, and 2 below that (the narrowest phones). A label hidden here may
+   have carried the year, so the next one shown takes it on. */
+@container (max-width: 989px) {
+  .chartDate[data-keep='1'] {
+    display: none;
+  }
+
+  .chartDateYear[data-year-from='2'] {
+    display: inline;
+  }
+}
+
+@container (max-width: 534px) {
+  .chartDate[data-keep='2'] {
+    display: none;
+  }
+
+  .chartDateYear[data-year-from='4'] {
+    display: inline;
+  }
+}
+
+@container (max-width: 269px) {
+  .chartDate[data-keep='4'] {
+    display: none;
+  }
+
+  .chartDateYear[data-year-from='8'] {
+    display: inline;
+  }
+}
+
+.chartTable {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--teal-300);
+}
+
+.chartTable summary {
+  cursor: pointer;
+}
+
+.chartTable .table {
+  margin-top: 8px;
+  max-width: 360px;
 }

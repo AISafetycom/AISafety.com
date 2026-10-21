@@ -290,6 +290,81 @@
   box-shadow: inset 0 -1px 0 var(--q-warn);
 }
 
+/* Past decisions in the search results (20 Oct 2026): quieter than the
+   live matches – a small muted heading, one muted line per decision, the
+   matched words underlined only. */
+.earlierGroup {
+  padding: 6px 0 8px;
+  border-top: 1px solid var(--q-border);
+}
+
+.earlierHead {
+  padding: 6px 16px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--q-muted);
+}
+
+.earlierRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 4px 16px 4px 14px;
+  border: none;
+  border-left: 3px solid transparent;
+  background: none;
+  text-align: left;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--q-muted);
+  cursor: pointer;
+}
+
+.earlierRow:hover {
+  background: var(--q-sel);
+  color: var(--q-text-2);
+}
+
+.earlierRowActive,
+.earlierRowActive:hover {
+  background: var(--q-sel);
+  border-left-color: var(--q-border-strong);
+  color: var(--q-text-2);
+}
+
+.earlierName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  mask-image: linear-gradient(to right, #000 85%, transparent);
+}
+
+.earlierName .mark {
+  background: none;
+  box-shadow: inset 0 -1px 0 var(--q-border-strong);
+}
+
+.earlierWhat {
+  flex: none;
+  font-size: 11.5px;
+}
+
+.earlierMore {
+  display: block;
+  padding: 4px 16px 0 17px;
+  font-size: 12px;
+  color: var(--q-muted);
+}
+
+button.earlierMore {
+  padding: 4px 16px 0 17px;
+  color: var(--q-accent);
+}
+
 /* Where the search found a word that is not on the row itself: one line,
    clipped by a fade rather than an ellipsis. */
 .rowExcerpt {
@@ -705,6 +780,74 @@
   font-size: 15px;
 }
 
+/* A tab with nothing left (TabDone). */
+.tabDone {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 96px 40px;
+  text-align: center;
+}
+
+.tabDoneTitle {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--q-accent);
+  font: inherit;
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+button.tabDoneTitle {
+  cursor: pointer;
+}
+
+p.tabDoneTitle {
+  color: var(--q-text-2);
+  font-size: 28px;
+}
+
+.tabDonePop {
+  animation: tabDonePop 700ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+@keyframes tabDonePop {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.tabDoneNote {
+  margin: 0 0 14px;
+  color: var(--q-muted);
+  font-size: 15px;
+}
+
+/* Over the whole page, taking no clicks (Fireworks.tsx). */
+.fireworks {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 50;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tabDonePop {
+    animation: none;
+  }
+}
+
 .detailHead {
   display: grid;
   gap: 10px;
@@ -988,6 +1131,12 @@
   background: var(--q-panel);
   border: 1px solid var(--q-border);
   border-radius: 8px;
+}
+
+/* While the rows can show their crosses, each keeps a last column for one,
+   so the columns line up whether a row has a cross or not. */
+.droppable .diffRow {
+  grid-template-columns: 150px minmax(0, 1fr) 16px minmax(0, 1fr) 16px;
 }
 
 .label {
@@ -1305,6 +1454,48 @@
   color: var(--q-muted);
 }
 
+/* Their reply to a decline, on top of the item it brought back, with
+   Fable's one line on it (20 Oct 2026). Amber like Unsure: it waits on a
+   decision. */
+.pushback {
+  padding: 12px 14px;
+  border: 1px solid var(--q-border-strong);
+  border-left: 3px solid var(--q-warn);
+  border-radius: 6px;
+  background: var(--q-panel);
+}
+
+.pushback .h3 {
+  flex-wrap: wrap;
+}
+
+.pushbackLink {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--q-muted);
+}
+
+.pushbackText {
+  margin: 0;
+  color: var(--q-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.pushbackTake {
+  margin: 0;
+  font-size: 13px;
+  color: var(--q-text-2);
+}
+
+/* Brought back after a decline, or back from "Review again in a week". */
+.returnNote {
+  display: flex;
+}
+
 .summary {
   margin: 0;
   font-size: 15px;
@@ -1312,7 +1503,27 @@
   color: var(--q-text);
 }
 
-/* A rule's test on past decisions (RuleTestBlock): one line per decision
+/* A rule's one line on its test (RuleCard): how many past decisions, then
+   each outcome's count as its small coloured label. */
+.ruleStat {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  font-size: 14px;
+  color: var(--q-text-2);
+}
+
+/* The rest of a rule's summary and Fable's take, behind Details. */
+.ruleMore {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--q-text-2);
+}
+
+/* A rule's test on past decisions (RuleCard): one line per decision
    it would have changed, its outcome as a small coloured label. */
 .ruleTest {
   margin: 0;
@@ -1922,6 +2133,12 @@ select.input {
   z-index: 20;
   /* slides up from below the window edge, and back down at the end */
   animation: toastIn 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  /* a click outside its buttons opens the item, as a list row does */
+  cursor: pointer;
+}
+
+.toast:hover {
+  background: var(--q-sel);
 }
 
 .toastLeaving {
@@ -2037,6 +2254,11 @@ select.input {
   margin-right: 8px;
 }
 
+/* The Discord reply went on the clipboard with the decision. */
+.toastCopied {
+  color: var(--q-accent);
+}
+
 .toastUndo {
   display: inline-flex;
   align-items: center;
@@ -2058,17 +2280,23 @@ select.input {
   border-color: var(--q-border-strong);
 }
 
+/* Over the admin header (z-index 50) too, and scrolling when the card is
+   taller than the window, so its first lines are never hidden. */
 .help {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.35);
   display: flex;
-  align-items: center;
   justify-content: center;
-  z-index: 30;
+  padding: 16px;
+  overflow-y: auto;
+  z-index: 51;
 }
 
+/* Auto margins center the card when it fits and let it start at the top
+   when it does not. */
 .helpCard {
+  margin: auto 0;
   width: 420px;
   padding: 20px 22px;
   background: var(--q-panel);
@@ -2120,13 +2348,20 @@ select.input {
   }
 
   .fieldRow,
-  .diffRow {
+  .diffRow,
+  .droppable .diffRow {
     grid-template-columns: 1fr;
     gap: 4px;
   }
 
   .arrow {
     transform: rotate(90deg);
+  }
+
+  /* The row's cross sits on the field name's line. */
+  .dropEdit {
+    grid-row: 1;
+    grid-column: 1;
   }
 }
 
@@ -2645,18 +2880,20 @@ button.chatFileChip:hover {
   transform: scaleX(-1);
 }
 
-/* A field edited beyond what a change proposes: the cross drops the edit,
-   shown on the row's hover like the pencil. */
+/* The cross at the end of a change's row: a proposed field is left out, an
+   edit beyond the proposal dropped. Shown on the row's hover like the
+   pencil, level with the value's first line. */
 .dropEdit {
   display: inline-flex;
   align-items: center;
-  margin-left: 8px;
+  align-self: start;
+  justify-self: end;
+  margin-top: 3px;
   padding: 2px;
   border: 0;
   border-radius: 4px;
   background: none;
   color: var(--q-muted);
-  vertical-align: middle;
   cursor: pointer;
   opacity: 0;
   transition: opacity 120ms;
@@ -2669,4 +2906,56 @@ button.chatFileChip:hover {
 
 .dropEdit:hover {
   color: var(--q-danger);
+}
+
+/* No hover on a touch screen: the cross is always there. */
+@media (hover: none) {
+  .dropEdit {
+    opacity: 1;
+  }
+}
+
+/* A proposed field left out with the cross (Bryce, 15 Oct 2026: "I want to
+   be able to delete a suggested field change"): what the listing keeps
+   reads as it is, and the proposal is crossed out and faded. */
+.leftOut .from {
+  color: var(--q-text);
+  text-decoration: none;
+}
+
+.leftOut .arrow {
+  opacity: 0.4;
+}
+
+.leftOutValue {
+  color: var(--q-muted);
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.leftOutMark {
+  margin-left: 8px;
+  font-size: 12px;
+  font-style: normal;
+  color: var(--q-warn);
+  white-space: nowrap;
+}
+
+.putBack {
+  margin-left: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--q-muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.putBack:hover,
+.putBack:focus-visible {
+  color: var(--q-text);
 }

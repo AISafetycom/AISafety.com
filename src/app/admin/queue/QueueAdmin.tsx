@@ -9,16 +9,25 @@ import type {
   FieldInfo,
   PreviousImage,
   PreviewKind,
+  ProposedChange,
   QueueItem,
   RejectReply,
 } from '@/lib/admin/queue'
 import { missingFields } from '@/lib/admin/queue-needed'
-import { laterSince, laterUntil } from '@/lib/admin/queue-later'
+import { backSince, laterSince, laterUntil } from '@/lib/admin/queue-later'
+import { LEFT_OUT_KEY, withLeftOut } from '@/lib/admin/queue-left-out'
+import { verdictWords, type FlagUpdate } from '@/lib/admin/queue-flag'
 import { rejectReplyFor, shownDeclineChip } from '@/lib/admin/queue-decline'
+import { reopeningLabel, type Reopening } from '@/lib/admin/queue-reopen'
+import { discordAppLink, replyToCopy } from '@/lib/admin/queue-discord'
 import {
+  alreadyRepliedOf,
+  type AlreadyReplied,
+} from '@/lib/admin/queue-already'
+import {
+  leadSentence,
   OUTCOME_LABEL,
-  ruleTestHeadline,
-  type RuleTest,
+  ruleTestShort,
   type RuleTestResult,
 } from '@/lib/admin/queue-rule-test'
 import {
@@ -47,6 +56,7 @@ import Chat, { CharCount, descriptionCap, type Decided } from './Chat'
 import FieldPicker from './FieldPicker'
 import type { FableChange } from '@/lib/admin/queue-fable'
 import Position, { forgetOrder } from './Position'
+import Fireworks from './Fireworks'
 import { SORT_FIELD, sortValue } from '@/lib/admin/queue-place'
 import {
   byUrgency,
@@ -63,6 +73,9 @@ import {
   type PictureSide,
 } from '@/lib/admin/queue-picture'
 import styles from './queue.module.css'
+import { Collapse } from '../Collapse'
+import { useClosing } from '../motion'
+import motion from '../motion.module.css'
 
 // The Queue is a triage tool Bryce sits in for long stretches, so it has its
 // own look (see queue.module.css) rather than the admin's teal card stack:
@@ -73,6 +86,7 @@ import styles from './queue.module.css'
 
 const API = '/api/admin/queue'
 const UPLOAD_API = '/api/admin/queue/upload'
+const VISITORS_API = '/api/admin/queue/visitors'
 
 // The list reads Airtable again this often while the tab is in view, and
 // the moment it comes back into view. Two refreshes closer together than
@@ -124,7 +138,7 @@ const URGENT_WHY: Record<Kind, string> = {
   rules: '',
 }
 const SECTION_LABEL: Record<Section, string> = {
-  fable: 'Fable replying',
+  fable: 'Fable chats',
   urgent: 'Urgent',
   requests: 'Requests',
   broom: 'Broom',
@@ -155,12 +169,22 @@ const NO_PAGE_LABEL = 'No page'
 // A search lists the items named by it first, then those that mention it
 // somewhere else (Comb's source line, a description, Fable's notes), then
 // today's decisions that match (Bryce, 24 Sept 2026: "search should also
-// search things done today").
-const SEARCH_GROUPS: { key: 'name' | 'other' | 'done'; label: string }[] = [
+// search things done today"), then every decision before today (Bryce,
+// 20 Oct 2026: a decline from a week before could not be found to reverse).
+type SearchGroup = 'name' | 'other' | 'done' | 'earlier'
+const SEARCH_GROUPS: { key: SearchGroup; label: string }[] = [
   { key: 'name', label: 'Name matches' },
   { key: 'other', label: 'Other matches' },
   { key: 'done', label: 'Done today' },
+  { key: 'earlier', label: 'Earlier' },
 ]
+/** The most earlier decisions a search lists; more words narrow it. */
+const EARLIER_MAX = 60
+/** Earlier decisions shown before "Show N more": the live matches stay the
+ *  loud part of the results (Bryce, 20 Oct 2026: "probably avoid the search
+ *  results from being too crowded somehow e.g. by making past decisions
+ *  less loud"). */
+const EARLIER_FEW = 3
 
 const KIND_WORD: Record<QueueItem['type'], string> = {
   Add: 'Addition',
@@ -227,6 +251,7 @@ const ICON = {
   chevron: '/images/icons/chevron-down.svg',
   search: '/images/icons/magnifying-glass.svg',
   clock: '/images/icons/clock.svg',
+  reopen: '/images/icons/redo.svg',
 } as const
 
 // Each section's head carries its icon, in grey: colour in the list is kept
@@ -424,10 +449,33 @@ function decidedAtOf(item: QueueItem): string | null {
   return later ? laterSince(later) : item.decidedAt
 }
 
+/** A rejection, including one whose record the Mac has since deleted (its
+ *  row then says Applied). */
+function isRejected(item: QueueItem): boolean {
+  return item.status === 'Rejected' || item.declined
+}
+
 /** The mark beside a decision: a clock for an item set aside. */
 function doneIcon(item: QueueItem): string {
   if (setAsideUntil(item)) return ICON.clock
-  return item.status === 'Rejected' ? ICON.x : ICON.check
+  return isRejected(item) ? ICON.x : ICON.check
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/** What can take a decision back: Undo, or – for a declined addition the
+ *  Mac has deleted, or one declined over a day ago – Reopen, which brings
+ *  the listing back (queue-reopen.ts). Null while it is on its way back. */
+function takeBack(item: QueueItem): 'undo' | 'reopen' | null {
+  if (isOpen(item)) return null
+  if (item.reopening) return item.reopening.error ? 'reopen' : null
+  if (item.declined && item.type === 'Add') {
+    const at = Date.parse(item.decidedAt ?? '')
+    if (item.status !== 'Rejected' || !(Date.now() - at < DAY_MS)) {
+      return 'reopen'
+    }
+  }
+  return 'undo'
 }
 
 function decidedSince(item: QueueItem, since: number): boolean {
@@ -442,6 +490,12 @@ function dayMonth(iso: string): string {
     day: 'numeric',
     month: 'long',
   })
+}
+
+/** Back from "Review again in a week": when it was set aside, while it is
+ *  open again (queue-later.ts). */
+function backFrom(item: QueueItem): string | null {
+  return isOpen(item) ? backSince(item, Date.now()) : null
 }
 
 function show(v: unknown): string {
@@ -763,11 +817,37 @@ function editsAsText(edits: Record<string, unknown>): Record<string, string> {
   return out
 }
 
-/** The draft an item starts from: its saved edits, when it is still open. */
+/** The draft an item starts from: its saved edits and the fields it left
+ *  out, when it is still open. */
 function draftOfRow(items: QueueItem[] | null | undefined, id: string): Draft {
   const item = items?.find(i => i.id === id)
-  if (!item || !item.edits || !isOpen(item)) return FRESH
-  return { ...FRESH, edits: editsAsText(item.edits) }
+  if (!item || (!item.edits && !item.leftOut)) return FRESH
+  if (!isOpen(item) && !setAsideUntil(item)) return FRESH
+  return {
+    ...FRESH,
+    edits: editsAsText(item.edits ?? {}),
+    leftOut: item.leftOut ?? [],
+  }
+}
+
+/** A new edit to a left-out field (the chat's too) puts it back with that
+ *  value; an edit it had when it was left out stays with it for Put back. */
+function settle(was: Draft, next: Draft): Draft {
+  const back = next.leftOut.filter(
+    k => k in next.edits && next.edits[k] !== was.edits[k]
+  )
+  return back.length
+    ? { ...next, leftOut: next.leftOut.filter(k => !back.includes(k)) }
+    : next
+}
+
+/** The edits that go with Accept: not those of a field left out. */
+function activeEdits(d: Draft): Record<string, string> {
+  return d.leftOut.length
+    ? Object.fromEntries(
+        Object.entries(d.edits).filter(([k]) => !d.leftOut.includes(k))
+      )
+    : d.edits
 }
 
 function sameEdits(
@@ -776,6 +856,10 @@ function sameEdits(
 ): boolean {
   const ka = Object.keys(a)
   return ka.length === Object.keys(b).length && ka.every(k => a[k] === b[k])
+}
+
+function sameList(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((x, i) => x === b[i])
 }
 
 /** Waiting for a decision. An item set aside with "Review again in a
@@ -790,10 +874,18 @@ function isOpen(item: QueueItem): boolean {
 }
 
 /** The edits a card preview is built with before the admin touches
- *  anything: a Change shows its proposed values, an Add shows the record. */
-function proposedEdits(item: QueueItem): Record<string, unknown> {
+ *  anything: a Change shows its proposed values, but for the fields left
+ *  out; an Add shows the record. */
+function proposedEdits(
+  item: QueueItem,
+  leftOut: string[] = item.leftOut ?? []
+): Record<string, unknown> {
   return item.type === 'Change'
-    ? Object.fromEntries(item.changes.map(c => [c.field, c.to]))
+    ? Object.fromEntries(
+        item.changes
+          .filter(c => !leftOut.includes(c.field))
+          .map(c => [c.field, c.to])
+      )
     : {}
 }
 
@@ -915,6 +1007,26 @@ function pageLabel(item: QueueItem): string | null {
     : item.page
 }
 
+/** What search looks through for one item. */
+function searchDocOf(item: QueueItem): SearchDoc {
+  const { name, heading } = splitTitle(item)
+  return searchDoc(
+    itemParts(item, {
+      title: name ?? item.title,
+      heading,
+      page: pageLabel(item),
+      source:
+        item.source === 'Comb' && item.sourceExcerpt
+          ? foundLabel(item.sourceExcerpt)
+          : item.sourceExcerpt,
+    }),
+    [item.id, item.targetRecord ?? '']
+  )
+}
+
+/** An item their reply to a decline brought back sits atop Urgent. */
+const REPLIED: Urgency = { days: null, label: 'Replied to your decline' }
+
 /** The live page, landing on this record's card (every site card carries
  *  its record id as an anchor; ScrollToHash finds it once rendered). */
 function livePageUrl(item: QueueItem): string {
@@ -933,25 +1045,28 @@ function copyListingName(item: QueueItem): void {
 
 function acceptLabel(
   item: QueueItem,
-  edits: Record<string, string> = {}
+  edits: Record<string, string> = {},
+  leftOut: string[] = item.leftOut ?? []
 ): string {
   if (item.type === 'Add') return 'Publish'
   if (item.type === 'Change') {
-    // a field edited beyond the (empty) proposal makes it a change too
-    return item.changes.length || Object.keys(edits).length
-      ? 'Apply change'
-      : 'Accept flag'
+    // a field edited beyond the (empty) proposal makes it a change too; a
+    // proposal whose every field is left out has nothing to apply
+    if (
+      item.changes.some(c => !leftOut.includes(c.field)) ||
+      Object.keys(edits).length
+    ) {
+      return 'Apply change'
+    }
+    // Nothing to apply: a Broom flag is accepted as a flag; anything else
+    // (a correction that needed the owner) is just marked done.
+    return item.source === 'Broom' ? 'Accept flag' : 'Mark done'
   }
   return 'Apply rule'
 }
 
 function verdictWord(item: QueueItem): string {
-  if (item.verdict === 'Publish') return 'Publish it'
-  if (item.verdict === "Don't publish") return "Don't publish"
-  if (item.verdict === 'Fix') return 'Fix it'
-  if (item.verdict === 'Dismiss') return 'Dismiss the flag'
-  if (item.verdict === 'Unsure') return 'Unsure'
-  return item.verdict ?? ''
+  return verdictWords(item.verdict)
 }
 
 /** An emailed request whose reply draft still has to reach Gmail. */
@@ -960,7 +1075,8 @@ function wantsDraft(item: QueueItem): boolean {
     Boolean(item.replyDraft) &&
     (item.source === 'Email' || item.source === 'Form') &&
     item.replyStatus !== 'Saved' &&
-    item.replyStatus !== 'Sent'
+    item.replyStatus !== 'Sent' &&
+    !item.alreadyReplied
   )
 }
 
@@ -978,6 +1094,8 @@ function wantsRejectReply(item: QueueItem): boolean {
       item.source === 'Form' ||
       item.source === 'Discord') &&
     Boolean(item.replyTo) &&
+    !item.alreadyReplied &&
+    !item.declinedBefore &&
     item.rejectReply?.state !== 'saved' &&
     item.rejectReply?.state !== 'ready' &&
     Date.parse(item.decidedAt ?? '') >= REJECT_REPLIES_SINCE
@@ -993,7 +1111,29 @@ function discordRejectText(item: QueueItem): string | null {
     : null
 }
 
+/** What a decision's toast says once its Discord reply is on the clipboard. */
+const COPIED_NOTE = 'Reply copied · paste it in Discord'
+
+/** The Discord reply a decision's toast offers: the one copied with the
+ *  decision, else the one ready once the decision landed. Such a toast stays
+ *  up until Discord is opened, it is closed, or the next decision, so the
+ *  paste is not forgotten (Bryce, 15 Oct 2026). */
+function toastReply(toast: Toast): string | null {
+  if (toast.item.source !== 'Discord' || toast.later || toast.reopen)
+    return null
+  if (toast.state === 'failed' || toast.state === 'undoing') return null
+  if (toast.copied) return toast.copied
+  if (toast.state !== 'done') return null
+  return (
+    (toast.no ? discordRejectText(toast.item) : toast.item.replyDraft) || null
+  )
+}
+
 function replyLabel(item: QueueItem): string {
+  if (item.alreadyReplied) return 'Already replied by hand · no draft'
+  if (item.status === 'Rejected' && item.declinedBefore) {
+    return 'They have your first decline · no new draft'
+  }
   if (item.status === 'Rejected') {
     if (item.source === 'Discord') {
       // A ready decline shows as Copy reply / Open on Discord instead.
@@ -1019,15 +1159,31 @@ function replyLabel(item: QueueItem): string {
 function doneLabel(item: QueueItem): string {
   const later = setAsideUntil(item)
   if (later) return `Back on ${dayMonth(later)}`
-  if (item.status === 'Rejected') return 'Rejected'
+  if (isRejected(item)) return 'Rejected'
   if (item.status === 'Accepted') return 'Accepted'
   if (item.type === 'Add') return 'Published'
   if (item.type === 'Change') {
-    const n = item.changes.length
-    if (n === 0) return 'Flag cleared'
+    const n = item.changes.filter(c => !item.leftOut?.includes(c.field)).length
+    if (n === 0) return item.source === 'Broom' ? 'Flag cleared' : 'Done'
     return `Changed ${n} field${n === 1 ? '' : 's'}`
   }
   return 'Applied'
+}
+
+/** The page's edits that went out with an applied item, as text; none for
+ *  any other decision (a rejection keeps them on the row unwritten). */
+/** An addition already published or a change already applied: its fields
+ *  still edit, straight onto the listing (fixItem in queue.ts). */
+function fixable(item: QueueItem): boolean {
+  if (item.status !== 'Applied' || item.declined) return false
+  if (item.type === 'Add') return true
+  return (
+    item.type === 'Change' && Boolean(item.targetTable && item.targetRecord)
+  )
+}
+
+function appliedEdits(item: QueueItem): Record<string, string> {
+  return item.status === 'Applied' ? editsAsText(item.edits ?? {}) : {}
 }
 
 /** A decided item's chat cards: the decision's button, and what it wrote
@@ -1057,18 +1213,21 @@ function laterNote(item: QueueItem): string {
     : 'Back in the list then'
 }
 
-function workingLabel(item: QueueItem, action: Decision): string {
+function workingLabel(item: QueueItem, action: Decision, d?: Draft): string {
   if (action === 'reject') return 'Rejecting…'
   if (action === 'later') return 'Setting it aside…'
-  const label = acceptLabel(item)
+  const label = acceptLabel(item, d && activeEdits(d), d?.leftOut)
   if (label === 'Publish') return 'Publishing…'
-  if (label === 'Accept flag') return 'Accepting…'
+  if (label === 'Accept flag' || label === 'Mark done') return 'Accepting…'
   return 'Applying…'
 }
 
 interface Draft {
   mode: 'idle' | 'reject'
   edits: Record<string, string>
+  /** A change's proposed fields left out with the cross: Accept does not
+   *  write them, so the listing keeps what it holds there. */
+  leftOut: string[]
   editing: string | null
   chip: string | null
   other: string
@@ -1089,6 +1248,7 @@ interface Draft {
 const FRESH: Draft = {
   mode: 'idle',
   edits: {},
+  leftOut: [],
   editing: null,
   chip: null,
   other: '',
@@ -1108,19 +1268,25 @@ interface Toast {
   /** Set aside to review again: the mark is a clock. */
   later?: boolean
   /** working: the decision is still on its way to Airtable (the toast
-   *  stays up, U queues an undo). done: it landed. failed: the item is
-   *  still in the list, with Retry. */
-  state: 'working' | 'done' | 'failed'
+   *  stays up, U queues an undo). done: it landed. undoing: Undo was
+   *  pressed and is on its way (the mark spins until the item is back).
+   *  failed: the decision or the undo did not land, with Retry – or the
+   *  item was closed somewhere else and is under Done, without. */
+  state: 'working' | 'done' | 'undoing' | 'failed'
   text: string
   /** A second line that fills in later: what happened to the reply draft. */
   sub?: string
   /** What Retry sends again after a failure. */
-  retry?: { action: Decision; extra: Record<string, unknown> }
+  retry?: { action: Action; extra: Record<string, unknown> }
+  /** A Discord reply put on the clipboard with the decision. */
+  copied?: string
+  /** Reopen on a declined addition: no Undo, the mark is its arrow. */
+  reopen?: boolean
 }
 
 /** What the page tells the Mac agent to do after a decision: save the
  *  accept's reply draft, or write and save a rejection's. */
-type AgentAction = 'gmail_draft' | 'reject_draft'
+type AgentAction = 'gmail_draft' | 'reject_draft' | 'reopen'
 
 interface AgentResult {
   ok: boolean
@@ -1132,12 +1298,21 @@ interface AgentResult {
   chat: boolean
   /** reject_draft: the words saved in Gmail. */
   rejectText?: string
+  /** No draft: the owner had already replied in the thread, on this day. */
+  alreadyReplied?: AlreadyReplied
 }
 
 const AGENT_TIMEOUT_MS = 15000
 // Fable writes a rejection's reply before it is saved: a few seconds, up
 // to a minute or two on a slow day.
 const REJECT_REPLY_TIMEOUT_MS = 180000
+// Reopen: the Mac rebuilds the record, fetches its logo through Logo Prep
+// and checks Comb's cooldown on the server – seconds, rarely a minute.
+const REOPEN_TIMEOUT_MS = 120000
+// Without the agent the Mac worker brings it back on its next pass: the
+// page looks again this often, for this long.
+const REOPEN_POLL_MS = 15000
+const REOPEN_POLL_FOR_MS = 7 * 60 * 1000
 
 /** Call the local agent on the owner's Mac (~/Queue/agent.py). It listens
  *  on loopback only and checks the token the site minted, so the call is
@@ -1165,6 +1340,7 @@ async function callAgent(
       error?: string
       chat?: boolean
       rejectText?: string
+      alreadyReplied?: unknown
     }
     return {
       ok: Boolean(data.ok),
@@ -1173,6 +1349,7 @@ async function callAgent(
       detail: data.detail ?? data.error ?? '',
       chat: Boolean(data.chat),
       rejectText: data.rejectText,
+      alreadyReplied: alreadyRepliedOf(data.alreadyReplied) ?? undefined,
     }
   } catch {
     return {
@@ -1228,7 +1405,7 @@ const WORKER_NOTE = 'the Mac saves the reply draft within five minutes'
 const OFFLINE_SUB = `Mac agent not reachable · ${WORKER_NOTE}`
 
 type Decision = 'accept' | 'reject' | 'later'
-type Action = Decision | 'undo'
+type Action = Decision | 'undo' | 'reopen'
 
 export default function QueueAdmin({
   canEdit,
@@ -1250,6 +1427,13 @@ export default function QueueAdmin({
   const [toast, setToast] = useState<Toast | null>(null)
   // True for the last moments of a toast, while it slides back down.
   const [toastLeaving, setToastLeaving] = useState(false)
+  // The decision that emptied a tab: fireworks once it lands. `at` tells
+  // one round from the next.
+  const [cheer, setCheer] = useState<{
+    kind: Kind
+    id: string
+    at: number
+  } | null>(null)
   // The last decision, kept for U after the toast has gone.
   const [undoable, setUndoable] = useState<QueueItem | null>(null)
   // Decisions still being written to Airtable, by item id. The page moves
@@ -1307,7 +1491,28 @@ export default function QueueAdmin({
   const [listingDates, setListingDates] = useState<
     Record<string, ListingDates>
   >({})
+  // How many people saw each resource page last month, so the Urgent
+  // section can put the busier pages' items first (queue-urgent.ts). Null
+  // until known, or when this session can't see the analytics.
+  const [pageVisitors, setPageVisitors] = useState<{
+    month: string
+    pages: Record<string, number>
+  } | null>(null)
   const [showDone, setShowDone] = useState(false)
+  // Every decision before today, for the search's "Earlier" group: read
+  // the first time a search is typed, once per visit (Bryce, 20 Oct 2026).
+  const [earlier, setEarlier] = useState<QueueItem[] | null>(null)
+  const [earlierState, setEarlierState] = useState<
+    'idle' | 'loading' | 'failed'
+  >('idle')
+  // Older items opened from it (or from a link): they stay in the list the
+  // page holds, though each refresh reads only open rows and today's.
+  const keptRef = useRef<Set<string>>(new Set())
+  // The search whose Earlier group was opened past its first few rows.
+  const [earlierMoreFor, setEarlierMoreFor] = useState<string | null>(null)
+  // The item in focus, for work that lands later (a Reopen) to tell
+  // whether the admin is still on it.
+  const selectedIdRef = useRef<string | null>(null)
   // A decision opened from Done today: the item itself in place of the
   // list, with a way back (Bryce, 4 Oct 2026).
   const [doneOpen, setDoneOpen] = useState(false)
@@ -1331,6 +1536,7 @@ export default function QueueAdmin({
     return () => clearTimeout(t)
   }, [dayStart])
   const [showHelp, setShowHelp] = useState(false)
+  const [helpShown, helpClosing] = useClosing(showHelp)
   const [kind, setKind] = useState<Kind>('additions')
   const [collapsed, setCollapsed] = useState<Record<Section, boolean>>({
     fable: false,
@@ -1403,9 +1609,14 @@ export default function QueueAdmin({
     }
   }, [])
 
-  const toggleGroup = (section: Section) => {
+  // A heading folds or opens itself; shift-click takes every heading beside
+  // it (`along`) the same way: all the sections on the tab, or all the pages
+  // in a section (Bryce, 14 Oct 2026: "shift click on a group should
+  // open/close all of them").
+  const toggleGroup = (section: Section, along: Section[] = [section]) => {
     setCollapsed(prev => {
-      const next = { ...prev, [section]: !prev[section] }
+      const next = { ...prev }
+      for (const s of along) next[s] = !prev[section]
       try {
         localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next))
       } catch {
@@ -1415,12 +1626,14 @@ export default function QueueAdmin({
     })
   }
 
-  const foldPage = useCallback((foldKey: string, folded: boolean) => {
+  const foldPages = useCallback((foldKeys: string[], folded: boolean) => {
     setFoldedPages(prev => {
-      if (Boolean(prev[foldKey]) === folded) return prev
+      if (foldKeys.every(key => Boolean(prev[key]) === folded)) return prev
       const next = { ...prev }
-      if (folded) next[foldKey] = true
-      else delete next[foldKey]
+      for (const key of foldKeys) {
+        if (folded) next[key] = true
+        else delete next[key]
+      }
       try {
         localStorage.setItem(FOLDED_PAGES_KEY, JSON.stringify(next))
       } catch {
@@ -1430,8 +1643,13 @@ export default function QueueAdmin({
     })
   }, [])
 
-  const togglePage = (foldKey: string) =>
-    foldPage(foldKey, !foldedPages[foldKey])
+  const foldPage = useCallback(
+    (foldKey: string, folded: boolean) => foldPages([foldKey], folded),
+    [foldPages]
+  )
+
+  const togglePage = (foldKey: string, along: string[] = [foldKey]) =>
+    foldPages(along, !foldedPages[foldKey])
 
   const chooseKind = (next: Kind) => {
     // During a search the segments count its matches; picking one leaves
@@ -1493,6 +1711,12 @@ export default function QueueAdmin({
           url: i.url ?? was.url,
         }
       })
+      // An older decision opened on this page is not in the list the API
+      // reads (open rows and the last day's): it stays as the page has it.
+      const listed = new Set(next.map(i => i.id))
+      for (const i of before ?? []) {
+        if (keptRef.current.has(i.id) && !listed.has(i.id)) next.push(i)
+      }
       setItems(next)
       setAgent(data.agent ?? null)
       // The list is on screen now; the pictures, the links and the cards
@@ -1522,6 +1746,22 @@ export default function QueueAdmin({
     wantedRef.current = hashId()
     void load().then(() => load({ sync: true }))
   }, [load])
+
+  // Last month's visitors per page: a figure that changes once a month, so
+  // one read per visit. Without it the Urgent list stays in date order.
+  useEffect(() => {
+    void fetch(VISITORS_API, { cache: 'no-store' })
+      .then(res => (res.ok ? res.json() : null))
+      .then((data: { month?: string | null; pages?: unknown } | null) => {
+        if (!data?.month || !data.pages || typeof data.pages !== 'object')
+          return
+        setPageVisitors({
+          month: data.month,
+          pages: data.pages as Record<string, number>,
+        })
+      })
+      .catch(e => console.warn('[queue] page visitors unavailable', e))
+  }, [])
 
   // The list keeps itself current: again the moment the tab or window
   // comes back into view (Bryce, 17 Sept 2026: he deletes suggestions in
@@ -1554,6 +1794,21 @@ export default function QueueAdmin({
     const hit = items.find(i => i.id === id)
     if (!hit) {
       wantedRef.current = null
+      // An older decision is not in the list: read that one row, and open
+      // it among the decisions.
+      void fetch(`${API}?id=${encodeURIComponent(id)}`, { cache: 'no-store' })
+        .then(res => (res.ok ? res.json() : null))
+        .then((data: { item?: QueueItem } | null) => {
+          if (!data?.item) return
+          keptRef.current.add(id)
+          wantedRef.current = id
+          setItems(prev =>
+            prev && !prev.some(i => i.id === id)
+              ? [...prev, data.item as QueueItem]
+              : prev
+          )
+        })
+        .catch(() => {})
       return
     }
     setSelectedId(id)
@@ -1684,24 +1939,35 @@ export default function QueueAdmin({
     return marks
   }, [chatOn, chatRows, chatSeen, openId])
 
-  // The items in the "Fable replying" section, newest arrival first. One joins when
-  // Fable is answering it or has answered unread while it is not the open
-  // one (so a row never moves from under the item being chatted on), and
-  // stays while it is open (so clicking it there does not send it back
-  // down); it goes back to its place once it is left with nothing unread.
+  // The items in the "Fable chats" section, newest arrival first: every
+  // open item Bryce has chatted with Fable on, until it is decided. Reading
+  // the reply no longer sends it back to its place (13 Oct 2026: "a listing
+  // shouldn't leave Fable Replying when I read the message"; the section
+  // was renamed from "Fable replying" the same day to match). One joins
+  // once Fable is answering it or has answered and it is not the open one,
+  // so a row never moves from under the item being chatted on. The section
+  // shows only on the item's own tab (Additions, Changes or Rules), like
+  // every other section.
   const [fableTop, setFableTop] = useState<string[]>([])
   useEffect(() => {
+    const rows = chatOn ? chatRows : {}
+    // Oldest reply first, so the newest ends up on top (a fresh load fills
+    // the section in one go); a reply still being written counts as newest.
+    const older = (a: string, b: string) =>
+      Number(!!rows[a].answering) - Number(!!rows[b].answering) ||
+      ((rows[a].last ?? '') < (rows[b].last ?? '') ? -1 : 1)
     setFableTop(prev => {
-      const next = prev.filter(id => id === openId || fableMarks[id])
-      for (const id of Object.keys(fableMarks)) {
-        if (id !== openId && !next.includes(id)) next.unshift(id)
-      }
+      const next = prev.filter(id => rows[id])
+      const joining = Object.keys(rows)
+        .filter(id => id !== openId && !next.includes(id))
+        .sort(older)
+      for (const id of joining) next.unshift(id)
       return next.length === prev.length &&
         next.every((id, i) => id === prev[i])
         ? prev
         : next
     })
-  }, [fableMarks, openId])
+  }, [chatOn, chatRows, openId])
 
   /** The strongest mark among `list`, for a folded heading's dot. */
   const markAmong = (list: QueueItem[]): FableMark | null => {
@@ -1724,26 +1990,63 @@ export default function QueueAdmin({
   // changes, so each key typed just runs the words over it.
   const searchDocs = useMemo(() => {
     const docs = new Map<string, SearchDoc>()
-    for (const item of items ?? []) {
-      const { name, heading } = splitTitle(item)
-      docs.set(
-        item.id,
-        searchDoc(
-          itemParts(item, {
-            title: name ?? item.title,
-            heading,
-            page: pageLabel(item),
-            source:
-              item.source === 'Comb' && item.sourceExcerpt
-                ? foundLabel(item.sourceExcerpt)
-                : item.sourceExcerpt,
-          }),
-          [item.id, item.targetRecord ?? '']
-        )
-      )
-    }
+    for (const item of items ?? []) docs.set(item.id, searchDocOf(item))
     return docs
   }, [items])
+  const earlierDocs = useMemo(() => {
+    const docs = new Map<string, SearchDoc>()
+    for (const item of earlier ?? []) docs.set(item.id, searchDocOf(item))
+    return docs
+  }, [earlier])
+
+  // The decisions before today, read the first time a search is typed. A
+  // read that failed is tried again with the next search.
+  useEffect(() => {
+    if (!searching) {
+      if (earlierState === 'failed') setEarlierState('idle')
+      return
+    }
+    if (earlier || earlierState !== 'idle') return
+    setEarlierState('loading')
+    fetch(`${API}?decided=1`, { cache: 'no-store' })
+      .then(async res => {
+        const data = (await res.json()) as {
+          items?: QueueItem[]
+          error?: string
+        }
+        if (!res.ok || !data.items) {
+          throw new Error(data.error ?? `HTTP ${res.status}`)
+        }
+        setEarlier(data.items)
+        setEarlierState('idle')
+      })
+      .catch(e => {
+        console.warn('[queue] earlier decisions not read', e)
+        setEarlierState('failed')
+      })
+  }, [searching, earlier, earlierState])
+
+  // How many people saw an item's page last month, for the Urgent order;
+  // a page with none recorded counts as the quietest one. Null while the
+  // figures are unknown, which keeps the date-only order.
+  const visitorsOf = useMemo(() => {
+    if (!pageVisitors) return () => null
+    const { pages } = pageVisitors
+    const quietest = Math.min(...Object.values(pages))
+    return (item: QueueItem): number | null =>
+      (item.page ? pages[item.page] : undefined) ?? quietest
+  }, [pageVisitors])
+
+  // The Urgent row's tooltip: the figure behind its place in the list.
+  const visitorsNote = (item: QueueItem): string | undefined => {
+    const n = item.page ? pageVisitors?.pages[item.page] : undefined
+    if (!pageVisitors || n === undefined) return undefined
+    const month = new Date(`${pageVisitors.month}-01T00:00:00Z`).toLocaleString(
+      'en-US',
+      { month: 'long', timeZone: 'UTC' }
+    )
+    return `${item.page}: ${n.toLocaleString('en-US')} visitors in ${month}`
+  }
 
   const ordered = useMemo(() => {
     const groups: Record<Section, QueueItem[]> = {
@@ -1766,6 +2069,18 @@ export default function QueueAdmin({
       changes: 0,
       rules: 0,
     }
+    // Each tab's waiting and done-today counts for the progress bar, which
+    // shows the open tab only and ignores the search.
+    const openPerKind: Record<Kind, number> = {
+      additions: 0,
+      changes: 0,
+      rules: 0,
+    }
+    const donePerKind: Record<Kind, number> = {
+      additions: 0,
+      changes: 0,
+      rules: 0,
+    }
     const urgencies = new Map<string, Urgency>()
     const today = isoDate(dayStart)
     let open = 0
@@ -1776,15 +2091,16 @@ export default function QueueAdmin({
       const hit = search && doc ? matchDoc(doc, search) : null
       if (hit) hits.set(item.id, hit)
       if (!isOpen(item)) {
+        const decidedToday = decidedSince(item, dayStart)
+        if (decidedToday) donePerKind[kindOf(item)]++
         // Today's decisions, plus one linked from the address bar however
         // old: that link promised to show it.
-        if (decidedSince(item, dayStart) || item.id === selectedId) {
-          done.push(item)
-        }
+        if (decidedToday || item.id === selectedId) done.push(item)
         continue
       }
       open++
       const k = kindOf(item)
+      openPerKind[k]++
       if (search) {
         // Every kind at once; the segments count the matches of each.
         if (!hit) continue
@@ -1793,19 +2109,21 @@ export default function QueueAdmin({
         continue
       }
       perKind[k]++
-      const urgency = urgencyOf(
-        item,
-        item.targetRecord ? listingDates[item.targetRecord] : undefined,
-        today
-      )
+      // Their reply to a decline brought it back: it can't wait either.
+      const urgency = item.pushback
+        ? REPLIED
+        : urgencyOf(
+            item,
+            item.targetRecord ? listingDates[item.targetRecord] : undefined,
+            today
+          )
       if (urgency) {
         urgencies.set(item.id, urgency)
         urgentPerKind[k]++
       }
+      if (k !== kind) continue
       if (fableTop.includes(item.id)) groups.fable.push(item)
-      else if (k === kind) {
-        groups[urgency ? 'urgent' : sectionOf(item)].push(item)
-      }
+      else groups[urgency ? 'urgent' : sectionOf(item)].push(item)
     }
     const oldest = (a: QueueItem, b: QueueItem) =>
       a.createdAt < b.createdAt ? -1 : 1
@@ -1814,8 +2132,13 @@ export default function QueueAdmin({
     const urgentAt = (i: QueueItem) => ({
       urgency: urgencies.get(i.id) ?? { days: null, label: '' },
       createdAt: i.createdAt,
+      visitors: visitorsOf(i),
     })
-    groups.urgent.sort((a, b) => byUrgency(urgentAt(a), urgentAt(b)))
+    groups.urgent.sort(
+      (a, b) =>
+        Number(Boolean(b.pushback)) - Number(Boolean(a.pushback)) ||
+        byUrgency(urgentAt(a), urgentAt(b))
+    )
     groups.fable.sort((a, b) => fableTop.indexOf(a.id) - fableTop.indexOf(b.id))
     groups.requests.sort(oldest)
     groups.broom.sort(byVerdict)
@@ -1851,10 +2174,37 @@ export default function QueueAdmin({
     // order the sections would give them, then today's decisions that
     // match, newest first. Folded groups hide nothing. The decisions are
     // not in `walk`: Tab and auto-advance only go through open items.
-    const found: Record<'name' | 'other' | 'done', QueueItem[]> = {
+    const found: Record<SearchGroup, QueueItem[]> = {
       name: [],
       other: [],
-      done: doneHits,
+      // One opened from Earlier sits in the done list, not in this group.
+      done: doneHits.filter(i => decidedSince(i, dayStart)),
+      earlier: [],
+    }
+    // Every decision before today that matches, newest first: the ones the
+    // page holds (the last day's, and older ones opened here), then the
+    // rest of the decisions read for the search.
+    let earlierCount = 0
+    if (search) {
+      const held = new Set((items ?? []).map(i => i.id))
+      const older: QueueItem[] = []
+      for (const item of items ?? []) {
+        if (isOpen(item) || decidedSince(item, dayStart)) continue
+        if (hits.has(item.id)) older.push(item)
+      }
+      for (const item of earlier ?? []) {
+        if (held.has(item.id)) continue
+        const doc = earlierDocs.get(item.id)
+        const hit = doc ? matchDoc(doc, search) : null
+        if (!hit) continue
+        hits.set(item.id, hit)
+        older.push(item)
+      }
+      older.sort((a, b) =>
+        (decidedAtOf(a) ?? '') < (decidedAtOf(b) ?? '') ? 1 : -1
+      )
+      earlierCount = older.length
+      found.earlier = older.slice(0, EARLIER_MAX)
     }
     if (search) {
       for (const s of SECTIONS) {
@@ -1891,11 +2241,14 @@ export default function QueueAdmin({
       doneHits,
       hits,
       found,
+      earlierCount,
       flat,
       walk,
       foldOf,
       open,
       perKind,
+      openPerKind,
+      donePerKind,
       urgentPerKind,
       urgencies,
     }
@@ -1908,14 +2261,18 @@ export default function QueueAdmin({
     selectedId,
     search,
     searchDocs,
+    earlier,
+    earlierDocs,
     listingDates,
     fableTop,
+    visitorsOf,
   ])
 
   const selected = useMemo(() => {
     if (!items) return null
     return items.find(i => i.id === selectedId) ?? null
   }, [items, selectedId])
+  selectedIdRef.current = selectedId
 
   // Midnight can empty the done list while it is open; back to the queue.
   useEffect(() => {
@@ -2069,9 +2426,17 @@ export default function QueueAdmin({
       why: 'edit' | 'undo' | 'redo' = 'edit'
     ) => {
       const was = draftsRef.current[id] ?? draftOfRow(itemsRef.current, id)
+      // Undo and redo put back a draft exactly as it was.
+      const next = (base: Draft): Draft =>
+        why === 'edit'
+          ? settle(base, { ...base, ...patch })
+          : { ...base, ...patch }
+      const merged = next(was)
+      const leftOutMoved = !sameList(merged.leftOut, was.leftOut)
       const changed =
         (patch.edits !== undefined && !sameEdits(patch.edits, was.edits)) ||
-        (patch.reply !== undefined && patch.reply !== was.reply)
+        (patch.reply !== undefined && patch.reply !== was.reply) ||
+        leftOutMoved
       if (why !== 'undo' && changed) {
         historyRef.current.push({ id, before: was, at: Date.now() })
         if (historyRef.current.length > 50) historyRef.current.shift()
@@ -2085,10 +2450,9 @@ export default function QueueAdmin({
       // when he set its Deadline after a reload).
       setDrafts(prev => ({
         ...prev,
-        [id]: { ...(prev[id] ?? draftOfRow(itemsRef.current, id)), ...patch },
+        [id]: next(prev[id] ?? draftOfRow(itemsRef.current, id)),
       }))
-      if (!patch.edits && patch.reply === undefined) return
-      const merged = { ...was, ...patch }
+      if (!patch.edits && patch.reply === undefined && !leftOutMoved) return
       const row = itemsRef.current?.find(i => i.id === id)
       if (patch.edits) {
         const touched = (touchedKeys.current[id] ??= new Set())
@@ -2099,10 +2463,15 @@ export default function QueueAdmin({
           if (was.edits[k] !== patch.edits[k]) touched.add(k)
         }
       }
+      // The fields left out go on the row with the edits, under their own
+      // key, which the save moves like any field the page touched.
+      if (leftOutMoved) {
+        ;(touchedKeys.current[id] ??= new Set()).add(LEFT_OUT_KEY)
+      }
       const body: Record<string, unknown> = {
         id,
         action: 'edit',
-        edits: merged.edits,
+        edits: withLeftOut(merged.edits, merged.leftOut),
         keys: [...(touchedKeys.current[id] ?? [])],
       }
       if (patch.reply !== undefined && row?.replyDraft !== null) {
@@ -2188,15 +2557,58 @@ export default function QueueAdmin({
     [ordered.foldOf, foldedPages, foldPage, select]
   )
 
+  // After a jump to a finished Fable reply: the reply jumped to (`at`) and
+  // the item list order would have given instead (`next`), where the walk
+  // picks up again once the replies are read.
+  const resumeRef = useRef<{ at: string; next: string | null } | null>(null)
+
+  /** Where moving on from `fromId` goes (Tab, the down arrow and
+   *  auto-advance). A listing Fable has finished replying on, not read
+   *  yet, comes first, the one waiting longest of them (Bryce, 13 Oct
+   *  2026: "when fable has finished replying, when I go to the next
+   *  listing it should move to the one that has finished replying"); with
+   *  none left, the walk carries on from where it was. `inOrder` is the
+   *  item list order gives; `free` passes over items that can't be gone
+   *  to. A reply Fable is still writing waits its turn. */
+  const fableFirst = useCallback(
+    (
+      fromId: string | null,
+      inOrder: QueueItem | undefined,
+      free: (x: QueueItem) => boolean
+    ) => {
+      const ok = (x: QueueItem) => x.id !== fromId && free(x)
+      const finished = (x: QueueItem) => chatRows[x.id]?.last ?? ''
+      const ready = ordered.walk
+        .filter(x => fableMarks[x.id] === 'new' && ok(x))
+        .sort((a, b) => (finished(a) < finished(b) ? -1 : 1))[0]
+      const resume =
+        resumeRef.current && resumeRef.current.at === fromId
+          ? resumeRef.current
+          : null
+      if (ready) {
+        resumeRef.current = {
+          at: ready.id,
+          next: resume ? resume.next : (inOrder?.id ?? null),
+        }
+        return ready
+      }
+      resumeRef.current = null
+      const back = resume && ordered.walk.find(x => x.id === resume.next)
+      return back && ok(back) ? back : inOrder
+    },
+    [ordered.walk, fableMarks, chatRows]
+  )
+
   const move = useCallback(
     (delta: number) => {
       const walk = ordered.walk
       if (walk.length === 0) return
       const i = walk.findIndex(x => x.id === selectedId)
-      const next = walk[Math.min(walk.length - 1, Math.max(0, i + delta))]
+      const step = walk[Math.min(walk.length - 1, Math.max(0, i + delta))]
+      const next = delta > 0 ? fableFirst(selectedId, step, () => true) : step
       if (next) reveal(next)
     },
-    [ordered.walk, selectedId, reveal]
+    [ordered.walk, selectedId, reveal, fableFirst]
   )
 
   /** Leave the search. The item in focus stays in focus, shown among its
@@ -2215,15 +2627,31 @@ export default function QueueAdmin({
   // reachable the worker does it within five minutes.
   const saveReply = useCallback(
     async (item: QueueItem) => {
-      const res = agent
+      const res: AgentResult = agent
         ? await callAgent(agent, '/act', { id: item.id, action: 'gmail_draft' })
-        : { ok: false, offline: true, replyStatus: null, detail: '' }
+        : {
+            ok: false,
+            offline: true,
+            replyStatus: null,
+            detail: '',
+            chat: false,
+          }
       if (agent) setAgentOnline(!res.offline)
       const sub = res.ok
         ? res.detail || 'Draft saved in Gmail'
         : res.offline
           ? OFFLINE_SUB
           : `Reply draft failed: ${res.detail}`
+      const already = res.alreadyReplied
+      if (already) {
+        setItems(prev =>
+          prev
+            ? prev.map(i =>
+                i.id === item.id ? { ...i, alreadyReplied: already } : i
+              )
+            : prev
+        )
+      }
       if (res.replyStatus) {
         const status = res.replyStatus
         setItems(prev =>
@@ -2276,21 +2704,30 @@ export default function QueueAdmin({
         : res.offline
           ? `Mac agent not reachable · the Mac writes the reply within five minutes`
           : `${discord ? 'Reply' : 'Reply draft'} failed: ${res.detail}`
-      const reply: RejectReply | null = res.offline
-        ? null
-        : res.ok
-          ? {
-              text: res.rejectText ?? null,
-              state: discord ? 'ready' : 'saved',
-              error: null,
-            }
-          : { text: null, state: 'failed', error: res.detail }
-      if (reply) {
+      const already = res.alreadyReplied ?? null
+      const reply: RejectReply | null =
+        res.offline || already
+          ? null
+          : res.ok
+            ? {
+                text: res.rejectText ?? null,
+                state: discord ? 'ready' : 'saved',
+                error: null,
+              }
+            : { text: null, state: 'failed', error: res.detail }
+      // What the row learns: the reply as it went, or (no draft) the day he
+      // had already replied by hand.
+      const patch: Partial<QueueItem> | null = reply
+        ? { rejectReply: reply }
+        : already
+          ? { alreadyReplied: already }
+          : null
+      if (patch) {
         setItems(prev =>
           prev
             ? prev.map(i =>
                 i.id === item.id && i.status === 'Rejected'
-                  ? { ...i, rejectReply: reply }
+                  ? { ...i, ...patch }
                   : i
               )
             : prev
@@ -2302,12 +2739,213 @@ export default function QueueAdmin({
           ? {
               ...prev,
               sub,
-              item: reply ? { ...prev.item, rejectReply: reply } : prev.item,
+              item: patch ? { ...prev.item, ...patch } : prev.item,
             }
           : prev
       )
     },
     [agent]
+  )
+
+  // "Update flag" from the chat (queue-flag.ts): the new verdict, reasons
+  // and reject buttons go onto the row, and the item on the page becomes
+  // the row as written. The page's edits and reply draft stay as they are.
+  const updateFlag = useCallback(
+    async (
+      item: QueueItem,
+      body: { flag: FlagUpdate } | { undo: true }
+    ): Promise<string | null> => {
+      if (!canEdit) return 'View only: the flag stays as it is.'
+      try {
+        const res = await fetch(API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: item.id, action: 'flag', ...body }),
+        })
+        const data = (await res.json()) as { item?: QueueItem; error?: string }
+        if (!res.ok || !data.item) return data.error ?? `HTTP ${res.status}`
+        // A read of the list that began before this landed is stale now.
+        loadSeq.current++
+        const updated = { ...data.item, logo: data.item.logo ?? item.logo }
+        // A new list of field changes makes the card built before it stale.
+        forgetCard(updated)
+        setItems(prev =>
+          prev ? prev.map(i => (i.id === updated.id ? updated : i)) : prev
+        )
+        return null
+      } catch {
+        return 'No answer from the site; the flag is as it was.'
+      }
+    },
+    [canEdit]
+  )
+
+  /** A field fixed on an addition already published, from Done today: it
+   *  goes straight onto the live listing (fixItem). Resolves to an error to
+   *  show, or null. */
+  const fixFields = useCallback(
+    async (
+      item: QueueItem,
+      edits: Record<string, unknown>
+    ): Promise<string | null> => {
+      if (!canEdit) return 'View only: the listing stays as it is.'
+      try {
+        const res = await fetch(API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: item.id, action: 'fix', edits }),
+        })
+        const data = (await res.json()) as { item?: QueueItem; error?: string }
+        if (!res.ok || !data.item) return data.error ?? `HTTP ${res.status}`
+        loadSeq.current++
+        const updated = { ...data.item, logo: data.item.logo ?? item.logo }
+        for (const [k, v] of Object.entries(edits)) setLiveField(item.id, k, v)
+        forgetCard(updated)
+        setItems(prev =>
+          prev ? prev.map(i => (i.id === updated.id ? updated : i)) : prev
+        )
+        return null
+      } catch {
+        return 'No answer from the site; the listing is as it was.'
+      }
+    },
+    [canEdit, setLiveField]
+  )
+
+  /** After Reopen marked the row: the Mac's agent brings it back now (the
+   *  worker within five minutes when the agent is not there or is an older
+   *  one), and the page reads the row until it is open again or the Mac
+   *  says why it could not (queue-reopen.ts). */
+  const followReopen = useCallback(
+    async (item: QueueItem) => {
+      const res: AgentResult | null = agent
+        ? await callAgent(
+            agent,
+            '/act',
+            { id: item.id, action: 'reopen' },
+            REOPEN_TIMEOUT_MS
+          )
+        : null
+      // The agent did it (or tried): one read settles it. Otherwise the
+      // worker's next pass does, so the page looks again for a while.
+      const direct = Boolean(
+        res && !res.offline && res.detail !== 'unknown action'
+      )
+      if (!direct) {
+        setToast(prev =>
+          prev?.item.id === item.id && prev.reopen
+            ? { ...prev, sub: 'The Mac brings it back within five minutes' }
+            : prev
+        )
+      }
+      const until = Date.now() + (direct ? 20000 : REOPEN_POLL_FOR_MS)
+      let now: QueueItem | null = null
+      for (;;) {
+        try {
+          const r = await fetch(`${API}?id=${encodeURIComponent(item.id)}`, {
+            cache: 'no-store',
+          })
+          const data = (await r.json()) as { item?: QueueItem }
+          if (r.ok && data.item) now = data.item
+        } catch {
+          // asked again below
+        }
+        if (now && (!now.reopening || now.reopening.error)) break
+        if (Date.now() > until) break
+        await new Promise(done =>
+          setTimeout(done, direct ? 2000 : REOPEN_POLL_MS)
+        )
+      }
+      if (!now) return
+      const back = { ...now, logo: now.logo ?? null }
+      loadSeq.current++
+      forgetLive(back.id)
+      forgetCard(back)
+      setItems(prev =>
+        prev ? prev.map(i => (i.id === back.id ? back : i)) : prev
+      )
+      if (isOpen(back)) {
+        // A listing now in the list like any other: the next refresh has
+        // it, and its picture comes the usual way.
+        keptRef.current.delete(back.id)
+        askedTargets.delete(back.targetRecord ?? '')
+        void loadTargets([back]).then(found =>
+          setItems(prev => (prev ? prev.map(i => withTarget(i, found)) : prev))
+        )
+        // Still on it: it opens as the open item it is now. Moved on: it
+        // waits in the list, and the toast says so.
+        if (selectedIdRef.current === back.id) {
+          setKind(kindOf(back))
+          select(back.id)
+        }
+        const logo = back.reopened?.logo
+        setToast(prev =>
+          prev?.item.id === item.id && prev.reopen
+            ? {
+                item: back,
+                no: false,
+                reopen: true,
+                state: 'done',
+                text: 'Back in the queue',
+                sub:
+                  [
+                    back.reopened?.rebuilt
+                      ? 'Rebuilt from the saved copy, unpublished'
+                      : null,
+                    logo === 'wanted' ? 'Fable is finding its logo' : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ') || undefined,
+              }
+            : prev
+        )
+      } else if (back.reopening?.error) {
+        setToast(prev =>
+          prev?.item.id === item.id && prev.reopen
+            ? {
+                item: back,
+                no: false,
+                reopen: true,
+                state: 'failed',
+                text: `Could not bring it back · ${back.reopening?.error}`,
+                sub: 'The decision still stands',
+                retry: { action: 'reopen', extra: {} },
+              }
+            : prev
+        )
+      } else {
+        setToast(prev =>
+          prev?.item.id === item.id && prev.reopen
+            ? {
+                item: back,
+                no: false,
+                reopen: true,
+                state: 'done',
+                text: back.reopening
+                  ? 'Still on its way back'
+                  : (back.error ?? 'Not reopened'),
+                sub: back.reopening
+                  ? 'The Mac finishes it on its next pass'
+                  : undefined,
+              }
+            : prev
+        )
+      }
+    },
+    [agent, forgetLive, select]
+  )
+
+  /** Open a decision from the search's Earlier group: into the list the
+   *  page holds, and opened as one of today's would be. */
+  const openEarlier = useCallback(
+    (item: QueueItem) => {
+      keptRef.current.add(item.id)
+      setItems(prev =>
+        prev && !prev.some(i => i.id === item.id) ? [...prev, item] : prev
+      )
+      showDecided(item.id)
+    },
+    [showDecided]
   )
 
   const act = useCallback(
@@ -2325,6 +2963,16 @@ export default function QueueAdmin({
         action === 'accept' && reply !== null ? { replyDraft: reply } : {}
       const decision =
         action === 'accept' || action === 'reject' || action === 'later'
+      // A Discord reply goes on the clipboard with the decision, as the page
+      // shows it, ready to paste (Bryce, 15 Oct 2026). Copied here, inside
+      // the click or key press, because the browser allows it only then.
+      const copyText = replyToCopy({
+        source: item.source,
+        action,
+        alreadyReplied: Boolean(item.alreadyReplied),
+        shownReply: reply ?? item.replyDraft,
+        rejectReply: extra.rejectReply,
+      })
       if (decision) {
         // The page moves on now; the write lands behind it. The previous
         // decision stops being U's target (the Done list still has it).
@@ -2333,23 +2981,66 @@ export default function QueueAdmin({
         setUndoable(null)
         pendingRef.current = { ...pendingRef.current, [item.id]: action }
         setPending(pendingRef.current)
+        // The last item on the open tab: fireworks (Bryce, 13 Oct 2026).
+        const k = kindOf(item)
+        if (
+          k === kind &&
+          !searching &&
+          !(itemsRef.current ?? []).some(
+            x => isOpen(x) && kindOf(x) === k && !pendingRef.current[x.id]
+          )
+        ) {
+          setCheer({ kind: k, id: item.id, at: Date.now() })
+        }
         setToast({
           item,
           no: action === 'reject',
           later: action === 'later',
           state: 'working',
-          text: workingLabel(item, action),
+          text: workingLabel(item, action, drafts[item.id]),
         })
+        if (copyText) {
+          navigator.clipboard.writeText(copyText).then(
+            () =>
+              setToast(prev =>
+                prev &&
+                prev.item.id === item.id &&
+                prev.state !== 'undoing' &&
+                !undoAfterRef.current.has(item.id)
+                  ? { ...prev, copied: copyText }
+                  : prev
+              ),
+            // Not copied (the page lost focus first): the toast keeps its
+            // Copy reply button, so nothing is lost.
+            () => {}
+          )
+        }
         // Auto-advance to the next open item that is not itself on its way,
-        // opening its page if that is folded.
+        // opening its page if that is folded; a finished Fable reply first.
         const walk = ordered.walk
         const i = walk.findIndex(x => x.id === item.id)
         const free = (x: QueueItem) =>
           x.id !== item.id && !pendingRef.current[x.id]
-        const next =
+        const next = fableFirst(
+          item.id,
           walk.slice(i + 1).find(free) ??
-          walk.slice(0, Math.max(0, i)).reverse().find(free)
+            walk.slice(0, Math.max(0, i)).reverse().find(free),
+          free
+        )
         if (next) reveal(next)
+      } else if (action === 'undo') {
+        // The write takes a second or two: the toast says so straight away,
+        // even after it has gone (U keeps working for five minutes), so the
+        // key never seems to do nothing (Bryce, 12 Oct 2026).
+        setToast({ item, no: false, state: 'undoing', text: 'Undoing…' })
+      } else if (action === 'reopen') {
+        setToast({
+          item,
+          no: false,
+          reopen: true,
+          state: 'working',
+          text: 'Bringing it back…',
+        })
       }
       const forget = () => {
         const rest = { ...pendingRef.current }
@@ -2357,6 +3048,7 @@ export default function QueueAdmin({
         pendingRef.current = rest
         setPending(rest)
       }
+      let status = 0
       try {
         const res = await fetch(API, {
           method: 'POST',
@@ -2368,6 +3060,7 @@ export default function QueueAdmin({
             ...extra,
           }),
         })
+        status = res.status
         const data = (await res.json()) as { item?: QueueItem; error?: string }
         if (!res.ok || !data.item) {
           throw new Error(data.error ?? `HTTP ${res.status}`)
@@ -2406,7 +3099,9 @@ export default function QueueAdmin({
                 : 'Rejected'
               : doneLabel(updated)
           if (undoAfterRef.current.delete(item.id)) {
-            // U was pressed while it was on its way: straight back.
+            // U was pressed while it was on its way: straight back, and
+            // the tab is not done after all.
+            setCheer(c => (c?.id === item.id ? null : c))
             setToast(prev =>
               prev && prev.item.id === item.id
                 ? {
@@ -2432,6 +3127,7 @@ export default function QueueAdmin({
                   later: action === 'later',
                   state: 'done',
                   text,
+                  copied: prev.copied,
                   sub:
                     action === 'later'
                       ? laterNote(updated)
@@ -2449,45 +3145,79 @@ export default function QueueAdmin({
                                 ? 'Saving the reply draft in Gmail…'
                                 : 'Fable is writing the reply for Gmail…'
                             : 'Reply: the Mac saves it within five minutes'
-                          : updated.source === 'Discord' && updated.replyDraft
-                            ? 'Reply drafted · copy it and send it yourself on Discord'
-                            : undefined,
+                          : updated.alreadyReplied
+                            ? `You already replied to them on ${updated.alreadyReplied.date} · no draft saved`
+                            : updated.source === 'Discord' && updated.replyDraft
+                              ? 'Reply drafted · copy it and send it yourself on Discord'
+                              : undefined,
                 }
               : prev
           )
           if (draftPending) void saveReply(updated)
           if (rejectReplyPending) void saveRejectReply(updated)
         } else if (action === 'undo') {
-          // A rejection's reply already in Gmail stays there: say so.
-          setToast(
-            item.status === 'Rejected' && item.rejectReply?.state === 'saved'
-              ? {
-                  item: updated,
-                  no: false,
-                  state: 'done',
-                  text: 'Back in the queue',
-                  sub: 'The rejection reply is still in Gmail as a draft – delete it there',
-                }
-              : null
+          // A rejection's reply already in Gmail stays there: say so. A
+          // decision made while the undo was on its way keeps the toast.
+          setToast(prev =>
+            prev && prev.item.id !== item.id
+              ? prev
+              : item.status === 'Rejected' &&
+                  item.rejectReply?.state === 'saved'
+                ? {
+                    item: updated,
+                    no: false,
+                    state: 'done',
+                    text: 'Back in the queue',
+                    sub: 'The rejection reply is still in Gmail as a draft – delete it there',
+                  }
+                : null
           )
           setUndoable(null)
           select(updated.id)
+        } else if (action === 'reopen') {
+          void followReopen(updated)
         }
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e)
-        setDraft(item.id, { busy: false, error: message })
+        // 409: the item was decided or closed somewhere else (the Mac
+        // worker, another tab). Retrying can never work, so the list is
+        // read again first and the item moves to Done, with its own note
+        // on why.
+        const closed = decision && status === 409
+        setDraft(item.id, { busy: false, error: closed ? null : message })
+        if (closed) await load()
         if (decision) {
           forget()
           undoAfterRef.current.delete(item.id)
+          setCheer(c => (c?.id === item.id ? null : c))
           // A failure takes the toast whatever it shows, and keeps it up
           // until Retry, Dismiss or the next decision. The item is still in
-          // the list, with the error on it.
+          // the list, with the error on it, unless it was closed.
           setToast({
             item,
             no: action === 'reject',
             state: 'failed',
-            text: `${action === 'reject' ? 'Reject' : action === 'later' ? 'Review again in a week' : acceptLabel(item)} failed · ${message}`,
-            sub: 'Still in the list',
+            text: `${action === 'reject' ? 'Reject' : action === 'later' ? 'Review again in a week' : acceptLabel(item)} failed · ${closed ? message.replace(/\s*Reload the page\.$/, '') : message}`,
+            sub: closed ? 'Moved to Done today' : 'Still in the list',
+            retry: closed ? undefined : { action, extra },
+          })
+        } else if (action === 'undo') {
+          setToast({
+            item,
+            no: false,
+            state: 'failed',
+            text: `Undo failed · ${message}`,
+            sub: 'The decision still stands',
+            retry: { action, extra },
+          })
+        } else if (action === 'reopen') {
+          setToast({
+            item,
+            no: false,
+            reopen: true,
+            state: 'failed',
+            text: `Reopen failed · ${message}`,
+            sub: 'The decision still stands',
             retry: { action, extra },
           })
         }
@@ -2496,6 +3226,7 @@ export default function QueueAdmin({
     [
       ordered.walk,
       reveal,
+      fableFirst,
       select,
       setDraft,
       drafts,
@@ -2504,6 +3235,10 @@ export default function QueueAdmin({
       saveRejectReply,
       canEdit,
       forgetLive,
+      load,
+      kind,
+      searching,
+      followReopen,
     ]
   )
   actRef.current = act
@@ -2513,14 +3248,15 @@ export default function QueueAdmin({
     undoAfterRef.current.add(id)
     setToast(prev =>
       prev && prev.item.id === id
-        ? { ...prev, sub: 'Undoing as soon as it lands…' }
+        ? { ...prev, copied: undefined, sub: 'Undoing as soon as it lands…' }
         : prev
     )
   }, [])
 
   useEffect(() => {
-    // A decision on its way, or one that failed, stays up until dealt with.
-    if (!toast || toast.state !== 'done') return
+    // A decision on its way, or one that failed, stays up until dealt with;
+    // so does one whose Discord reply is still to be pasted.
+    if (!toast || toast.state !== 'done' || toastReply(toast)) return
     const leave = setTimeout(
       () => setToastLeaving(true),
       TOAST_MS - TOAST_OUT_MS
@@ -2571,7 +3307,12 @@ export default function QueueAdmin({
         if (top) {
           setDraft(
             top.id,
-            { edits: top.after.edits, reply: top.after.reply, editing: null },
+            {
+              edits: top.after.edits,
+              leftOut: top.after.leftOut,
+              reply: top.after.reply,
+              editing: null,
+            },
             'redo'
           )
           select(top.id)
@@ -2602,13 +3343,18 @@ export default function QueueAdmin({
           redoRef.current.push({ id: top.id, after: draft(top.id) })
           setDraft(
             top.id,
-            { edits: top.before.edits, reply: top.before.reply, editing: null },
+            {
+              edits: top.before.edits,
+              leftOut: top.before.leftOut,
+              reply: top.before.reply,
+              editing: null,
+            },
             'undo'
           )
           select(top.id)
         } else if (decision) {
           void act(decision, 'undo')
-        } else if (toast?.state === 'working') {
+        } else if (toast?.state === 'working' && !toast.reopen) {
           queueUndo(toast.item.id)
         }
         return
@@ -2650,17 +3396,20 @@ export default function QueueAdmin({
             e.preventDefault()
             void act(item, 'accept', {
               keep: fableFieldsRef.current[item.id] ?? [],
-              edits: coerceEdits(
-                d.edits,
-                item.type === 'Change'
-                  ? {
-                      ...live[item.id]?.fields,
-                      ...Object.fromEntries(
-                        item.changes.map(c => [c.field, c.to])
-                      ),
-                    }
-                  : (live[item.id]?.fields ?? item.fields ?? {}),
-                new Map((live[item.id]?.schema ?? []).map(f => [f.name, f]))
+              edits: withLeftOut(
+                coerceEdits(
+                  activeEdits(d),
+                  item.type === 'Change'
+                    ? {
+                        ...live[item.id]?.fields,
+                        ...Object.fromEntries(
+                          item.changes.map(c => [c.field, c.to])
+                        ),
+                      }
+                    : (live[item.id]?.fields ?? item.fields ?? {}),
+                  new Map((live[item.id]?.schema ?? []).map(f => [f.name, f]))
+                ),
+                d.leftOut
               ),
             })
           } else if (
@@ -2715,7 +3464,11 @@ export default function QueueAdmin({
           break
         case 'p':
           // Where the addition goes on its page (Bryce, 30 Sept 2026).
-          if (canEdit && item?.type === 'Add' && isOpen(item)) {
+          if (
+            canEdit &&
+            item?.type === 'Add' &&
+            (isOpen(item) || setAsideUntil(item) || fixable(item))
+          ) {
             e.preventDefault()
             setPlaceFocus(n => n + 1)
           }
@@ -2725,7 +3478,7 @@ export default function QueueAdmin({
           if (
             canEdit &&
             item?.type === 'Change' &&
-            isOpen(item) &&
+            (isOpen(item) || setAsideUntil(item) || fixable(item)) &&
             item.status !== 'Revising'
           ) {
             e.preventDefault()
@@ -2758,7 +3511,7 @@ export default function QueueAdmin({
           if (undoable && !draft(undoable.id).busy) {
             e.preventDefault()
             void act(undoable, 'undo')
-          } else if (toast?.state === 'working') {
+          } else if (toast?.state === 'working' && !toast.reopen) {
             e.preventDefault()
             queueUndo(toast.item.id)
           }
@@ -2767,10 +3520,13 @@ export default function QueueAdmin({
           // The shown listing's own link, in a new tab (Bryce, 17 Sept
           // 2026: "make S open the link for the currently shown listing").
           const href = item
-            ? listingLink(item, live[item.id]?.fields, {
-                ...proposedEdits(item),
-                ...d.edits,
-              })
+            ? listingLink(
+                item,
+                live[item.id]?.fields,
+                isOpen(item)
+                  ? { ...proposedEdits(item, d.leftOut), ...activeEdits(d) }
+                  : { ...proposedEdits(item), ...appliedEdits(item) }
+              )
             : null
           if (href) {
             e.preventDefault()
@@ -2798,6 +3554,28 @@ export default function QueueAdmin({
             e.preventDefault()
             copyListingName(item)
             window.open(livePageUrl(item), '_blank', 'noopener')
+          }
+          break
+        case 'b':
+          // Bring a declined addition back, however old (Bryce, 20 Oct
+          // 2026). A left-hand key, like the rest.
+          if (
+            canEdit &&
+            item &&
+            takeBack(item) === 'reopen' &&
+            !draft(item.id).busy
+          ) {
+            e.preventDefault()
+            void act(item, 'reopen')
+          }
+          break
+        case 't':
+          // Today's decisions and back to the queue, as the "done today"
+          // link up top does (Bryce, 21 Oct 2026).
+          if (showDone || ordered.done.length > 0) {
+            e.preventDefault()
+            setShowDone(v => !v)
+            setDoneOpen(false)
           }
           break
         case '/':
@@ -2845,6 +3623,7 @@ export default function QueueAdmin({
     searching,
     clearSearch,
     airtableBase,
+    ordered.done,
   ])
 
   // Enter or the down arrow in the search box goes to the first match, so
@@ -2853,13 +3632,35 @@ export default function QueueAdmin({
     searchRef.current?.blur()
     const first = ordered.flat[0]
     if (first) select(first.id)
-    else if (ordered.doneHits[0]) showDecided(ordered.doneHits[0].id)
+    else if (ordered.found.done[0]) showDecided(ordered.found.done[0].id)
+    else if (ordered.found.earlier[0]) openEarlier(ordered.found.earlier[0])
   }
 
   const waiting = ordered.open
-  const doneToday = ordered.done.length
-  const total = waiting + doneToday
+  // An older decision opened from the search sits in the done list but
+  // was not done today.
+  const doneToday = ordered.done.filter(i => decidedSince(i, dayStart)).length
+  // The bar under the top is the open tab's day (Bryce, 13 Oct 2026: "make
+  // it for each tab instead of overall").
+  const tabDone = ordered.donePerKind[kind]
+  const tabTotal = ordered.openPerKind[kind] + tabDone
   const toastRetry = toast?.retry ?? null
+  const toastCopy = toast ? toastReply(toast) : null
+  /** The toast's item, where it is now: one decided or closed meanwhile is
+   *  under Done. Opening it as an open item put the first item in the list
+   *  in focus instead (Bryce, 12 Oct 2026). */
+  const openToastItem = (id: string) => {
+    const now = itemsRef.current?.find(i => i.id === id)
+    if (now && !isOpen(now)) showDecided(now.id)
+    else select(id)
+  }
+  // The sections the list shows: those with something waiting, and
+  // Requests on the additions and changes tabs even when it is empty.
+  const shownSections = SECTIONS.filter(
+    section =>
+      ordered.groups[section].length > 0 ||
+      (section === 'requests' && kind !== 'rules')
+  )
 
   return (
     <div ref={rootRef} className={styles.queue}>
@@ -2918,16 +3719,13 @@ export default function QueueAdmin({
                     {ordered.urgentPerKind[k.key]}
                   </span>
                 )}
-                {/* Items already in "Fable replying" at the top are not
-                    counted again here. */}
+                {/* Fable at work on another tab: its "Fable chats"
+                    items show only there, so the dot points the way. */}
                 {!searching && kind !== k.key && (
                   <FableDot
                     mark={markAmong(
                       (items ?? []).filter(
-                        i =>
-                          isOpen(i) &&
-                          kindOf(i) === k.key &&
-                          !fableTop.includes(i.id)
+                        i => isOpen(i) && kindOf(i) === k.key
                       )
                     )}
                   />
@@ -2959,11 +3757,11 @@ export default function QueueAdmin({
             <Icon src={ICON.question} />
           </button>
         </div>
-        {total > 0 && (
+        {tabTotal > 0 && (
           <div className={styles.progress} aria-hidden>
             <div
               className={styles.progressBar}
-              style={{ width: `${Math.round((doneToday / total) * 100)}%` }}
+              style={{ width: `${Math.round((tabDone / tabTotal) * 100)}%` }}
             />
           </div>
         )}
@@ -3038,7 +3836,7 @@ export default function QueueAdmin({
                   {ordered.flat.length === 0
                     ? 'No matches waiting'
                     : `${ordered.flat.length} ${ordered.flat.length === 1 ? 'match' : 'matches'} waiting`}
-                  {ordered.doneHits.length > 0 && (
+                  {ordered.found.done.length > 0 && (
                     <>
                       {' · '}
                       <button
@@ -3048,36 +3846,83 @@ export default function QueueAdmin({
                           setDoneOpen(false)
                         }}
                       >
-                        {ordered.doneHits.length} done today
+                        {ordered.found.done.length} done today
                       </button>
                     </>
                   )}
+                  {earlierState === 'loading' &&
+                    ' · looking through earlier decisions…'}
+                  {earlierState === 'failed' &&
+                    ' · earlier decisions could not be read'}
+                  {ordered.earlierCount > 0 &&
+                    ` · ${ordered.earlierCount} earlier`}
                 </div>
               )}
             </div>
             <div className={styles.list} ref={listRef}>
               {searching &&
                 ordered.flat.length === 0 &&
-                ordered.doneHits.length === 0 && (
+                ordered.doneHits.length === 0 &&
+                ordered.earlierCount === 0 && (
                   <p className={styles.searchEmpty}>
-                    Search looks through every open item, whatever its kind, and
-                    today&apos;s decisions: names, links, fields, messages and
-                    Fable&apos;s notes. Each word you type has to start a word
-                    there.
+                    {earlierState === 'loading'
+                      ? 'Nothing waiting or done today matches. Looking through the earlier decisions… '
+                      : ''}
+                    Search looks through every open item, whatever its kind,
+                    today&apos;s decisions and every one before: names, links,
+                    fields, messages and Fable&apos;s notes. Each word you type
+                    has to start a word there.
                   </p>
                 )}
               {searching &&
                 SEARCH_GROUPS.map(g => {
                   const list = ordered.found[g.key]
                   if (!list.length) return null
+                  if (g.key === 'earlier') {
+                    // Past decisions, quietly: one muted line each, a few
+                    // at first.
+                    const more = earlierMoreFor === query
+                    const shown = more ? list : list.slice(0, EARLIER_FEW)
+                    const rest = ordered.earlierCount - shown.length
+                    return (
+                      <div key={g.key} className={styles.earlierGroup}>
+                        <div className={styles.earlierHead}>
+                          Earlier decisions · {ordered.earlierCount}
+                        </div>
+                        {shown.map(item => (
+                          <EarlierRow
+                            key={item.id}
+                            item={item}
+                            active={item.id === selectedId && showDone}
+                            search={search}
+                            onClick={() => openEarlier(item)}
+                          />
+                        ))}
+                        {rest > 0 &&
+                          (more ? (
+                            <div className={styles.earlierMore}>
+                              {rest} more · add a word to narrow it
+                            </div>
+                          ) : (
+                            <button
+                              className={`${styles.linkButton} ${styles.earlierMore}`}
+                              onClick={() => setEarlierMoreFor(query)}
+                            >
+                              Show {rest} more
+                            </button>
+                          ))}
+                      </div>
+                    )
+                  }
                   const decided = g.key === 'done'
+                  const total = list.length
                   return (
                     <div key={g.key} className={styles.group}>
                       <div
                         className={`${styles.groupHead} ${styles.groupHeadStatic}`}
                       >
                         {g.label}
-                        <span className={styles.groupCount}>{list.length}</span>
+                        <span className={styles.groupCount}>{total}</span>
                       </div>
                       {list.map(item => (
                         <Row
@@ -3104,18 +3949,18 @@ export default function QueueAdmin({
                   )
                 })}
               {!searching &&
-                SECTIONS.map(section => {
+                shownSections.map(section => {
                   const list = ordered.groups[section]
-                  if (
-                    list.length === 0 &&
-                    (section !== 'requests' || kind === 'rules')
-                  )
-                    return null
                   return (
                     <div key={section} className={styles.group}>
                       <button
                         className={styles.groupHead}
-                        onClick={() => toggleGroup(section)}
+                        onClick={e =>
+                          toggleGroup(
+                            section,
+                            e.shiftKey ? shownSections : undefined
+                          )
+                        }
                         aria-expanded={!collapsed[section]}
                       >
                         <span className={styles.groupIcon}>
@@ -3132,35 +3977,46 @@ export default function QueueAdmin({
                           <Icon src={ICON.chevron} size={12} />
                         </span>
                       </button>
-                      {collapsed[section] ? null : list.length === 0 ? (
-                        <div className={styles.groupEmpty}>Nothing waiting</div>
-                      ) : ordered.pages[section].length ? (
-                        ordered.pages[section].map(page => {
-                          const foldKey = `${section}:${page.key}`
-                          const folded = foldedPages[foldKey] === true
-                          return (
-                            <div key={page.key} className={styles.pageGroup}>
-                              <button
-                                className={styles.pageHead}
-                                onClick={() => togglePage(foldKey)}
-                                aria-expanded={!folded}
-                              >
-                                <span
-                                  className={`${styles.pageChevron} ${folded ? styles.groupChevronClosed : ''}`}
+                      <Collapse open={!collapsed[section]}>
+                        {list.length === 0 ? (
+                          <div className={styles.groupEmpty}>
+                            Nothing waiting
+                          </div>
+                        ) : ordered.pages[section].length ? (
+                          ordered.pages[section].map(page => {
+                            const foldKey = `${section}:${page.key}`
+                            const folded = foldedPages[foldKey] === true
+                            return (
+                              <div key={page.key} className={styles.pageGroup}>
+                                <button
+                                  className={styles.pageHead}
+                                  onClick={e =>
+                                    togglePage(
+                                      foldKey,
+                                      e.shiftKey
+                                        ? ordered.pages[section].map(
+                                            p => `${section}:${p.key}`
+                                          )
+                                        : undefined
+                                    )
+                                  }
+                                  aria-expanded={!folded}
                                 >
-                                  <Icon src={ICON.chevron} size={12} />
-                                </span>
-                                {page.label}
-                                <span className={styles.pageCount}>
-                                  {page.items.length}
-                                </span>
-                                {folded && (
-                                  <FableDot mark={markAmong(page.items)} />
-                                )}
-                              </button>
-                              {folded
-                                ? null
-                                : page.items.map(item => (
+                                  <span
+                                    className={`${styles.pageChevron} ${folded ? styles.groupChevronClosed : ''}`}
+                                  >
+                                    <Icon src={ICON.chevron} size={12} />
+                                  </span>
+                                  {page.label}
+                                  <span className={styles.pageCount}>
+                                    {page.items.length}
+                                  </span>
+                                  {folded && (
+                                    <FableDot mark={markAmong(page.items)} />
+                                  )}
+                                </button>
+                                <Collapse open={!folded}>
+                                  {page.items.map(item => (
                                     <Row
                                       key={item.id}
                                       item={item}
@@ -3178,33 +4034,38 @@ export default function QueueAdmin({
                                       onLogoError={() => logoDied(item)}
                                     />
                                   ))}
-                            </div>
-                          )
-                        })
-                      ) : (
-                        list.map(item => (
-                          <Row
-                            key={item.id}
-                            item={item}
-                            active={item.id === selectedId && !showDone}
-                            working={pending[item.id] ?? null}
-                            failed={
-                              !pending[item.id] && Boolean(draft(item.id).error)
-                            }
-                            fable={fableMarks[item.id]}
-                            showKind={
-                              section === 'fable' && kindOf(item) !== kind
-                            }
-                            urgency={
-                              section === 'fable' || section === 'urgent'
-                                ? ordered.urgencies.get(item.id)
-                                : undefined
-                            }
-                            onClick={() => select(item.id)}
-                            onLogoError={() => logoDied(item)}
-                          />
-                        ))
-                      )}
+                                </Collapse>
+                              </div>
+                            )
+                          })
+                        ) : (
+                          list.map(item => (
+                            <Row
+                              key={item.id}
+                              item={item}
+                              active={item.id === selectedId && !showDone}
+                              working={pending[item.id] ?? null}
+                              failed={
+                                !pending[item.id] &&
+                                Boolean(draft(item.id).error)
+                              }
+                              fable={fableMarks[item.id]}
+                              urgency={
+                                section === 'fable' || section === 'urgent'
+                                  ? ordered.urgencies.get(item.id)
+                                  : undefined
+                              }
+                              urgencyNote={
+                                section === 'urgent'
+                                  ? visitorsNote(item)
+                                  : undefined
+                              }
+                              onClick={() => select(item.id)}
+                              onLogoError={() => logoDied(item)}
+                            />
+                          ))
+                        )}
+                      </Collapse>
                     </div>
                   )
                 })}
@@ -3223,6 +4084,7 @@ export default function QueueAdmin({
                 busyFor={id => draft(id).busy}
                 errorFor={id => draft(id).error}
                 onUndo={canEdit ? item => void act(item, 'undo') : null}
+                onReopen={canEdit ? item => void act(item, 'reopen') : null}
                 onOpen={showDecided}
               />
             ) : selected ? (
@@ -3239,10 +4101,19 @@ export default function QueueAdmin({
                   ? {
                       onBack: () => setDoneOpen(false),
                       onUndo: canEdit ? () => void act(selected, 'undo') : null,
+                      onReopen: canEdit
+                        ? () => void act(selected, 'reopen')
+                        : null,
+                      onFix:
+                        canEdit && fixable(selected)
+                          ? (edits: Record<string, unknown>) =>
+                              fixFields(selected, edits)
+                          : null,
                       undoing: draft(selected.id).busy,
                     }
                   : {})}
                 item={selected}
+                onFlag={body => updateFlag(selected, body)}
                 live={live[selected.id] ?? null}
                 onImage={(field, urls) => {
                   setLiveField(selected.id, field, urls)
@@ -3259,15 +4130,28 @@ export default function QueueAdmin({
                 chatFocus={chatFocus}
                 placeFocus={placeFocus}
                 fieldFocus={fieldFocus}
-                readOnly={!canEdit || !isOpen(selected)}
+                readOnly={
+                  !canEdit ||
+                  !(isOpen(selected) || Boolean(setAsideUntil(selected)))
+                }
+              />
+            ) : !searching && ordered.openPerKind[kind] === 0 ? (
+              <TabDone
+                kind={kind}
+                done={tabDone}
+                waiting={ordered.openPerKind}
+                cheer={cheer?.kind === kind ? cheer.at : null}
+                onCheered={() => setCheer(null)}
+                onAgain={() => setCheer({ kind, id: '', at: Date.now() })}
+                onNext={chooseKind}
               />
             ) : (
               <div className={styles.emptyDetail}>
                 {searching && ordered.flat.length === 0
-                  ? 'Nothing waiting matches the search.'
-                  : waiting === 0
-                    ? 'All clear.'
-                    : 'Pick an item on the left.'}
+                  ? ordered.earlierCount > 0
+                    ? 'Nothing waiting matches the search. Earlier decisions that do are on the left.'
+                    : 'Nothing waiting matches the search.'
+                  : 'Pick an item on the left.'}
               </div>
             )}
           </div>
@@ -3277,22 +4161,38 @@ export default function QueueAdmin({
       {toast && (
         // Laid out like a list row (logo, name, the muted line) with a
         // bold tick or cross in front, so the eye reads it the same way.
-        // While the decision is on its way the mark is a spinning ring.
+        // While the decision (or its undo) is on its way the mark is a
+        // spinning ring. A click outside its buttons opens the item
+        // (Bryce, 21 Oct 2026: "let's make the toast clickable").
         <div
           key={toast.item.id}
           className={`${styles.toast} ${toastLeaving ? styles.toastLeaving : ''}`}
           role="status"
+          onClick={e => {
+            if ((e.target as HTMLElement).closest('button, a')) return
+            openToastItem(toast.item.id)
+          }}
         >
           <span
             className={`${styles.toastMark} ${toast.no ? styles.toastMarkNo : ''} ${
-              toast.state === 'working' ? styles.toastMarkWorking : ''
+              toast.state === 'working' || toast.state === 'undoing'
+                ? styles.toastMarkWorking
+                : ''
             } ${toast.state === 'failed' ? styles.toastMarkFailed : ''}`}
           >
             {toast.state === 'failed' ? (
               '!'
             ) : toast.state === 'done' ? (
               <Icon
-                src={toast.later ? ICON.clock : toast.no ? ICON.x : ICON.check}
+                src={
+                  toast.reopen
+                    ? ICON.reopen
+                    : toast.later
+                      ? ICON.clock
+                      : toast.no
+                        ? ICON.x
+                        : ICON.check
+                }
                 size={16}
               />
             ) : null}
@@ -3311,31 +4211,28 @@ export default function QueueAdmin({
             <span className={styles.rowMeta}>
               <span>{toast.text}</span>
               {toast.item.page && <span>{toast.item.page}</span>}
-              {toast.sub && <span>{toast.sub}</span>}
+              {toast.copied && toast.state !== 'failed' ? (
+                <span className={styles.toastCopied}>{COPIED_NOTE}</span>
+              ) : (
+                toast.sub && <span>{toast.sub}</span>
+              )}
             </span>
           </span>
-          {toast.state === 'done' &&
-            toast.item.source === 'Discord' &&
-            (toast.no
-              ? discordRejectText(toast.item)
-              : toast.item.replyDraft) && (
-              <>
-                <CopyReply
-                  text={
-                    (toast.no
-                      ? discordRejectText(toast.item)
-                      : toast.item.replyDraft) ?? ''
-                  }
+          {toastCopy && (
+            <>
+              {toast.item.sourceLink && (
+                <OpenOnDiscord
+                  href={toast.item.sourceLink}
                   className={styles.toastUndo}
+                  onOpen={() => setToast(null)}
                 />
-                {toast.item.sourceLink && (
-                  <OpenOnDiscord
-                    href={toast.item.sourceLink}
-                    className={styles.toastUndo}
-                  />
-                )}
-              </>
-            )}
+              )}
+              {/* Copied already: the Done list keeps a Copy reply for later. */}
+              {!toast.copied && (
+                <CopyReply text={toastCopy} className={styles.toastUndo} />
+              )}
+            </>
+          )}
           {toast.state === 'failed' ? (
             <>
               {toastRetry && (
@@ -3351,7 +4248,7 @@ export default function QueueAdmin({
               )}
               <button
                 className={styles.toastUndo}
-                onClick={() => select(toast.item.id)}
+                onClick={() => openToastItem(toast.item.id)}
               >
                 Open
               </button>
@@ -3363,7 +4260,7 @@ export default function QueueAdmin({
                 <Icon src={ICON.x} size={12} />
               </button>
             </>
-          ) : (
+          ) : toast.state === 'undoing' || toast.reopen ? null : (
             <button
               className={styles.toastUndo}
               disabled={toast.state === 'done' && draft(toast.item.id).busy}
@@ -3377,25 +4274,51 @@ export default function QueueAdmin({
               Undo <kbd>U</kbd>
             </button>
           )}
+          {toastCopy && toast.state === 'done' && (
+            <button
+              className={styles.toastClose}
+              aria-label="Dismiss"
+              onClick={() => setToast(null)}
+            >
+              <Icon src={ICON.x} size={12} />
+            </button>
+          )}
         </div>
       )}
 
-      {showHelp && (
-        <div className={styles.help} onClick={() => setShowHelp(false)}>
-          <div className={styles.helpCard} onClick={e => e.stopPropagation()}>
+      {helpShown && (
+        <div
+          className={`${styles.help} ${helpClosing ? motion.fadeOut : motion.fade}`}
+          onClick={() => setShowHelp(false)}
+          inert={helpClosing}
+        >
+          <div
+            className={`${styles.helpCard} ${helpClosing ? motion.riseOut : motion.rise}`}
+            onClick={e => e.stopPropagation()}
+          >
             <div className={styles.helpTitle}>Keyboard</div>
             <dl className={styles.helpList}>
               <dt>
                 <kbd>Tab</kbd> / <kbd>⇧</kbd> <kbd>Tab</kbd>
               </dt>
-              <dd>next / previous item</dd>
+              <dd>
+                next / previous item; next goes to a reply Fable has finished
+                first
+              </dd>
+              <dt>
+                <kbd>⇧</kbd> click
+              </dt>
+              <dd>
+                on a heading, open or close all the sections at once, or all the
+                pages in that section
+              </dd>
               <dt>
                 <kbd>/</kbd>
               </dt>
               <dd>
-                search every open item, whatever its kind, and today&apos;s
-                decisions; <kbd>Enter</kbd> goes to the first match,{' '}
-                <kbd>Esc</kbd> leaves the search
+                search every open item, whatever its kind, today&apos;s
+                decisions and every earlier one; <kbd>Enter</kbd> goes to the
+                first match, <kbd>Esc</kbd> leaves the search
               </dd>
               <dt>
                 <kbd>A</kbd>
@@ -3414,7 +4337,8 @@ export default function QueueAdmin({
               </dt>
               <dd>
                 review again in a week: out of the list until then, and Fable
-                reviews an addition again before it comes back
+                reviews an addition again before it comes back, marked Back from
+                the day you set it aside
               </dd>
               <dt>
                 <kbd>F</kbd>
@@ -3455,6 +4379,18 @@ export default function QueueAdmin({
               </dt>
               <dd>undo the last decision</dd>
               <dt>
+                <kbd>T</kbd>
+              </dt>
+              <dd>today&apos;s decisions, and back to the queue</dd>
+              <dt>
+                <kbd>B</kbd>
+              </dt>
+              <dd>
+                on a declined addition opened from the search, bring it back:
+                the listing is rebuilt if it was deleted, and the item is open
+                again
+              </dd>
+              <dt>
                 <kbd>⌘</kbd> <kbd>Z</kbd>
               </dt>
               <dd>
@@ -3492,6 +4428,25 @@ function FableDot({ mark }: { mark: FableMark | null }) {
   )
 }
 
+/** On a row that came back from "Review again in a week": since when. */
+function BackTag({ item }: { item: QueueItem }) {
+  const back = backFrom(item)
+  if (!back) return null
+  return (
+    <span
+      className={styles.withIcon}
+      title={`You set it aside on ${dayMonth(back)} to review again in a week`}
+    >
+      <Icon src={ICON.clock} size={12} />
+      Back from{' '}
+      {new Date(back).toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'short',
+      })}
+    </span>
+  )
+}
+
 function Row({
   item,
   active,
@@ -3503,6 +4458,7 @@ function Row({
   search = null,
   hit,
   urgency,
+  urgencyNote,
   onClick,
   onLogoError,
 }: {
@@ -3524,6 +4480,8 @@ function Row({
   hit?: SearchHit
   /** In the Urgent section: why it can't wait ("Closes 10 Oct"). */
   urgency?: Urgency
+  /** Its tooltip: the page's visitors behind its place in the list. */
+  urgencyNote?: string
   onClick: () => void
   /** The picture's link has stopped working. */
   onLogoError: () => void
@@ -3554,12 +4512,27 @@ function Row({
           <Marked text={splitTitle(item).name ?? item.title} search={search} />
         </span>
         <span className={styles.rowMeta}>
-          {urgency && (
-            <span className={`${styles.withIcon} ${styles.urgentTag}`}>
-              <Icon src={ICON.clock} size={12} />
+          {urgency ? (
+            <span
+              className={`${styles.withIcon} ${styles.urgentTag}`}
+              title={urgencyNote}
+            >
+              <Icon
+                src={item.pushback ? ICON.requests : ICON.clock}
+                size={12}
+              />
               {urgency.label}
             </span>
+          ) : (
+            item.pushback &&
+            isOpen(item) && (
+              <span className={`${styles.withIcon} ${styles.urgentTag}`}>
+                <Icon src={ICON.requests} size={12} />
+                {REPLIED.label}
+              </span>
+            )
           )}
+          <BackTag item={item} />
           {showKind && <span>{KIND_WORD[item.type]}</span>}
           {item.source !== 'Comb' && <span>{item.source}</span>}
           {showPage && item.page && <span>{pageLabel(item)}</span>}
@@ -3568,7 +4541,7 @@ function Row({
           {!isOpen(item) ? (
             <>
               <span
-                className={`${styles.withIcon} ${item.status === 'Rejected' ? styles.no : styles.yes}`}
+                className={`${styles.withIcon} ${isRejected(item) ? styles.no : styles.yes}`}
               >
                 <Icon src={doneIcon(item)} size={12} />
                 {doneLabel(item)}
@@ -3589,6 +4562,7 @@ function Row({
               revising
             </span>
           )}
+          {item.reopening && <ReopeningTag reopening={item.reopening} />}
           {working && (
             <span className={styles.withIcon}>
               <span className={styles.spinner} />
@@ -3610,6 +4584,55 @@ function Row({
         )}
       </span>
     </button>
+  )
+}
+
+/** A past decision in the search results: one quiet line – the name, what
+ *  was decided and when – with no logo or excerpt, so the live matches
+ *  above stay the loud part. */
+function EarlierRow({
+  item,
+  active,
+  search,
+  onClick,
+}: {
+  item: QueueItem
+  active: boolean
+  search: SearchQuery | null
+  onClick: () => void
+}) {
+  return (
+    <button
+      data-id={item.id}
+      className={`${styles.earlierRow} ${active ? styles.earlierRowActive : ''}`}
+      onClick={onClick}
+      title={`${KIND_WORD[item.type]}${item.page ? ` · ${pageLabel(item)}` : ''}`}
+    >
+      <span className={styles.earlierName}>
+        <Marked text={splitTitle(item).name ?? item.title} search={search} />
+      </span>
+      <span className={styles.earlierWhat}>
+        {doneLabel(item)} · {ago(decidedAtOf(item))}
+      </span>
+    </button>
+  )
+}
+
+/** On its way back after Reopen (or their reply), or why it could not
+ *  come back. */
+function ReopeningTag({ reopening }: { reopening: Reopening }) {
+  return (
+    <span
+      className={`${styles.withIcon} ${reopening.error ? styles.no : ''}`}
+      title={reopening.error ?? undefined}
+    >
+      {reopening.error ? (
+        <Icon src={ICON.x} size={12} />
+      ) : (
+        <span className={styles.spinner} />
+      )}
+      {reopeningLabel(reopening)}
+    </span>
   )
 }
 
@@ -3661,8 +4684,11 @@ function Detail({
   fieldFocus,
   readOnly,
   onFable,
+  onFlag,
   onBack,
   onUndo,
+  onReopen,
+  onFix,
   undoing = false,
 }: {
   item: QueueItem
@@ -3673,10 +4699,20 @@ function Detail({
   /** The chat shows Fable changed the listing: the page reads it live. */
   /** Fable changed fields on the record from the chat: their names. */
   onFable?: (fields: string[]) => void
+  /** Write a flag update from the chat onto the row, or undo it; resolves
+   *  to an error to show, or null. */
+  onFlag: (
+    body: { flag: FlagUpdate } | { undo: true }
+  ) => Promise<string | null>
   /** A decision opened from Done today: back to that list. */
   onBack?: () => void
   /** A decision opened from Done today: take it back (null: view only). */
   onUndo?: (() => void) | null
+  /** A declined addition: bring it back (null: view only). */
+  onReopen?: (() => void) | null
+  /** A published addition opened from Done today: write edited fields
+   *  straight onto the listing; resolves to an error, or null. */
+  onFix?: ((edits: Record<string, unknown>) => Promise<string | null>) | null
   undoing?: boolean
   d: Draft
   setD: (patch: Partial<Draft>) => void
@@ -3694,8 +4730,10 @@ function Detail({
   // Nothing on the item can be touched while Claude is revising it, and a
   // view-only session can never touch it.
   const revising = item.status === 'Revising' || readOnly
-  // Set aside with "Review again in a week": when it comes back.
+  // Set aside with "Review again in a week": when it comes back. Until
+  // then its fields edit into the draft, as an open item's do.
   const later = setAsideUntil(item)
+  const draftable = isOpen(item) || Boolean(later)
   const nothingToApply = item.type === 'Change' && item.changes.length === 0
   const reason = d.chip ?? d.other.trim()
   // The reasons open in the bar at the bottom, which then grows over the
@@ -3727,7 +4765,7 @@ function Detail({
         typed: d.other,
       }),
     })
-  const editCount = Object.keys(d.edits).length
+  const editCount = Object.keys(activeEdits(d)).length
   const original: Record<string, unknown> =
     item.type === 'Change'
       ? {
@@ -3736,15 +4774,51 @@ function Detail({
         }
       : (live?.fields ?? item.fields ?? {})
   const types = new Map((live?.schema ?? []).map(f => [f.name, f]))
-  const editsToSave = () => coerceEdits(d.edits, original, types)
+  const editsToSave = () => coerceEdits(activeEdits(d), original, types)
   // An addition's fields as its field list shows them. An applied one
   // shows what its decision wrote, over the record as read: a read made
   // before the decision (or Comb's snapshot, until a fresh read lands)
   // holds the old values (8 Oct 2026: a published event's list showed the
   // submitted 209-character Description, not Fable's that went out).
+  // An addition already published or a change already applied, opened
+  // from Done today, keeps its fields editable, each save written straight
+  // onto the live listing (Bryce, 21 Oct 2026: "make fields in the today
+  // view editable", for every kind). A value on its way shows at once; a
+  // failed one goes back, with the error under the fields.
+  const [fixing, setFixing] = useState<{
+    id: string
+    fields: Record<string, unknown>
+    error: string | null
+  }>({ id: '', fields: {}, error: null })
+  const fixNow = fixing.id === item.id ? fixing : null
+  const canFix = Boolean(onFix)
+  const fixWith = (field: string, edits: Record<string, unknown>) => {
+    if (!onFix) return
+    const id = item.id
+    setFixing(prev => ({
+      id,
+      fields: { ...(prev.id === id ? prev.fields : {}), ...edits },
+      error: null,
+    }))
+    void onFix(edits).then(error =>
+      setFixing(prev => {
+        if (prev.id !== id) return prev
+        const fields = { ...prev.fields }
+        delete fields[field]
+        return { id, fields, error }
+      })
+    )
+  }
+  const fix = onFix
+    ? (field: string, text: string) =>
+        fixWith(field, coerceEdits({ [field]: text }, original, types))
+    : null
+  // The fixes on their way, as the change rows hold values: text.
+  const fixText = editsAsText(fixNow?.fields ?? {})
   const shownFields: Record<string, unknown> = {
     ...(live?.fields ?? item.fields ?? {}),
     ...(item.status === 'Applied' ? (item.edits ?? {}) : {}),
+    ...fixNow?.fields,
   }
   // What Fable changed on the listing straight in Airtable from the chat
   // (its replies carry it): listed with a change's fields, marked on an
@@ -3765,6 +4839,38 @@ function Detail({
       ? item.changes.map(c => c.field).filter(k => fableFields.has(k))
       : []
 
+  // Proposed fields left out with the cross (Bryce, 15 Oct 2026: "I want
+  // to be able to delete a suggested field change"): Accept leaves them as
+  // the listing has them. An applied change shows the ones it left out.
+  const leftOut = draftable
+    ? d.leftOut
+    : item.status === 'Applied'
+      ? (item.leftOut ?? [])
+      : []
+  // The proposal's fields can be edited or left out only while it waits;
+  // once applied, they are fixed straight on the listing (canFix).
+  const canChange = draftable && !revising
+  // The edits a change's fields show: the draft's while it waits; once
+  // applied, the ones that went out with it (Bryce, 15 Oct 2026: an applied
+  // change showed its proposals again, not the values Apply wrote), and
+  // any fix on its way.
+  const shownEdits = draftable ? d.edits : { ...appliedEdits(item), ...fixText }
+  // An edit to the field waits with it, unsent, and comes back with it.
+  const leaveOut = (field: string, out: boolean) => {
+    const rest = d.leftOut.filter(k => k !== field)
+    setD(
+      out
+        ? {
+            leftOut: [...rest, field],
+            editing: d.editing === field ? null : d.editing,
+          }
+        : { leftOut: rest }
+    )
+  }
+  const leftCount = item.changes.filter(
+    c => leftOut.includes(c.field) && !fableFields.has(c.field)
+  ).length
+
   // Fields edited beyond what a change proposes (Bryce, 5 Oct 2026: "I
   // want a way of editing other random fields too"), each a row under the
   // proposed ones, from what the record holds now. A decided change shows
@@ -3773,15 +4879,20 @@ function Detail({
   const extraEdits: Record<string, string> =
     item.type !== 'Change'
       ? {}
-      : isOpen(item)
+      : draftable
         ? d.edits
-        : item.status === 'Applied' && item.before
-          ? Object.fromEntries(
-              Object.entries(editsAsText(item.edits ?? {})).filter(
-                ([k]) => k in item.before!
-              )
-            )
-          : {}
+        : {
+            ...(item.status === 'Applied' && item.before
+              ? Object.fromEntries(
+                  Object.entries(editsAsText(item.edits ?? {})).filter(
+                    ([k]) => k in item.before!
+                  )
+                )
+              : {}),
+            ...Object.fromEntries(
+              Object.entries(fixText).filter(([k]) => !proposedFields.has(k))
+            ),
+          }
   const extraFields =
     item.type !== 'Change'
       ? []
@@ -3791,10 +4902,52 @@ function Detail({
         ].filter(
           k =>
             !proposedFields.has(k) &&
+            !fableFields.has(k) &&
             !UNPICKABLE_TYPES.has(types.get(k)?.type ?? '')
         )
   const extraWas = (k: string): unknown =>
-    isOpen(item) ? live?.fields[k] : item.before?.[k]
+    draftable || !item.before || !(k in item.before)
+      ? live?.fields[k]
+      : item.before[k]
+  // A field Fable changed from the chat: its picture is shown as it is;
+  // anything else can be edited like a field picked with E, from Fable's
+  // value. A decided change shows the edit that went out with it.
+  const fableRow = (c: FableChange) => {
+    if (touchesPicture(c)) {
+      return (
+        <FableChangeRow
+          key={`fable:${c.field}`}
+          change={c}
+          page={item.page}
+          live={live?.fields[c.field]}
+          cap={c.field === cap.field ? cap.cap : undefined}
+        />
+      )
+    }
+    const edit = shownEdits[c.field]
+    return (
+      <ExtraChangeRow
+        key={`fable:${c.field}`}
+        field={c.field}
+        page={item.page}
+        info={types.get(c.field)}
+        was={c.from}
+        fable={c}
+        edit={edit}
+        editing={d.editing === c.field}
+        canEdit={(!revising && draftable) || canFix}
+        cap={c.field === cap.field ? cap.cap : undefined}
+        onEditing={on => setD({ editing: on ? c.field : null })}
+        onFix={fix ? text => fix(c.field, text) : undefined}
+        onEdit={text => {
+          const edits = { ...d.edits }
+          if (text === null) delete edits[c.field]
+          else edits[c.field] = text
+          setD({ editing: null, edits })
+        }}
+      />
+    )
+  }
   // What the picker offers: the record's other fields that can be typed
   // into, in the table's order.
   const pickable =
@@ -3818,7 +4971,8 @@ function Detail({
     // A box is ticked or unticked at once; anything else opens its editor.
     if (types.get(name)?.type === 'checkbox') {
       const was = live?.fields[name] === true
-      setD({ edits: { ...d.edits, [name]: was ? 'false' : 'true' } })
+      if (fix) fix(name, was ? 'false' : 'true')
+      else setD({ edits: { ...d.edits, [name]: was ? 'false' : 'true' } })
     } else {
       setD({ editing: name })
     }
@@ -3899,9 +5053,7 @@ function Detail({
                 {item.sourceLink ? (
                   <>
                     {' '}
-                    <a href={item.sourceLink} target="_blank" rel="noreferrer">
-                      on Discord
-                    </a>
+                    <a href={discordAppLink(item.sourceLink)}>on Discord</a>
                   </>
                 ) : (
                   ' on Discord'
@@ -3951,6 +5103,7 @@ function Detail({
   const showDecline =
     isOpen(item) &&
     Boolean(item.replyTo) &&
+    !item.declinedBefore &&
     (declineChip !== null || d.decline !== null)
   const declineFromReason =
     d.mode === 'reject' && d.other.trim() !== '' && d.decline === null
@@ -3963,6 +5116,11 @@ function Detail({
         <p className={styles.note}>
           Fable writes this one from your reason when you reject.
         </p>
+      ) : item.source === 'Discord' ? (
+        // The same box as the accept's Discord reply above it: click to
+        // copy, no typing here (Bryce, 15 Oct 2026: "why do these have
+        // different buttons?").
+        <CopyBox text={declineText} />
       ) : d.editingDecline ? (
         <textarea
           ref={fitToText}
@@ -4002,11 +5160,11 @@ function Detail({
       {!declineFromReason && (
         <p className={styles.note}>
           {d.decline !== null || !declineChip
-            ? 'Reject saves this'
-            : `Reject for “${declineChip}” saves this`}
+            ? 'Reject'
+            : `Reject for “${declineChip}”`}
           {item.source === 'Discord'
-            ? ' here to copy into Discord. Nothing is sent.'
-            : ' as a Gmail draft. Nothing is sent.'}
+            ? ' copies this, ready to paste in Discord. Nothing is sent.'
+            : ' saves this as a Gmail draft. Nothing is sent.'}
         </p>
       )}
     </section>
@@ -4061,7 +5219,14 @@ function Detail({
             onEdit={() => setD({ editingReply: true })}
           />
         )}
-        {item.source !== 'Discord' && (
+        {item.source === 'Discord' ? (
+          isOpen(item) && (
+            <p className={styles.note}>
+              {acceptLabel(item, activeEdits(d), d.leftOut)} copies this, ready
+              to paste in Discord. Nothing is sent.
+            </p>
+          )
+        ) : (
           <p className={styles.note}>
             {item.replyStatus === 'Saved' ? (
               <>
@@ -4079,7 +5244,7 @@ function Detail({
             ) : item.replyStatus === 'Failed' ? (
               `The draft could not be saved${item.error ? `: ${item.error}` : '.'}`
             ) : isOpen(item) ? (
-              `${acceptLabel(item)} saves this as a Gmail draft. Nothing is sent.`
+              `${acceptLabel(item, activeEdits(d), d.leftOut)} saves this as a Gmail draft. Nothing is sent.`
             ) : (
               replyLabel(item)
             )}
@@ -4103,17 +5268,129 @@ function Detail({
       </section>
     ) : null
 
-  const replyBlock =
-    item.status === 'Rejected' ? (
-      (rejectReplyBlock ?? noReplyBlock)
-    ) : acceptBlock || declineBlock ? (
-      <div className={styles.replies}>
-        {acceptBlock}
-        {declineBlock}
-      </div>
-    ) : (
-      noReplyBlock
-    )
+  // He already answered them by hand in the request's thread: no draft on
+  // either decision, and the item says so where the replies would be (Bryce,
+  // 12 Oct 2026, after a second decline nearly went to someone he had
+  // already answered).
+  const alreadyBlock = item.alreadyReplied ? (
+    <section className={styles.block}>
+      <h3 className={styles.h3}>
+        Already replied{item.replyTo ? ` to ${item.replyTo}` : ''}
+      </h3>
+      <p className={styles.note}>
+        You replied by hand on {item.alreadyReplied.date}
+        {item.alreadyReplied.link && (
+          <>
+            {' · '}
+            <a href={item.alreadyReplied.link} target="_blank" rel="noreferrer">
+              see your reply
+            </a>
+          </>
+        )}
+        {isOpen(item)
+          ? `, so ${acceptLabel(item)} and Reject save no new draft.`
+          : ', so no new draft was saved.'}
+      </p>
+    </section>
+  ) : null
+
+  // Brought back after a decline with no word from them since: they have
+  // the decline, and a second one never goes (Bryce, 20 Oct 2026).
+  const declinedBlock =
+    item.declinedBefore && isOpen(item) ? (
+      <section className={styles.block}>
+        <h3 className={styles.h3}>If you reject it again</h3>
+        <p className={styles.note}>
+          They already have your decline
+          {item.declinedBefore.date ? ` from ${item.declinedBefore.date}` : ''},
+          so Reject saves no new draft.
+        </p>
+      </section>
+    ) : null
+
+  const replyBlock = alreadyBlock ? (
+    alreadyBlock
+  ) : item.status === 'Rejected' ? (
+    (rejectReplyBlock ?? noReplyBlock)
+  ) : acceptBlock || declineBlock || declinedBlock ? (
+    <div className={styles.replies}>
+      {acceptBlock}
+      {declineBlock ?? declinedBlock}
+    </div>
+  ) : (
+    noReplyBlock
+  )
+
+  // A declined addition the Mac deleted a day later: only its saved copy
+  // is left until Reopen rebuilds it.
+  const recordGone =
+    !isOpen(item) && item.declined && item.status !== 'Rejected'
+
+  // Brought back after a decline (queue-reopen.ts): their reply on top,
+  // with Fable's one line on whether it changes the call; or, when Bryce
+  // reopened it himself, how it came back.
+  const pushback = isOpen(item) ? item.pushback : null
+  // Back from "Review again in a week" (Bryce, 20 Oct 2026: "I need to know
+  // if something is coming back a week later").
+  const back = backFrom(item)
+  const returnBlock = pushback ? (
+    <section className={`${styles.block} ${styles.pushback}`}>
+      <h3 className={`${styles.h3} ${styles.withIcon}`}>
+        <Icon src={ICON.requests} size={12} />
+        {pushback.name || pushback.from || 'They'} replied to your decline
+        {pushback.at && <span className={styles.when}>{ago(pushback.at)}</span>}
+        {pushback.link && (
+          <a
+            className={styles.pushbackLink}
+            href={pushback.link}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Open in Gmail
+          </a>
+        )}
+      </h3>
+      <p className={styles.pushbackText}>{pushback.text}</p>
+      <p className={styles.pushbackTake}>
+        <span
+          className={`${styles.withIcon} ${
+            pushback.changes === 'yes'
+              ? styles.yes
+              : pushback.changes === 'no'
+                ? styles.no
+                : pushback.changes === 'unsure'
+                  ? styles.maybe
+                  : ''
+          }`}
+        >
+          <Icon src={ICON.stars} size={12} />
+          Fable
+        </span>{' '}
+        {pushback.take ?? 'is reading their reply…'}
+      </p>
+    </section>
+  ) : item.reopened && isOpen(item) ? (
+    <p className={`${styles.note} ${styles.withIcon} ${styles.returnNote}`}>
+      <Icon src={ICON.reopen} size={12} />
+      Brought back {ago(item.reopened.at)}
+      {item.reopened.rebuilt
+        ? ' · the listing was rebuilt from the saved copy, unpublished'
+        : ''}
+      {item.reopened.logo === 'wanted'
+        ? ' · Fable is finding its logo'
+        : item.reopened.logo === 'none'
+          ? ' · no logo found, add one before Publish'
+          : ''}
+    </p>
+  ) : back ? (
+    <p className={`${styles.note} ${styles.withIcon} ${styles.returnNote}`}>
+      <Icon src={ICON.clock} size={12} />
+      Back after a week · you set it aside on {dayMonth(back)}
+      {item.type === 'Add' && item.targetRecord
+        ? ' · Fable reviewed it again'
+        : ' · not checked again since'}
+    </p>
+  ) : null
 
   // The side panel: the verdict with its reasons, and under it the chat
   // with Fable (when the Mac agent is up), which is there for every item.
@@ -4191,16 +5468,34 @@ function Detail({
           )}
         </div>
 
+        {returnBlock}
+
         {/* The record as the site shows it, with the proposed change laid
-            over it, so the effect of Accept is visible. */}
+            over it, so the effect of Accept is visible. A field Fable already
+            changed is left as the record holds it – Apply keeps Fable's – so
+            the card does not show a proposal that will never land (12 Oct
+            2026: AI Safety Purdue's card kept the proposed wordmark after
+            Fable had put the bare mark on the listing). */}
         {hasCard && (
           <div className={styles.cardRow}>
             <SitePreview
               table={item.targetTable ?? ''}
               record={item.targetRecord ?? ''}
               edits={{
-                ...Object.fromEntries(item.changes.map(c => [c.field, c.to])),
-                ...editsToSave(),
+                ...Object.fromEntries(
+                  item.changes
+                    .filter(
+                      c =>
+                        !fableFields.has(c.field) && !leftOut.includes(c.field)
+                    )
+                    .map(c => [c.field, c.to])
+                ),
+                // An applied change shows the edits that went out with it.
+                ...(isOpen(item)
+                  ? editsToSave()
+                  : item.status === 'Applied'
+                    ? item.edits
+                    : null),
               }}
             />
             <div className={styles.cardRowText}>{excerptBlock}</div>
@@ -4228,11 +5523,21 @@ function Detail({
           (live || item.fields) && (
             <>
               <div className={styles.cardRow}>
-                <SitePreview
-                  table={item.targetTable ?? ''}
-                  record={item.targetRecord ?? ''}
-                  edits={editsToSave()}
-                />
+                {recordGone ? (
+                  // No card to build: the record is gone.
+                  <section className={styles.block}>
+                    <p className={styles.note}>
+                      The listing was deleted a day after the decline; these are
+                      its fields as saved then. Reopen rebuilds it.
+                    </p>
+                  </section>
+                ) : (
+                  <SitePreview
+                    table={item.targetTable ?? ''}
+                    record={item.targetRecord ?? ''}
+                    edits={editsToSave()}
+                  />
+                )}
                 <Fields
                   part="main"
                   item={item}
@@ -4243,6 +5548,7 @@ function Detail({
                   d={d}
                   setD={setD}
                   readOnly={readOnly}
+                  onFix={fix}
                 />
               </div>
               {placeable && (
@@ -4253,9 +5559,15 @@ function Detail({
                   name={splitTitle(item).name ?? item.title}
                   value={SORT_FIELD in d.edits ? d.edits[SORT_FIELD] : sortWas}
                   edited={SORT_FIELD in d.edits}
-                  canEdit={!revising && isOpen(item)}
+                  canEdit={(!revising && draftable) || canFix}
                   focusTick={placeFocus}
                   onChange={sort => {
+                    if (fix) {
+                      if (sort !== sortValue(sortWas)) {
+                        fix(SORT_FIELD, String(sort))
+                      }
+                      return
+                    }
                     // Back where the record has it is not an edit.
                     const edits = { ...d.edits }
                     if (sort === sortValue(sortWas)) delete edits[SORT_FIELD]
@@ -4275,6 +5587,7 @@ function Detail({
                 d={d}
                 setD={setD}
                 readOnly={readOnly}
+                onFix={fix}
               />
             </>
           )}
@@ -4284,24 +5597,43 @@ function Detail({
           fableChanges.length === 0 &&
           extraFields.length === 0 ? (
             <p className={styles.note}>
-              No field change proposed. Accept says the flag was right and you
-              have dealt with it, and clears it in Airtable; Reject clears it as
-              wrong; edit a field yourself; or ask Fable for a change.
+              {item.source === 'Broom'
+                ? 'No field change proposed. Accept says the flag was right and you have dealt with it, and clears it in Airtable; Reject clears it as wrong; edit a field yourself; or ask Fable for a change.'
+                : item.targetRecord
+                  ? 'No field change proposed. Edit a field yourself or ask Fable for a change; Mark done once you have dealt with it another way; Reject if nothing needs doing.'
+                  : 'No listing matched, so there is nothing to change here. Ask Fable which listing it is and to fix it, or fix it in Airtable, then Mark done; Reject if nothing needs doing.'}
             </p>
           ) : (
-            <div className={styles.diff}>
-              {item.changes.map(c =>
+            // The rows keep a column for their crosses while they can show.
+            <div
+              className={`${styles.diff} ${canChange ? styles.droppable : ''}`}
+            >
+              {item.changes.map(c => {
                 // A proposed field Fable has since changed on the record
                 // shows Fable's value in its place, once; Accept keeps it.
-                fableFields.has(c.field) ? (
-                  <FableChangeRow
-                    key={`fable:${c.field}`}
-                    change={fableFields.get(c.field)!}
-                    page={item.page}
-                    live={live?.fields[c.field]}
-                    cap={c.field === cap.field ? cap.cap : undefined}
-                  />
-                ) : (
+                if (fableFields.has(c.field)) {
+                  return fableRow(fableFields.get(c.field)!)
+                }
+                if (leftOut.includes(c.field)) {
+                  return (
+                    <LeftOutRow
+                      key={c.field}
+                      change={c}
+                      edit={draftable ? d.edits[c.field] : undefined}
+                      page={item.page}
+                      live={live?.fields[c.field]}
+                      open={draftable}
+                      onPutBack={
+                        canChange
+                          ? () => leaveOut(c.field, false)
+                          : canFix && !LISTING_SWITCHES.has(c.field)
+                            ? () => fixWith(c.field, { [c.field]: c.to })
+                            : null
+                      }
+                    />
+                  )
+                }
+                return (
                   <div key={c.field} className={styles.diffRow}>
                     <span className={styles.label}>
                       <FieldIcon
@@ -4316,7 +5648,7 @@ function Detail({
                       {(() => {
                         const pic = pictureOf(c.from, live?.fields[c.field], {
                           pictureField: touchesPicture(c),
-                          open: isOpen(item),
+                          open: draftable,
                         })
                         return pic ? (
                           <Picture key={pic.url ?? ''} {...pic} />
@@ -4332,7 +5664,7 @@ function Detail({
                       {(() => {
                         // A proposed picture is shown, not its JSON, and
                         // is not typed over: it is taken or refused whole.
-                        if (c.field in d.edits || d.editing === c.field) {
+                        if (c.field in shownEdits || d.editing === c.field) {
                           return null
                         }
                         const pic = pictureOf(c.to, null, {
@@ -4345,10 +5677,20 @@ function Detail({
                         (d.editing === c.field ? (
                           <FieldEditor
                             info={types.get(c.field)}
-                            value={d.edits[c.field] ?? editText(c.to)}
+                            value={shownEdits[c.field] ?? editText(c.to)}
                             cap={c.field === cap.field ? cap.cap : undefined}
                             onCancel={() => setD({ editing: null })}
                             onSave={text => {
+                              if (fix) {
+                                setD({ editing: null })
+                                if (
+                                  text !==
+                                  (shownEdits[c.field] ?? editText(c.to))
+                                ) {
+                                  fix(c.field, text)
+                                }
+                                return
+                              }
                               // Closing the box without changing anything is
                               // not an edit.
                               const edits = { ...d.edits }
@@ -4361,19 +5703,22 @@ function Detail({
                           <>
                             <EditableValue
                               text={friendly(
-                                c.field in d.edits
-                                  ? d.edits[c.field]
+                                c.field in shownEdits
+                                  ? shownEdits[c.field]
                                   : show(c.to)
                               )}
-                              edited={c.field in d.edits}
-                              canEdit={!revising}
+                              edited={c.field in shownEdits}
+                              canEdit={
+                                canChange ||
+                                (canFix && !LISTING_SWITCHES.has(c.field))
+                              }
                               onEdit={() => setD({ editing: c.field })}
                             />
                             {c.field === cap.field && (
                               <Counted
                                 text={
-                                  c.field in d.edits
-                                    ? d.edits[c.field]
+                                  c.field in shownEdits
+                                    ? shownEdits[c.field]
                                     : show(c.to)
                                 }
                                 cap={cap.cap}
@@ -4382,20 +5727,18 @@ function Detail({
                           </>
                         ))}
                     </span>
+                    {canChange && d.editing !== c.field && (
+                      <DropButton
+                        field={c.field}
+                        onDrop={() => leaveOut(c.field, true)}
+                      />
+                    )}
                   </div>
                 )
-              )}
+              })}
               {fableChanges
                 .filter(c => !proposedFields.has(c.field))
-                .map(c => (
-                  <FableChangeRow
-                    key={`fable:${c.field}`}
-                    change={c}
-                    page={item.page}
-                    live={live?.fields[c.field]}
-                    cap={c.field === cap.field ? cap.cap : undefined}
-                  />
-                ))}
+                .map(fableRow)}
               {extraFields.map(k => (
                 <ExtraChangeRow
                   key={`extra:${k}`}
@@ -4405,9 +5748,10 @@ function Detail({
                   was={extraWas(k)}
                   edit={extraEdits[k]}
                   editing={d.editing === k}
-                  canEdit={!revising}
+                  canEdit={canChange || canFix}
                   cap={k === cap.field ? cap.cap : undefined}
                   onEditing={on => setD({ editing: on ? k : null })}
+                  onFix={fix ? text => fix(k, text) : undefined}
                   onEdit={text => {
                     const edits = { ...d.edits }
                     if (text === null) delete edits[k]
@@ -4419,60 +5763,35 @@ function Detail({
             </div>
           ))}
 
-        {item.type === 'Change' && (
+        {/* A correction no listing matched has no fields to pick from. */}
+        {item.type === 'Change' && Boolean(item.targetRecord) && (
           <FieldPicker
             key={item.id}
             fields={pickable}
-            canEdit={!revising}
+            canEdit={!revising || canFix}
             focusTick={fieldFocus}
             onPick={pickField}
           />
         )}
 
         {item.type === 'Rule' && (
-          <section className={styles.block}>
-            <h3 className={styles.h3}>What changes for the bots</h3>
-            <p className={styles.summary}>
-              {item.summary ?? 'No summary was written for this rule.'}
-            </p>
-            {item.appliesTo && (
-              <p className={styles.note}>Applies to: {item.appliesTo}</p>
-            )}
-          </section>
-        )}
-        {item.type === 'Rule' && <RuleTestBlock test={item.ruleTest} />}
-        {item.type === 'Rule' && item.ruleWording && (
-          // The rule as it will read, folded away: the summary is what gets
-          // read (9 Sept 2026: no diffs on the card); the words are there on
-          // a click for a rule worth checking closely (5 Oct 2026).
-          <details className={styles.findingMore}>
-            <summary>Exact wording</summary>
-            <div className={styles.block}>
-              <blockquote className={styles.quote}>
-                {item.ruleWording}
-              </blockquote>
-              {item.ruleWas && (
-                <>
-                  <h3 className={styles.h3}>Replaces</h3>
-                  <blockquote className={`${styles.quote} ${styles.from}`}>
-                    {item.ruleWas}
-                  </blockquote>
-                </>
-              )}
-            </div>
-          </details>
+          <RuleCard key={`rule:${item.id}`} item={item} />
         )}
 
         {(hasCard || !excerptBlock) && replyBlock}
 
-        {(item.error || d.error) && (
-          <p className={styles.error}>{d.error ?? item.error}</p>
+        {(item.error || d.error || fixNow?.error) && (
+          <p className={styles.error}>
+            {fixNow?.error ?? d.error ?? item.error}
+          </p>
         )}
       </div>
 
       {showAside && (
+        // Colored only by a verdict: a Rule's bullets are the lessons it was
+        // learned from, not a "Don't publish" (Bryce, 13 Oct 2026).
         <aside
-          className={`${styles.detailAside} ${hasVerdict ? verdictClass(item) : ''}`}
+          className={`${styles.detailAside} ${item.verdict ? verdictClass(item) : ''}`}
           data-chat-scroll
         >
           {found && (
@@ -4490,13 +5809,21 @@ function Detail({
               </span>
             </div>
           )}
-          {item.reasons.length > 0 && (
-            <ul className={styles.reasons}>
-              {item.reasons.map((r, i) => (
-                <li key={i}>{r}</li>
-              ))}
-            </ul>
-          )}
+          {item.reasons.length > 0 &&
+            (item.type === 'Rule' ? (
+              // A rule's bullets are the decisions it was learned from,
+              // under a heading that folds them away. Its key must differ
+              // from the Chat's below (a sibling keyed by the item id):
+              // sharing one left every rule visited stacked in the panel
+              // (18 Oct 2026).
+              <RuleReasons key={`reasons:${item.id}`} reasons={item.reasons} />
+            ) : (
+              <ul className={styles.reasons}>
+                {item.reasons.map((r, i) => (
+                  <li key={i}>{r}</li>
+                ))}
+              </ul>
+            ))}
           {chatAgent && (
             <Chat
               key={item.id}
@@ -4518,6 +5845,7 @@ function Detail({
                 if (isOpen(item)) setD({ reply: text })
               }}
               onWrote={onWrote}
+              onFlag={onFlag}
               onFableChanges={list => {
                 // The same list again (every history load sends one) keeps
                 // the state as it is, so the page does not re-render for it.
@@ -4540,7 +5868,7 @@ function Detail({
           // A decision opened from Done today: what was decided, and Undo.
           <div className={styles.buttons}>
             <span
-              className={`${styles.withIcon} ${item.status === 'Rejected' ? styles.no : styles.yes}`}
+              className={`${styles.withIcon} ${isRejected(item) ? styles.no : styles.yes}`}
             >
               <Icon src={doneIcon(item)} size={12} />
               {doneLabel(item)}
@@ -4553,15 +5881,29 @@ function Detail({
               <span className={styles.note}>{replyLabel(item)}</span>
             )}
             <span className={styles.note}>{ago(decidedAtOf(item))}</span>
-            {onUndo && (
+            {item.reopening && <ReopeningTag reopening={item.reopening} />}
+            {onReopen && takeBack(item) === 'reopen' ? (
               <button
                 className={styles.ghost}
                 disabled={undoing}
-                onClick={onUndo}
+                onClick={onReopen}
+                title="Bring it back: the listing is rebuilt if it was deleted"
               >
-                <Icon src={ICON.undo} size={12} />
-                {undoing ? 'Undoing…' : 'Undo'}
+                <Icon src={ICON.reopen} size={12} />
+                {undoing ? 'Reopening…' : 'Reopen'} <kbd>B</kbd>
               </button>
+            ) : (
+              onUndo &&
+              takeBack(item) === 'undo' && (
+                <button
+                  className={styles.ghost}
+                  disabled={undoing}
+                  onClick={onUndo}
+                >
+                  <Icon src={ICON.undo} size={12} />
+                  {undoing ? 'Undoing…' : 'Undo'}
+                </button>
+              )
             )}
           </div>
         ) : readOnly ? (
@@ -4575,7 +5917,7 @@ function Detail({
             Claude is revising this{item.note ? ` (“${item.note}”)` : ''}.
           </p>
         ) : d.mode === 'reject' ? (
-          <div className={styles.panel}>
+          <div className={`${styles.panel} ${motion.fade}`}>
             <div className={styles.chips}>
               {item.rejectChips.map((chip, i) => (
                 // Picking a reason IS the rejection: no Confirm step after
@@ -4651,14 +5993,20 @@ function Detail({
               className={`${styles.button} ${styles.primary}`}
               disabled={d.busy}
               onClick={() =>
-                act('accept', { edits: editsToSave(), keep: fableKept })
+                act('accept', {
+                  edits: withLeftOut(editsToSave(), d.leftOut),
+                  keep: fableKept,
+                })
               }
             >
               <Icon
                 src={item.type === 'Add' ? ICON.plus : ICON.check}
                 size={12}
               />
-              {d.busy ? 'Applying…' : acceptLabel(item, d.edits)} <kbd>A</kbd>
+              {d.busy
+                ? 'Applying…'
+                : acceptLabel(item, activeEdits(d), d.leftOut)}{' '}
+              <kbd>A</kbd>
             </button>
             <button
               className={`${styles.button} ${styles.danger}`}
@@ -4677,10 +6025,16 @@ function Detail({
               <Icon src={ICON.clock} size={12} />
               Review again in a week <kbd>W</kbd>
             </button>
-            {editCount > 0 && (
+            {(editCount > 0 || leftCount > 0) && (
               <span className={styles.note}>
-                {editCount === 1 ? '1 edit goes' : `${editCount} edits go`} with
-                it
+                {[
+                  editCount > 0 &&
+                    `${editCount === 1 ? '1 edit goes' : `${editCount} edits go`} with it`,
+                  leftCount > 0 &&
+                    `${leftCount === 1 ? '1 field' : `${leftCount} fields`} left out`,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
               </span>
             )}
           </div>
@@ -4714,6 +6068,8 @@ function isImageList(v: unknown): v is string[] {
 // plausibly want to edit").
 const HOUSEKEEPING =
   /^(created|date added|last modified|created time|record id|submitter's email)$/i
+/** Accept and Undo set these; a fix after the decision leaves them be. */
+const LISTING_SWITCHES = new Set(['Publish?', 'Hide?'])
 const COMPUTED_TYPES = new Set([
   'formula',
   'rollup',
@@ -4898,10 +6254,11 @@ function ByFable({ change }: { change?: FableChange }) {
   )
 }
 
-/** A field Fable changed on the listing from the chat, among a change's
+/** A picture Fable changed on the listing from the chat, among a change's
  *  fields (in the place of the proposed one when the proposal names it):
  *  it is on the record already, so it is shown, not edited, and Accept
- *  neither writes it again nor writes the proposal over it. */
+ *  neither writes it again nor writes the proposal over it. Fable's other
+ *  fields are ExtraChangeRows, which can be edited. */
 function FableChangeRow({
   change,
   page,
@@ -4948,6 +6305,69 @@ function FableChangeRow({
   )
 }
 
+/** A proposed field left out with the cross (Bryce, 15 Oct 2026: "I want
+ *  to be able to delete a suggested field change"): what the listing keeps
+ *  reads as it is, the proposal is crossed out, and Put back brings it back
+ *  while the item is open. Accept does not write it. */
+function LeftOutRow({
+  change,
+  edit,
+  page,
+  live,
+  open,
+  onPutBack,
+}: {
+  change: ProposedChange
+  /** The page's edit to the proposed value, kept for Put back. */
+  edit: string | undefined
+  page: string | null
+  /** The record's field now, for a fresh link to the picture it keeps. */
+  live: unknown
+  open: boolean
+  /** Null when it cannot come back: view only. On an applied change it
+   *  writes the proposed value onto the listing now. */
+  onPutBack: (() => void) | null
+}) {
+  const pictureField = touchesPicture(change)
+  const from = pictureOf(change.from, live, { pictureField, open })
+  const value = edit ?? change.to
+  const to = pictureOf(value, null, { pictureField })
+  return (
+    <div className={`${styles.diffRow} ${styles.leftOut}`}>
+      <span className={styles.label}>
+        <FieldIcon
+          page={page}
+          name={change.field}
+          value={show(change.from)}
+          size={12}
+        />
+        {change.field}
+      </span>
+      <span className={styles.from}>
+        {from ? (
+          <Picture key={from.url ?? ''} {...from} />
+        ) : (
+          friendly(show(change.from))
+        )}
+      </span>
+      <span className={styles.arrow}>
+        <Icon src={ICON.arrow} size={12} />
+      </span>
+      <span className={styles.to}>
+        <span className={styles.leftOutValue}>
+          {to ? <Picture key={to.url ?? ''} {...to} /> : friendly(show(value))}
+        </span>
+        <em className={styles.leftOutMark}>left out</em>
+        {onPutBack && (
+          <button type="button" className={styles.putBack} onClick={onPutBack}>
+            {open ? 'Put back' : 'Apply now'}
+          </button>
+        )}
+      </span>
+    </div>
+  )
+}
+
 /** Field types the change view does not offer to edit: pictures upload
  *  straight onto the record (an addition's slot does that), links to other
  *  records and people are ids, not text. */
@@ -4968,24 +6388,32 @@ function editText(v: unknown): string {
 
 /** A field edited beyond what a change proposes: what the record holds,
  *  the arrow, and the edit, which opens its field's own editor on a click
- *  and can be dropped again with the cross. */
+ *  and can be dropped again with the cross. A field Fable changed from the
+ *  chat is one too, from what it held before Fable to Fable's value, which
+ *  can be edited the same way (Bryce, 12 Oct 2026: "I'm unable to edit
+ *  these fields created by Fable"). */
 function ExtraChangeRow({
   field,
   page,
   info,
   was,
+  fable,
   edit,
   editing,
   canEdit,
   cap,
   onEditing,
   onEdit,
+  onFix,
 }: {
   field: string
   page: string | null
   info: FieldInfo | undefined
-  /** The record's value now (before Accept, on a decided change). */
+  /** The record's value now (before Accept, on a decided change); for a
+   *  field Fable changed, what it held before Fable. */
   was: unknown
+  /** Fable's change to the field, whose value the edit starts from. */
+  fable?: FableChange
   /** The edit as text; undefined while the field is only open. */
   edit: string | undefined
   editing: boolean
@@ -4995,12 +6423,20 @@ function ExtraChangeRow({
   /** The new text, or null to drop the edit (also when it is back to
    *  what the record holds). */
   onEdit: (text: string | null) => void
+  /** A change already applied: a new value goes straight onto the
+   *  listing, and there is no edit to drop. */
+  onFix?: (text: string) => void
 }) {
   const box = info?.type === 'checkbox'
-  const base = box ? (was === true ? 'true' : 'false') : editText(was)
+  const now = fable ? fable.to : was
+  const base = box ? (now === true ? 'true' : 'false') : editText(now)
   const value = edit ?? base
   // Back to what the record holds is not an edit.
-  const save = (text: string) => onEdit(text === base ? null : text)
+  const save = (text: string) => {
+    if (!onFix) return onEdit(text === base ? null : text)
+    onEditing(false)
+    if (text !== value) onFix(text)
+  }
   let to: React.ReactNode
   if (editing && !box) {
     to = (
@@ -5049,20 +6485,37 @@ function ExtraChangeRow({
       </span>
       <span className={styles.to}>
         {to}
-        {cap !== undefined && !editing && <Counted text={value} cap={cap} />}
-        {canEdit && edit !== undefined && !editing && (
-          <button
-            type="button"
-            className={styles.dropEdit}
-            title={`Leave ${field} as it is`}
-            aria-label={`Leave ${field} as it is`}
-            onClick={() => onEdit(null)}
+        {fable && edit === undefined && !editing && (
+          <em
+            className={styles.byFable}
+            title="Fable changed this in Airtable from the chat, so it is on the record already. Apply keeps it, unless you edit it."
           >
-            <Icon src="/images/icons/x-small.svg" size={12} />
-          </button>
+            by Fable
+          </em>
         )}
+        {cap !== undefined && !editing && <Counted text={value} cap={cap} />}
       </span>
+      {canEdit && !onFix && edit !== undefined && !editing && (
+        <DropButton field={field} onDrop={() => onEdit(null)} />
+      )}
     </div>
+  )
+}
+
+/** The cross at the end of a change's row, shown on the row's hover like
+ *  the pencil: the field stays as the listing has it – a proposed field is
+ *  left out, an edit beyond the proposal dropped. */
+function DropButton({ field, onDrop }: { field: string; onDrop: () => void }) {
+  return (
+    <button
+      type="button"
+      className={styles.dropEdit}
+      title={`Leave ${field} as it is`}
+      aria-label={`Leave ${field} as it is`}
+      onClick={onDrop}
+    >
+      <Icon src="/images/icons/x-small.svg" size={12} />
+    </button>
   )
 }
 
@@ -5077,6 +6530,7 @@ function Fields({
   d,
   setD,
   readOnly,
+  onFix,
 }: {
   /** "main" is name, link, description and the pictures, which sit beside
    *  the card; "rest" is every other field, under it. */
@@ -5092,6 +6546,9 @@ function Fields({
   d: Draft
   setD: (patch: Partial<Draft>) => void
   readOnly: boolean
+  /** A published addition opened from Done today: a saved field goes
+   *  straight onto the live listing, not into the draft. */
+  onFix?: ((field: string, text: string) => void) | null
 }) {
   // With the table's field list we show every column, empty ones included,
   // in the table's order (name, link and description first); without it,
@@ -5125,7 +6582,7 @@ function Fields({
   const rest = entries.filter(
     e => !seen.has(e[0]) && e[0] !== omit && editable(e)
   )
-  const revising = item.status === 'Revising' || readOnly
+  const revising = item.status === 'Revising' || (readOnly && !onFix)
   // The description's length against its page's cap, as the chat's edit
   // card counts it (Bryce, 24 Sept 2026).
   const cap = descriptionCap(item)
@@ -5165,6 +6622,11 @@ function Fields({
           onSave={text => {
             // Saving what was already there is not an edit.
             const same = text === (empty ? '' : show(v))
+            if (onFix) {
+              setD({ editing: null })
+              if (!same) onFix(k, text)
+              return
+            }
             const edits = { ...d.edits }
             if (same) delete edits[k]
             else edits[k] = text
@@ -5200,8 +6662,12 @@ function Fields({
             <input
               type="checkbox"
               checked={on}
-              disabled={revising}
+              disabled={revising || (Boolean(onFix) && LISTING_SWITCHES.has(k))}
               onChange={e => {
+                if (onFix) {
+                  onFix(k, e.target.checked ? 'true' : 'false')
+                  return
+                }
                 // Back to how it was is not an edit.
                 const edits = { ...d.edits }
                 if (e.target.checked === (v === true)) delete edits[k]
@@ -5769,6 +7235,7 @@ function EditableValue({
       <>
         {icon}
         {shown}
+        {edited && <em className={styles.edited}>edited</em>}
       </>
     )
   return (
@@ -5939,20 +7406,25 @@ function CopyReply({ text, className }: { text: string; className?: string }) {
   )
 }
 
-/** The conversation the request came from, in Discord. */
+/** The conversation the request came from, opened in the Discord app,
+ *  where the reply is pasted (Bryce, 15 Oct 2026: "it could open the
+ *  specific thread"). */
 function OpenOnDiscord({
   href,
   className,
+  onOpen,
 }: {
   href: string
   className?: string
+  onOpen?: () => void
 }) {
+  const app = discordAppLink(href)
   return (
     <a
       className={className ?? styles.ghost}
-      href={href}
-      target="_blank"
-      rel="noreferrer"
+      href={app}
+      {...(app === href ? { target: '_blank', rel: 'noreferrer' } : {})}
+      onClick={onOpen}
     >
       <Icon src={ICON.external} size={16} />
       Open on Discord
@@ -5995,51 +7467,124 @@ function ReplyDraft({
   )
 }
 
-/** What the Mac's test of a rule on the owner's past decisions found
- *  (~/Queue/replay.py, 9 Oct 2026): one line, Fable's take, then each
- *  decision it would have changed, "Goes against you" first; the ones where
- *  his call stands sit behind a fold. */
-function RuleTestBlock({ test }: { test: RuleTest | null }) {
-  if (!test) {
-    return (
-      <section className={styles.block}>
-        <h3 className={styles.h3}>Tested on your past decisions</h3>
-        <p className={styles.note}>
-          Not tested yet. The Mac tests each new rule on your past decisions
-          within a few minutes.
-        </p>
-      </section>
-    )
-  }
-  const changed = test.results.filter(r => r.outcome !== 'keeps')
-  const same = test.results.filter(r => r.outcome === 'keeps')
+/** A rule, bare (Bryce, 18 Oct 2026: "I find each Rule page too text
+ *  heavy, please reduce it to just the bare essentials"): the first
+ *  sentence of what changes, one line on the test on his past decisions
+ *  with its counts as labels, and only the results that need him (goes
+ *  against him, can't tell) spelled out. The rest of the summary, Fable's
+ *  take on the test, every other result, where it applies and the exact
+ *  wording wait behind one Details fold. */
+function RuleCard({ item }: { item: QueueItem }) {
+  const { lead, rest } = leadSentence(
+    item.summary ?? 'No summary was written for this rule.'
+  )
+  const test = item.ruleTest
+  const needsYou =
+    test?.results.filter(
+      r => r.outcome === 'breaks' || r.outcome === 'unclear'
+    ) ?? []
+  const others =
+    test?.results.filter(
+      r => r.outcome !== 'breaks' && r.outcome !== 'unclear'
+    ) ?? []
+  const hasDetails =
+    Boolean(rest) ||
+    Boolean(test?.summary) ||
+    others.length > 0 ||
+    (Boolean(item.appliesTo) && !item.rulePublicPolicy) ||
+    Boolean(item.ruleWording)
   return (
     <section className={styles.block}>
-      <h3 className={styles.h3}>Tested on your past decisions</h3>
-      <p className={styles.summary}>{ruleTestHeadline(test)}</p>
-      {test.summary && <p className={styles.note}>{test.summary}</p>}
-      {changed.length > 0 && (
+      <p className={styles.summary}>{lead}</p>
+      {item.rulePublicPolicy ? (
+        // The policy check's rows change aisafety.com/listing-policy only;
+        // replay.py skips them, so "Not tested yet" was never coming true.
+        <p className={styles.note}>
+          Not tested, as no bot reads the public listing policy. Apply puts this
+          wording on aisafety.com/listing-policy.
+        </p>
+      ) : !test ? (
+        <p className={styles.note}>
+          Not tested yet. The Mac tests it on your past decisions within a few
+          minutes.
+        </p>
+      ) : (
+        <p className={styles.ruleStat}>
+          <span>{ruleTestShort(test)}</span>
+          {RULE_OUTCOMES.filter(o => test.counts[o] > 0).map(o => (
+            <span key={o} className={styles.ruleTestOutcome} data-outcome={o}>
+              {OUTCOME_LABEL[o]} {test.counts[o]}
+            </span>
+          ))}
+        </p>
+      )}
+      {needsYou.length > 0 && (
         <ul className={styles.ruleTest}>
-          {changed.map(r => (
+          {needsYou.map(r => (
             <RuleTestLine key={r.row} result={r} />
           ))}
         </ul>
       )}
-      {same.length > 0 && (
+      {hasDetails && (
         <details className={styles.findingMore}>
-          <summary>
-            {same.length === 1
-              ? '1 more it touches, same as you'
-              : `${same.length} more it touches, same as you`}
-          </summary>
-          <ul className={styles.ruleTest}>
-            {same.map(r => (
-              <RuleTestLine key={r.row} result={r} />
-            ))}
-          </ul>
+          <summary>Details</summary>
+          <div className={styles.block}>
+            {rest && <p className={styles.ruleMore}>{rest}</p>}
+            {test?.summary && <p className={styles.ruleMore}>{test.summary}</p>}
+            {others.length > 0 && (
+              <ul className={styles.ruleTest}>
+                {others.map(r => (
+                  <RuleTestLine key={r.row} result={r} />
+                ))}
+              </ul>
+            )}
+            {item.appliesTo && !item.rulePublicPolicy && (
+              <p className={styles.note}>Applies to {item.appliesTo}</p>
+            )}
+            {item.ruleWording && (
+              // The rule as it will read (9 Sept 2026: no diffs on the
+              // card; 5 Oct 2026: the words a click away).
+              <>
+                <h3 className={styles.h3}>Exact wording</h3>
+                <blockquote className={styles.quote}>
+                  {item.ruleWording}
+                </blockquote>
+              </>
+            )}
+            {item.ruleWas && (
+              <>
+                <h3 className={styles.h3}>Replaces</h3>
+                <blockquote className={`${styles.quote} ${styles.from}`}>
+                  {item.ruleWas}
+                </blockquote>
+              </>
+            )}
+          </div>
         </details>
       )}
     </section>
+  )
+}
+
+const RULE_OUTCOMES = ['breaks', 'unclear', 'fixes', 'keeps'] as const
+
+/** The aside's bullets on a rule: what it came from, open to begin with
+ *  and folded on a click (Bryce, 18 Oct 2026: "make the where it came from
+ *  show by default"). The
+ *  policy check's "Accept puts it on …" line is left out, as the card
+ *  says so itself. */
+function RuleReasons({ reasons }: { reasons: string[] }) {
+  const shown = reasons.filter(r => !/^Accept puts it on /i.test(r))
+  if (shown.length === 0) return null
+  return (
+    <details className={styles.findingMore} open>
+      <summary>Where it came from ({shown.length})</summary>
+      <ul className={styles.reasons}>
+        {shown.map((r, i) => (
+          <li key={i}>{r}</li>
+        ))}
+      </ul>
+    </details>
   )
 }
 
@@ -6059,6 +7604,67 @@ function RuleTestLine({ result: r }: { result: RuleTestResult }) {
   )
 }
 
+/** A tab with nothing left: "You're done!", with fireworks when the last
+ *  decision has just landed, and the way on to a tab that still has some.
+ *  The heading sets off another round. */
+function TabDone({
+  kind,
+  done,
+  waiting,
+  cheer,
+  onCheered,
+  onAgain,
+  onNext,
+}: {
+  kind: Kind
+  /** Decided today on this tab. */
+  done: number
+  waiting: Record<Kind, number>
+  /** The round of fireworks to play, if any. */
+  cheer: number | null
+  onCheered: () => void
+  onAgain: () => void
+  onNext: (kind: Kind) => void
+}) {
+  const at = KINDS.findIndex(k => k.key === kind)
+  const next = [...KINDS.slice(at + 1), ...KINDS.slice(0, at)].find(
+    k => waiting[k.key] > 0
+  )
+  const label = KINDS[at].label.toLowerCase()
+  return (
+    <div className={styles.tabDone}>
+      {cheer !== null && <Fireworks key={`fw-${cheer}`} onDone={onCheered} />}
+      {done > 0 ? (
+        <button
+          key={`title-${cheer ?? 'still'}`}
+          className={`${styles.tabDoneTitle} ${cheer !== null ? styles.tabDonePop : ''}`}
+          onClick={onAgain}
+          title="Again!"
+        >
+          You&rsquo;re done!
+        </button>
+      ) : (
+        <p className={styles.tabDoneTitle}>All clear</p>
+      )}
+      <p className={styles.tabDoneNote}>
+        No {label} waiting
+        {done > 0 && ` \u00b7 ${done} decided today`}
+      </p>
+      {next ? (
+        <button
+          className={`${styles.button} ${styles.primary}`}
+          onClick={() => onNext(next.key)}
+        >
+          On to {next.label}
+          <span className={styles.segCount}>{waiting[next.key]}</span>
+        </button>
+      ) : (
+        <p className={styles.tabDoneNote}>The whole queue is clear.</p>
+      )}
+    </div>
+  )
+}
+
 function DoneList({
   items,
   activeId,
@@ -6066,6 +7672,7 @@ function DoneList({
   busyFor,
   errorFor,
   onUndo,
+  onReopen,
   onOpen,
 }: {
   items: QueueItem[]
@@ -6077,6 +7684,8 @@ function DoneList({
   errorFor: (id: string) => string | null
   /** Null for a view-only session: decisions are shown, not undone. */
   onUndo: ((item: QueueItem) => void) | null
+  /** Bring a declined addition back (null for a view-only session). */
+  onReopen: ((item: QueueItem) => void) | null
   /** Open a decision: the item as it was decided. */
   onOpen: (id: string) => void
 }) {
@@ -6095,10 +7704,6 @@ function DoneList({
         </span>
         Done today
       </h2>
-      <p className={styles.note}>
-        Published listings and field changes reach the site within about three
-        minutes.
-      </p>
       {search && (
         <p className={styles.note}>
           {items.length
@@ -6142,7 +7747,7 @@ function DoneList({
                 {item.source !== 'Comb' && <span>{item.source}</span>}
                 {item.page && <span>{pageLabel(item)}</span>}
                 <span
-                  className={`${styles.withIcon} ${item.status === 'Rejected' ? styles.no : styles.yes}`}
+                  className={`${styles.withIcon} ${isRejected(item) ? styles.no : styles.yes}`}
                 >
                   <Icon src={doneIcon(item)} size={12} />
                   {doneLabel(item)}
@@ -6150,6 +7755,7 @@ function DoneList({
                 {item.rejectReason && <span>{item.rejectReason}</span>}
                 {replyLabel(item) && <span>{replyLabel(item)}</span>}
                 <span>{ago(decidedAtOf(item))}</span>
+                {item.reopening && <ReopeningTag reopening={item.reopening} />}
               </span>
             </span>
             {/* The buttons act on their own, without opening the item. */}
@@ -6177,15 +7783,28 @@ function DoneList({
                     )}
                   </>
                 )}
-              {onUndo && (
+              {onReopen && takeBack(item) === 'reopen' ? (
                 <button
                   className={styles.ghost}
                   disabled={busyFor(item.id)}
-                  onClick={() => onUndo(item)}
+                  onClick={() => onReopen(item)}
+                  title="Bring it back: the listing is rebuilt if it was deleted (B)"
                 >
-                  <Icon src={ICON.undo} size={12} />
-                  {busyFor(item.id) ? 'Undoing…' : 'Undo'}
+                  <Icon src={ICON.reopen} size={12} />
+                  {busyFor(item.id) ? 'Reopening…' : 'Reopen'}
                 </button>
+              ) : (
+                onUndo &&
+                takeBack(item) === 'undo' && (
+                  <button
+                    className={styles.ghost}
+                    disabled={busyFor(item.id)}
+                    onClick={() => onUndo(item)}
+                  >
+                    <Icon src={ICON.undo} size={12} />
+                    {busyFor(item.id) ? 'Undoing…' : 'Undo'}
+                  </button>
+                )
               )}
             </span>
           </div>

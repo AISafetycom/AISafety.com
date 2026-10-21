@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { PAGES } from '@/lib/assistant/pages'
 import { DEFAULT_MODEL_ID, MODELS } from '@/lib/assistant/models'
 import styles from '../admin.module.css'
+import { Collapse } from '../Collapse'
 import Icon from '@/components/Icon'
 
 export interface ContextOverrides {
@@ -305,7 +306,7 @@ export default function EditorPanel({
                 className={styles.editorVersionListChevron}
               />
             </button>
-            {versionsOpen && (
+            <Collapse open={versionsOpen}>
               <div className={styles.editorVersionListBody}>
                 {versions.map(v => {
                   const isActive = v.id === loadedVersionId
@@ -353,7 +354,7 @@ export default function EditorPanel({
                   )
                 })}
               </div>
-            )}
+            </Collapse>
           </div>
         )}
       </div>

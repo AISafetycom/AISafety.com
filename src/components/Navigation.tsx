@@ -42,11 +42,6 @@ const navItems = [
   },
   { href: '/advisors', label: 'Advisors', icon: 'person.svg' },
   {
-    href: '/projects',
-    label: 'Volunteer projects',
-    icon: 'clipboard.svg',
-  },
-  {
     href: '/founders',
     label: 'Founder toolkit',
     icon: 'rocket.svg',
@@ -56,7 +51,7 @@ const navItems = [
 
 // Caps the visible row at 6 items — Funding and below live in the +N menu
 // (and the mobile menu, which always lists everything).
-const MIN_OVERFLOW = 6
+const MAX_VISIBLE = 6
 
 // How long the +N panel stays mounted after closing, for its exit animation.
 // Must match the transition on .nav-dropdown-closing in the CSS.
@@ -71,9 +66,7 @@ export default function Navigation({
 }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
-  const [visibleCount, setVisibleCount] = useState(
-    navItems.length - MIN_OVERFLOW
-  )
+  const [visibleCount, setVisibleCount] = useState(MAX_VISIBLE)
   const pathname = usePathname()
 
   // Close the mobile menu only once the new route is actually active.
@@ -121,7 +114,7 @@ export default function Navigation({
   )
   useEffect(() => cancelDropdownClose, [cancelDropdownClose])
   const navRef = useRef<HTMLElement>(null)
-  const navOuterRef = useRef<HTMLDivElement>(null)
+  const navOuterRef = useRef<HTMLElement>(null)
   const itemRefs = useRef<(HTMLAnchorElement | null)[]>([])
   const itemWidths = useRef<number[]>([])
   const scrollInfo = useRef({
@@ -149,8 +142,7 @@ export default function Navigation({
       count++
     }
 
-    const maxVisible = navItems.length - MIN_OVERFLOW
-    setVisibleCount(Math.min(count, maxVisible))
+    setVisibleCount(Math.min(count, MAX_VISIBLE))
   }, [])
 
   // Measure item widths and calculate before the browser paints — no jitter
@@ -338,7 +330,10 @@ export default function Navigation({
   }, [])
   return (
     <SearchProvider counts={counts} preview={preview}>
-      <div ref={navOuterRef} className={`${styles.nav} ${styles['nav-fixed']}`}>
+      <header
+        ref={navOuterRef}
+        className={`${styles.nav} ${styles['nav-fixed']}`}
+      >
         <div className={styles['nav-container']}>
           <Link href="/" className="padding-right-24px">
             <Image
@@ -453,7 +448,7 @@ export default function Navigation({
             </span>
           </button>
         </div>
-      </div>
+      </header>
 
       <div
         className={`${styles['mobile-menu']} ${isMenuOpen ? styles['mobile-menu-visible'] : ''}`}

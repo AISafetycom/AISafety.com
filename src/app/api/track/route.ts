@@ -71,5 +71,7 @@ export async function POST(req: NextRequest) {
   after(async () => {
     if (await allowTrack(ip)) await recordEvent(event)
   })
+  // The same answer on a preview deployment, which records nothing
+  // (writesSharedStore in events.ts): the page can't tell the difference.
   return new Response(null, { status: 204 })
 }

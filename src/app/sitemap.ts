@@ -27,7 +27,6 @@ const ROUTES = [
   '/media',
   '/media-channels',
   '/privacy',
-  '/projects',
   '/self-study',
   '/training',
 ] as const

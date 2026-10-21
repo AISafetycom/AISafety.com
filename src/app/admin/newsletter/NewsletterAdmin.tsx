@@ -15,7 +15,11 @@ import {
   wavesLabel,
 } from '@/lib/admin/newsletter-warmup'
 import Icon from '@/components/Icon'
+import { webPath } from '@/lib/newsletter-web'
 import adminStyles from '../admin.module.css'
+import { Collapse } from '../Collapse'
+import { useClosing } from '../motion'
+import motion from '../motion.module.css'
 import styles from './newsletter.module.css'
 import NewsletterAlerts from './NewsletterAlerts'
 
@@ -230,8 +234,6 @@ interface Recent {
   scheduledAt: string | null
   sentAt: string | null
   sentTo: number
-  uniqueOpens: number | null
-  unsubscribes: number | null
   listNames: string[]
   baseName: string
   wave: { wave: number; waves: number } | null
@@ -241,12 +243,6 @@ interface Recent {
   /** Rows of one issue on one list share it (they come next to each
    *  other) and are shown together. */
   group: string
-  /** Counted on aisafety.com (the links go through /api/nl since 28 Sept
-   *  2026); zero for older sends. Per issue: every wave carries the same. */
-  clicks: {
-    total: number
-    links: Array<{ label: string; url: string; clicks: number }>
-  }
   /** What an approver may do to it now. */
   actions: StopAction[]
 }
@@ -285,9 +281,9 @@ const LINEUP: Array<{
 ]
 
 /** How often the page rereads ActiveCampaign on its own, so an approved
- *  issue turns from "scheduled" into "sent" (and the opens move) without a
- *  click (Bryce, 16 Sept 2026: "this should automatically update without me
- *  needing to refresh"). A read is several AC calls and takes a few seconds,
+ *  issue turns from "scheduled" into "sent" without a click (Bryce, 16 Sept
+ *  2026: "this should automatically update without me needing to
+ *  refresh"). A read is several AC calls and takes a few seconds,
  *  so no faster than this; the Refresh button is still there for right now. */
 const POLL_MS = 30_000
 
@@ -513,19 +509,11 @@ function rowTarget(row: Recent, rows: Recent[]): StopTarget {
   }
 }
 
-/** "lensacademy.org" for a link's destination (no www, no path). */
-function hostOf(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '')
-  } catch {
-    return url
-  }
-}
-
 export default function NewsletterAdmin({
   canSend,
   testTo,
   canQueue = false,
+  canAnalytics = false,
 }: {
   /** This session may approve (from the server, so it is known before the
    *  ActiveCampaign read finishes). Picks which notice shows at the top; the
@@ -536,13 +524,13 @@ export default function NewsletterAdmin({
   testTo: string | null
   /** May decide Queue items: Fix on a changed listing applies a Broom item. */
   canQueue?: boolean
+  /** May open /admin/analytics, where each issue's numbers are. */
+  canAnalytics?: boolean
 }) {
   const [data, setData] = useState<Payload | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [previewId, setPreviewId] = useState<string | null>(null)
-  /** The send whose per-link clicks are open under its row. */
-  const [openClicks, setOpenClicks] = useState<string | null>(null)
   /** Bumped after a reorder or a text edit so the preview frame reloads. */
   const [previewNonce, setPreviewNonce] = useState(0)
   /** Where the reader is in the preview (the frame posts it as it scrolls),
@@ -583,6 +571,9 @@ export default function NewsletterAdmin({
   const [stopBusyId, setStopBusyId] = useState<string | null>(null)
   /** The draft whose Delete dialog is open, and the one being deleted. */
   const [deleting, setDeleting] = useState<Draft | null>(null)
+  const [confirmShown, confirmClosing] = useClosing(confirming)
+  const [deleteShown, deleteClosing] = useClosing(deleting)
+  const [stopShown, stopClosing] = useClosing(stopping)
   const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null)
   const [notice, setNotice] = useState<{
     kind: 'ok' | 'error'
@@ -1539,7 +1530,7 @@ export default function NewsletterAdmin({
               )}
               {/* The preview brings the reorder panel with it (approvers only;
                   no separate button — Bryce, 11 Sept 2026). */}
-              {previewId === draft.id && (
+              <Collapse open={previewId === draft.id}>
                 <div className={styles.previewRow}>
                   {data.canSend && draft.cards && draft.editable && (
                     <div className={styles.reorderSide}>
@@ -1558,7 +1549,9 @@ export default function NewsletterAdmin({
                     </div>
                   )}
                   <iframe
-                    ref={previewFrame}
+                    // Only the open preview holds the ref: one that is still
+                    // closing must not take it from the one opening.
+                    ref={previewId === draft.id ? previewFrame : undefined}
                     title={`Preview of ${draft.subject}`}
                     className={styles.previewFrame}
                     // Links in the email open in a new, ordinary tab (the
@@ -1572,7 +1565,7 @@ export default function NewsletterAdmin({
                     }&v=${previewNonce}#y=${previewY}`}
                   />
                 </div>
-              )}
+              </Collapse>
             </div>
           )
         })}
@@ -1602,22 +1595,15 @@ export default function NewsletterAdmin({
                   <th>Issue</th>
                   <th>Sent</th>
                   <th className={styles.num}>Sent to</th>
-                  <th className={styles.num}>Opened</th>
-                  <th className={styles.num}>Clicks</th>
-                  <th className={styles.num}>Unsubscribed</th>
                 </tr>
               </thead>
               {/* One body per issue, so the alternating shade covers an
-                  issue's waves and its clicks list together. */}
+                  issue's waves together. */}
               {groupRecent(data.recent).map(rows => (
                 <tbody key={rows[0].group}>
                   <SendRows
                     rows={rows}
                     canSend={data.canSend}
-                    openClicks={openClicks}
-                    onToggleClicks={key =>
-                      setOpenClicks(openClicks === key ? null : key)
-                    }
                     stopBusyId={stopBusyId}
                     onStop={(row, action) =>
                       setStopping({ target: rowTarget(row, rows), action })
@@ -1628,39 +1614,59 @@ export default function NewsletterAdmin({
             </table>
           </div>
         )}
+        {/* The numbers live in Analytics now (Bryce, 14 Oct 2026); this
+            table keeps what's needed while an issue goes out. */}
+        {data && data.recent.length > 0 && canAnalytics && (
+          <p className={styles.tableNote}>
+            Opens, clicks, unsubscribes, bounces, and spam reports for each
+            issue are in{' '}
+            <a href="/admin/analytics?tab=newsletters">
+              Analytics → Newsletters
+            </a>
+            .
+          </p>
+        )}
       </div>
 
-      {confirming && (
+      {confirmShown && (
         <ConfirmSend
           // New warnings or holds (after a refused approval) start afresh.
           key={[
-            ...confirming.draft.warnings.map(w => w.id),
-            ...confirming.holds,
+            ...confirmShown.draft.warnings.map(w => w.id),
+            ...confirmShown.holds,
           ].join(' ')}
-          draft={confirming.draft}
-          choice={confirming.choice}
-          holds={confirming.holds}
-          changed={alertsFor(confirming.draft.id)}
-          schedule={confirming.schedule}
+          draft={confirmShown.draft}
+          choice={confirmShown.choice}
+          holds={confirmShown.holds}
+          changed={alertsFor(confirmShown.draft.id)}
+          schedule={confirmShown.schedule}
+          closing={confirmClosing}
           onCancel={() => setConfirming(null)}
           onConfirm={(confirmed, override) =>
-            void send(confirming.draft, confirming.choice, confirmed, override)
+            void send(
+              confirmShown.draft,
+              confirmShown.choice,
+              confirmed,
+              override
+            )
           }
         />
       )}
-      {deleting && (
+      {deleteShown && (
         <ConfirmDelete
-          draft={deleting}
+          draft={deleteShown}
+          closing={deleteClosing}
           onCancel={() => setDeleting(null)}
-          onConfirm={() => void removeDraft(deleting)}
+          onConfirm={() => void removeDraft(deleteShown)}
         />
       )}
-      {stopping && (
+      {stopShown && (
         <ConfirmStop
-          target={stopping.target}
-          action={stopping.action}
+          target={stopShown.target}
+          action={stopShown.action}
+          closing={stopClosing}
           onCancel={() => setStopping(null)}
-          onConfirm={() => void stopSend(stopping.target, stopping.action)}
+          onConfirm={() => void stopSend(stopShown.target, stopShown.action)}
         />
       )}
     </div>
@@ -1753,6 +1759,7 @@ function ReorderPanel({
     gid: string
     card: CardInfo
   } | null>(null)
+  const [removeShown, removeClosing] = useClosing(removing)
   /** A removal in flight, or how the last one went (said in the panel). */
   const [removeNote, setRemoveNote] = useState<{
     kind: 'busy' | 'ok' | 'error'
@@ -2253,8 +2260,8 @@ function ReorderPanel({
                     <Icon src="/images/icons/trash.svg" size={16} />
                   </button>
                 </li>,
-                open && (
-                  <li key={`${c.key}-edit`} className={styles.fitEditor}>
+                <Collapse as="li" key={`${c.key}-edit`} open={open}>
+                  <div className={styles.fitEditor}>
                     {c.fields.map((f, n) => {
                       const v = values[f.name] ?? f.value
                       const vPlain = v.replace(/\s+/g, ' ').trim()
@@ -2382,8 +2389,8 @@ function ReorderPanel({
                                 ? 'All changes saved to the draft.'
                                 : 'Changes save by themselves as you type.'}
                     </p>
-                  </li>
-                ),
+                  </div>
+                </Collapse>,
               ]
             })}
           </ol>
@@ -2432,11 +2439,12 @@ function ReorderPanel({
           {removeNote.kind === 'busy' && slowNote}
         </p>
       )}
-      {removing && (
+      {removeShown && (
         <ConfirmRemoveCard
-          title={removing.card.title}
+          title={removeShown.card.title}
+          closing={removeClosing}
           onCancel={() => setRemoving(null)}
-          onConfirm={() => void removeCard(removing.gid, removing.card)}
+          onConfirm={() => void removeCard(removeShown.gid, removeShown.card)}
         />
       )}
     </div>
@@ -2571,9 +2579,12 @@ function ConfirmSend({
   holds,
   schedule,
   changed = [],
+  closing = false,
   onCancel,
   onConfirm,
 }: {
+  /** Playing its closing animation: shown, but no longer usable. */
+  closing?: boolean
   draft: Draft
   /** Listings in the email that changed since it was built, still unfixed:
    *  sending anyway takes its own tick. */
@@ -2635,9 +2646,13 @@ function ConfirmSend({
   }, [onCancel])
 
   return (
-    <div className={styles.overlay} onClick={onCancel}>
+    <div
+      className={`${styles.overlay} ${closing ? motion.fadeOut : motion.fade}`}
+      onClick={onCancel}
+      inert={closing}
+    >
       <div
-        className={styles.dialog}
+        className={`${styles.dialog} ${closing ? motion.riseOut : motion.rise}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-send-title"
@@ -3047,21 +3062,16 @@ function LineupCounts({
 }
 
 /** One issue's rows in Recent sends. A single whole-list send is one row; an
- *  issue sent in waves gets a row with its totals (and its clicks, which
- *  are counted per issue), then a row per wave. Sends to a test list are
- *  dimmed and tagged, so the real ones stand out. */
+ *  issue sent in waves gets a row with its total, then a row per wave. Sends
+ *  to a test list are dimmed and tagged, so the real ones stand out. */
 function SendRows({
   rows,
   canSend,
-  openClicks,
-  onToggleClicks,
   stopBusyId,
   onStop,
 }: {
   rows: Recent[]
   canSend: boolean
-  openClicks: string | null
-  onToggleClicks: (key: string) => void
   stopBusyId: string | null
   onStop: (row: Recent, action: StopAction) => void
 }) {
@@ -3080,28 +3090,58 @@ function SendRows({
         ? null
         : first.listNames.join(', ')
 
+  // The issue opens its web version (Bryce, 20 Oct 2026), which shows an
+  // issue once a send of it has reached readers on the newsletter's own
+  // list (reachedReaders in src/lib/admin/newsletter.ts); before that, or
+  // for a test send, the page would only say it isn't online.
+  const reached = (r: Recent) =>
+    r.status === 'sending' ||
+    r.status === 'sent' ||
+    ((r.status === 'paused' || r.status === 'stopped') && r.sentTo > 0)
+  const webHref =
+    !isTest && otherList == null && rows.some(reached)
+      ? webPath(first.baseName)
+      : null
+
+  const nameParts = (
+    <>
+      {newsletter && (
+        <>
+          <span
+            className={`${styles.dot} ${NEWSLETTER_DOTS[newsletter] ?? ''}`}
+            aria-hidden="true"
+          />
+          <span className={styles.newsletterName}>{newsletter}</span>
+        </>
+      )}
+      <span className={webHref ? styles.issueLinkText : undefined}>
+        {issue}
+      </span>
+      {isTest && (
+        <span
+          className={styles.tag}
+          title={`Sent to the test list ${first.listNames.join(', ')}`}
+        >
+          Test
+        </span>
+      )}
+    </>
+  )
   const issueCell = (sub: string | null) => (
     <td>
-      <span className={styles.issueName}>
-        {newsletter && (
-          <>
-            <span
-              className={`${styles.dot} ${NEWSLETTER_DOTS[newsletter] ?? ''}`}
-              aria-hidden="true"
-            />
-            <span className={styles.newsletterName}>{newsletter}</span>
-          </>
-        )}
-        <span>{issue}</span>
-        {isTest && (
-          <span
-            className={styles.tag}
-            title={`Sent to the test list ${first.listNames.join(', ')}`}
-          >
-            Test
-          </span>
-        )}
-      </span>
+      {webHref ? (
+        <a
+          href={webHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`${styles.issueName} ${styles.issueLink}`}
+          title="Open the web version"
+        >
+          {nameParts}
+        </a>
+      ) : (
+        <span className={styles.issueName}>{nameParts}</span>
+      )}
       {(otherList || sub) && (
         <span className={styles.subline}>
           {[otherList && `to ${otherList}`, sub].filter(Boolean).join(' · ')}
@@ -3181,88 +3221,24 @@ function SendRows({
     ) : (
       n.toLocaleString('en-US')
     )
-  const opened = (opens: number | null, to: number | null) => (
-    <>
-      {count(opens)}
-      {opens != null && to != null && to > 0 && (
-        <span className={styles.rate}>{Math.round((opens / to) * 100)}%</span>
-      )}
-    </>
-  )
-  const clicksButton = (r: Recent, key: string) =>
-    r.clicks.total > 0 ? (
-      <button
-        type="button"
-        className={styles.clicksButton}
-        aria-expanded={openClicks === key}
-        title="Which links were clicked"
-        onClick={() => onToggleClicks(key)}
-      >
-        {r.clicks.total.toLocaleString('en-US')}
-        <span aria-hidden="true">{openClicks === key ? ' ▴' : ' ▾'}</span>
-      </button>
-    ) : (
-      <span className={styles.muted}>0</span>
-    )
-  const clicksRow = (r: Recent, key: string) =>
-    openClicks === key && (
-      <tr className={styles.clicksTr}>
-        <td colSpan={6} className={styles.clicksCell}>
-          <ol className={styles.clicksList}>
-            {r.clicks.links.map(l => (
-              <li key={l.url} className={styles.clicksRow}>
-                <span className={styles.clicksCount}>{l.clicks}</span>
-                {/* Its share of the issue's clicks. */}
-                <span className={styles.clicksShare}>
-                  {Math.round((l.clicks / r.clicks.total) * 100)}%
-                </span>
-                <span>{l.label}</span>
-                <a
-                  href={l.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={styles.muted}
-                >
-                  {hostOf(l.url)}
-                </a>
-              </li>
-            ))}
-          </ol>
-        </td>
-      </tr>
-    )
   const rowClass = (extra?: string) =>
     [isTest && styles.testRow, extra].filter(Boolean).join(' ') || undefined
 
   if (!waved) {
     return (
-      <>
-        <tr className={rowClass()}>
-          {issueCell(null)}
-          {sentCell(first)}
-          <td className={styles.num}>{count(first.sentTo)}</td>
-          <td className={styles.num}>
-            {opened(first.uniqueOpens, first.sentTo)}
-          </td>
-          <td className={styles.num}>{clicksButton(first, first.id)}</td>
-          <td className={styles.num}>{count(first.unsubscribes)}</td>
-        </tr>
-        {clicksRow(first, first.id)}
-      </>
+      <tr className={rowClass()}>
+        {issueCell(null)}
+        {sentCell(first)}
+        <td className={styles.num}>{count(first.sentTo)}</td>
+      </tr>
     )
   }
-  const sum = (pick: (r: Recent) => number | null) => {
-    const vals = rows.map(pick).filter((v): v is number => v != null)
-    return vals.length ? vals.reduce((a, b) => a + b, 0) : null
-  }
-  const groupKey = `issue:${first.group}`
   const newestSent = rows
     .map(r => r.sentAt)
     .filter((s): s is string => s != null)
     .sort()
     .pop()
   const waves = first.wave?.waves
-  const sentTo = sum(r => r.sentTo)
   return (
     <>
       <tr className={rowClass(styles.groupRow)}>
@@ -3271,20 +3247,15 @@ function SendRows({
         )}
         <td>
           {newestSent && (
-            <span title={when(newestSent)}>{whenShort(newestSent)}</span>
+            <span className={styles.sentLine} title={when(newestSent)}>
+              {whenShort(newestSent)}
+            </span>
           )}
         </td>
-        <td className={styles.num}>{count(sentTo)}</td>
         <td className={styles.num}>
-          {opened(
-            sum(r => r.uniqueOpens),
-            sentTo
-          )}
+          {count(rows.reduce((n, r) => n + r.sentTo, 0))}
         </td>
-        <td className={styles.num}>{clicksButton(first, groupKey)}</td>
-        <td className={styles.num}>{count(sum(r => r.unsubscribes))}</td>
       </tr>
-      {clicksRow(first, groupKey)}
       {rows.map(r => (
         <tr key={r.id} className={rowClass(styles.waveSubRow)}>
           <td>
@@ -3293,11 +3264,6 @@ function SendRows({
           </td>
           {sentCell(r)}
           <td className={styles.num}>{count(r.sentTo)}</td>
-          <td className={styles.num}>{opened(r.uniqueOpens, r.sentTo)}</td>
-          <td className={styles.num} title="Clicks are counted per issue">
-            <span className={styles.muted}>–</span>
-          </td>
-          <td className={styles.num}>{count(r.unsubscribes)}</td>
         </tr>
       ))}
     </>
@@ -3333,9 +3299,12 @@ function Countdown({ to }: { to: string }) {
 /** Confirmation for a draft's Delete button. Focus starts on "Go back". */
 function ConfirmDelete({
   draft,
+  closing = false,
   onCancel,
   onConfirm,
 }: {
+  /** Playing its closing animation: shown, but no longer usable. */
+  closing?: boolean
   draft: Draft
   onCancel: () => void
   onConfirm: () => void
@@ -3352,9 +3321,13 @@ function ConfirmDelete({
   const midWaves =
     !draft.alreadySent && (draft.waves?.waves.some(w => w.sent) ?? false)
   return (
-    <div className={styles.overlay} onClick={onCancel}>
+    <div
+      className={`${styles.overlay} ${closing ? motion.fadeOut : motion.fade}`}
+      onClick={onCancel}
+      inert={closing}
+    >
       <div
-        className={styles.dialog}
+        className={`${styles.dialog} ${closing ? motion.riseOut : motion.rise}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-delete-title"
@@ -3395,9 +3368,12 @@ function ConfirmDelete({
  *  words. Focus starts on "Go back". */
 function ConfirmRemoveCard({
   title,
+  closing = false,
   onCancel,
   onConfirm,
 }: {
+  /** Playing its closing animation: shown, but no longer usable. */
+  closing?: boolean
   title: string
   onCancel: () => void
   onConfirm: () => void
@@ -3412,9 +3388,13 @@ function ConfirmRemoveCard({
     return () => window.removeEventListener('keydown', onKey)
   }, [onCancel])
   return (
-    <div className={styles.overlay} onClick={onCancel}>
+    <div
+      className={`${styles.overlay} ${closing ? motion.fadeOut : motion.fade}`}
+      onClick={onCancel}
+      inert={closing}
+    >
       <div
-        className={styles.dialog}
+        className={`${styles.dialog} ${closing ? motion.riseOut : motion.rise}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-remove-card-title"
@@ -3456,9 +3436,12 @@ function ConfirmRemoveCard({
 function ConfirmStop({
   target: row,
   action,
+  closing = false,
   onCancel,
   onConfirm,
 }: {
+  /** Playing its closing animation: shown, but no longer usable. */
+  closing?: boolean
   target: StopTarget
   action: StopAction
   onCancel: () => void
@@ -3526,9 +3509,13 @@ function ConfirmStop({
     }
   const t = text[action]
   return (
-    <div className={styles.overlay} onClick={onCancel}>
+    <div
+      className={`${styles.overlay} ${closing ? motion.fadeOut : motion.fade}`}
+      onClick={onCancel}
+      inert={closing}
+    >
       <div
-        className={styles.dialog}
+        className={`${styles.dialog} ${closing ? motion.riseOut : motion.rise}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-stop-title"

@@ -31,7 +31,9 @@ export default function LayoutShell({
   return (
     <>
       <Navigation counts={counts} preview={preview} />
-      {children}
+      {/* The page's own content, marked as the main landmark so screen-reader
+          users can jump straight past the menu to it. */}
+      <main>{children}</main>
       <Footer />
       <Assistant />
       <MapPreload />

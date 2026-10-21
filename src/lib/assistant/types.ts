@@ -5,7 +5,6 @@ export type ListingType =
   | 'community'
   | 'course'
   | 'founder-resource'
-  | 'project'
   | 'media-channel'
   | 'org'
   | 'event'

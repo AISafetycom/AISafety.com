@@ -5,6 +5,37 @@
   min-height: 100vh;
   background-color: var(--teal-900);
   color: var(--white);
+  /* Open and close timings for every admin panel (motion.module.css). */
+  --admin-open: 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --admin-close: 100ms ease-in;
+}
+
+/* Every <details> in the admin (Show as a table, Details, Show listings)
+   opens and closes with a quick fade. The height grows too where the
+   browser can animate to auto (Chrome); elsewhere it just fades. */
+@media (prefers-reduced-motion: no-preference) {
+  .adminWrap details {
+    interpolate-size: allow-keywords;
+  }
+
+  .adminWrap details::details-content {
+    block-size: 0;
+    opacity: 0;
+    overflow-y: clip;
+    transition:
+      block-size var(--admin-close),
+      opacity var(--admin-close),
+      content-visibility var(--admin-close) allow-discrete;
+  }
+
+  .adminWrap details[open]::details-content {
+    block-size: auto;
+    opacity: 1;
+    transition:
+      block-size var(--admin-open),
+      opacity var(--admin-open),
+      content-visibility var(--admin-open) allow-discrete;
+  }
 }
 
 /* ─── Top bar ─────────────────────────────────────────────────────────── */

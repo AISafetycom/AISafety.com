@@ -124,19 +124,22 @@ export function isRecordId(id: string): boolean {
   return RECORD_ID_RE.test(id)
 }
 
+/** The shapes a request path takes: a table id, optionally a record id in
+ *  it (optionally its comments), optionally a query string as
+ *  URLSearchParams writes it. Checked right before the URL is built, so a
+ *  value that reached here from a request body or query string can only
+ *  name a table or record of this base. */
+const REQUEST_PATH_RE =
+  /^tbl[A-Za-z0-9]{14}(\/rec[A-Za-z0-9]{14}(\/comments)?)?(\?[A-Za-z0-9%&=+*._-]*)?$/
+
 export async function airtableRequest(
   path: string,
   init: RequestInit = {}
 ): Promise<Response> {
-  // Resolve the path against this base's URL and refuse anything that
-  // escapes it, so a request-supplied value can never point the call at
-  // another table, another base, or another host.
-  const base = `${AIRTABLE_ORIGIN}/v0/${BASE}/`
-  const url = new URL(path, base)
-  if (url.origin !== AIRTABLE_ORIGIN || !url.href.startsWith(base)) {
+  if (!REQUEST_PATH_RE.test(path)) {
     throw new Error('Airtable request path escapes the base')
   }
-  return fetch(url, {
+  return fetch(`${AIRTABLE_ORIGIN}/v0/${BASE}/${path}`, {
     ...init,
     headers: {
       Authorization: `Bearer ${TOKEN}`,
@@ -253,7 +256,10 @@ export interface ConversationData {
 /** What the visitor's browser reported about one reply — the signals the
  *  server can't see. Every duration is milliseconds from the moment the
  *  visitor sent their message. Exactly one of received/stopped/error/left is
- *  expected per turn (the outcome); the rest are context around it. Absent
+ *  expected per send (the outcome); the rest are context around it. A failed
+ *  reply the visitor retried (Try again, or the same message re-sent) gets a
+ *  second outcome on the same entry, so an error, stop or page-leave next to
+ *  `received` means the retry worked; its times are from the re-send. Absent
  *  entirely on turns from before this was tracked, on browsers the owner
  *  excluded from logging, and when the report never reached us (e.g. the tab
  *  was closed and the browser dropped the final request). */
@@ -593,8 +599,37 @@ export async function listConversationsForStats(range: {
   endMs: number | null
 }): Promise<ConversationRow[]> {
   ensureConfig(CONVERSATIONS_TABLE)
-  // IS_AFTER/IS_BEFORE are strict, so widen each bound by 1ms to keep the
-  // range's own endpoints included.
+  const params = createdInRange(range)
+  params.set('returnFieldsByFieldId', 'true')
+  params.append('fields[]', FIELD.data)
+  params.append('fields[]', FIELD.clicked)
+  params.append('fields[]', FIELD.ratings)
+  const rows = await listAll<ConversationFields>(CONVERSATIONS_TABLE, params)
+  return rows.map(rowToConversation)
+}
+
+/** When each conversation in a range began (epoch ms), reading one short
+ *  field per row rather than the transcripts: the Chatbot tab's comparison
+ *  with the stretch before its range. */
+export async function listConversationTimes(range: {
+  startMs: number | null
+  endMs: number | null
+}): Promise<number[]> {
+  ensureConfig(CONVERSATIONS_TABLE)
+  const params = createdInRange(range)
+  params.set('returnFieldsByFieldId', 'true')
+  params.append('fields[]', FIELD.session)
+  const rows = await listAll<ConversationFields>(CONVERSATIONS_TABLE, params)
+  return rows.map(r => Date.parse(r.createdTime))
+}
+
+/** The filter for rows created inside a range. IS_AFTER/IS_BEFORE are
+ *  strict, so each bound is widened by 1ms to keep the range's own endpoints
+ *  included. */
+function createdInRange(range: {
+  startMs: number | null
+  endMs: number | null
+}): URLSearchParams {
   const parts: string[] = []
   if (range.startMs != null) {
     const iso = new Date(range.startMs - 1).toISOString()
@@ -611,12 +646,7 @@ export async function listConversationsForStats(range: {
       parts.length === 1 ? parts[0] : `AND(${parts.join(', ')})`
     )
   }
-  params.set('returnFieldsByFieldId', 'true')
-  params.append('fields[]', FIELD.data)
-  params.append('fields[]', FIELD.clicked)
-  params.append('fields[]', FIELD.ratings)
-  const rows = await listAll<ConversationFields>(CONVERSATIONS_TABLE, params)
-  return rows.map(rowToConversation)
+  return params
 }
 
 export async function updateConversation(

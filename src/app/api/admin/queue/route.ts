@@ -10,14 +10,26 @@
        Airtable itself – what the Mac worker does every five minutes, done
        now for the page's refreshes. A write, so it takes the edit grant;
        a viewer gets the plain list.
+  GET  /api/admin/queue?decided=1              → { items } – every decided row,
+       newest decision first, for the search's "Earlier" group (read only
+       while a search is typed)
+  GET  /api/admin/queue?id=<rec>               → { item } – one row as it is now
+       (the page follows a Reopen with it until the Mac is done)
   GET  /api/admin/queue?target=<tbl>/<rec>     → { fields, attachments, schema } (live)
   GET  /api/admin/queue?order=<tbl>            → { order } – the page's published
        listings by Sort, for placing an addition (null for a table with no Sort)
   POST /api/admin/queue  body { id, action, edits?, reason?, replyDraft? } → { item }
-       action: accept | reject | edit | later | undo
+       action: accept | reject | edit | later | undo | flag | reopen | fix
        (later sets the item aside for a week, Fable reviews it again then;
        undo also brings back an item set aside; edit keeps the page's pending edits, and the reply draft as
-       edited, on the row – nothing more)
+       edited, on the row – nothing more; flag writes the verdict, reasons
+       and reject buttons Fable gave in the chat onto the row, body
+       { flag } – or { undo: true } to put back what it replaced –
+       queue-flag.ts; reopen brings a declined addition back, however
+       old: the Mac rebuilds a deleted record from the row's saved copy –
+       queue-reopen.ts; fix writes edits straight onto the listing of an
+       addition already published or a change already applied, from Done
+       today)
 
   `agent` is { port, token } for the local agent on the owner's Mac (null
   when QUEUE_AGENT_SECRET is not set): the page calls it after an accept so
@@ -35,18 +47,24 @@ import {
   acceptItem,
   agentInfo,
   closeHandledRows,
+  fixItem,
+  flagItem,
   getPageOrder,
   getQueueItem,
   getTableSchema,
   getTargetFields,
   laterItem,
+  listDecided,
   listQueue,
   QueueError,
   rejectItem,
+  reopenItem,
   sanitiseEdits,
   saveEdits,
   undoItem,
+  unflagItem,
 } from '@/lib/admin/queue'
+import { parseFlag } from '@/lib/admin/queue-flag'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -83,6 +101,15 @@ export async function GET(req: NextRequest) {
   const auth = await ensureAuth(false)
   if (auth) return auth
   try {
+    if (req.nextUrl.searchParams.get('decided') === '1') {
+      return json({ items: await listDecided() })
+    }
+    const one = req.nextUrl.searchParams.get('id')
+    if (one) {
+      const item = await getQueueItem(one)
+      if (!item) return json({ error: 'That item no longer exists.' }, 404)
+      return json({ item })
+    }
     const orderOf = req.nextUrl.searchParams.get('order')
     if (orderOf) return json({ order: await getPageOrder(orderOf) })
     const target = req.nextUrl.searchParams.get('target')
@@ -114,7 +141,16 @@ export async function GET(req: NextRequest) {
   }
 }
 
-const ACTIONS = new Set(['accept', 'reject', 'edit', 'later', 'undo'])
+const ACTIONS = new Set([
+  'accept',
+  'reject',
+  'edit',
+  'later',
+  'undo',
+  'flag',
+  'reopen',
+  'fix',
+])
 
 export async function POST(req: NextRequest) {
   const auth = await ensureAuth(true)
@@ -161,8 +197,20 @@ export async function POST(req: NextRequest) {
           : undefined
       )
       return json({ item: await getQueueItem(id) })
+    } else if (action === 'fix') {
+      await fixItem(item, sanitiseEdits(body.edits))
     } else if (action === 'later') {
       await laterItem(item)
+    } else if (action === 'reopen') {
+      await reopenItem(item)
+    } else if (action === 'flag') {
+      if (body.undo === true) {
+        await unflagItem(item)
+      } else {
+        const parsed = parseFlag(body.flag, item.type)
+        if ('error' in parsed) return json({ error: parsed.error }, 400)
+        await flagItem(item, parsed.flag)
+      }
     } else {
       await undoItem(item)
     }

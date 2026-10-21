@@ -11,9 +11,10 @@
 //     everything older than ~10 days — including all of 20–30 June 2026, the
 //     first stretch after launch. The migrate endpoint copied that list's
 //     survivors into their month lists on 10 July 2026.)
-//   • Local dev (no Redis env vars set): an append-only NDJSON file under
-//     .analytics-dev/ so the whole loop works on a laptop without touching
-//     production data.
+//   • Local dev: an append-only NDJSON file under .analytics-dev/ so the whole
+//     loop works on a laptop without touching production data. A dev server
+//     writes there even with the Redis env vars set, and a preview deployment
+//     records nothing (see writesSharedStore).
 //
 // Aggregation happens per-query in JS over the raw events: this keeps storage
 // simple, makes the dashboard fully date-range aware (every event carries a
@@ -24,10 +25,42 @@ import { Redis } from '@upstash/redis'
 import { Ratelimit } from '@upstash/ratelimit'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { promisify } from 'node:util'
+import { gzip, gunzip } from 'node:zlib'
 import { displayFilterGroup, displayFilterValue } from '@/lib/filter-tracking'
+import {
+  cleanUrl,
+  quickHost,
+  labelMatches,
+  matchesNorm,
+  normText,
+  spreadsTo,
+  rowHash,
+  rowKey,
+  stripIdPrefix,
+  type MatchReason,
+  type OrgSpec,
+} from './org-lookup'
+import {
+  bucketsOf,
+  countPer,
+  eventsIn,
+  peopleIn,
+  peoplePer,
+  instantsPer,
+  previousWindow,
+  trendFrame,
+  visitStarts,
+  weeklyOf,
+  within,
+  type TrendFrame,
+  type TrendMetric,
+  type TrendWindow,
+} from './trends'
 
 export interface AnalyticsEvent {
-  /** Event kind, e.g. 'listing_click'. Must be in ALLOWED_EVENT_TYPES. */
+  /** Event kind, e.g. 'listing_click'. Must be in ALLOWED_EVENT_TYPES, or
+   *  be one the server records itself (NEWSLETTER_COPY_VIEW). */
   type: string
   /** Resource page the event came from, e.g. 'Funding'. */
   page?: string
@@ -186,6 +219,16 @@ const NAV_OVERFLOW_OPEN_LABEL: Record<string, string> = {
   tap: 'Tap',
 }
 
+/** Dashboard labels for what a press-page click did (press_action.source):
+ *  the same four words Matomo records as the event's action, so the two
+ *  read side by side. */
+const PRESS_ACTION_LABEL: Record<string, string> = {
+  copy: 'Copy',
+  download: 'Download',
+  contact: 'Contact',
+  jump: 'Jump',
+}
+
 // ─── Redis backend ───────────────────────────────────────────────────────────
 
 // The Vercel-Upstash Marketplace integration provisions KV_REST_API_URL /
@@ -201,11 +244,33 @@ const store =
 // The dashboard's bulk reads get their own client with auto-pipelining off.
 // @upstash/redis otherwise batches commands issued together into ONE HTTP
 // call, so parallel slice reads would come back as a single oversized
-// response — the very thing READ_CHUNK exists to prevent.
+// response — the very thing READ_CHUNK exists to prevent. Responses come as
+// plain JSON rather than the client's default base64: events are our own
+// JSON text, never binary, and skipping the extra layer cuts a month read's
+// download by a seventh and its decoding by about a third.
 const bulkStore =
   restUrl && restToken
-    ? new Redis({ url: restUrl, token: restToken, enableAutoPipelining: false })
+    ? new Redis({
+        url: restUrl,
+        token: restToken,
+        enableAutoPipelining: false,
+        responseEncoding: false,
+      })
     : null
+
+/** Whether this copy of the site adds events to the shared store. Vercel gives
+ *  the Upstash keys to Preview and Development as well as Production, so until
+ *  13 October 2026 every visit to a preview deployment counted as a real
+ *  visitor on /admin/analytics. A preview now records nothing (its disk is
+ *  read-only, so there's no file to fall back to), and a dev server keeps to
+ *  its own file even with the keys pulled into .env.local. Unlike the
+ *  newsletter's checks this fails open: a production server that somehow lacks
+ *  VERCEL_ENV still records, since losing real visitors is the worse mistake. */
+function writesSharedStore(): boolean {
+  const env = process.env.VERCEL_ENV
+  if (env === 'preview' || env === 'development') return false
+  return process.env.NODE_ENV !== 'development'
+}
 
 const trackLimiter = store
   ? new Ratelimit({
@@ -354,9 +419,10 @@ async function readDevEvents(): Promise<AnalyticsEvent[]> {
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /** Whether to accept another event from this IP right now. Fails open (returns
- *  true) when Redis is unavailable, so dev and a Redis outage don't drop data. */
+ *  true) when Redis is unavailable, so dev and a Redis outage don't drop data.
+ *  A copy that doesn't write to the shared store doesn't touch it here either. */
 export async function allowTrack(ip: string): Promise<boolean> {
-  if (!trackLimiter) return true
+  if (!trackLimiter || !writesSharedStore()) return true
   try {
     const { success } = await trackLimiter.limit(ip)
     return success
@@ -380,9 +446,19 @@ const FIRST_SEEN_CACHE_CAP = 50_000
 
 /** Record one event. Never throws to the caller — a failed analytics write must
  *  not break the user's request (it is fired via after() from the route). */
-export async function recordEvent(event: AnalyticsEvent): Promise<void> {
+export async function recordEvent(
+  event: AnalyticsEvent,
+  {
+    /** false for a `vid` that isn't a browser's own id (a server-side
+     *  count's daily hash): it never goes into the first-seen record, which
+     *  tells returning visitors from new ones. */
+    firstSeen = true,
+  }: { firstSeen?: boolean } = {}
+): Promise<void> {
   try {
-    if (store) {
+    // A preview deployment keeps nothing (see writesSharedStore).
+    if (process.env.VERCEL_ENV === 'preview') return
+    if (store && writesSharedStore()) {
       const month = monthOf(event.ts)
       if (!month) {
         console.warn(
@@ -398,7 +474,7 @@ export async function recordEvent(event: AnalyticsEvent): Promise<void> {
         p.zadd(MONTHS_KEY, { score: monthScore(month), member: month })
       }
       // First time we see this browser? Remember when. NX keeps the earliest.
-      const writeFirstSeen = !!vid && !firstSeenWritten.has(vid)
+      const writeFirstSeen = firstSeen && !!vid && !firstSeenWritten.has(vid)
       if (writeFirstSeen) p.hsetnx(FIRST_SEEN_KEY, vid, Date.parse(event.ts))
       await p.exec()
       if (registerMonth) registeredMonths.add(month)
@@ -409,7 +485,7 @@ export async function recordEvent(event: AnalyticsEvent): Promise<void> {
       }
       return
     }
-    // No Redis configured (local dev) — fall back to the on-disk log.
+    // Local dev, or no Redis configured: the on-disk log.
     await writeDevEvent(event)
   } catch (err) {
     console.warn(
@@ -558,6 +634,23 @@ export interface MapSearchPanelData {
   picked: ListingRow[]
 }
 
+export interface PressPanelData {
+  /** Clicks per action ('Copy', 'Download', 'Contact', 'Jump'), busiest
+   *  first. Built from the same clicks as `byItem`, so both add up to the
+   *  same total. */
+  byAction: Counted[]
+  /** Clicks per item, by the event's label ('Copied full boilerplate',
+   *  'Downloaded press kit', 'Jumped to the boilerplate', …), busiest
+   *  first. */
+  byItem: Counted[]
+  /** Per action: distinct visitors who did it vs the press page's distinct
+   *  visitors. Keyed by the names `byAction` uses. */
+  actionShare: VisitorShare[]
+  /** The Total row's share: distinct visitors who did any of them vs the
+   *  press page's distinct visitors. */
+  anyShare: VisitorShare
+}
+
 export interface VisitsData {
   /** Page views bucketed by page, busiest first — visitors or raw views,
    *  depending on the dashboard's count mode. */
@@ -609,6 +702,49 @@ export interface VisitorShare {
   /** The page's distinct page-view visitors — the % denominator. 0 when the
    *  range predates page-view tracking (15 July 2026). */
   visitors: number
+}
+
+/** The site-wide tiles' figures over time (each tab's "over time" panel):
+ *  per-day (or per-hour) values for the range, its totals, and the totals
+ *  for the stretch just before it. Each total is the figure the panels below
+ *  show; people are always counted once, clicks and signups follow the count
+ *  mode as their tables do. */
+export interface DashboardTrends {
+  frame: TrendFrame
+  /** Distinct visitors (page views). */
+  visitors: TrendMetric
+  /** Visits, each counted on the day it began. */
+  visits: TrendMetric
+  pageViews: TrendMetric
+  /** Listing clicks on every page, as Clicks by page counts them. */
+  listingClicks: TrendMetric
+  /** The chatbot funnel, in people. */
+  chatbotOpened: TrendMetric
+  chatbotMessaged: TrendMetric
+  chatbotClicked: TrendMetric
+  /** The site search funnel, in people. */
+  searchOpened: TrendMetric
+  searchTyped: TrendMetric
+  searchClicked: TrendMetric
+  /** Submits of the newsletter signup boxes. */
+  newsletterSubmits: TrendMetric
+  /** Signups through the site that ActiveCampaign took. */
+  newsletterSignups: TrendMetric
+  /** Readers who confirmed (landed on /subscribed/<key>). */
+  newsletterConfirmed: TrendMetric
+  /** Visits from links in the newsletters. */
+  newsletterVisits: TrendMetric
+}
+
+/** The selected resource page's tiles over time. */
+export interface PageTrends {
+  /** Distinct visitors to the page. */
+  visitors: TrendMetric
+  pageViews: TrendMetric
+  /** Its listing clicks, every source, as its tab's total counts them. */
+  listingClicks: TrendMetric
+  /** Filter values turned on, as Filter usage counts them. */
+  filterUses: TrendMetric
 }
 
 export interface DashboardData {
@@ -708,6 +844,16 @@ export interface DashboardData {
   /** Each newsletter's past issues page (/newsletter/<key>, from 10 October
    *  2026): its views and where its clicks went. */
   newsletterArchive: NewsletterArchiveRow[]
+  /** Each newsletter's signups through the site beside the readers who
+   *  confirmed (landed on /subscribed/<key>). */
+  newsletterConfirmed: NewsletterConfirmRow[]
+  /** Views of each issue's web and text versions on aisafety.com. */
+  newsletterCopies: NewsletterCopyRow[]
+  /** The Funding box's card link to Substack and the footer's Newsletters
+   *  links. */
+  newsletterLinks: NewsletterLinkRow[]
+  /** Visits from links in the newsletters, and what came of them. */
+  newsletterVisits: NewsletterVisits
   /** For `selectedPage`'s own tables: distinct visitors per listing / slot /
    *  filter group / filter value / contribute button / hovered listing,
    *  each against the page's distinct visitors. Keyed by the same row names
@@ -748,6 +894,9 @@ export interface DashboardData {
   /** The +N table's Total row: distinct visitors who opened the menu at all
    *  vs distinct visitors site-wide. */
   anyNavOverflowOpenShare: VisitorShare
+  /** The press and media page (/media, from 19 September 2026): its copy,
+   *  download, email and jump-button clicks, per action and per item. */
+  press: PressPanelData
   /** For pages with a map (Map, Communities): `selectedPage`'s most-hovered
    *  map listings — tooltip dwells (500 ms cursor rest on desktop, first tap
    *  on mobile), grouped like `topListings` and following the same unique/
@@ -775,6 +924,12 @@ export interface DashboardData {
   optOuts: { off: number; on: number }
   /** First-party page views (recorded from 15 July 2026). */
   visits: VisitsData
+  /** The site-wide tiles over time. */
+  trends: DashboardTrends
+  /** The selected page's tiles over time. */
+  pageTrends: PageTrends
+  /** The Org lookup tab's figures, when it asked for them (a search). */
+  org?: OrgLookupData
   /** Cross-interest overlaps between pages (and the chatbot), from anonymous
    *  visitor ids: pairs ranked by how many visitors engaged with both. */
   correlations: CorrelationRow[]
@@ -801,6 +956,13 @@ export interface DashboardData {
     prevMonth: string
     prevCount: number
   } | null
+}
+
+const NO_TREND: TrendMetric = {
+  total: 0,
+  previous: null,
+  points: [],
+  weekly: null,
 }
 
 const EMPTY: Omit<DashboardData, 'source'> = {
@@ -837,6 +999,10 @@ const EMPTY: Omit<DashboardData, 'source'> = {
   siteNewsletterShare: null,
   newsletterResults: { byPage: [], errors: [] },
   newsletterArchive: [],
+  newsletterConfirmed: [],
+  newsletterCopies: [],
+  newsletterLinks: [],
+  newsletterVisits: { byNewsletter: [], pages: [], listings: [], issues: [] },
   listingShare: [],
   anyListingShare: null,
   positionShare: [],
@@ -851,6 +1017,12 @@ const EMPTY: Omit<DashboardData, 'source'> = {
   navOverflowOpens: [],
   navOverflowOpenShare: [],
   anyNavOverflowOpenShare: { name: 'Any open', active: 0, visitors: 0 },
+  press: {
+    byAction: [],
+    byItem: [],
+    actionShare: [],
+    anyShare: { name: 'Any action', active: 0, visitors: 0 },
+  },
   topHovered: [],
   areaClicks: [],
   funnel: { opened: 0, typed: 0, clicked: 0 },
@@ -889,11 +1061,55 @@ const EMPTY: Omit<DashboardData, 'source'> = {
     returningVisitors: 0,
     returningShareByPage: [],
   },
+  trends: {
+    frame: { unit: 'day', starts: [], startMs: 0, endMs: 0, previous: null },
+    visitors: NO_TREND,
+    visits: NO_TREND,
+    pageViews: NO_TREND,
+    listingClicks: NO_TREND,
+    chatbotOpened: NO_TREND,
+    chatbotMessaged: NO_TREND,
+    chatbotClicked: NO_TREND,
+    searchOpened: NO_TREND,
+    searchTyped: NO_TREND,
+    searchClicked: NO_TREND,
+    newsletterSubmits: NO_TREND,
+    newsletterSignups: NO_TREND,
+    newsletterConfirmed: NO_TREND,
+    newsletterVisits: NO_TREND,
+  },
+  pageTrends: {
+    visitors: NO_TREND,
+    pageViews: NO_TREND,
+    listingClicks: NO_TREND,
+    filterUses: NO_TREND,
+  },
   firstSeenBackfilled: true,
   correlations: [],
   recent: [],
   highTraffic: null,
 }
+
+/** The pages listing clicks are tracked under on the live site. Clicks under
+ *  any other name are the team testing, not visitors: the admin Queue's
+ *  preview ('admin-queue'), or the unreleased /hire page ('Hire') on preview
+ *  deployments, which wrote to the same store until 13 October 2026. The
+ *  dashboard leaves those out, so they get no tab and no share of the click
+ *  counts. */
+const LISTING_PAGES = new Set([
+  'Home',
+  'Training',
+  'Events',
+  'Map',
+  'Communities',
+  'Self-study',
+  'Jobs',
+  'Funding',
+  'Media channels',
+  'Advisors',
+  'Founders',
+  'Projects',
+])
 
 /** Source filters offered on map pages. 'untracked' = neither map nor cards. */
 /** Resource pages that have a map above their card list, so a click can come
@@ -1099,6 +1315,70 @@ function listingRows(events: AnalyticsEvent[]): ListingRow[] {
     .sort((a, b) => b.count - a.count)
 }
 
+/** The dashboard fields that depend on which resource page is selected (and
+ *  its ?source filter). Everything else is site-wide: the same on every tab. */
+type PageFields = Pick<
+  DashboardData,
+  | 'selectedPage'
+  | 'topListings'
+  | 'byPosition'
+  | 'bySource'
+  | 'selectedSource'
+  | 'filterGroups'
+  | 'filterValues'
+  | 'filterUsers'
+  | 'listingShare'
+  | 'anyListingShare'
+  | 'positionShare'
+  | 'filterGroupShare'
+  | 'filterValueShare'
+  | 'anyFilterShare'
+  | 'contributeButtons'
+  | 'contributeButtonShare'
+  | 'anyContributeShare'
+  | 'airtableViews'
+  | 'cardsViews'
+  | 'cardsViewShare'
+  | 'cardsButtonClicks'
+  | 'cardsButtonShare'
+  | 'topHovered'
+  | 'hoverShare'
+  | 'anyHoverShare'
+  | 'areaClicks'
+  | 'mapSearch'
+  | 'pageTrends'
+  | 'org'
+>
+type AggregateFields = Omit<
+  DashboardData,
+  'source' | 'error' | 'oldestTs' | 'highTraffic' | 'firstSeenBackfilled'
+>
+type SiteFields = Omit<AggregateFields, keyof PageFields>
+
+/** The site-wide half of the dashboard for one date range and count mode,
+ *  plus the in-range event sets the per-page half is cut from. Built once and
+ *  shared by every tab, so switching tabs only redoes the (small) page part.
+ *  Never mutated after it's built, apart from the lazily filled hover sets. */
+interface SiteView {
+  fields: SiteFields
+  inRange: AnalyticsEvent[]
+  range: DateRange
+  unique: boolean
+  /** Listing clicks, deduped in unique mode. */
+  clicks: AnalyticsEvent[]
+  filterHits: AnalyticsEvent[]
+  filterApplies: AnalyticsEvent[]
+  contributeHits: AnalyticsEvent[]
+  contributeClicks: AnalyticsEvent[]
+  airtableClicks: AnalyticsEvent[]
+  viewVidsByPage: Map<string, Set<string>>
+  /** Every map hover in range, deduped in unique mode. Only the map pages
+   *  read it, so it's worked out on first use. */
+  hovers?: AnalyticsEvent[]
+  /** What the selected page's tiles count, by page (siteTrends). */
+  pageTiles: PageTileEvents
+}
+
 /** Aggregate a newest-first event list into the dashboard view, filtered to the
  *  given date range. `selectedPageReq` chooses which resource page the
  *  per-listing panels reflect; it falls back to Funding, then the busiest page.
@@ -1106,73 +1386,72 @@ function listingRows(events: AnalyticsEvent[]): ListingRow[] {
  *  to count every click. */
 function aggregate(
   all: AnalyticsEvent[],
-  { startMs, endMs }: DateRange,
+  range: DateRange,
   selectedPageReq?: string,
   unique = true,
   sourceReq?: string,
+  firstSeen: Map<string, number> = new Map(),
+  /** The Org lookup tab's search, already matched against the catalog. */
+  org: OrgSpec | null = null
+): AggregateFields {
+  // `all` is every event there is (the dev store), so the stretch before the
+  // range is always there to compare with.
+  const now = Date.now()
+  const site = aggregateSite(
+    all,
+    range,
+    unique,
+    firstSeen,
+    previousWindow(range, now),
+    now
+  )
+  return {
+    ...site.fields,
+    ...aggregatePage(site, selectedPageReq, sourceReq, org),
+  }
+}
+
+/** Distinct visitor ids among the events; those without one can't count. */
+function distinctVids(hits: AnalyticsEvent[]): number {
+  const vids = new Set<string>()
+  for (const e of hits) if (e.vid) vids.add(e.vid)
+  return vids.size
+}
+
+/** The site-wide half of aggregate(): every panel that's the same whichever
+ *  tab is open. */
+function aggregateSite(
+  all: AnalyticsEvent[],
+  { startMs, endMs }: DateRange,
+  unique: boolean,
   /** Epoch ms each visitor was first seen (any event, whole store), for at
    *  least every visitor with a page view in range. What makes "returning"
    *  knowable without reading the months before the range. */
-  firstSeen: Map<string, number> = new Map()
-): Omit<
-  DashboardData,
-  'source' | 'error' | 'oldestTs' | 'highTraffic' | 'firstSeenBackfilled'
-> {
-  const inRange = all.filter(e => {
-    const t = Date.parse(e.ts)
-    if (Number.isNaN(t)) return false
-    if (startMs != null && t < startMs) return false
-    if (endMs != null && t > endMs) return false
-    return true
-  })
+  firstSeen: Map<string, number>,
+  /** The stretch the tiles compare with, when `all` holds its events (the
+   *  store reads them only when they're there and fit: loadSiteView). */
+  previous: TrendWindow | null,
+  now: number
+): SiteView {
+  // Store timestamps compare as text, much faster than parsing each of a
+  // few hundred thousand (within).
+  const inside = within({ startMs, endMs })
+  const inRange = all.filter(e => inside(e.ts))
   // Every click table below derives from this set. In unique mode it's deduped
   // to one click per visitor per listing per day, so repeat clicks don't inflate
   // the counts; in total mode every click is counted. Filtered by type, not by
   // "has a page": chatbot events also carry the page they happened on, and must
-  // not count as listing clicks.
-  const pageHits = inRange.filter(e => e.type === 'listing_click' && e.page)
+  // not count as listing clicks. Only the live site's pages (LISTING_PAGES):
+  // the team's test clicks get no tab and no share of the counts.
+  const pageHits = inRange.filter(
+    e =>
+      e.type === 'listing_click' && e.page != null && LISTING_PAGES.has(e.page)
+  )
   const clicks = unique ? uniqueClicks(pageHits) : pageHits
   const usersOf = (type: string) =>
     uniqueUsers(inRange.filter(e => e.type === type))
 
   const byPage = tally(clicks.map(e => e.page as string))
-  const pageNames = byPage.map(p => p.name)
-  // The page the listing panels drill into. An explicit request always wins —
-  // even with no clicks in range — so selecting a quiet page's tab shows that
-  // page (empty), not a fallback. With no request, default to Funding (Bryce's
-  // main interest), then the busiest page.
-  const selectedPage = selectedPageReq
-    ? selectedPageReq
-    : pageNames.includes('Funding')
-      ? 'Funding'
-      : (pageNames[0] ?? null)
-
-  // On a page with a split (map surface, or the Events/Training view toggle)
-  // the panels can be filtered to one click source. The split itself (bySource,
-  // below) is always computed from every click on the page so the user can
-  // switch sources; only the per-listing panels narrow.
-  const split = selectedPage != null ? PAGE_SPLITS[selectedPage] : undefined
-  const splitSlugs = split?.map(sourceSlug) ?? []
-  const selectedSource =
-    split && sourceReq && [...splitSlugs, 'untracked'].includes(sourceReq)
-      ? sourceReq
-      : null
-  const matchesSource = (e: AnalyticsEvent): boolean => {
-    if (selectedSource == null) return true // no filter
-    if (selectedSource === 'untracked')
-      return e.source == null || !splitSlugs.includes(e.source)
-    return e.source === selectedSource
-  }
-
-  // For the selected page: total clicks per listing, the range of slots each was
-  // clicked at (from positions stamped at click time, so it's period-accurate
-  // even as the page is reordered), and a representative url for its favicon.
-  // Every listing for the page, ranked by clicks — the dashboard shows the first
-  // 50 and lets the user reveal more, so we return the full list rather than a
-  // fixed top-N here.
-  const pageClicksAll = clicks.filter(e => e.page === selectedPage)
-  const pageClicks = pageClicksAll.filter(matchesSource)
-  const topListings: ListingRow[] = listingRows(pageClicks)
 
   // Site-wide leaderboards, independent of the selected page: the most-clicked
   // listings and the busiest slots across every page. Keyed by page+listing so
@@ -1202,47 +1481,11 @@ function aggregate(
     clicks.map(e => e.position).filter((p): p is string => p != null)
   )
 
-  // Source split, only for pages in PAGE_SPLITS. Clicks are explicitly tagged
-  // at click time; anything untagged (logged before source tracking, or a
-  // surface we don't tag) is its own 'Untracked' bucket rather than being
-  // miscounted. Honours the unique/total mode (same pageClicks). Only
-  // non-empty buckets are shown.
-  let bySource: Counted[] = []
-  if (split) {
-    const counts = new Map<string, number>(split.map(label => [label, 0]))
-    let untracked = 0
-    for (const e of pageClicksAll) {
-      const label = split.find(l => sourceSlug(l) === e.source)
-      if (label) counts.set(label, (counts.get(label) ?? 0) + 1)
-      else untracked += 1
-    }
-    bySource = [
-      ...split.map(label => ({ name: label, count: counts.get(label) ?? 0 })),
-      { name: 'Untracked', count: untracked },
-    ].filter(r => r.count > 0)
-  }
-
   // Filter usage. One filter_apply per value a visitor turns on; unique mode
   // counts each group+value once per visitor per day, total mode every toggle.
   const filterHits = inRange.filter(e => e.type === 'filter_apply' && e.page)
   const filterApplies = unique ? uniqueFilterApplies(filterHits) : filterHits
   const filtersByPage = tally(filterApplies.map(e => e.page as string))
-  const pageFilters = filterApplies.filter(e => e.page === selectedPage)
-  // Renamed filter titles and options are logged under their original names;
-  // show the current wording so old and new clicks land in one row.
-  const filterGroupName = (e: AnalyticsEvent) =>
-    displayFilterGroup(e.page ?? '', e.source ?? '(unknown)')
-  const filterValueName = (e: AnalyticsEvent) => {
-    const group = e.source ?? '(unknown)'
-    const label = e.label ?? '(unknown)'
-    const page = e.page ?? ''
-    return `${displayFilterGroup(page, group)}: ${displayFilterValue(page, group, label)}`
-  }
-  const filterGroups = tally(pageFilters.map(filterGroupName))
-  const filterValues = tally(pageFilters.map(filterValueName))
-  const filterUsers = uniqueUsers(
-    filterHits.filter(e => e.page === selectedPage)
-  )
 
   // The "% of visitors" columns: distinct doing-vids per page (filtering,
   // clicking a listing, …) against distinct page_view vids per page.
@@ -1269,54 +1512,6 @@ function aggregate(
   const filterShareByPage = shareByPage(filterHits)
   const clickShareByPage = shareByPage(pageHits)
 
-  // The selected page's own tables all share one "% of visitors" denominator:
-  // that page's distinct page-view visitors. Rows are keyed exactly like the
-  // tables they join (listing label, slot, 'Group: Value', button label).
-  const pageVisitorCount =
-    selectedPage != null ? (viewVidsByPage.get(selectedPage)?.size ?? 0) : 0
-  const shareOnPage = (
-    hits: AnalyticsEvent[],
-    keyOf: (e: AnalyticsEvent) => string
-  ): VisitorShare[] => {
-    const vidsByKey = new Map<string, Set<string>>()
-    for (const e of hits) {
-      if (!e.vid) continue
-      const key = keyOf(e)
-      const set = vidsByKey.get(key) ?? new Set<string>()
-      set.add(e.vid)
-      vidsByKey.set(key, set)
-    }
-    return [...vidsByKey.entries()].map(([name, vids]) => ({
-      name,
-      active: vids.size,
-      visitors: pageVisitorCount,
-    }))
-  }
-  const listingShare = shareOnPage(pageClicks, listingMember)
-  // The Total rows' "any at all" shares: one Set across every qualifying
-  // event, so a visitor who did several still counts once — deliberately NOT
-  // the sum of the per-row shares.
-  const distinctVids = (hits: AnalyticsEvent[]): number => {
-    const vids = new Set<string>()
-    for (const e of hits) if (e.vid) vids.add(e.vid)
-    return vids.size
-  }
-  const anyOnPage = (
-    hits: AnalyticsEvent[],
-    name: string
-  ): VisitorShare | null =>
-    selectedPage != null
-      ? { name, active: distinctVids(hits), visitors: pageVisitorCount }
-      : null
-  const anyListingShare = anyOnPage(pageClicks, 'Any listing')
-  const positionShare = shareOnPage(
-    pageClicks.filter(e => e.position),
-    e => e.position as string
-  )
-  const filterGroupShare = shareOnPage(pageFilters, filterGroupName)
-  const filterValueShare = shareOnPage(pageFilters, filterValueName)
-  const anyFilterShare = anyOnPage(pageFilters, 'Any filter')
-
   // Contribute-button and Airtable-card clicks. uniqueClicks dedupes on
   // page+label, which is exactly the button identity here.
   const contributeHits = inRange.filter(
@@ -1327,21 +1522,10 @@ function aggregate(
     : contributeHits
   const contributeByPage = tally(contributeClicks.map(e => e.page as string))
   const contributeShareByPage = shareByPage(contributeHits)
-  const contributeButtons = tally(
-    contributeClicks
-      .filter(e => e.page === selectedPage)
-      .map(e => listingMember(e))
-  )
-  const pageContributeHits = contributeHits.filter(e => e.page === selectedPage)
-  const contributeButtonShare = shareOnPage(pageContributeHits, listingMember)
-  const anyContributeShare = anyOnPage(pageContributeHits, 'Any button')
   const airtableHits = inRange.filter(e => e.type === 'airtable_view' && e.page)
   const airtableClicks = unique ? uniqueClicks(airtableHits) : airtableHits
   const airtableByPage = tally(airtableClicks.map(e => e.page as string))
   const airtableShareByPage = shareByPage(airtableHits)
-  const airtableViews = airtableClicks.filter(
-    e => e.page === selectedPage
-  ).length
   const newsletterHits = inRange.filter(
     e => e.type === 'newsletter_signup' && e.page
   )
@@ -1393,6 +1577,471 @@ function aggregate(
     )
   )
   const anyNavOverflowOpenShare = anyOnSite(navOpens, 'Any open')
+  const press = pressPanel(inRange, unique, viewVidsByPage.get('/media'))
+
+  const newsletterResults = newsletterSignupResults(inRange, unique)
+
+  // The tiles over time, worked out once per view (siteTrends).
+  const visits = visitsData(inRange, unique, firstSeen, startMs, viewVidsByPage)
+  const { trends, pageTiles } = siteTrends(
+    all,
+    inRange,
+    { startMs, endMs },
+    now,
+    previous,
+    unique,
+    {
+      clicks,
+      filterApplies,
+      newsletterSubmits,
+      visitors: visits.uniqueVisitors,
+    }
+  )
+
+  return {
+    inRange,
+    range: { startMs, endMs },
+    unique,
+    clicks,
+    filterHits,
+    filterApplies,
+    contributeHits,
+    contributeClicks,
+    airtableClicks,
+    viewVidsByPage,
+    pageTiles,
+    fields: {
+      totalEvents: inRange.length,
+      byPage,
+      topListingsOverall,
+      byPositionOverall,
+      filtersByPage,
+      filterShareByPage,
+      clickShareByPage,
+      contributeByPage,
+      contributeShareByPage,
+      airtableByPage,
+      airtableShareByPage,
+      newsletterByPage,
+      newsletterShareByPage,
+      siteClickShare,
+      siteContributeShare,
+      siteAirtableShare,
+      siteNewsletterShare,
+      newsletterResults,
+      newsletterArchive: newsletterArchiveStats(inRange, unique),
+      newsletterConfirmed: newsletterConfirmations(
+        inRange,
+        unique,
+        newsletterResults
+      ),
+      newsletterCopies: newsletterCopyViews(inRange, unique),
+      newsletterLinks: newsletterLinkClicks(inRange, unique),
+      newsletterVisits: newsletterVisits(inRange),
+      footerClicks,
+      navOverflowOpens,
+      navOverflowOpenShare,
+      anyNavOverflowOpenShare,
+      press,
+      funnel: {
+        opened: usersOf('chatbot_open'),
+        typed: usersOf('chatbot_message'),
+        clicked: usersOf('chatbot_click'),
+      },
+      chatbot: chatbotPanels(inRange, unique),
+      search: searchPanels(inRange, unique),
+      optOuts: optOutSplit(inRange),
+      visits,
+      trends,
+      correlations: correlations(inRange),
+      // Newest-first already; page views, map hovers and cards-section views
+      // are left out so the feed stays a log of deliberate actions rather than
+      // a firehose of visits, passing cursors and scrolls.
+      recent: inRange
+        .filter(
+          e =>
+            e.type !== 'page_view' &&
+            e.type !== NEWSLETTER_COPY_VIEW &&
+            e.type !== 'listing_hover' &&
+            e.type !== 'cards_view' &&
+            // The team's test clicks (see LISTING_PAGES) stay out here too.
+            (e.type !== 'listing_click' || LISTING_PAGES.has(e.page ?? ''))
+        )
+        .slice(0, 50),
+    },
+  }
+}
+
+/** What the page tiles count, grouped by page once per site view so a tab
+ *  only picks its own: the in-range page views with each one's bucket, and
+ *  the stretch before's views, clicks and filter uses (counted like their
+ *  in-range twins). */
+interface PageTileEvents {
+  views: Map<string, { events: AnalyticsEvent[]; buckets: number[] }>
+  prevViews: Map<string, AnalyticsEvent[]>
+  prevClicks: Map<string, AnalyticsEvent[]>
+  prevFilters: Map<string, AnalyticsEvent[]>
+}
+
+/** The events of the kinds the tiles count, in one pass over a list. */
+function tileKinds(list: AnalyticsEvent[]) {
+  const k = {
+    views: [] as AnalyticsEvent[],
+    clicks: [] as AnalyticsEvent[],
+    filters: [] as AnalyticsEvent[],
+    submits: [] as AnalyticsEvent[],
+    signups: [] as AnalyticsEvent[],
+    chatbotOpen: [] as AnalyticsEvent[],
+    chatbotMessage: [] as AnalyticsEvent[],
+    chatbotClick: [] as AnalyticsEvent[],
+    searchOpen: [] as AnalyticsEvent[],
+    searchQuery: [] as AnalyticsEvent[],
+    searchClick: [] as AnalyticsEvent[],
+  }
+  for (const e of list) {
+    switch (e.type) {
+      case 'page_view':
+        k.views.push(e)
+        break
+      case 'listing_click':
+        if (e.page != null && LISTING_PAGES.has(e.page)) k.clicks.push(e)
+        break
+      case 'filter_apply':
+        if (e.page) k.filters.push(e)
+        break
+      case 'newsletter_signup':
+        if (e.page) k.submits.push(e)
+        break
+      case 'newsletter_signup_success':
+        if (e.page) k.signups.push(e)
+        break
+      case 'chatbot_open':
+        k.chatbotOpen.push(e)
+        break
+      case 'chatbot_message':
+        k.chatbotMessage.push(e)
+        break
+      case 'chatbot_click':
+        k.chatbotClick.push(e)
+        break
+      case 'search_open':
+        k.searchOpen.push(e)
+        break
+      case 'search_query':
+        if (e.query) k.searchQuery.push(e)
+        break
+      case 'search_click':
+        k.searchClick.push(e)
+        break
+    }
+  }
+  return k
+}
+
+/** The tiles over time for a site view: each tile's per-bucket values over
+ *  the range, its total (the figure the panels below show), and the same
+ *  total over the stretch before the range (`previous`, when `all` holds
+ *  it). People are always counted once; clicks, filter uses and signups
+ *  follow the count mode as their tables do. `counted` passes in what
+ *  aggregateSite has already worked out for the range. Worked out in a few
+ *  passes, as it runs over every event in the range and the stretch before
+ *  (a few hundred thousand), on every rebuild of the view. */
+function siteTrends(
+  all: AnalyticsEvent[],
+  inRange: AnalyticsEvent[],
+  range: DateRange,
+  now: number,
+  previous: TrendWindow | null,
+  unique: boolean,
+  counted: {
+    clicks: AnalyticsEvent[]
+    filterApplies: AnalyticsEvent[]
+    newsletterSubmits: AnalyticsEvent[]
+    visitors: number
+  }
+): { trends: DashboardTrends; pageTiles: PageTileEvents } {
+  // The drawn stretch never starts before the oldest event read (newest
+  // first, so the last one).
+  const oldestRead = all.length > 0 ? Date.parse(all[all.length - 1].ts) : NaN
+  const frame = trendFrame(
+    range,
+    now,
+    Number.isNaN(oldestRead) ? Infinity : oldestRead,
+    previous
+  )
+  const cur = tileKinds(inRange)
+  const before = tileKinds(eventsIn(all, previous))
+  // Signups through the site, deduped as newsletterSignupResults does: one
+  // per visitor per page per day in unique mode.
+  const signups = (hits: AnalyticsEvent[]) => {
+    if (!unique) return hits
+    const seen = new Set<string>()
+    return hits.filter(e => {
+      if (!e.vid) return true
+      const key = `${e.vid}\x00${dashboardDay(Date.parse(e.ts))}\x00${e.page}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }
+  const prevClicks = unique ? uniqueClicks(before.clicks) : before.clicks
+  const prevFilters = unique
+    ? uniqueFilterApplies(before.filters)
+    : before.filters
+  const prevSubmits = unique ? uniqueClicks(before.submits) : before.submits
+
+  const people = (
+    hits: AnalyticsEvent[],
+    prevHits: AnalyticsEvent[]
+  ): TrendMetric => {
+    const buckets = bucketsOf(frame, hits)
+    const points = peoplePer(frame, hits, buckets)
+    return {
+      total: uniqueUsers(hits),
+      previous: previous ? peopleIn(prevHits) : null,
+      points,
+      weekly: weeklyOf(frame, points, { events: hits, buckets }),
+    }
+  }
+  const counts = (
+    total: number,
+    prevTotal: number,
+    points: number[]
+  ): TrendMetric => ({
+    total,
+    previous: previous ? prevTotal : null,
+    points,
+    weekly: weeklyOf(frame, points),
+  })
+  const events = (hits: AnalyticsEvent[], prevHits: AnalyticsEvent[]) =>
+    counts(
+      hits.length,
+      prevHits.length,
+      countPer(frame, bucketsOf(frame, hits))
+    )
+  const viewBuckets = bucketsOf(frame, cur.views)
+  const visitBegins = visitStarts(cur.views, SESSION_GAP_MS)
+  const visitorPoints = peoplePer(frame, cur.views, viewBuckets)
+  const trends: DashboardTrends = {
+    frame,
+    visitors: {
+      total: counted.visitors,
+      previous: previous ? peopleIn(before.views) : null,
+      points: visitorPoints,
+      weekly: weeklyOf(frame, visitorPoints, {
+        events: cur.views,
+        buckets: viewBuckets,
+      }),
+    },
+    visits: counts(
+      visitBegins.length,
+      previous ? visitStarts(before.views, SESSION_GAP_MS).length : 0,
+      instantsPer(frame, visitBegins)
+    ),
+    pageViews: counts(
+      cur.views.length,
+      before.views.length,
+      countPer(frame, viewBuckets)
+    ),
+    listingClicks: events(counted.clicks, prevClicks),
+    chatbotOpened: people(cur.chatbotOpen, before.chatbotOpen),
+    chatbotMessaged: people(cur.chatbotMessage, before.chatbotMessage),
+    chatbotClicked: people(cur.chatbotClick, before.chatbotClick),
+    searchOpened: people(cur.searchOpen, before.searchOpen),
+    searchTyped: people(cur.searchQuery, before.searchQuery),
+    searchClicked: people(cur.searchClick, before.searchClick),
+    newsletterSubmits: events(counted.newsletterSubmits, prevSubmits),
+    newsletterSignups: events(signups(cur.signups), signups(before.signups)),
+    newsletterConfirmed: events(
+      confirmLandings(cur.views, unique),
+      confirmLandings(before.views, unique)
+    ),
+    newsletterVisits: events(
+      newsletterLandings(cur.views),
+      newsletterLandings(before.views)
+    ),
+  }
+
+  const group = (
+    hits: AnalyticsEvent[],
+    keyOf: (e: AnalyticsEvent) => string
+  ) => {
+    const out = new Map<string, AnalyticsEvent[]>()
+    for (const e of hits) {
+      const key = keyOf(e)
+      const list = out.get(key)
+      if (list) list.push(e)
+      else out.set(key, [e])
+    }
+    return out
+  }
+  const pageOf = (e: AnalyticsEvent) =>
+    e.page ? (PAGE_NAME_BY_PATH[e.page] ?? e.page) : ''
+  const views = new Map<
+    string,
+    { events: AnalyticsEvent[]; buckets: number[] }
+  >()
+  cur.views.forEach((e, k) => {
+    const name = pageOf(e)
+    let g = views.get(name)
+    if (!g) views.set(name, (g = { events: [], buckets: [] }))
+    g.events.push(e)
+    g.buckets.push(viewBuckets[k])
+  })
+  return {
+    trends,
+    pageTiles: {
+      views,
+      prevViews: group(before.views, pageOf),
+      prevClicks: group(prevClicks, e => e.page ?? ''),
+      prevFilters: group(prevFilters, e => e.page ?? ''),
+    },
+  }
+}
+
+/** The per-page half of aggregate(): the panels for the selected resource
+ *  page, cut from a site view's in-range events. */
+function aggregatePage(
+  site: SiteView,
+  selectedPageReq?: string,
+  sourceReq?: string,
+  /** The Org lookup tab's search, already matched against the catalog. */
+  org: OrgSpec | null = null
+): PageFields {
+  const { inRange, unique, clicks, filterHits, filterApplies } = site
+  const pageNames = site.fields.byPage.map(p => p.name)
+  // The page the listing panels drill into. An explicit request always wins —
+  // even with no clicks in range — so selecting a quiet page's tab shows that
+  // page (empty), not a fallback. With no request, default to Funding (Bryce's
+  // main interest), then the busiest page.
+  const selectedPage = selectedPageReq
+    ? selectedPageReq
+    : pageNames.includes('Funding')
+      ? 'Funding'
+      : (pageNames[0] ?? null)
+
+  // On a page with a split (map surface, or the Events/Training view toggle)
+  // the panels can be filtered to one click source. The split itself (bySource,
+  // below) is always computed from every click on the page so the user can
+  // switch sources; only the per-listing panels narrow.
+  const split = selectedPage != null ? PAGE_SPLITS[selectedPage] : undefined
+  const splitSlugs = split?.map(sourceSlug) ?? []
+  const selectedSource =
+    split && sourceReq && [...splitSlugs, 'untracked'].includes(sourceReq)
+      ? sourceReq
+      : null
+  const matchesSource = (e: AnalyticsEvent): boolean => {
+    if (selectedSource == null) return true // no filter
+    if (selectedSource === 'untracked')
+      return e.source == null || !splitSlugs.includes(e.source)
+    return e.source === selectedSource
+  }
+
+  // For the selected page: total clicks per listing, the range of slots each was
+  // clicked at (from positions stamped at click time, so it's period-accurate
+  // even as the page is reordered), and a representative url for its favicon.
+  // Every listing for the page, ranked by clicks — the dashboard shows the first
+  // 50 and lets the user reveal more, so we return the full list rather than a
+  // fixed top-N here.
+  const pageClicksAll = clicks.filter(e => e.page === selectedPage)
+  const pageClicks = pageClicksAll.filter(matchesSource)
+  const topListings: ListingRow[] = listingRows(pageClicks)
+
+  // Source split, only for pages in PAGE_SPLITS. Clicks are explicitly tagged
+  // at click time; anything untagged (logged before source tracking, or a
+  // surface we don't tag) is its own 'Untracked' bucket rather than being
+  // miscounted. Honours the unique/total mode (same pageClicks). Only
+  // non-empty buckets are shown.
+  let bySource: Counted[] = []
+  if (split) {
+    const counts = new Map<string, number>(split.map(label => [label, 0]))
+    let untracked = 0
+    for (const e of pageClicksAll) {
+      const label = split.find(l => sourceSlug(l) === e.source)
+      if (label) counts.set(label, (counts.get(label) ?? 0) + 1)
+      else untracked += 1
+    }
+    bySource = [
+      ...split.map(label => ({ name: label, count: counts.get(label) ?? 0 })),
+      { name: 'Untracked', count: untracked },
+    ].filter(r => r.count > 0)
+  }
+
+  const pageFilters = filterApplies.filter(e => e.page === selectedPage)
+  // Renamed filter titles and options are logged under their original names;
+  // show the current wording so old and new clicks land in one row.
+  const filterGroupName = (e: AnalyticsEvent) =>
+    displayFilterGroup(e.page ?? '', e.source ?? '(unknown)')
+  const filterValueName = (e: AnalyticsEvent) => {
+    const group = e.source ?? '(unknown)'
+    const label = e.label ?? '(unknown)'
+    const page = e.page ?? ''
+    return `${displayFilterGroup(page, group)}: ${displayFilterValue(page, group, label)}`
+  }
+  const filterGroups = tally(pageFilters.map(filterGroupName))
+  const filterValues = tally(pageFilters.map(filterValueName))
+  const filterUsers = uniqueUsers(
+    filterHits.filter(e => e.page === selectedPage)
+  )
+
+  // The selected page's own tables all share one "% of visitors" denominator:
+  // that page's distinct page-view visitors. Rows are keyed exactly like the
+  // tables they join (listing label, slot, 'Group: Value', button label).
+  const pageVisitorCount =
+    selectedPage != null
+      ? (site.viewVidsByPage.get(selectedPage)?.size ?? 0)
+      : 0
+  const shareOnPage = (
+    hits: AnalyticsEvent[],
+    keyOf: (e: AnalyticsEvent) => string
+  ): VisitorShare[] => {
+    const vidsByKey = new Map<string, Set<string>>()
+    for (const e of hits) {
+      if (!e.vid) continue
+      const key = keyOf(e)
+      const set = vidsByKey.get(key) ?? new Set<string>()
+      set.add(e.vid)
+      vidsByKey.set(key, set)
+    }
+    return [...vidsByKey.entries()].map(([name, vids]) => ({
+      name,
+      active: vids.size,
+      visitors: pageVisitorCount,
+    }))
+  }
+  const listingShare = shareOnPage(pageClicks, listingMember)
+  // The Total rows' "any at all" shares: one Set across every qualifying
+  // event, so a visitor who did several still counts once — deliberately NOT
+  // the sum of the per-row shares.
+  const anyOnPage = (
+    hits: AnalyticsEvent[],
+    name: string
+  ): VisitorShare | null =>
+    selectedPage != null
+      ? { name, active: distinctVids(hits), visitors: pageVisitorCount }
+      : null
+  const anyListingShare = anyOnPage(pageClicks, 'Any listing')
+  const positionShare = shareOnPage(
+    pageClicks.filter(e => e.position),
+    e => e.position as string
+  )
+  const filterGroupShare = shareOnPage(pageFilters, filterGroupName)
+  const filterValueShare = shareOnPage(pageFilters, filterValueName)
+  const anyFilterShare = anyOnPage(pageFilters, 'Any filter')
+
+  const contributeButtons = tally(
+    site.contributeClicks
+      .filter(e => e.page === selectedPage)
+      .map(e => listingMember(e))
+  )
+  const pageContributeHits = site.contributeHits.filter(
+    e => e.page === selectedPage
+  )
+  const contributeButtonShare = shareOnPage(pageContributeHits, listingMember)
+  const anyContributeShare = anyOnPage(pageContributeHits, 'Any button')
+  const airtableViews = site.airtableClicks.filter(
+    e => e.page === selectedPage
+  ).length
 
   // Most-hovered map listings for the selected page — tooltip dwells
   // (listing_hover events), grouped exactly like topListings but with no
@@ -1412,10 +2061,13 @@ function aggregate(
   let cardsButtonClicks = 0
   let cardsButtonShare: VisitorShare | null = null
   if (selectedPage != null && MAP_PAGES.has(selectedPage)) {
-    const hoverHits = inRange.filter(e => e.type === 'listing_hover' && e.page)
-    const hovers = (unique ? uniqueClicks(hoverHits) : hoverHits).filter(
-      e => e.page === selectedPage
-    )
+    if (!site.hovers) {
+      const hoverHits = inRange.filter(
+        e => e.type === 'listing_hover' && e.page
+      )
+      site.hovers = unique ? uniqueClicks(hoverHits) : hoverHits
+    }
+    const hovers = site.hovers.filter(e => e.page === selectedPage)
     topHovered = listingRows(hovers)
     hoverShare = shareOnPage(hovers, listingMember)
     anyHoverShare = anyOnPage(hovers, 'Any listing')
@@ -1453,80 +2105,83 @@ function aggregate(
       ? mapSearchPanels(inRange, unique, anyOnPage)
       : EMPTY.mapSearch
 
+  // The page's tiles over time, counted like the site's (siteTrends).
+  const { frame } = site.fields.trends
+  const tiles = site.pageTiles
+  const compared = frame.previous != null
+  const page = selectedPage ?? ''
+  const views = tiles.views.get(page) ?? { events: [], buckets: [] }
+  const prevViews = tiles.prevViews.get(page) ?? []
+  const pageCounts = (
+    total: number,
+    prevTotal: number,
+    points: number[]
+  ): TrendMetric => ({
+    total,
+    previous: compared ? prevTotal : null,
+    points,
+    weekly: weeklyOf(frame, points),
+  })
+  const pageEvents = (
+    hits: AnalyticsEvent[],
+    prevHits: AnalyticsEvent[] | undefined
+  ) =>
+    pageCounts(
+      hits.length,
+      prevHits?.length ?? 0,
+      countPer(frame, bucketsOf(frame, hits))
+    )
+  const visitorPoints = peoplePer(frame, views.events, views.buckets)
+  const pageTrends: PageTrends = {
+    visitors: {
+      total: uniqueUsers(views.events),
+      previous: compared ? peopleIn(prevViews) : null,
+      points: visitorPoints,
+      weekly: weeklyOf(frame, visitorPoints, views),
+    },
+    pageViews: pageCounts(
+      views.events.length,
+      prevViews.length,
+      countPer(frame, views.buckets)
+    ),
+    listingClicks: pageEvents(pageClicksAll, tiles.prevClicks.get(page)),
+    filterUses: pageEvents(pageFilters, tiles.prevFilters.get(page)),
+  }
+
   return {
-    totalEvents: inRange.length,
-    byPage,
     selectedPage,
     topListings,
     byPosition: tallyPositions(
       pageClicks.map(e => e.position).filter((p): p is string => p != null)
     ),
-    topListingsOverall,
-    byPositionOverall,
     bySource,
     selectedSource,
-    filtersByPage,
     filterGroups,
     filterValues,
     filterUsers,
-    filterShareByPage,
-    clickShareByPage,
-    contributeByPage,
-    contributeButtons,
-    contributeShareByPage,
-    airtableByPage,
-    airtableViews,
-    airtableShareByPage,
-    cardsViews,
-    cardsViewShare,
-    cardsButtonClicks,
-    cardsButtonShare,
-    newsletterByPage,
-    newsletterShareByPage,
-    siteClickShare,
-    siteContributeShare,
-    siteAirtableShare,
-    siteNewsletterShare,
-    newsletterResults: newsletterSignupResults(inRange, unique),
-    newsletterArchive: newsletterArchiveStats(inRange, unique),
     listingShare,
     anyListingShare,
     positionShare,
     filterGroupShare,
     filterValueShare,
     anyFilterShare,
-    anyContributeShare,
-    anyHoverShare,
+    contributeButtons,
     contributeButtonShare,
-    hoverShare,
-    footerClicks,
-    navOverflowOpens,
-    navOverflowOpenShare,
-    anyNavOverflowOpenShare,
+    anyContributeShare,
+    airtableViews,
+    cardsViews,
+    cardsViewShare,
+    cardsButtonClicks,
+    cardsButtonShare,
     topHovered,
+    hoverShare,
+    anyHoverShare,
     areaClicks,
-    funnel: {
-      opened: usersOf('chatbot_open'),
-      typed: usersOf('chatbot_message'),
-      clicked: usersOf('chatbot_click'),
-    },
-    chatbot: chatbotPanels(inRange, unique),
-    search: searchPanels(inRange, unique),
     mapSearch,
-    optOuts: optOutSplit(inRange),
-    visits: visitsData(inRange, unique, firstSeen, startMs, viewVidsByPage),
-    correlations: correlations(inRange),
-    // Newest-first already; page views, map hovers and cards-section views
-    // are left out so the feed stays a log of deliberate actions rather than
-    // a firehose of visits, passing cursors and scrolls.
-    recent: inRange
-      .filter(
-        e =>
-          e.type !== 'page_view' &&
-          e.type !== 'listing_hover' &&
-          e.type !== 'cards_view'
-      )
-      .slice(0, 50),
+    pageTrends,
+    org: org
+      ? orgLookup(inRange, org, unique, site.viewVidsByPage, site.range)
+      : undefined,
   }
 }
 
@@ -1535,6 +2190,10 @@ export interface NewsletterResultRow {
   name: string
   /** Signups ActiveCampaign took: the confirmation email went out. */
   succeeded: number
+  /** Addresses already confirmed on the list: the visitor was told so, as
+   *  a success, and nothing was sent. Recorded as a signup error with the
+   *  reason 'already_subscribed', but not one. */
+  already: number
   /** Submits that showed the visitor an error instead. */
   failed: number
 }
@@ -1572,22 +2231,24 @@ export function newsletterSignupResults(
     })
   }
   const succeeded = onePerDay('newsletter_signup_success', () => '')
-  const failed = onePerDay('newsletter_signup_error', e => e.source ?? '')
+  const answers = onePerDay('newsletter_signup_error', e => e.source ?? '')
+  const already = answers.filter(e => e.source === 'already_subscribed')
+  const failed = answers.filter(e => e.source !== 'already_subscribed')
   const rows = new Map<string, NewsletterResultRow>()
   const rowFor = (page: string) => {
     let row = rows.get(page)
     if (!row) {
-      row = { name: page, succeeded: 0, failed: 0 }
+      row = { name: page, succeeded: 0, already: 0, failed: 0 }
       rows.set(page, row)
     }
     return row
   }
   for (const e of succeeded) rowFor(e.page as string).succeeded++
+  for (const e of already) rowFor(e.page as string).already++
   for (const e of failed) rowFor(e.page as string).failed++
+  const all = (r: NewsletterResultRow) => r.succeeded + r.already + r.failed
   return {
-    byPage: [...rows.values()].sort(
-      (a, b) => b.succeeded + b.failed - (a.succeeded + a.failed)
-    ),
+    byPage: [...rows.values()].sort((a, b) => all(b) - all(a)),
     errors: tally(failed.map(e => newsletterErrorLabel(e.source))),
   }
 }
@@ -1608,6 +2269,16 @@ export interface NewsletterArchiveRow {
  *  with any, busiest first. Follows the count mode: unique = one view per
  *  visitor per page per day, and one click per visitor per link per day.
  *  Exported for the unit test. */
+/** When each past issues page went live (PR #685, deployed 11 October 2026
+ *  at about 12:30 UTC). Before then the address was the site's 404 page,
+ *  and so is a newsletter's page that isn't listed here: Funding's, until
+ *  its move. Add a newsletter's time on the day its page first lists an
+ *  issue (Funding's move checklist in ~/Newsletter/PLAN.md says so). */
+export const PAST_ISSUES_LIVE_SINCE: Readonly<Record<string, number>> = {
+  events: Date.parse('2026-10-11T12:30:00Z'),
+  training: Date.parse('2026-10-11T12:30:00Z'),
+}
+
 export function newsletterArchiveStats(
   inRange: AnalyticsEvent[],
   unique: boolean
@@ -1636,6 +2307,10 @@ export function newsletterArchiveStats(
         e.page ?? ''
       )
       if (!m) continue
+      // A view of the 404 page that stood at the address isn't a view.
+      const live = PAST_ISSUES_LIVE_SINCE[m[1]]
+      const t = Date.parse(e.ts)
+      if (live == null || Number.isNaN(t) || t < live) continue
       const name = m[1][0].toUpperCase() + m[1].slice(1)
       if (counts(e, `view\x00${name}`)) rowFor(name).views++
     } else if (e.type === 'newsletter_archive_click' && e.page) {
@@ -1648,6 +2323,879 @@ export function newsletterArchiveStats(
     }
   }
   return [...rows.values()].sort((a, b) => b.views - a.views)
+}
+
+/** The newsletter a past issues page, confirm page or signup belongs to,
+ *  by the page it was recorded under. */
+const NEWSLETTER_OF_PAGE: Readonly<Record<string, string>> = {
+  Events: 'Events',
+  Training: 'Training',
+  Funding: 'Funding',
+  '/newsletter/events': 'Events',
+  '/newsletter/training': 'Training',
+  '/newsletter/funding': 'Funding',
+}
+
+/** Where ActiveCampaign sends a reader once they've pressed "Confirm
+ *  subscription" in the email a signup on the site triggers
+ *  (src/app/subscribed), per newsletter. */
+const CONFIRM_PAGE = /^\/subscribed\/(events|training|funding)\/?$/
+
+/** The page views of the confirm pages that count as confirmations: every
+ *  one in total mode, one per visitor per newsletter per day in unique mode
+ *  (a reader who clicks the link twice). Events without a visitor id each
+ *  count. Expects a newest-first list, like the rest. Exported for the unit
+ *  test. */
+export function confirmLandings(
+  views: AnalyticsEvent[],
+  unique: boolean
+): AnalyticsEvent[] {
+  const seen = new Set<string>()
+  return views.filter(e => {
+    if (e.type !== 'page_view') return false
+    const m = CONFIRM_PAGE.exec(e.page ?? '')
+    if (!m) return false
+    if (!unique || !e.vid) return true
+    const t = Date.parse(e.ts)
+    const key = `${e.vid}\x00${Number.isNaN(t) ? '' : dashboardDay(t)}\x00${m[1]}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+export interface NewsletterConfirmRow {
+  /** 'Events', 'Training', 'Funding'. */
+  name: string
+  /** Signups ActiveCampaign took (a link to confirm went out), from the
+   *  newsletter's boxes: its resource page and its past issues page. */
+  signedUp: number
+  /** Readers who landed on the newsletter's confirm page. */
+  confirmed: number
+}
+
+/** Each newsletter's signups through the site beside its confirmations,
+ *  both following the count mode. Exported for the unit test. */
+export function newsletterConfirmations(
+  inRange: AnalyticsEvent[],
+  unique: boolean,
+  results: NewsletterSignupResults
+): NewsletterConfirmRow[] {
+  const rows = new Map<string, NewsletterConfirmRow>()
+  const rowFor = (name: string) => {
+    let row = rows.get(name)
+    if (!row) {
+      row = { name, signedUp: 0, confirmed: 0 }
+      rows.set(name, row)
+    }
+    return row
+  }
+  for (const r of results.byPage) {
+    const name = NEWSLETTER_OF_PAGE[r.name]
+    if (name && r.succeeded > 0) rowFor(name).signedUp += r.succeeded
+  }
+  for (const e of confirmLandings(inRange, unique)) {
+    const key = CONFIRM_PAGE.exec(e.page ?? '')![1]
+    rowFor(key[0].toUpperCase() + key.slice(1)).confirmed++
+  }
+  return [...rows.values()].sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** A view of an issue's web or text version on aisafety.com
+ *  (/newsletter/<key>/<issue>, …/text). Those pages run no site scripts, so
+ *  the view is counted by the server, from the small image the page loads
+ *  (src/app/newsletter/[key]/[issue]/seen): `page` is the newsletter
+ *  ('Events'), `label` the issue's address ('week-41-2026'), `source` which
+ *  copy ('web' | 'text'), `vid` a salted hash of the reader's address and
+ *  browser that changes every day, so nothing can tell who it was. Recorded
+ *  by the server only: the public beacon doesn't take this kind. */
+export const NEWSLETTER_COPY_VIEW = 'newsletter_copy_view'
+
+export interface NewsletterCopyRow {
+  /** 'Events', 'Training', 'Funding'. */
+  newsletter: string
+  /** The issue's address ('week-41-2026'). */
+  issue: string
+  web: number
+  text: number
+}
+
+/** Views of each issue's web and text versions, busiest first. Unique mode
+ *  counts a reader once per issue per copy per day; total mode every load.
+ *  Exported for the unit test. */
+export function newsletterCopyViews(
+  inRange: AnalyticsEvent[],
+  unique: boolean
+): NewsletterCopyRow[] {
+  const rows = new Map<string, NewsletterCopyRow>()
+  const seen = new Set<string>()
+  for (const e of inRange) {
+    if (e.type !== NEWSLETTER_COPY_VIEW || !e.page || !e.label) continue
+    if (e.source !== 'web' && e.source !== 'text') continue
+    const id = `${e.page}\x00${e.label}`
+    if (unique && e.vid) {
+      const t = Date.parse(e.ts)
+      const key = `${e.vid}\x00${Number.isNaN(t) ? '' : dashboardDay(t)}\x00${id}\x00${e.source}`
+      if (seen.has(key)) continue
+      seen.add(key)
+    }
+    let row = rows.get(id)
+    if (!row) {
+      row = { newsletter: e.page, issue: e.label, web: 0, text: 0 }
+      rows.set(id, row)
+    }
+    row[e.source]++
+  }
+  return [...rows.values()].sort(
+    (a, b) =>
+      b.web + b.text - (a.web + a.text) || b.issue.localeCompare(a.issue)
+  )
+}
+
+export interface NewsletterLinkRow {
+  /** What was clicked: "Funding page's box" or "Footer · AI Safety Events". */
+  name: string
+  /** Where it goes: 'Substack', '/events'. */
+  to: string
+  clicks: number
+}
+
+/** The ways to the newsletters elsewhere on the site, busiest first: the
+ *  signup box's card link from when /funding's box handed off to Substack
+ *  (the card opened the newsletter there to read first; newsletter_view,
+ *  no longer sent since the Funding move), and the
+ *  footer's Newsletters column. Unique mode counts a visitor once per link
+ *  per day. Exported for the unit test. */
+export function newsletterLinkClicks(
+  inRange: AnalyticsEvent[],
+  unique: boolean
+): NewsletterLinkRow[] {
+  const rows = new Map<string, NewsletterLinkRow>()
+  const seen = new Set<string>()
+  const where = (url: string | undefined) => {
+    if (!url) return ''
+    if (url.startsWith('/')) return url.split(/[?#]/)[0]
+    try {
+      const u = new URL(url)
+      if (/(^|\.)substack\.com$/.test(u.hostname)) return 'Substack'
+      if (/(^|\.)aisafety\.com$/.test(u.hostname)) return u.pathname
+      return u.hostname.replace(/^www\./, '')
+    } catch {
+      return url
+    }
+  }
+  for (const e of inRange) {
+    let name: string
+    let to: string
+    if (e.type === 'newsletter_view' && e.page) {
+      name = `${e.page} page's box`
+      to = 'Substack'
+    } else if (
+      e.type === 'footer_click' &&
+      e.source === 'Newsletters' &&
+      e.label
+    ) {
+      name = `Footer · ${e.label}`
+      to = where(e.url)
+    } else continue
+    if (unique && e.vid) {
+      const t = Date.parse(e.ts)
+      const key = `${e.vid}\x00${Number.isNaN(t) ? '' : dashboardDay(t)}\x00${name}`
+      if (seen.has(key)) continue
+      seen.add(key)
+    }
+    const row = rows.get(name) ?? { name, to, clicks: 0 }
+    row.clicks++
+    rows.set(name, row)
+  }
+  return [...rows.values()].sort((a, b) => b.clicks - a.clicks)
+}
+
+/** The newsletter a link in one of the emails was in, from the utm tags the
+ *  pipeline puts on every aisafety.com link (utm_source=events-newsletter,
+ *  utm_campaign=events-2026-week-42; the Events & Training issues on
+ *  Substack used events-training-…). Read from a page view's `ref`, the
+ *  address the page was on when its beacon went out. Null for any other
+ *  address. Exported for the unit test. */
+export function newsletterOfRef(
+  ref: string | undefined
+): { newsletter: string; campaign: string | null } | null {
+  if (!ref || !ref.includes('utm_source=')) return null
+  let params: URLSearchParams
+  try {
+    params = new URL(ref).searchParams
+  } catch {
+    return null
+  }
+  const m = /^(events-training|events|training|funding)-newsletter$/i.exec(
+    params.get('utm_source') ?? ''
+  )
+  if (!m) return null
+  return {
+    newsletter: NEWSLETTER_OF_UTM[m[1].toLowerCase()],
+    campaign: params.get('utm_campaign') || null,
+  }
+}
+
+const NEWSLETTER_OF_UTM: Readonly<Record<string, string>> = {
+  events: 'Events',
+  training: 'Training',
+  funding: 'Funding',
+  'events-training': 'Events & Training',
+}
+
+/** The page views that start a visit from a newsletter: a page view whose
+ *  address carries a newsletter's tags, unless the same visitor's last such
+ *  view (from the same newsletter) was under SESSION_GAP_MS before, which
+ *  is the same visit reloaded. A view without a visitor id always counts.
+ *  Newest first, like the input. Exported for the unit test. */
+export function newsletterLandings(views: AnalyticsEvent[]): AnalyticsEvent[] {
+  const tagged = views.filter(
+    e => e.type === 'page_view' && newsletterOfRef(e.ref) != null
+  )
+  const last = new Map<string, number>()
+  const keep = new Set<AnalyticsEvent>()
+  // Oldest first, so each view is judged against the one before it.
+  for (let i = tagged.length - 1; i >= 0; i--) {
+    const e = tagged[i]
+    const t = Date.parse(e.ts)
+    if (!e.vid || Number.isNaN(t)) {
+      keep.add(e)
+      continue
+    }
+    const key = `${e.vid}\x00${newsletterOfRef(e.ref)!.newsletter}`
+    const before = last.get(key)
+    if (before == null || t - before >= SESSION_GAP_MS) keep.add(e)
+    last.set(key, t)
+  }
+  return tagged.filter(e => keep.has(e))
+}
+
+export interface NewsletterVisitRow {
+  /** 'Events', 'Training', 'Funding', 'Events & Training'. */
+  name: string
+  visits: number
+  /** Distinct visitors among them (a visit without a visitor id isn't one). */
+  visitors: number
+  /** Visits that went on to another page of the site. */
+  morePages: number
+  /** Visits with a listing click. */
+  clicked: number
+  /** Listing clicks in those visits. */
+  listingClicks: number
+}
+
+export interface NewsletterVisits {
+  /** Busiest newsletter first. */
+  byNewsletter: NewsletterVisitRow[]
+  /** The pages viewed in those visits, the first one included, by page name
+   *  ('Events') or path. */
+  pages: Counted[]
+  /** The listings clicked in them. */
+  listings: Counted[]
+  /** Visits per issue, by the link's utm_campaign. */
+  issues: Counted[]
+}
+
+/** What visitors who came from a newsletter did: each landing
+ *  (newsletterLandings) starts a visit, which runs until the visitor has
+ *  been quiet for SESSION_GAP_MS or lands from a newsletter again. A visit
+ *  without a visitor id can't be followed, so only its landing page counts.
+ *  Every visit counts, whatever the count mode. Exported for the unit test. */
+export function newsletterVisits(inRange: AnalyticsEvent[]): NewsletterVisits {
+  const landings = newsletterLandings(
+    inRange.filter(e => e.type === 'page_view')
+  )
+  const rows = new Map<string, NewsletterVisitRow>()
+  const people = new Map<string, Set<string>>()
+  const pages: string[] = []
+  const listings: string[] = []
+  const issues: string[] = []
+  const pageOf = (e: AnalyticsEvent) =>
+    PAGE_NAME_BY_PATH[e.page ?? ''] ?? e.page ?? ''
+  // Each landing visitor's events, oldest first.
+  const byVid = new Map<string, AnalyticsEvent[]>()
+  for (const e of landings) if (e.vid) byVid.set(e.vid, [])
+  for (let i = inRange.length - 1; i >= 0; i--) {
+    const e = inRange[i]
+    if (e.vid) byVid.get(e.vid)?.push(e)
+  }
+  const starts = new Set(landings)
+  for (const landing of [...landings].reverse()) {
+    const { newsletter, campaign } = newsletterOfRef(landing.ref)!
+    let row = rows.get(newsletter)
+    if (!row) {
+      row = {
+        name: newsletter,
+        visits: 0,
+        visitors: 0,
+        morePages: 0,
+        clicked: 0,
+        listingClicks: 0,
+      }
+      rows.set(newsletter, row)
+      people.set(newsletter, new Set())
+    }
+    row.visits++
+    if (campaign) issues.push(campaign)
+    const first = pageOf(landing)
+    pages.push(first)
+    if (!landing.vid) continue
+    people.get(newsletter)!.add(landing.vid)
+    const events = byVid.get(landing.vid)!
+    let at = events.indexOf(landing)
+    let prev = Date.parse(landing.ts)
+    let more = false
+    let clicks = 0
+    for (at++; at < events.length; at++) {
+      const e = events[at]
+      const t = Date.parse(e.ts)
+      if (starts.has(e) || (!Number.isNaN(t) && t - prev >= SESSION_GAP_MS))
+        break
+      if (!Number.isNaN(t)) prev = t
+      if (e.type === 'page_view') {
+        const p = pageOf(e)
+        pages.push(p)
+        if (p !== first) more = true
+      } else if (
+        e.type === 'listing_click' &&
+        e.page != null &&
+        LISTING_PAGES.has(e.page)
+      ) {
+        clicks++
+        listings.push(listingMember(e))
+      }
+    }
+    if (more) row.morePages++
+    if (clicks > 0) row.clicked++
+    row.listingClicks += clicks
+  }
+  for (const [name, row] of rows) row.visitors = people.get(name)!.size
+  return {
+    byNewsletter: [...rows.values()].sort((a, b) => b.visits - a.visits),
+    pages: tally(pages),
+    listings: tally(listings),
+    issues: tally(issues),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Org lookup (the dashboard's Org lookup tab)
+// ---------------------------------------------------------------------------
+
+/** One of the org's listings: a dashboard row (page + label), as on the page
+ *  tabs, so its click count reconciles with that page's Top listings. */
+export interface OrgListingRow {
+  /** Row key (page + '\0' + label). */
+  key: string
+  /** Short id for leaving the row out (?x=). */
+  hash: string
+  name: string
+  page: string
+  /** Resource-page clicks on the listing (cards, featured slots, map pins),
+   *  following the count mode. */
+  clicks: number
+  /** Distinct visitors who clicked it on its page vs the page's visitors. */
+  share: VisitorShare
+  /** Map tooltip dwells (Map, Communities) and Field map search picks,
+   *  following the count mode. */
+  hovers: number
+  picks: number
+  /** Clicked at least once in a featured slot. */
+  featured: boolean
+  url?: string
+  /** Airtable logo when one is known, else null (the dashboard falls back to
+   *  the website's favicon). */
+  logo: string | null
+  why: MatchReason
+  /** On the site right now. */
+  live: boolean
+}
+
+export interface OrgDestinationRow {
+  key: string
+  /** The clicked result's title, or its url when none was recorded. */
+  name: string
+  url: string
+  where: 'Site search' | 'Chatbot'
+  count: number
+}
+
+export interface OrgSearchRow {
+  key: string
+  term: string
+  where: 'Site search' | 'Map search'
+  count: number
+}
+
+export interface OrgLookupData {
+  query: string
+  orgName: string
+  tooBroad: { listings: number; websites: number } | null
+  failedPages: string[]
+  /** Catalog listings the search matched, past ones included, whether or
+   *  not they had any activity in range. */
+  matched: number
+  /** Distinct visitors who clicked through to any of the listings (from a
+   *  resource page, site search, or the chatbot); vid-less clicks count once
+   *  each. Ignores the count mode. */
+  visitors: number
+  /** Those clicks, following the count mode. */
+  clicks: number
+  rows: OrgListingRow[]
+  /** Rows (and catalog listings) Bryce left out, for the Put back links. */
+  leftOut: { hash: string; page: string; name: string }[]
+  /** The clicks by how visitors reached the listing; sums to `clicks`. */
+  reached: Counted[]
+  destinations: OrgDestinationRow[]
+  searches: OrgSearchRow[]
+  /** Clicks (count mode) per UTC day, or per week from Monday when the range
+   *  is longer than SERIES_DAILY_MAX_DAYS. `start` is the bucket's first
+   *  day, YYYY-MM-DD; `days` is set on a week only partly inside the range
+   *  (the first and the current one, usually): how many of its days are. */
+  series: { start: string; count: number; days?: number }[]
+  seriesUnit: 'day' | 'week'
+  /** Pages with resource-page clicks, busiest first. */
+  clickedPages: string[]
+}
+
+/** Longest range drawn one bar per day (a month, 30 days, or less); longer
+ *  ranges get a bar per week, since 90 bars a quarter read as noise. */
+const SERIES_DAILY_MAX_DAYS = 31
+
+const ORG_REACHED_ORDER = [
+  'Cards',
+  'Featured slot',
+  'Map pins',
+  'Homepage',
+  'Site search',
+  'Chatbot',
+]
+
+/** Everything the dashboard holds on one org's listings. One pass to decide
+ *  which rows match and collect the candidates, one to count them; no extra
+ *  reads. Never mutates the (shared, cached) events. Exported for the unit
+ *  test. */
+export function orgLookup(
+  inRange: AnalyticsEvent[],
+  spec: OrgSpec,
+  unique: boolean,
+  viewVidsByPage: Map<string, Set<string>>,
+  range: DateRange,
+  now = Date.now()
+): OrgLookupData {
+  const base = {
+    query: spec.query,
+    orgName: spec.orgName,
+    tooBroad: spec.tooBroad,
+    failedPages: spec.failedPages,
+    matched: spec.entries.size,
+  }
+  if (spec.tooBroad || !spec.norm)
+    return {
+      ...base,
+      visitors: 0,
+      clicks: 0,
+      rows: [],
+      leftOut: [],
+      reached: [],
+      destinations: [],
+      searches: [],
+      series: [],
+      seriesUnit: 'day',
+      clickedPages: [],
+    }
+
+  // Event addresses come from the public beacon (anything, up to 600
+  // characters), so only those on a host the org could own are parsed and
+  // remembered; quickHost is plain string work.
+  const urlHosts = new Set<string>()
+  for (const u of spec.urls) urlHosts.add(hostPart(u))
+  const cleanMemo = new Map<string, string | null>()
+  const clean = (url: string | undefined) => {
+    if (!url) return null
+    let c = cleanMemo.get(url)
+    if (c === undefined) {
+      c = cleanUrl(url)
+      cleanMemo.set(url, c)
+    }
+    return c
+  }
+  const onSpread = (host: string | null) =>
+    spec.hosts.size > 0 && spreadsTo(spec, host)
+
+  // Pass 1: which rows are the org's, and the candidate events.
+  const why = new Map<string, MatchReason | null>()
+  const rowCands: { e: AnalyticsEvent; key: string }[] = []
+  const destCands: AnalyticsEvent[] = []
+  const queryCands: AnalyticsEvent[] = []
+  for (const e of inRange) {
+    const isRow =
+      (e.type === 'listing_click' && !!e.page && LISTING_PAGES.has(e.page)) ||
+      (e.type === 'listing_hover' && !!e.page) ||
+      e.type === 'map_search_pick'
+    if (isRow) {
+      const page = e.page ?? 'Map'
+      const label = listingMember(e)
+      const key = rowKey(page, label)
+      rowCands.push({ e, key })
+      let w = why.get(key)
+      if (w === undefined) {
+        w =
+          spec.entries.get(key)?.why ??
+          (labelMatches(page, label, spec.norm, spec.compact) ? 'name' : null)
+        why.set(key, w)
+      }
+      if (w) continue
+      const byId = e.listingId ? spec.ids.get(e.listingId) : undefined
+      const host = quickHost(e.url)
+      const byUrl =
+        host != null &&
+        ((page !== 'Jobs' && onSpread(host)) ||
+          (urlHosts.has(host) && spec.urls.has(clean(e.url) ?? '')))
+      if (byId || byUrl) why.set(key, byId ?? 'website')
+    } else if (
+      (e.type === 'search_click' && e.source !== 'page') ||
+      e.type === 'chatbot_click'
+    ) {
+      if (quickHost(e.url)) destCands.push(e)
+    } else if (
+      (e.type === 'search_query' || e.type === 'map_search_query') &&
+      e.query
+    ) {
+      queryCands.push(e)
+    }
+  }
+
+  // Pass 2: count the matched rows.
+  interface Acc {
+    page: string
+    name: string
+    clicks: AnalyticsEvent[]
+    hovers: AnalyticsEvent[]
+    picks: AnalyticsEvent[]
+    url?: string
+    listingId?: string
+    live: boolean
+  }
+  const accs = new Map<string, Acc>()
+  const leftOut = new Map<
+    string,
+    { hash: string; page: string; name: string }
+  >()
+  const leftOutUrls = new Set(spec.leftOutUrls)
+  const leftOutIds = new Set(spec.leftOutIds)
+  const rowUrls = new Set<string>()
+  for (const { e, key } of rowCands) {
+    if (!why.get(key)) continue
+    const page = e.page ?? 'Map'
+    const name = listingMember(e)
+    if (spec.leftOut.has(rowHash(page, name))) {
+      if (!leftOut.has(key))
+        leftOut.set(key, { hash: rowHash(page, name), page, name })
+      const c = clean(e.url)
+      if (c) leftOutUrls.add(c)
+      // Unless a kept listing has the same record (a homepage card and its
+      // program): its chatbot cards still count.
+      if (e.listingId && !spec.ids.has(e.listingId)) leftOutIds.add(e.listingId)
+      continue
+    }
+    let acc = accs.get(key)
+    if (!acc) {
+      // The homepage's own cards are written into the page, not read from
+      // a getter, so the catalog can't say they've gone: never flag them.
+      acc = {
+        page,
+        name,
+        clicks: [],
+        hovers: [],
+        picks: [],
+        live: page === 'Home',
+      }
+      accs.set(key, acc)
+    }
+    if (e.type === 'listing_click') acc.clicks.push(e)
+    else if (e.type === 'listing_hover') acc.hovers.push(e)
+    else acc.picks.push(e)
+    // Newest first, so the first url / id seen is the most recent.
+    acc.url ??= e.url
+    acc.listingId ??= e.listingId
+    if (
+      (e.listingId && spec.liveIds.has(e.listingId)) ||
+      spec.liveKeys.has(key)
+    )
+      acc.live = true
+    const c = clean(e.url)
+    if (c) rowUrls.add(c)
+  }
+  for (const l of spec.leftOutEntries)
+    if (!leftOut.has(l.key))
+      leftOut.set(l.key, {
+        hash: rowHash(l.page, l.name),
+        page: l.page,
+        name: l.name,
+      })
+  const rowHosts = new Set<string>()
+  for (const u of rowUrls) rowHosts.add(hostPart(u))
+
+  const dedupe = (events: AnalyticsEvent[]) =>
+    unique ? uniqueClicks(events) : events
+  const reached = new Map<string, number>()
+  const bump = (bucket: string) =>
+    reached.set(bucket, (reached.get(bucket) ?? 0) + 1)
+  const counted: AnalyticsEvent[] = []
+  // Every click before the count mode's dedupe, for the visitor count.
+  // Counted, not kept: a flood on one listing mustn't cost memory twice.
+  const visitorIds = new Set<string>()
+  let anonClicks = 0
+  const seeClick = (e: AnalyticsEvent) => {
+    if (e.vid) visitorIds.add(e.vid)
+    else anonClicks++
+  }
+  const clicksByPage = new Map<string, number>()
+  const rows: OrgListingRow[] = []
+  for (const [key, a] of accs) {
+    const clicks = dedupe(a.clicks)
+    for (const e of clicks) {
+      bump(
+        e.page === 'Home'
+          ? 'Homepage'
+          : e.position?.startsWith('F')
+            ? 'Featured slot'
+            : e.source === 'map'
+              ? 'Map pins'
+              : 'Cards'
+      )
+      counted.push(e)
+    }
+    const vids = new Set<string>()
+    for (const e of a.clicks) {
+      seeClick(e)
+      if (e.vid) vids.add(e.vid)
+    }
+    if (clicks.length)
+      clicksByPage.set(a.page, (clicksByPage.get(a.page) ?? 0) + clicks.length)
+    const entry = spec.entries.get(key)
+    rows.push({
+      key,
+      hash: rowHash(a.page, a.name),
+      name: a.name,
+      page: a.page,
+      clicks: clicks.length,
+      share: {
+        name: key,
+        active: vids.size,
+        visitors: viewVidsByPage.get(a.page)?.size ?? 0,
+      },
+      hovers: dedupe(a.hovers).length,
+      picks: dedupe(a.picks).length,
+      featured: a.clicks.some(e => e.position?.startsWith('F')),
+      url: a.url ?? entry?.url,
+      logo:
+        entry?.logo ??
+        spec.logoByKey.get(key) ??
+        (a.listingId ? spec.logoById.get(a.listingId) : undefined) ??
+        null,
+      why: why.get(key) as MatchReason,
+      live: a.live,
+    })
+  }
+  // The org's live listings nobody clicked in range still belong in the list.
+  for (const [key, entry] of spec.entries) {
+    if (accs.has(key) || !entry.live) continue
+    rows.push({
+      key,
+      hash: rowHash(entry.page, entry.name),
+      name: entry.name,
+      page: entry.page,
+      clicks: 0,
+      share: {
+        name: key,
+        active: 0,
+        visitors: viewVidsByPage.get(entry.page)?.size ?? 0,
+      },
+      hovers: 0,
+      picks: 0,
+      featured: false,
+      url: entry.url,
+      logo: entry.logo,
+      why: entry.why,
+      live: true,
+    })
+  }
+  rows.sort(
+    (a, b) =>
+      b.clicks - a.clicks ||
+      b.hovers + b.picks - (a.hovers + a.picks) ||
+      a.name.localeCompare(b.name)
+  )
+
+  // Clicks through from site search and the chatbot. They carry the page the
+  // visitor was on, not the listing's, so they're matched by address (or a
+  // chatbot card's record id) and counted apart from the rows.
+  const seen = new Set<string>()
+  const dests = new Map<string, OrgDestinationRow>()
+  for (const e of destCands) {
+    const host = quickHost(e.url) as string
+    const cardId =
+      e.type === 'chatbot_click' && e.listingId
+        ? stripIdPrefix(e.listingId)
+        : null
+    // A card naming a left-out listing stays out, whatever its address.
+    if (cardId && leftOutIds.has(cardId)) continue
+    const byId = cardId != null && spec.ids.has(cardId)
+    const isJob =
+      e.type === 'search_click'
+        ? e.source === 'job'
+        : (e.listingId?.startsWith('job:') ?? false)
+    const ownHost = urlHosts.has(host) || rowHosts.has(host)
+    const spread = !isJob && onSpread(host)
+    if (!byId && !ownHost && !spread) continue
+    const c = clean(e.url)
+    if (!c) continue
+    const known = spec.urls.has(c) || rowUrls.has(c)
+    if (!byId && !known && !spread) continue
+    // An address only left-out listings have stays out; one a kept listing
+    // shares (the Field map org and its program on one homepage) stays in.
+    if (leftOutUrls.has(c) && !byId && !known) continue
+    const where = e.type === 'search_click' ? 'Site search' : 'Chatbot'
+    seeClick(e)
+    if (unique && e.vid) {
+      const t = Date.parse(e.ts)
+      const k = `${e.vid}\x00${Number.isNaN(t) ? '' : dashboardDay(t)}\x00${where}\x00${c}`
+      if (seen.has(k)) continue
+      seen.add(k)
+    }
+    counted.push(e)
+    bump(where)
+    const dk = `${where}\x00${c}`
+    const d = dests.get(dk)
+    if (d) d.count++
+    // Newest first: the first click names the row.
+    else
+      dests.set(dk, {
+        key: dk,
+        name: e.label || (e.url as string),
+        url: e.url as string,
+        where,
+        count: 1,
+      })
+  }
+
+  // What visitors typed into the two search boxes that names the org.
+  const queryCounts = new Map<string, OrgSearchRow>()
+  const queryMatch = new Map<string, boolean>()
+  const queryVids = new Set<string>()
+  for (const e of queryCands) {
+    const term = (e.query as string).trim().toLowerCase()
+    let m = queryMatch.get(term)
+    if (m === undefined) {
+      m = matchesNorm(normText(term), spec.norm, spec.compact)
+      queryMatch.set(term, m)
+    }
+    if (!m) continue
+    const where = e.type === 'search_query' ? 'Site search' : 'Map search'
+    const k = `${where}\x00${term}`
+    if (unique && e.vid) {
+      if (queryVids.has(`${k}\x00${e.vid}`)) continue
+      queryVids.add(`${k}\x00${e.vid}`)
+    }
+    const row = queryCounts.get(k)
+    if (row) row.count++
+    else queryCounts.set(k, { key: k, term, where, count: 1 })
+  }
+
+  // inRange is newest first, so its last event is the oldest data there is.
+  const oldest = inRange.length
+    ? Date.parse(inRange[inRange.length - 1].ts)
+    : NaN
+  const { series, unit } = orgSeries(counted, range, now, oldest)
+  return {
+    ...base,
+    visitors: visitorIds.size + anonClicks,
+    clicks: counted.length,
+    rows,
+    leftOut: [...leftOut.values()],
+    reached: ORG_REACHED_ORDER.filter(b => reached.has(b)).map(name => ({
+      name,
+      count: reached.get(name) as number,
+    })),
+    destinations: [...dests.values()].sort(
+      (a, b) => b.count - a.count || a.name.localeCompare(b.name)
+    ),
+    searches: [...queryCounts.values()].sort(
+      (a, b) => b.count - a.count || a.term.localeCompare(b.term)
+    ),
+    series,
+    seriesUnit: unit,
+    clickedPages: [...clicksByPage.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([page]) => page),
+  }
+}
+
+/** The host at the front of a cleanUrl() result. */
+function hostPart(cleaned: string): string {
+  const i = cleaned.search(/[/?]/)
+  return i === -1 ? cleaned : cleaned.slice(0, i)
+}
+
+/** Clicks per UTC day (or per week, from Monday, for long ranges), every
+ *  bucket from the range's start to the earlier of its end and now. The
+ *  start never goes back before the oldest event read (`oldest`), so an
+ *  open range, or a typed date far in the past, draws only days there's
+ *  data for. Empty when there's nothing to draw. */
+function orgSeries(
+  clicks: AnalyticsEvent[],
+  { startMs, endMs }: DateRange,
+  now: number,
+  oldest: number
+): {
+  series: { start: string; count: number; days?: number }[]
+  unit: 'day' | 'week'
+} {
+  // Nothing read in range means nothing to draw.
+  if (!Number.isFinite(oldest)) return { series: [], unit: 'day' }
+  const end = Math.min(endMs ?? now, now)
+  const start = startMs != null ? Math.max(startMs, oldest) : oldest
+  if (!Number.isFinite(end) || start > end) return { series: [], unit: 'day' }
+  // Day boundaries by arithmetic: the dashboard's zone is UTC (DASHBOARD_TZ).
+  const dayMs = (t: number) => Math.floor(t / 86_400_000) * 86_400_000
+  const firstDay = dayMs(start)
+  const lastDay = dayMs(end)
+  const unit =
+    (lastDay - firstDay) / 86_400_000 + 1 > SERIES_DAILY_MAX_DAYS
+      ? 'week'
+      : 'day'
+  const bucketOf = (t: number) => {
+    const d = dayMs(t)
+    if (unit === 'day') return d
+    return d - ((new Date(d).getUTCDay() + 6) % 7) * 86_400_000
+  }
+  const counts = new Map<number, number>()
+  for (const e of clicks) {
+    const t = Date.parse(e.ts)
+    if (Number.isNaN(t)) continue
+    const b = bucketOf(t)
+    counts.set(b, (counts.get(b) ?? 0) + 1)
+  }
+  const step = unit === 'day' ? 86_400_000 : 7 * 86_400_000
+  const series: { start: string; count: number; days?: number }[] = []
+  for (let b = bucketOf(firstDay); b <= lastDay; b += step) {
+    // A week cut off by the range's start or end (or by today).
+    const days =
+      unit === 'week'
+        ? (Math.min(b + 6 * 86_400_000, lastDay) - Math.max(b, firstDay)) /
+            86_400_000 +
+          1
+        : 1
+    series.push({
+      start: dashboardDay(b),
+      count: counts.get(b) ?? 0,
+      ...(unit === 'week' && days < 7 && { days }),
+    })
+  }
+  return { series, unit }
 }
 
 /** What a newsletter_signup_error's reason (`source`) means, in words. */
@@ -1785,7 +3333,8 @@ function interestOf(e: AnalyticsEvent): string | undefined {
     return e.page && e.page !== '/'
       ? (PAGE_NAME_BY_PATH[e.page] ?? e.page)
       : undefined
-  if (e.type === 'listing_click') return e.page
+  if (e.type === 'listing_click')
+    return e.page && LISTING_PAGES.has(e.page) ? e.page : undefined
   if (e.type.startsWith('chatbot')) return 'Chatbot'
   if (e.type.startsWith('search')) return 'Search'
   // Using the map's search box is engaging with the map.
@@ -2143,6 +3692,36 @@ function optOutSplit(events: AnalyticsEvent[]): { off: number; on: number } {
   return { off, on }
 }
 
+/** The press page's clicks (press_action), per action and per item. Follows
+ *  the count mode like the footer's links: unique = one click per visitor per
+ *  item per day, and the action rows add up those same clicks. The shares
+ *  divide by `pageVids`, the distinct visitors who viewed /media in range.
+ *  Exported for the unit test. */
+export function pressPanel(
+  inRange: AnalyticsEvent[],
+  unique: boolean,
+  pageVids: ReadonlySet<string> | undefined
+): PressPanelData {
+  const hits = inRange.filter(
+    e => e.type === 'press_action' && e.page === 'Press'
+  )
+  const clicks = unique ? uniqueClicks(hits) : hits
+  const actionOf = (e: AnalyticsEvent) =>
+    PRESS_ACTION_LABEL[e.source ?? ''] ?? 'Unknown'
+  const byAction = tally(clicks.map(actionOf))
+  const visitors = pageVids?.size ?? 0
+  return {
+    byAction,
+    byItem: tally(clicks.map(e => listingMember(e))),
+    actionShare: byAction.map(row => ({
+      name: row.name,
+      active: distinctVids(hits.filter(e => actionOf(e) === row.name)),
+      visitors,
+    })),
+    anyShare: { name: 'Any action', active: distinctVids(hits), visitors },
+  }
+}
+
 /** Distinct users in a set of events: distinct vids, plus each vid-less event
  *  counted once (can't dedup what we can't identify). */
 function uniqueUsers(events: AnalyticsEvent[]): number {
@@ -2201,12 +3780,14 @@ async function readMonths(
 }
 
 /** Like readMonths, but through the month cache: only events new since this
- *  instance last read a month are downloaded. */
+ *  instance last read a month are downloaded. One list per month, newest month
+ *  first. A month's list is the very same array as last time when nothing in
+ *  it changed, which is what lets siteViews tell when a view is still current. */
 async function readMonthsCached(
   db: Redis,
   monthsNewestFirst: { month: string; len: number }[]
-): Promise<AnalyticsEvent[]> {
-  const parts = await Promise.all(
+): Promise<AnalyticsEvent[][]> {
+  return Promise.all(
     monthsNewestFirst.map(({ month, len }) => {
       const key = `${month}:${len}`
       let read = monthReads.get(key)
@@ -2219,7 +3800,6 @@ async function readMonthsCached(
       return read
     })
   )
-  return parts.flat()
 }
 
 /** One month's events at `len` long, newest first: the cached copy plus
@@ -2238,7 +3818,14 @@ async function refreshMonth(
         ? cached.events
         : (await readTail(db, key, cached.len, len)).concat(cached.events)
   } else {
+    // A full read happens on a server's first dashboard load (each deploy
+    // starts fresh ones) and after a hand cleanup. Logged so its cost can be
+    // seen in the Vercel logs.
+    const t0 = Date.now()
     events = await readTail(db, key, 0, len)
+    console.info(
+      `[analytics] read ${month} in full: ${len.toLocaleString('en-US')} events in ${Date.now() - t0} ms`
+    )
   }
   monthCache.set(month, { len, events })
   trimMonthCache()
@@ -2266,7 +3853,100 @@ function trimMonthCache(): void {
     if (total <= MONTH_CACHE_MAX_EVENTS || monthCache.size <= 1) break
     total -= monthCache.get(month)!.len
     monthCache.delete(month)
+    dropSiteViewsOf(month)
   }
+}
+
+// ─── Site view cache ─────────────────────────────────────────────────────────
+// The site-wide half of the dashboard (aggregateSite) is nearly all of the
+// work behind a view, and it's the same on every tab. Each server instance
+// keeps the ones it has built, so a tab switch, or the dashboard preloading
+// its other tabs, only works out the selected page's panels. A view is keyed
+// by its date range, count mode and the exact month lists it was built from:
+// month lists are replaced, never changed in place, whenever an event arrives
+// or a month is re-read, so a new event always means a fresh view and the
+// figures are never older than the click.
+//
+// Only views built from the month cache's own lists are kept, and a view goes
+// when the month cache lets go of one of its months. A range bigger than the
+// month cache (All time, once the store passes MONTH_CACHE_MAX_EVENTS) has its
+// oldest months re-read on every load, so it gets no lasting view: it would
+// never be hit again, and would hold its own copy of months the month cache
+// dropped to stay within memory. Its loads still share a build while one is
+// under way.
+interface CachedSiteView {
+  builtAt: number
+  /** The months it was built from. */
+  months: string[]
+  view: Promise<SiteView>
+}
+const siteViews = new Map<string, CachedSiteView>()
+// A few ranges and count modes' worth. Each holds its in-range events (the
+// month cache's own event objects, not copies) plus the computed panels.
+const SITE_VIEWS_MAX = 6
+// Past this a view is dropped when the next load comes, even if nothing
+// changed.
+const SITE_VIEW_MAX_AGE_MS = 10 * 60_000
+// A small id per month list, so a cache key can name exact arrays.
+const listIds = new WeakMap<AnalyticsEvent[], number>()
+let nextListId = 0
+
+function listId(list: AnalyticsEvent[]): number {
+  let id = listIds.get(list)
+  if (id == null) {
+    id = ++nextListId
+    listIds.set(list, id)
+  }
+  return id
+}
+
+/** Forget every kept view built from this month (the month cache dropped it). */
+function dropSiteViewsOf(month: string): void {
+  for (const [k, c] of siteViews)
+    if (c.months.includes(month)) siteViews.delete(k)
+}
+
+/** The site view for these month lists (newest month first, matching
+ *  `wanted`), range and count mode: the kept one, the one already being built,
+ *  or a new one from `build`. */
+function cachedSiteView(
+  wanted: { month: string; len: number }[],
+  parts: AnalyticsEvent[][],
+  { startMs, endMs }: DateRange,
+  unique: boolean,
+  build: () => Promise<SiteView>
+): Promise<SiteView> {
+  const now = Date.now()
+  for (const [k, c] of siteViews)
+    if (now - c.builtAt > SITE_VIEW_MAX_AGE_MS) siteViews.delete(k)
+  const keepable = wanted.every(
+    (w, i) => monthCache.get(w.month)?.events === parts[i]
+  )
+  const key = keepable
+    ? [startMs, endMs, unique, ...parts.map(listId)].join('|')
+    : [startMs, endMs, unique, ...wanted.map(w => `${w.month}:${w.len}`)].join(
+        '|'
+      )
+  const hit = siteViews.get(key)
+  if (hit) return hit.view
+  const entry: CachedSiteView = {
+    builtAt: now,
+    months: wanted.map(w => w.month),
+    view: build(),
+  }
+  siteViews.set(key, entry)
+  const drop = () => {
+    if (siteViews.get(key) === entry) siteViews.delete(key)
+  }
+  // A failed build isn't kept: the next load tries again. Nor is one from
+  // re-read months, once it's done.
+  entry.view.then(keepable ? undefined : drop, drop)
+  // Oldest first, as Map keeps insertion order.
+  for (const k of siteViews.keys()) {
+    if (siteViews.size <= SITE_VIEWS_MAX) break
+    siteViews.delete(k)
+  }
+  return entry.view
 }
 
 /** The newest month, if it already holds more than HIGH_TRAFFIC_RATIO times
@@ -2310,13 +3990,10 @@ function viewVidsInRange(
   { startMs, endMs }: DateRange
 ): string[] {
   const vids = new Set<string>()
+  const inside = within({ startMs, endMs })
   for (const e of all) {
     if (e.type !== 'page_view' || !e.vid) continue
-    const t = Date.parse(e.ts)
-    if (Number.isNaN(t)) continue
-    if (startMs != null && t < startMs) continue
-    if (endMs != null && t > endMs) continue
-    vids.add(e.vid)
+    if (inside(e.ts)) vids.add(e.vid)
   }
   return [...vids]
 }
@@ -2373,46 +4050,129 @@ function earliestByVid(events: AnalyticsEvent[]): Map<string, number> {
   return out
 }
 
+/** The dashboard fields that come with a view whatever its tab. */
+type ViewMeta = Pick<
+  DashboardData,
+  'oldestTs' | 'highTraffic' | 'firstSeenBackfilled'
+>
+
+/** Whether an event came from a preview deployment or a laptop rather than the
+ *  live site, judged by the address of the page that sent it (`ref`). Until
+ *  writesSharedStore existed (13 October 2026) those landed in the shared
+ *  store too: about 770 events in July to September 2026. They stay stored and
+ *  are left out of every count. The live site's own *.vercel.app address goes
+ *  with them, since no visitor uses it. */
+export function fromTestCopy(ref: string | undefined): boolean {
+  if (!ref || ref.startsWith('https://aisafety.com/')) return false
+  const host = /^https?:\/\/([^/?#]+)/i
+    .exec(ref)?.[1]
+    .replace(/:\d*$/, '')
+    .toLowerCase()
+  if (!host) return false
+  return (
+    host.endsWith('.vercel.app') ||
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host === '127.0.0.1' ||
+    host === '[::1]'
+  )
+}
+
+/** The months a view reads (newest first) and the stretch before the range
+ *  its tiles compare with. That stretch is read too, but only when the store
+ *  goes back that far and the extra months fit the month cache: a 90-day
+ *  range would otherwise double what every load holds in memory once the
+ *  store passes it. Without it the tiles show no "From". */
+function readPlan(
+  byMonth: { month: string; len: number }[],
+  range: DateRange,
+  now: number
+): { wanted: { month: string; len: number }[]; previous: TrendWindow | null } {
+  const months = byMonth.map(b => b.month)
+  const pick = (r: DateRange) =>
+    monthsInRange(months, r)
+      .map(m => byMonth.find(b => b.month === m)!)
+      .reverse() // newest first
+  const own = pick(range)
+  const previous = previousWindow(range, now)
+  if (!previous || months.length === 0) return { wanted: own, previous: null }
+  if (previous.startMs < monthBounds(months[0]).startMs)
+    return { wanted: own, previous: null }
+  const both = pick({ startMs: previous.startMs, endMs: range.endMs })
+  const events = both.reduce((n, b) => n + b.len, 0)
+  if (both.length > own.length && events > MONTH_CACHE_MAX_EVENTS)
+    return { wanted: own, previous: null }
+  return { wanted: both, previous }
+}
+
+/** The site view for a range and count mode from the Redis store, through
+ *  the month cache and the site view cache, plus the store-wide fields. */
+async function loadSiteView(
+  db: Redis,
+  range: DateRange,
+  unique: boolean
+): Promise<{ site: SiteView; meta: ViewMeta }> {
+  // All stored months, oldest first, with lengths (so the near-cap warning
+  // covers the whole store); only the months the range (and the stretch the
+  // tiles compare it with) touches have their events read. The oldest month
+  // also tells us how far back the data goes.
+  const byMonth = await storedMonths(db)
+  const months = byMonth.map(b => b.month)
+  const now = Date.now()
+  const { wanted, previous } = readPlan(byMonth, range, now)
+  const [parts, oldestEvent, backfilled] = await Promise.all([
+    readMonthsCached(bulkStore ?? db, wanted),
+    months.length > 0
+      ? (db.lindex(
+          MONTH_KEY_PREFIX + months[0],
+          -1
+        ) as Promise<AnalyticsEvent | null>)
+      : null,
+    db.exists(FIRST_SEEN_BACKFILLED_KEY),
+  ])
+  const site = await cachedSiteView(wanted, parts, range, unique, async () => {
+    // Only here, on the shared store: a laptop's own file is all localhost.
+    const all = parts.flat().filter(e => !fromTestCopy(e.ref))
+    // Which of the range's visitors were around before it began. Skipped
+    // for an open-ended range: nothing can predate "All time".
+    const firstSeen =
+      range.startMs != null
+        ? await readFirstSeen(db, viewVidsInRange(all, range))
+        : new Map<string, number>()
+    return aggregateSite(all, range, unique, firstSeen, previous, now)
+  })
+  return {
+    site,
+    meta: {
+      oldestTs: oldestEvent?.ts,
+      highTraffic: highTrafficMonth(
+        byMonth.map(b => ({ month: b.month, count: b.len }))
+      ),
+      firstSeenBackfilled: backfilled === 1,
+    },
+  }
+}
+
 export async function readDashboard(
   range: DateRange,
   page?: string,
   unique = true,
-  sourceFilter?: string
+  sourceFilter?: string,
+  /** The Org lookup tab's search. A promise, so the catalog it's matched
+   *  against (Airtable) loads while the events do; it must never reject. */
+  org?: Promise<OrgSpec | null>
 ): Promise<DashboardData> {
   if (store) {
     try {
-      // All stored months, oldest first, with lengths (so the near-cap warning
-      // covers the whole store); only the months the range touches have their
-      // events read. The oldest month also tells us how far back the data goes.
-      const byMonth = await storedMonths(store)
-      const months = byMonth.map(b => b.month)
-      const wanted = monthsInRange(months, range)
-        .map(m => byMonth.find(b => b.month === m)!)
-        .reverse() // newest first
-      const [all, oldestEvent, backfilled] = await Promise.all([
-        readMonthsCached(bulkStore ?? store, wanted),
-        months.length > 0
-          ? (store.lindex(
-              MONTH_KEY_PREFIX + months[0],
-              -1
-            ) as Promise<AnalyticsEvent | null>)
-          : null,
-        store.exists(FIRST_SEEN_BACKFILLED_KEY),
+      const [{ site, meta }, orgSpec] = await Promise.all([
+        loadSiteView(store, range, unique),
+        org,
       ])
-      // Which of the range's visitors were around before it began. Skipped for
-      // an open-ended range: nothing can predate "All time".
-      const firstSeen =
-        range.startMs != null
-          ? await readFirstSeen(store, viewVidsInRange(all, range))
-          : new Map<string, number>()
       return {
         source: 'redis',
-        oldestTs: oldestEvent?.ts,
-        highTraffic: highTrafficMonth(
-          byMonth.map(b => ({ month: b.month, count: b.len }))
-        ),
-        firstSeenBackfilled: backfilled === 1,
-        ...aggregate(all, range, page, unique, sourceFilter, firstSeen),
+        ...meta,
+        ...site.fields,
+        ...aggregatePage(site, page, sourceFilter, orgSpec ?? null),
       }
     } catch (err) {
       // Degrade gracefully — a Redis blip must not 500 the dashboard.
@@ -2437,7 +4197,162 @@ export async function readDashboard(
       [...devMonthCounts.entries()].map(([month, count]) => ({ month, count }))
     ),
     firstSeenBackfilled: true,
-    ...aggregate(all, range, page, unique, sourceFilter, earliestByVid(all)),
+    ...aggregate(
+      all,
+      range,
+      page,
+      unique,
+      sourceFilter,
+      earliestByVid(all),
+      (await org) ?? null
+    ),
+  }
+}
+
+// ─── Saved copy of the default view ─────────────────────────────────────────
+// A server that hasn't read the store yet needs seconds to download and work
+// through the range's events before the dashboard can show anything, and
+// that's often: every deploy starts fresh servers (20 to 30 a day when
+// Airtable is busy), and idle ones are let go. So while the dashboard is in
+// use, the default view (30 days, unique counts) is saved, every tab of it,
+// compressed into one key (~100 KB). A server in that state shows the saved
+// copy at once while it reads, and the page swaps in the live figures when
+// they're ready (page.tsx).
+// One copy per environment, so a preview or a local server never replaces
+// production's (they can share the database).
+const SAVED_VIEW_KEY = `aisafety:analytics:saved-view:${process.env.VERCEL_ENV ?? 'local'}`
+// At most this often per server, so a busy session doesn't keep rewriting it.
+const SAVE_VIEW_EVERY_MS = 5 * 60_000
+// An older copy isn't shown: the live load is better than week-old figures.
+const SAVED_VIEW_MAX_AGE_MS = 7 * 86_400_000
+const gzipAsync = promisify(gzip)
+const gunzipAsync = promisify(gunzip)
+
+/** The fields a dashboard view has, nested, as one string. */
+function shapeOf(value: unknown): string {
+  if (Array.isArray(value)) return '[]'
+  if (value === null || typeof value !== 'object') return typeof value
+  return `{${Object.keys(value)
+    .sort()
+    .map(k => `${k}:${shapeOf((value as Record<string, unknown>)[k])}`)
+    .join(',')}}`
+}
+
+// A copy is only ever shown by the code that wrote it: the page reads its
+// fields without checks, so a copy from before a field was added would break
+// the page. The commit stays the same across the Airtable redeploys (they
+// rebuild the same code), so those keep the copy; a code change starts
+// without one. The shape is a second check, for servers without a commit.
+const SAVED_VIEW_BUILD = `${process.env.VERCEL_GIT_COMMIT_SHA ?? 'local'}:${shapeOf(EMPTY)}`
+
+interface SavedView {
+  v: 1
+  /** The code that wrote it (SAVED_VIEW_BUILD). */
+  build: string
+  /** Which range it is ('30d'), so a renamed preset never gets the wrong one. */
+  rangeKey: string
+  unique: boolean
+  /** When it was worked out (epoch ms). */
+  at: number
+  /** Every field but the per-page ones. */
+  base: Omit<DashboardData, keyof PageFields>
+  /** The per-page fields for each tab's page; '' is no page asked for. */
+  pages: Record<string, PageFields>
+}
+
+let lastViewSave = 0
+let viewSaving = false
+
+/** Save the view for this range (the preset `rangeKey`) and count mode, with
+ *  the page panels of every page in `pages`, if the last save from this
+ *  server is old enough. Reuses the cached site view, so it costs only the
+ *  page panels and the write. Never throws: a failed save only means the next
+ *  fresh server waits for the live figures, as before. */
+export async function saveViewCopy(
+  range: DateRange,
+  rangeKey: string,
+  unique: boolean,
+  pages: string[]
+): Promise<void> {
+  if (!store || viewSaving || Date.now() - lastViewSave < SAVE_VIEW_EVERY_MS)
+    return
+  viewSaving = true
+  try {
+    const { site, meta } = await loadSiteView(store, range, unique)
+    const saved: SavedView = {
+      v: 1,
+      build: SAVED_VIEW_BUILD,
+      rangeKey,
+      unique,
+      at: Date.now(),
+      base: { source: 'redis', ...meta, ...site.fields },
+      pages: Object.fromEntries([
+        ['', aggregatePage(site)],
+        ...pages.map(p => [p, aggregatePage(site, p)]),
+      ]),
+    }
+    const packed = await gzipAsync(JSON.stringify(saved))
+    await store.set(SAVED_VIEW_KEY, packed.toString('base64'))
+    lastViewSave = saved.at
+  } catch (err) {
+    console.warn(
+      `[analytics] saving the dashboard copy failed: ${err instanceof Error ? err.message : String(err)}`
+    )
+  } finally {
+    viewSaving = false
+  }
+}
+
+/** The saved copy of this view (range preset, count mode, page), but only
+ *  while this server would have to read some of the range's months in full
+ *  first: once they're in the month cache the live figures come quickly and
+ *  win. Null when there's no fitting copy (another range, a source filter, a
+ *  page it doesn't hold, too old) or the store can't be read. */
+export async function savedViewWhileCold(
+  range: DateRange,
+  rangeKey: string,
+  unique: boolean,
+  page?: string,
+  sourceFilter?: string
+): Promise<{ at: number; data: DashboardData } | null> {
+  if (!store || sourceFilter) return null
+  try {
+    const months = (await store.zrange(MONTHS_KEY, 0, -1)) as string[]
+    // The months the live view reads, the tiles' stretch before the range
+    // included (readPlan; its lengths aren't known here, so this may count a
+    // month the live view would leave out, which only shows the copy).
+    const previous = previousWindow(range, Date.now())
+    const reads = monthsInRange(months, {
+      startMs:
+        previous &&
+        months.length > 0 &&
+        previous.startMs >= monthBounds(months[0]).startMs
+          ? previous.startMs
+          : range.startMs,
+      endMs: range.endMs,
+    })
+    if (reads.every(m => monthCache.has(m))) return null
+    const packed = await store.get<string>(SAVED_VIEW_KEY)
+    if (typeof packed !== 'string') return null
+    const saved = JSON.parse(
+      (await gunzipAsync(Buffer.from(packed, 'base64'))).toString('utf8')
+    ) as SavedView
+    const pageFields = saved.pages[page ?? '']
+    if (
+      saved.v !== 1 ||
+      saved.build !== SAVED_VIEW_BUILD ||
+      saved.rangeKey !== rangeKey ||
+      saved.unique !== unique ||
+      Date.now() - saved.at > SAVED_VIEW_MAX_AGE_MS ||
+      !pageFields
+    )
+      return null
+    return { at: saved.at, data: { ...EMPTY, ...saved.base, ...pageFields } }
+  } catch (err) {
+    console.warn(
+      `[analytics] reading the dashboard copy failed: ${err instanceof Error ? err.message : String(err)}`
+    )
+    return null
   }
 }
 
@@ -2505,6 +4420,57 @@ export async function readLastMonthVisitors(
     // Recoverable: the press page simply leaves the traffic row out.
     console.warn(
       `[analytics] last month's visitors unavailable: ${err instanceof Error ? err.message : String(err)}`
+    )
+    return null
+  }
+}
+
+// The same once-a-month figure per resource page, kept under its own key:
+// the Queue puts urgent items on busier pages first (Bryce, 13 Oct 2026).
+const MONTHLY_PAGE_VISITORS_KEY_PREFIX =
+  'aisafety:analytics:monthly-page-visitors:' // + 'YYYY-MM'
+
+export interface MonthlyPageVisitors {
+  /** The month the figures cover, 'YYYY-MM' (UTC). */
+  month: string
+  /** Distinct visitors among each resource page's views, by path ('/jobs').
+   *  Pages with no views that month are left out. */
+  pages: Record<string, number>
+}
+
+/** Visitors per resource page in the last complete calendar month, or null
+ *  when there is nothing to show (no analytics store, no page views that
+ *  month, or the store couldn't be read). Worked out once per month, like
+ *  readLastMonthVisitors. */
+export async function readLastMonthPageVisitors(
+  now = Date.now()
+): Promise<MonthlyPageVisitors | null> {
+  const { month, range } = lastCompleteMonth(now)
+  const key = MONTHLY_PAGE_VISITORS_KEY_PREFIX + month
+  try {
+    if (store) {
+      const kept = await store.get<MonthlyPageVisitors>(key)
+      if (kept && kept.month === month && Object.keys(kept.pages ?? {}).length)
+        return kept
+    }
+    const data = await readDashboard(range)
+    if (data.error) return null
+    const pathOf = new Map(
+      Object.entries(PAGE_NAME_BY_PATH).map(([path, name]) => [name, path])
+    )
+    const pages: Record<string, number> = {}
+    for (const { name, count } of data.visits.byPage) {
+      const path = pathOf.get(name)
+      if (path && count > 0) pages[path] = count
+    }
+    if (!Object.keys(pages).length) return null
+    const figures: MonthlyPageVisitors = { month, pages }
+    if (store) await store.set(key, figures)
+    return figures
+  } catch (err) {
+    // Recoverable: the Queue keeps its date-only order.
+    console.warn(
+      `[analytics] last month's page visitors unavailable: ${err instanceof Error ? err.message : String(err)}`
     )
     return null
   }

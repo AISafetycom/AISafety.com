@@ -335,6 +335,10 @@ describe('approving the waves (approve once)', () => {
       listName: 'AISafety.com Events',
       notes: [],
     })
+    // The issue's first send, which ends the hold on test copies' clicks.
+    expect(kv.data.get('aisafety:newsletter:sends-from:' + ISSUE)).toBe(
+      Date.parse('2026-10-08T15:05:00.000Z')
+    )
     expect(
       r.scheduled.map(s => [s.wave, s.campaignId, s.sendAt, s.expected])
     ).toEqual([
@@ -552,8 +556,14 @@ describe('approving the waves (approve once)', () => {
       [2, '2026-10-08T15:12:00.000Z'],
       [3, '2026-10-08T15:22:00.000Z'],
     ])
-    // A test list isn't the watcher's: nothing recorded.
+    // A test list isn't the watcher's: nothing recorded. Nor is the issue's
+    // first send, which would end the hold on test copies' clicks.
     expect(kv.zsets.size).toBe(0)
+    expect(
+      [...kv.data.keys()].filter(k =>
+        k.startsWith('aisafety:newsletter:sends-from:')
+      )
+    ).toEqual([])
   })
 
   it('waves go in order', async () => {
@@ -1394,13 +1404,45 @@ describe('Recent sends and Analytics group waves by issue', () => {
     expect(rows[0].baseName).toBe(ISSUE)
   })
 
+  it('Recent sends: an issue past the newest 12 sends still shows every wave', async () => {
+    const ac = makeAC({
+      extra: [
+        sentWave(1, { ldate: '2026-10-01T09:30:00-05:00' }),
+        sentWave(2, { ldate: '2026-10-09T09:30:00-05:00' }),
+        ...Array.from({ length: 11 }, (_, i) =>
+          camp({
+            id: String(300 + i),
+            name: `Training · Week ${i + 1}, 2027`,
+            list: '7',
+            ldate: `2026-10-0${2 + (i % 6)}T12:00:00-05:00`,
+          })
+        ),
+      ],
+    })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const rows = await nl.listRecent()
+    expect(rows).toHaveLength(13)
+    expect(rows.filter(r => r.baseName === ISSUE).map(r => r.id)).toEqual([
+      '181',
+      '180',
+    ])
+  })
+
   it('Analytics: one row per issue, its waves added up, its clicks once', async () => {
     const ac = makeAC({
       extra: [
-        sentWave(1, { uniqueopens: '300', unsubscribes: '4' }),
+        sentWave(1, {
+          uniqueopens: '300',
+          unsubscribes: '4',
+          hardbounces: '1',
+          softbounces: '2',
+        }),
         sentWave(2, {
           uniqueopens: '500',
           unsubscribes: '6',
+          softbounces: '3',
+          sdate: '2026-10-09 09:00:00',
           ldate: '2026-10-09T09:30:00-05:00',
         }),
         camp({
@@ -1408,29 +1450,308 @@ describe('Recent sends and Analytics group waves by issue', () => {
           name: 'Training · Week 41, 2026',
           list: '7',
           status: '5',
+          send_amt: '600',
+          uniqueopens: '200',
+          sdate: '2026-10-08 07:00:00',
+          ldate: '2026-10-08T07:20:00-05:00',
+        }),
+      ],
+      spamComplaints: { '180': '1', '181': '2', '170': 'unreadable' },
+    })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const { issues, readFrom } = await nl.readSendStats({
+      startMs: null,
+      endMs: null,
+    })
+    expect(
+      issues.map(s => [
+        s.id,
+        s.name,
+        s.newsletter,
+        s.sentAt,
+        s.sent,
+        s.opens,
+        s.unsubscribes,
+        s.waves,
+        s.unfinished,
+      ])
+    ).toEqual([
+      // Dated by when wave 1 went out (08:02 in the account's -05:00).
+      [
+        '181',
+        ISSUE,
+        'Events',
+        '2026-10-08T13:02:00.000Z',
+        1480,
+        800,
+        10,
+        2,
+        null,
+      ],
+      [
+        '170',
+        'Training · Week 41, 2026',
+        'Training',
+        '2026-10-08T12:00:00.000Z',
+        600,
+        200,
+        0,
+        0,
+        null,
+      ],
+    ])
+    // Bounces from the campaigns, complaints from each wave's v1 report: a
+    // report that can't be read leaves the issue's count unknown, not zero.
+    expect(
+      issues.map(s => [s.hardBounces, s.softBounces, s.spamComplaints])
+    ).toEqual([
+      [1, 5, 3],
+      [0, 0, null],
+    ])
+    expect(issues.map(s => s.clicks?.total)).toEqual([0, 0])
+    expect(readFrom).toBeNull()
+  })
+
+  it('Analytics: an issue counts whole, by when it first went out; practice sends and test lists stay out', async () => {
+    const ac = makeAC({
+      extra: [
+        sentWave(1),
+        sentWave(2, {
+          sdate: '2026-10-09 09:00:00',
+          ldate: '2026-10-09T09:30:00-05:00',
+        }),
+        // A practice copy to the team's own addresses on Funding's list,
+        // and the issue sent to a test list: neither is a real issue.
+        camp({
+          id: '160',
+          name: 'Funding · Issue #22, 2026',
+          list: '8',
+          status: '5',
           send_amt: '3',
-          uniqueopens: '2',
-          ldate: '2026-10-08T12:00:00-05:00',
+          sdate: '2026-10-07 10:00:00',
+        }),
+        camp({
+          id: '175',
+          name: ISSUE,
+          list: '4',
+          status: '5',
+          send_amt: '600',
+        }),
+        // Stopped part-way after reaching 1,200 people: it still went out.
+        camp({
+          id: '190',
+          name: 'Training · Week 42, 2026',
+          list: '7',
+          status: '4',
+          send_amt: '1200',
+          sdate: '2026-10-15 10:00:00',
         }),
       ],
     })
     vi.stubGlobal('fetch', ac.fetchMock)
     const nl = await freshModule()
-    const stats = await nl.readSendStats({ startMs: null, endMs: null })
+    const all = await nl.readSendStats({ startMs: null, endMs: null })
     expect(
-      stats.map(s => [
-        s.id,
-        s.name,
-        s.newsletter,
-        s.delivered,
-        s.opens,
-        s.unsubscribes,
-        s.waves,
-      ])
+      all.issues.map(s => [s.name, s.sent, s.waves, s.unfinished])
     ).toEqual([
-      ['181', ISSUE, 'Events', 1480, 800, 10, 2],
-      ['170', 'Training · Week 41, 2026', 'Training', 3, 2, 0, 0],
+      ['Training · Week 42, 2026', 1200, 0, 'stopped'],
+      [ISSUE, 1480, 2, null],
     ])
+    // A range that starts between the waves leaves the issue out, rather
+    // than showing wave 2 alone under its name.
+    const afterFirst = await nl.readSendStats({
+      startMs: Date.parse('2026-10-09T00:00:00Z'),
+      endMs: Date.parse('2026-10-14T23:59:59Z'),
+    })
+    expect(afterFirst.issues.map(s => s.name)).toEqual([])
+    const withFirst = await nl.readSendStats({
+      startMs: Date.parse('2026-10-08T00:00:00Z'),
+      endMs: Date.parse('2026-10-08T23:59:59Z'),
+    })
+    expect(withFirst.issues.map(s => [s.name, s.sent])).toEqual([[ISSUE, 1480]])
+  })
+
+  it('Analytics: reads only the lists of issues that could be in the range', async () => {
+    const ac = makeAC({ extra: [sentWave(1), sentWave(2)] })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const listReads = () =>
+      ac.calls.filter(c => /\/campaignLists$/.test(c.path)).length
+    const before = listReads()
+    const today = await nl.readSendStats({
+      startMs: Date.parse('2026-10-15T00:00:00Z'),
+      endMs: Date.parse('2026-10-15T23:59:59Z'),
+    })
+    expect(today.issues).toEqual([])
+    expect(listReads()).toBe(before)
+  })
+
+  it('Analytics: still sending, paused, stopped, or more waves to come', async () => {
+    const ac = makeAC({
+      extra: [
+        camp({
+          id: '191',
+          name: 'Training · Week 42, 2026',
+          list: '7',
+          status: '2',
+          send_amt: '900',
+        }),
+        camp({
+          id: '192',
+          name: 'Events · Week 42, 2026',
+          list: '6',
+          status: '3',
+          send_amt: '800',
+        }),
+        // Sending and stopped at once: sending is said.
+        camp({
+          id: '193',
+          name: 'Funding · Issue #24, 2026 · wave 1/2',
+          list: '8',
+          status: '2',
+          send_amt: '400',
+        }),
+        camp({
+          id: '194',
+          name: 'Funding · Issue #24, 2026 · wave 2/2',
+          list: '8',
+          status: '4',
+          send_amt: '300',
+        }),
+        // Wave 1 out, waves 2–4 scheduled: not finished.
+        sentWave(1),
+        sentWave(2, { status: '1', send_amt: '0', ldate: null }),
+        sentWave(3, { status: '1', send_amt: '0', ldate: null }),
+        sentWave(4, { status: '1', send_amt: '0', ldate: null }),
+      ],
+    })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const { issues } = await nl.readSendStats({ startMs: null, endMs: null })
+    expect(
+      issues
+        .map(s => [s.name, s.newsletter, s.waves, s.wavesPlanned, s.unfinished])
+        .sort()
+    ).toEqual([
+      [ISSUE, 'Events', 1, 4, 'scheduled'],
+      ['Events · Week 42, 2026', 'Events', 0, 0, 'paused'],
+      ['Funding · Issue #24, 2026', 'Funding', 2, 2, 'sending'],
+      ['Training · Week 42, 2026', 'Training', 0, 0, 'sending'],
+    ])
+  })
+
+  it('Analytics: real lists by id; a list without “(test)” in its name is still left out', async () => {
+    const ac = makeAC({
+      extra: [
+        camp({
+          id: '176',
+          name: 'Events · Week 40, 2026',
+          list: '3',
+          status: '5',
+          send_amt: '600',
+        }),
+      ],
+    })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const { issues } = await nl.readSendStats({ startMs: null, endMs: null })
+    expect(issues).toEqual([])
+  })
+
+  it('Analytics: a spam report that doesn’t load leaves the count unknown', async () => {
+    const ac = makeAC({
+      extra: [sentWave(1), sentWave(2)],
+      spamComplaints: { '180': '1' },
+      reportFails: ['181'],
+    })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const { issues } = await nl.readSendStats({ startMs: null, endMs: null })
+    expect(issues.map(s => [s.name, s.spamComplaints])).toEqual([[ISSUE, null]])
+  })
+
+  it('Analytics: unknown clicks stay unknown', async () => {
+    const ac = makeAC({ extra: [sentWave(1)] })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    kv.down = true
+    const { issues, readFrom } = await nl.readSendStats({
+      startMs: null,
+      endMs: null,
+    })
+    expect(issues.map(s => [s.name, s.clicks])).toEqual([[ISSUE, null]])
+    expect(readFrom).toBeNull()
+  })
+
+  /** `n` test-list campaigns newer than the issue (ids from 300 up), the
+   *  newest made at 15 October 2026, 12:00 UTC and each one `every` hours
+   *  before the next. */
+  function fillers(n: number, every: number) {
+    const newest = Date.parse('2026-10-15T12:00:00Z')
+    return Array.from({ length: n }, (_, i) =>
+      camp({
+        id: String(300 + n - 1 - i),
+        name: `Filler ${i}`,
+        list: '4',
+        cdate: new Date(newest - i * every * 3_600_000).toISOString(),
+      })
+    )
+  }
+
+  const campaignPages = (ac: ReturnType<typeof makeAC>) =>
+    ac.calls
+      .filter(c => c.method === 'GET' && c.path.startsWith('campaigns?'))
+      .map(c => new URLSearchParams(c.path.split('?')[1]).get('offset'))
+
+  it('Analytics: reads past the newest 100 campaigns, a page at a time, for an issue behind them', async () => {
+    const ac = makeAC({ extra: [sentWave(1), ...fillers(250, 1)] })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const { issues, readFrom } = await nl.readSendStats({
+      startMs: null,
+      endMs: null,
+    })
+    expect(issues.map(s => s.name)).toEqual([ISSUE])
+    // Each page starts 10 before the last one ended.
+    expect(campaignPages(ac)).toEqual([null, '90', '180'])
+    expect(readFrom).toBeNull()
+  })
+
+  it('Analytics: reads no older page than the range needs', async () => {
+    // 250 campaigns, one every 6 hours: the newest 100 reach back 25 days.
+    const ac = makeAC({ extra: [sentWave(1), ...fillers(250, 6)] })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const { issues, readFrom } = await nl.readSendStats({
+      startMs: Date.parse('2026-10-13T00:00:00Z'),
+      endMs: null,
+    })
+    expect(issues).toEqual([])
+    expect(campaignPages(ac)).toEqual([null])
+    expect(readFrom).toBeNull()
+  })
+
+  it('Analytics: says so when the range reaches back past the most it reads', async () => {
+    const nl = await freshModule()
+    const max = nl.CAMPAIGN_READ_MAX
+    const ac = makeAC({ extra: [sentWave(1), ...fillers(max + 200, 1)] })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const { issues, readFrom } = await nl.readSendStats({
+      startMs: null,
+      endMs: null,
+    })
+    // The issue is older than every campaign read.
+    expect(issues).toEqual([])
+    const pages = campaignPages(ac)
+    const end = Number(pages[pages.length - 1]) + 100
+    expect(end).toBeGreaterThanOrEqual(max)
+    expect(end).toBeLessThan(max + 100)
+    const read = [...ac.camps]
+      .sort((a, b) => Number(b.id) - Number(a.id))
+      .slice(0, end)
+    const oldest = Math.min(...read.map(c => Date.parse(c.cdate ?? '')))
+    expect(readFrom).toBe(new Date(oldest).toISOString())
   })
 })
 

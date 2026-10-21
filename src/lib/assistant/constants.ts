@@ -44,7 +44,6 @@ const SUGGEST_FORMS: Record<string, string> = {
   'founder-resource':
     'https://airtable.com/appF8XfZUGXtfi40E/pag1OO5TrQkO96W7R/form',
   advisor: 'https://airtable.com/appF8XfZUGXtfi40E/pagTw6PRaIHUHh8ty/form',
-  project: 'https://airtable.com/appF8XfZUGXtfi40E/pagudvyKXZISztcOI/form',
   org: 'https://airtable.com/appF8XfZUGXtfi40E/pag2YaqdXhhR9Ey82/form',
   // Pseudo-types below: not listing types. They route the "update / contact /
   // give feedback" intents to their shared site-wide forms.
@@ -65,7 +64,6 @@ export const SUGGEST_TYPES = [
   'media-channel',
   'founder-resource',
   'advisor',
-  'project',
   'org',
   'job',
   // Pseudo-types (not listing types) for the update / contact / feedback

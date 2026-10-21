@@ -79,8 +79,12 @@ export async function sendAdminMail(
     }
     return true
   } catch (err) {
+    // The subject can contain a person's name, so it goes in as a %s argument
+    // rather than in the format string.
     console.warn(
-      `[admin-mail] could not send "${mail.subject}" (${kind}):`,
+      '[admin-mail] could not send "%s" (%s):',
+      mail.subject,
+      kind,
       err
     )
     return false

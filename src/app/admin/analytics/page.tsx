@@ -1,14 +1,16 @@
-import { Fragment } from 'react'
-import Image from 'next/image'
-import Link from 'next/link'
+import { Fragment, Suspense } from 'react'
+import { after } from 'next/server'
+import { headers } from 'next/headers'
 import Icon from '@/components/Icon'
 import {
   readDashboard,
+  saveViewCopy,
+  savedViewWhileCold,
   sourceSlug,
   newsletterErrorLabel,
   PAGE_NAME_BY_PATH,
   type Counted,
-  type DateRange,
+  type DashboardData,
   type ChatbotFunnel,
   type ChatbotRepeatUse,
   type ClickDestination,
@@ -18,18 +20,23 @@ import {
   type SearchPanelData,
   type MapSearchPanelData,
   type NewsletterArchiveRow,
+  type NewsletterConfirmRow,
+  type NewsletterCopyRow,
+  type NewsletterLinkRow,
   type NewsletterSignupResults,
+  type NewsletterVisits,
+  type DateRange,
   type VisitorShare,
   DASHBOARD_TZ,
-  dashboardDay,
-  dashboardOffset,
 } from '@/lib/analytics/events'
 import {
+  countConversations,
   readConversationStats,
   type ConversationStats,
   type RatedReply,
   type TopQuestion,
 } from '@/lib/analytics/conversations'
+import { bucketOf, previousWindow, weeklyOf } from '@/lib/analytics/trends'
 import { readQuestionThemes, type ThemeSummary } from '@/lib/analytics/themes'
 import {
   buildSearchIndex,
@@ -37,6 +44,7 @@ import {
   type SearchType,
 } from '@/lib/data/search-index'
 import { TYPE_ICON, TYPE_LABEL, TYPE_PATH } from '@/lib/search'
+import { isPreviewRequest } from '@/lib/preview'
 import RefreshThemesButton from './RefreshThemesButton'
 import { getFunders } from '@/lib/data/funding'
 import { getEvents } from '@/lib/data/events'
@@ -49,20 +57,84 @@ import { getFounderResources } from '@/lib/data/founders'
 import { getJobs } from '@/lib/data/jobs'
 import { getMapData, type MapOrg } from '@/lib/data/map'
 import { getProjects } from '@/lib/data/projects'
+import { requireAccess } from '@/lib/admin/auth'
 import {
   isNewsletterConfigured,
+  CAMPAIGN_READ_MAX,
   readSendStats,
   type SendStats,
+  type SendStatsResult,
 } from '@/lib/admin/newsletter'
 import {
-  readFeedReaders,
+  historyStale,
+  readNewsletterSubscribers,
+  refreshSubscriberHistory,
+} from '@/lib/admin/newsletter-subscribers'
+import {
+  readFeedHistory,
   type FeedReaders,
 } from '@/lib/newsletter-archive-store'
+import { issueName } from '@/lib/newsletter-web'
+import { MAX_QUERY, normText, parseLeftOut } from '@/lib/analytics/org-lookup'
+import { readIssueClicks } from '@/lib/analytics/org-newsletter'
+import {
+  listShares,
+  sameLeftOut,
+  shareForQuery,
+} from '@/lib/analytics/org-shares'
+import { canEdit } from '@/lib/admin/access'
+import { requestOrigin } from '@/lib/admin/origin'
 import DateRangePicker from './DateRangePicker'
+import OrgSearch from './OrgSearch'
+import ShareOrgLink, {
+  LeaveOutLink,
+  SharedOrgPages,
+  type ShareState,
+  type ShareSync,
+} from './ShareOrgLink'
 import ExcludeToggle from './ExcludeToggle'
 import Logo from './Logo'
 import PendingMark from './PendingMark'
+import RefreshIfStale from './RefreshIfStale'
+import PreloadLink, { type Preload } from './PreloadLink'
 import SortableTable, { type SortColumn, type SortValue } from './SortableTable'
+import TrendChart, { type TrendTile } from './TrendChart'
+import SubstackUpload from './SubstackUpload'
+import {
+  eventTiles,
+  feedDays,
+  feedTile,
+  subscriberTiles,
+  type TileSpec,
+} from './trend-tiles'
+import {
+  OrgView,
+  openedWords,
+  orgNewsletterPanel,
+  type OrgAdmin,
+  type OrgNewsletter,
+} from './OrgView'
+import { orgSearchSpec } from './org-search'
+import { PAGE_NAV, navOrder } from './page-nav'
+import {
+  CountTable,
+  MAX_TABLE_ROWS,
+  Panel,
+  Stat,
+  TruncationNote,
+  faviconFor,
+  pct1,
+  prettyUrl,
+  shareCell,
+  type PageBadge,
+} from './parts'
+import {
+  MINUTE,
+  first,
+  resolveRange,
+  type ResolvedRange,
+  type SearchParams,
+} from './range'
 import admin from '../admin.module.css'
 import styles from './analytics.module.css'
 import { displayFilterGroup, displayFilterValue } from '@/lib/filter-tracking'
@@ -78,99 +150,56 @@ const SOURCE_LABEL: Record<string, string> = {
   none: 'No data yet',
 }
 
-// Resource pages in the same order as the site nav. `name` is the analytics
-// `page` value (the string passed to trackListingClick) and the tab key; `label`
-// is the page's name on the live site (from Navigation.tsx) so the tabs read the
-// way visitors see them — e.g. the 'Founders' page is labelled "Founder toolkit".
-// Drives the order, labels, and icons of the page tabs; every page listed here
-// always gets a tab (even with no clicks yet). Pages not listed (e.g. Home) sort
-// after these, keeping their by-clicks order and showing their raw name.
-const PAGE_NAV: { name: string; label: string; icon: string }[] = [
-  { name: 'Training', label: 'Training programs', icon: 'grad-cap.svg' },
-  { name: 'Events', label: 'Events', icon: 'calendar.svg' },
-  { name: 'Map', label: 'Field map', icon: 'map.svg' },
-  { name: 'Communities', label: 'Communities', icon: 'globe.svg' },
-  { name: 'Self-study', label: 'Self-study', icon: 'book.svg' },
-  { name: 'Jobs', label: 'Jobs', icon: 'briefcase.svg' },
-  { name: 'Funding', label: 'Funding', icon: 'coins.svg' },
-  { name: 'Media channels', label: 'Media channels', icon: 'megaphone.svg' },
-  { name: 'Advisors', label: 'Advisors', icon: 'person.svg' },
-  // Volunteer projects has no trackable clicks (its cards are plain text with no
-  // links), so it gets no tab. If it's ever tracked, add it back here.
-  { name: 'Founders', label: 'Founder toolkit', icon: 'rocket.svg' },
-]
-
-// The two non-page tabs that lead the tab bar. Their keys are reserved, so a
-// resource page can never collide with them.
+// The non-page tabs that lead the tab bar. Their keys are reserved (and
+// lowercase), so a resource page can never collide with them.
 const OVERVIEW_TABS: { key: string; label: string }[] = [
   { key: 'pages', label: 'Overview' },
+  { key: 'orgs', label: 'Org lookup' },
   { key: 'chatbot', label: 'Chatbot' },
   { key: 'search', label: 'Search' },
   { key: 'newsletters', label: 'Newsletters' },
   { key: 'correlations', label: 'Correlations' },
 ]
 const OVERVIEW_KEYS = new Set(OVERVIEW_TABS.map(t => t.key))
+// Tabs whose views read more than the event store: the Chatbot tab the
+// Airtable conversation log, Newsletters ActiveCampaign, Search the whole
+// search index, Org lookup the listing catalog and the newsletter clicks.
+// Their links preload only once the pointer is on them.
+const COSTLY_TABS = new Set(['chatbot', 'newsletters', 'search', 'orgs'])
+// The resource pages the site really has. Tab names otherwise come from the
+// events, which anyone can send to /api/track, so only these are preloaded
+// and kept in the saved copy.
+const KNOWN_PAGES = new Set([...PAGE_NAV.map(p => p.name), 'Home'])
+// The ranges whose months stay in the store's memory between loads, so their
+// views are cheap enough to preload all at once. Last month too: a finished
+// month never changes, so its figures are worked out once and kept.
+const SHORT_RANGES = new Set(['today', '7d', '30d', 'lastmonth'])
+// The range the dashboard opens on. It's the one view saved for servers that
+// haven't read the store yet (savedViewWhileCold).
+const DEFAULT_RANGE = '30d'
 
 // Pages with a map (mirrors MAP_PAGES in the events store). Only these emit
 // listing_hover events, so only their tabs get the hovered-listings panel —
 // and only Map has areas, so the by-area rollup is Map-only.
 const MAP_PAGES = new Set(['Map', 'Communities'])
 
-// Day boundaries and displayed times use the dashboard's fixed reporting zone
-// (DASHBOARD_TZ in events.ts, UTC) — the same for every viewer.
-const DAY = 86_400_000
+// When the events behind some tiles began to be recorded (the captions below
+// say the same), so a tile never compares with a stretch from before.
+// Clicks and the chatbot go back to the store's oldest event.
+const PAGE_VIEWS_SINCE = '2026-07-15'
+const SEARCH_SINCE = '2026-07-16'
+const FILTERS_SINCE = '2026-07-29'
+const SIGNUP_BOX_SINCE = '2026-07-29'
+const SITE_SIGNUPS_SINCE = '2026-10-08'
 
-interface ResolvedRange extends DateRange {
-  key: string // active preset key, or 'custom'
-  from?: string
-  to?: string
-}
-
-type SearchParams = Record<string, string | string[] | undefined>
-
-function first(v: string | string[] | undefined): string | undefined {
-  return Array.isArray(v) ? v[0] : v
-}
-
-/** Translate the query string into concrete epoch-ms bounds. Defaults to the
- *  last 30 days. A custom from/to (inclusive, dashboard-zone day boundaries) wins. */
-function resolveRange(sp: SearchParams): ResolvedRange {
-  const from = first(sp.from)
-  const to = first(sp.to)
-  if (from || to) {
-    const s = from
-      ? Date.parse(`${from}T00:00:00${dashboardOffset(from)}`)
-      : NaN
-    const e = to ? Date.parse(`${to}T23:59:59.999${dashboardOffset(to)}`) : NaN
-    return {
-      startMs: Number.isNaN(s) ? null : s,
-      endMs: Number.isNaN(e) ? null : e,
-      key: 'custom',
-      from,
-      to,
-    }
-  }
-  const range = first(sp.range) ?? '30d'
-  const now = Date.now()
-  switch (range) {
-    case 'today': {
-      const today = dashboardDay(now)
-      return {
-        startMs: Date.parse(`${today}T00:00:00${dashboardOffset(today)}`),
-        endMs: null,
-        key: 'today',
-      }
-    }
-    case '7d':
-      return { startMs: now - 7 * DAY, endMs: null, key: '7d' }
-    case '90d':
-      return { startMs: now - 90 * DAY, endMs: null, key: '90d' }
-    case 'all':
-      return { startMs: null, endMs: null, key: 'all' }
-    case '30d':
-    default:
-      return { startMs: now - 30 * DAY, endMs: null, key: '30d' }
-  }
+/** How long ago a saved copy was made, for the "figures from …" note. */
+function savedAgo(at: number): string {
+  const minutes = Math.round((Date.now() - at) / MINUTE)
+  if (minutes < 1) return 'a moment ago'
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 48) return `${hours} hour${hours === 1 ? '' : 's'} ago`
+  return `${Math.round(hours / 24)} days ago`
 }
 
 /** Real Airtable logos for the selected page's listings, keyed by the exact
@@ -222,19 +251,6 @@ async function logosForPage(
   }
 }
 
-/** A favicon for any outbound URL — the universal fallback when a listing has
- *  no Airtable logo (or the event isn't a funding listing). */
-function faviconFor(url?: string): string | undefined {
-  if (!url || url === '#') return undefined
-  try {
-    const host = new URL(url).hostname
-    if (!host) return undefined
-    return `https://www.google.com/s2/favicons?domain=${host}&sz=64`
-  } catch {
-    return undefined
-  }
-}
-
 /** The Map tab's per-area rollups: the page's clicks and hovers bucketed by
  *  map area — one list per metric, each sorted by its own count. Newer events
  *  carry their area stamped at click/hover time (what the visitor actually
@@ -281,13 +297,6 @@ function areaBreakdown(
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
   }
   return { clicks: tally(clicks), hovers: tally(hovers) }
-}
-
-/** A row's resource-page marker in the clicked-from-search table: the page's
- *  nav icon plus its name. */
-interface PageBadge {
-  icon: string | null
-  label: string
 }
 
 /** '/jobs' → 'job', '/funding' → 'funder', … — so a click on a resource page
@@ -376,16 +385,6 @@ function formatTime(iso: string): string {
   }
 }
 
-function prettyUrl(url: string): string {
-  try {
-    const u = new URL(url)
-    const path = u.pathname === '/' ? '' : u.pathname
-    return u.hostname.replace(/^www\./, '') + path
-  } catch {
-    return url
-  }
-}
-
 const EVENT_LABELS: Record<string, string> = {
   chatbot_open: 'Opened the chatbot',
   chatbot_message: 'Sent a message',
@@ -466,11 +465,6 @@ function pct(part: number, whole: number): string {
   return whole > 0 ? `${Math.round((100 * part) / whole)}%` : '—'
 }
 
-/** A share of `total` to one decimal place, e.g. "43.2%". */
-function pct1(part: number, total: number): string {
-  return `${((100 * part) / total).toFixed(1)}%`
-}
-
 /** "1 July 2026" in the dashboard's timezone, for the coverage note. */
 function formatDay(iso: string): string {
   try {
@@ -498,17 +492,17 @@ function formatMonth(month: string): string {
   }
 }
 
-export default async function AnalyticsPage({
-  searchParams,
-}: {
-  searchParams: Promise<SearchParams>
-}) {
-  const sp = await searchParams
-  const range = resolveRange(sp)
-  // Count each visitor once per listing per day by default; ?clicks=total counts
-  // every click.
-  const unique = first(sp.clicks) !== 'total'
+/** What the query string asks for. */
+interface Query {
+  range: ResolvedRange
+  /** Count each visitor once per listing per day (the default); ?clicks=total
+   *  counts every click. */
+  unique: boolean
+  tabReq?: string
+  onResourceTab: boolean
+}
 
+function readQuery(sp: SearchParams): Query {
   // The dashboard is tabbed: two overview tabs (the chatbot and the by-page
   // table) plus one tab per resource page. `tab` holds the active tab — an
   // overview key, or a resource page's analytics name. A resource tab is the
@@ -516,52 +510,256 @@ export default async function AnalyticsPage({
   // 'funnel' is the Chatbot tab's old key, kept working for bookmarked urls.
   const tabRaw = first(sp.tab)
   const tabReq = tabRaw === 'funnel' ? 'chatbot' : tabRaw
-  const onResourceTab = tabReq != null && !OVERVIEW_KEYS.has(tabReq)
+  return {
+    range: resolveRange(sp),
+    unique: first(sp.clicks) !== 'total',
+    tabReq,
+    onResourceTab: tabReq != null && !OVERVIEW_KEYS.has(tabReq),
+  }
+}
 
-  const [data, funders, convStats, themes, searchIndex, sendStats, feeds] =
-    await Promise.all([
-      readDashboard(
-        range,
-        onResourceTab ? tabReq : undefined,
-        unique,
-        first(sp.source)
-      ),
-      getFunders().catch(() => []),
-      // The transcript-derived stats only render on the Chatbot tab, so only
-      // fetch the (ever-growing) conversation log when it's the active tab.
-      tabReq === 'chatbot' ? readConversationStats(range) : null,
-      tabReq === 'chatbot' ? readQuestionThemes() : null,
-      // Resolves clicked search results to their resource page; only the Search
-      // tab reads it. On error the page icons resolve from recorded types alone.
-      tabReq === 'search'
-        ? buildSearchIndex().catch(() => [] as SearchEntry[])
-        : ([] as SearchEntry[]),
-      // The Newsletters tab reads the sends from ActiveCampaign (slow, so only
-      // on that tab). null = couldn't read them; the tab says so.
-      tabReq === 'newsletters' && isNewsletterConfigured()
-        ? readSendStats(range).catch(err => {
-            console.warn(
-              `[analytics] newsletter sends unavailable: ${err instanceof Error ? err.message : String(err)}`
-            )
-            return null
-          })
-        : null,
-      // The feeds' readers yesterday and so far today (UTC days); null =
-      // couldn't read them.
-      tabReq === 'newsletters' ? readFeedDays() : null,
-    ])
+export default async function AnalyticsPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>
+}) {
+  // Before anything is read. The layout checks too, but a tab click asks for
+  // this page without rendering the layout again (see requireAccess).
+  const access = await requireAccess('analytics')
+  // Org pages put figures outside the admin, so only Admin admin's editors
+  // make them (the API checks the same).
+  const canShare = canEdit(access, 'manageUsers')
+  // Adding a newsletter's Substack export is for the people who send them.
+  const canAddExport = canEdit(access, 'newsletter')
+
+  const sp = await searchParams
+  const query = readQuery(sp)
+  // A server that hasn't read the range's events yet (each deploy starts
+  // fresh ones) needs seconds to. When the page is opened or reloaded on the
+  // default view, it shows the copy saved on an earlier load straight away
+  // and streams the live figures in to replace it. Only when the browser
+  // says it's loading the page itself (Next hides its own navigation headers
+  // from pages): not for navigations within the dashboard (tab clicks,
+  // preloads, refreshes), which are preloaded anyway, and a refresh must
+  // never step back to older figures.
+  // Nor on the tabs that read Airtable or ActiveCampaign: those reads would
+  // hold the copy up anyway.
+  const saved =
+    query.range.key === DEFAULT_RANGE &&
+    !COSTLY_TABS.has(query.tabReq ?? '') &&
+    (await headers()).get('sec-fetch-dest') === 'document'
+      ? await savedViewWhileCold(
+          query.range,
+          query.range.key,
+          query.unique,
+          query.onResourceTab ? query.tabReq : undefined,
+          first(sp.source)
+        )
+      : null
+  const live = (
+    <AnalyticsView
+      sp={sp}
+      query={query}
+      canShare={canShare}
+      canAddExport={canAddExport}
+    />
+  )
+  if (!saved) return live
+  return (
+    <Suspense
+      fallback={
+        <AnalyticsView
+          sp={sp}
+          query={query}
+          canShare={canShare}
+          canAddExport={canAddExport}
+          saved={saved}
+        />
+      }
+    >
+      {live}
+    </Suspense>
+  )
+}
+
+/** The dashboard for one view: live, or `saved`, an earlier copy shown while
+ *  the live one loads. */
+async function AnalyticsView({
+  sp,
+  query,
+  canShare,
+  canAddExport,
+  saved,
+}: {
+  sp: SearchParams
+  query: Query
+  /** May make org pages from the Org lookup tab. */
+  canShare: boolean
+  /** May add a newsletter's Substack export on the Newsletters tab. */
+  canAddExport: boolean
+  saved?: { at: number; data: DashboardData }
+}) {
+  const { range, unique, tabReq, onResourceTab } = query
+
+  // When these figures were worked out, so a preloaded copy shown later can
+  // tell how old it is (RefreshIfStale).
+  // eslint-disable-next-line react-hooks/purity -- a server component renders once per request; this stamps that request
+  const renderedAt = saved ? saved.at : Date.now()
+  // The Org lookup tab's search (?q=) and the rows left out of it (?x=). Only
+  // that tab, and only a real search, reads the listing catalog.
+  const orgQuery = (first(sp.q) ?? '').trim().slice(0, MAX_QUERY)
+  const orgLeftOut = parseLeftOut(first(sp.x))
+  const orgSearch =
+    tabReq === 'orgs' && normText(orgQuery).length >= 2
+      ? orgSearchSpec(orgQuery, orgLeftOut)
+      : undefined
+  // The stretch the Conversations tile compares with (the tiles' rule,
+  // previousWindow); the log is read for it only on the Chatbot tab.
+  const convBefore =
+    tabReq === 'chatbot' ? previousWindow(range, renderedAt) : null
+
+  const [
+    data,
+    funders,
+    convStats,
+    convBeforeCount,
+    themes,
+    searchIndex,
+    sendStats,
+    subscribers,
+    feeds,
+    issueClicks,
+    shares,
+  ] = await Promise.all([
+    saved
+      ? saved.data
+      : readDashboard(
+          range,
+          onResourceTab ? tabReq : undefined,
+          unique,
+          first(sp.source),
+          orgSearch
+        ),
+    getFunders().catch(() => []),
+    // The transcript-derived stats only render on the Chatbot tab, so only
+    // fetch the (ever-growing) conversation log when it's the active tab.
+    tabReq === 'chatbot' ? readConversationStats(range) : null,
+    convBefore ? countConversations(convBefore) : null,
+    tabReq === 'chatbot' ? readQuestionThemes() : null,
+    // Resolves clicked search results to their resource page; only the Search
+    // tab reads it. On error the page icons resolve from recorded types alone.
+    tabReq === 'search'
+      ? buildSearchIndex().catch(() => [] as SearchEntry[])
+      : ([] as SearchEntry[]),
+    // The Newsletters tab reads the sends from ActiveCampaign (slow, so only
+    // on that tab). null = couldn't read them; the tab says so.
+    tabReq === 'newsletters' && isNewsletterConfigured()
+      ? readSendStats(range).catch(err => {
+          console.warn(
+            `[analytics] newsletter sends unavailable: ${err instanceof Error ? err.message : String(err)}`
+          )
+          return null
+        })
+      : null,
+    // The subscriber tiles' figures (ActiveCampaign, kept in Upstash, and
+    // the Substack histories). Never rejects.
+    tabReq === 'newsletters' ? readNewsletterSubscribers() : null,
+    // The feeds' readers each day of the range, and yesterday and so far
+    // today (UTC days); null = couldn't read them.
+    tabReq === 'newsletters' ? readFeeds(range) : null,
+    // The Org lookup's newsletter panel: the sent issues' link clicks
+    // (Upstash, live site only). Never rejects.
+    orgSearch ? readIssueClicks(range) : null,
+    // The org pages already made, for the Org lookup's share box and its
+    // list of them. 'failed' = couldn't read them; the box says so.
+    tabReq === 'orgs' && canShare
+      ? listShares().catch(err => {
+          console.warn(
+            `[analytics] org pages unavailable: ${err instanceof Error ? err.message : String(err)}`
+          )
+          return 'failed' as const
+        })
+      : null,
+  ])
+
+  // Which of those newsletter links are the searched org's.
+  const orgNewsletter: OrgNewsletter | null =
+    orgSearch && issueClicks
+      ? await orgNewsletterPanel(orgSearch, issueClicks)
+      : null
+
+  // The share box: this search's page, if it has one.
+  const shareOrigin = canShare ? requestOrigin(await headers()) : ''
+  const shared =
+    shares && shares !== 'failed' ? shareForQuery(shares, orgQuery) : undefined
+  const shareState: ShareState | null | 'unknown' =
+    shares === 'failed'
+      ? 'unknown'
+      : shared
+        ? {
+            token: shared.token,
+            orgName: shared.orgName,
+            leftOutDiffers: !sameLeftOut(shared.leftOut, [...orgLeftOut]),
+            opened: openedWords(shared.views, shared.lastViewedAt),
+          }
+        : null
+  const shareBox: OrgAdmin['shareBox'] =
+    shares == null
+      ? null
+      : (orgName, leftOut) => (
+          <ShareOrgLink
+            // A new search starts the name field afresh. (Not the bare
+            // search: the search box beside it is keyed by that.)
+            key={`share:${orgQuery}`}
+            query={orgQuery}
+            orgName={orgName}
+            leftOut={leftOut}
+            origin={shareOrigin}
+            share={shareState}
+          />
+        )
+  // The list before a search: each page opens the lookup on its own search
+  // and left-out rows, in the current dates and count mode.
+  const lookupHref = (query: string, leftOut: string[]) => {
+    const q = new URLSearchParams()
+    for (const [k, v] of Object.entries(sp))
+      if (k !== 'q' && k !== 'x' && typeof v === 'string') q.set(k, v)
+    q.set('tab', 'orgs')
+    q.set('q', query)
+    if (leftOut.length) q.set('x', leftOut.join(','))
+    return `?${q.toString()}`
+  }
+  // Leave out and Put back keep this search's shared page in step, for
+  // someone who may change it.
+  const shareSync: ShareSync | null = shared
+    ? { query: orgQuery, orgName: shared.orgName }
+    : null
+  const leaveOutLink: OrgAdmin['leaveOutLink'] = ({ label, ...link }) => (
+    <LeaveOutLink {...link} sync={shareSync}>
+      {label}
+    </LeaveOutLink>
+  )
+  const sharedPages =
+    shares && shares !== 'failed' && shares.length > 0 ? (
+      <SharedOrgPages
+        origin={shareOrigin}
+        pages={shares.map(s => ({
+          token: s.token,
+          orgName: s.orgName,
+          lookupHref: lookupHref(s.query, s.leftOut),
+          note: `${openedWords(s.views, s.lastViewedAt)} · made by ${s.createdBy}`,
+        }))}
+      />
+    ) : null
 
   // Resource-page tabs: every page in PAGE_NAV always gets one (so quiet pages
   // like Projects still appear), plus any other page that has clicks (e.g.
   // Home). Ordered Home first, then site-nav order, then the rest.
-  const pageOrder = new Map(PAGE_NAV.map((p, i) => [p.name, i]))
   const labelByPage = new Map(PAGE_NAV.map(p => [p.name, p.label]))
   const iconByPage = new Map(PAGE_NAV.map(p => [p.name, p.icon]))
-  const orderOf = (name: string) =>
-    name === 'Home' ? -1 : (pageOrder.get(name) ?? 999)
   const resourceNames = [
     ...new Set([...PAGE_NAV.map(p => p.name), ...data.byPage.map(p => p.name)]),
-  ].sort((a, b) => orderOf(a) - orderOf(b))
+  ].sort((a, b) => navOrder(a) - navOrder(b))
   const resourceTabs = resourceNames.map(name => ({
     key: name,
     label: labelByPage.get(name) ?? name,
@@ -573,6 +771,38 @@ export default async function AnalyticsPage({
   const tabKeys = new Set<string>([...OVERVIEW_KEYS, ...resourceNames])
   const activeTab = tabReq && tabKeys.has(tabReq) ? tabReq : 'pages'
   const onResourceView = !OVERVIEW_KEYS.has(activeTab)
+
+  // The dashboard preloads the views its links lead to, so a click shows at
+  // once. Every view at once only while that's cheap: a short range, a tab
+  // that reads only the event store, and not in preview mode (where every
+  // Airtable read goes live). Otherwise a link preloads once the pointer is
+  // on it, which still gives the server a head start.
+  // Not from a saved copy either: the server is still reading, and the live
+  // view that replaces it preloads.
+  const preloadAll =
+    !saved &&
+    SHORT_RANGES.has(range.key) &&
+    !COSTLY_TABS.has(activeTab) &&
+    !(await isPreviewRequest())
+
+  // Keep the saved copy of the default view (30 days, unique counts) current
+  // for the next server that starts cold (saveViewCopy does it at most every
+  // few minutes). After the response, so it never slows this one.
+  if (!saved && range.key === DEFAULT_RANGE && unique && !data.error)
+    after(() =>
+      saveViewCopy(
+        range,
+        range.key,
+        unique,
+        resourceNames.filter(name => KNOWN_PAGES.has(name))
+      )
+    )
+  const preloadTo = (tab: string): Preload =>
+    preloadAll &&
+    !COSTLY_TABS.has(tab) &&
+    (OVERVIEW_KEYS.has(tab) || KNOWN_PAGES.has(tab))
+      ? 'now'
+      : 'hover'
 
   // The Map tab needs the live map records twice — the by-area panel joins
   // clicks and hovers back to them, and the logo maps below read from them —
@@ -692,6 +922,8 @@ export default async function AnalyticsPage({
     0
   )
   const footerTotal = data.footerClicks.reduce((sum, r) => sum + r.count, 0)
+  const pressTotal = data.press.byAction.reduce((sum, r) => sum + r.count, 0)
+  const pressActionShare = shareMap(data.press.actionShare)
   const navOpenTotal = data.navOverflowOpens.reduce(
     (sum, r) => sum + r.count,
     0
@@ -731,14 +963,249 @@ export default async function AnalyticsPage({
     !Number.isNaN(oldestMs) &&
     (range.startMs == null || range.startMs < oldestMs)
 
+  // The tiles over time, for whichever tab is open.
+  const tilesFor = (specs: TileSpec[]) =>
+    eventTiles(data.trends.frame, range, range.key, data.oldestTs, specs)
+  const per = data.trends.frame.unit === 'hour' ? 'hour' : 'day'
+  const clickWords = unique
+    ? `once per visitor per listing per day (the Unique count)`
+    : `every click (the Total count)`
+  const siteTiles =
+    activeTab === 'pages'
+      ? tilesFor([
+          {
+            key: 'visitors',
+            label: 'Visitors',
+            unit: 'visitors',
+            metric: data.trends.visitors,
+            since: PAGE_VIEWS_SINCE,
+            what: `Visitors = distinct browsers that viewed a page. One that came on several ${per}s counts once in the tile and on each of those ${per}s in the chart.`,
+          },
+          {
+            key: 'visits',
+            label: 'Visits',
+            unit: 'visits',
+            metric: data.trends.visits,
+            since: PAGE_VIEWS_SINCE,
+            what: `Visits = a visitor's page views with less than 30 minutes between them, each counted on the ${per} it began.`,
+          },
+          {
+            key: 'views',
+            label: 'Page views',
+            unit: 'page views',
+            metric: data.trends.pageViews,
+            since: PAGE_VIEWS_SINCE,
+            what: 'Page views = every page viewed.',
+          },
+          {
+            key: 'clicks',
+            label: 'Listing clicks',
+            unit: 'listing clicks',
+            metric: data.trends.listingClicks,
+            what: `Listing clicks = clicks on listings across the resource pages, ${clickWords}.`,
+          },
+        ])
+      : []
+  const pageLabel =
+    labelByPage.get(data.selectedPage ?? '') ?? data.selectedPage
+  const pageTiles = onResourceView
+    ? tilesFor([
+        {
+          key: 'visitors',
+          label: 'Visitors',
+          unit: 'visitors',
+          metric: data.pageTrends.visitors,
+          since: PAGE_VIEWS_SINCE,
+          what: `Visitors = distinct browsers that viewed this page. One that came on several ${per}s counts once in the tile and on each of those ${per}s in the chart.`,
+        },
+        {
+          key: 'views',
+          label: 'Page views',
+          unit: 'page views',
+          metric: data.pageTrends.pageViews,
+          since: PAGE_VIEWS_SINCE,
+          what: 'Page views = every view of this page.',
+        },
+        {
+          key: 'clicks',
+          label: 'Listing clicks',
+          unit: 'listing clicks',
+          metric: data.pageTrends.listingClicks,
+          what: `Listing clicks = clicks on this page's listings from every part of the page, ${clickWords}.`,
+        },
+        ...(data.filterGroups.length > 0 || data.pageTrends.filterUses.previous
+          ? [
+              {
+                key: 'filters',
+                label: 'Filter uses',
+                unit: 'filter uses',
+                metric: data.pageTrends.filterUses,
+                since: FILTERS_SINCE,
+                what: 'Filter uses = a filter value turned on, as Filter usage counts them.',
+              },
+            ]
+          : []),
+      ])
+    : []
+  const { frame } = data.trends
+  // Conversations per day (or hour), from the log's start times.
+  const conversationPoints = frame.starts.map(() => 0)
+  for (const t of convStats?.startedAt ?? []) {
+    const b = bucketOf(frame, t)
+    if (b >= 0) conversationPoints[b]++
+  }
+  const chatbotTiles =
+    activeTab === 'chatbot'
+      ? tilesFor([
+          ...(convStats?.available
+            ? [
+                {
+                  key: 'conversations',
+                  label: 'Conversations',
+                  unit: 'conversations',
+                  metric: {
+                    total: convStats.totalConversations,
+                    previous: convBeforeCount,
+                    points: conversationPoints,
+                    weekly: weeklyOf(frame, conversationPoints),
+                  },
+                  what: `Conversations = chats started, from the conversation log, each on the ${per} it began.`,
+                },
+              ]
+            : []),
+          {
+            key: 'opened',
+            label: 'Opened the chatbot',
+            unit: 'people opened it',
+            metric: data.trends.chatbotOpened,
+            what: `Opened, Sent a message and Clicked a result count people, as the funnel below does. One who came back on several ${per}s counts once in the tile and on each of those ${per}s in the chart.`,
+          },
+          {
+            key: 'messaged',
+            label: 'Sent a message',
+            unit: 'people sent one',
+            metric: data.trends.chatbotMessaged,
+            what: `Sent a message = people who wrote to the chatbot, counted like Opened.`,
+          },
+          {
+            key: 'clicked',
+            label: 'Clicked a result',
+            unit: 'people clicked one',
+            metric: data.trends.chatbotClicked,
+            what: `Clicked a result = people who opened a card or link from a reply, counted like Opened.`,
+          },
+        ])
+      : []
+  const searchTiles =
+    activeTab === 'search'
+      ? tilesFor([
+          {
+            key: 'opened',
+            label: 'Opened search',
+            unit: 'people opened it',
+            metric: data.trends.searchOpened,
+            since: SEARCH_SINCE,
+            what: `Opened, Typed a search and Clicked a result count people, as the funnel below does. One who came back on several ${per}s counts once in the tile and on each of those ${per}s in the chart.`,
+          },
+          {
+            key: 'typed',
+            label: 'Typed a search',
+            unit: 'people searched',
+            metric: data.trends.searchTyped,
+            since: SEARCH_SINCE,
+            what: 'Typed a search = people who searched for something, counted like Opened.',
+          },
+          {
+            key: 'clicked',
+            label: 'Clicked a result',
+            unit: 'people clicked one',
+            metric: data.trends.searchClicked,
+            since: SEARCH_SINCE,
+            what: 'Clicked a result = people who opened a result, counted like Opened.',
+          },
+        ])
+      : []
+  const newsletterTiles =
+    activeTab === 'newsletters'
+      ? [
+          ...(subscribers ? subscriberTiles(subscribers, range) : []),
+          ...tilesFor([
+            {
+              key: 'submits',
+              label: 'Signup box submits',
+              unit: 'submits',
+              metric: data.trends.newsletterSubmits,
+              since: SIGNUP_BOX_SINCE,
+              what: `Signup box submits = the newsletter boxes on the site sent, ${unique ? 'once per visitor per page per day (the Unique count)' : 'every time (the Total count)'}, as Signup box on the site counts them. Not every submit ends in a signup.`,
+            },
+            {
+              key: 'signups',
+              label: 'Signed up through the site',
+              unit: 'signups',
+              metric: data.trends.newsletterSignups,
+              since: SITE_SIGNUPS_SINCE,
+              what: 'Signed up through the site = submits on /events and /training that ActiveCampaign took and sent a link to confirm, as Signups through the site counts them.',
+            },
+            {
+              key: 'confirmed',
+              label: 'Confirmed',
+              unit: 'confirmed',
+              metric: data.trends.newsletterConfirmed,
+              since: SITE_SIGNUPS_SINCE,
+              what: `Confirmed = readers who pressed the link in that email and landed on aisafety.com/subscribed/events, /subscribed/training or /subscribed/funding, ${unique ? 'once per visitor per newsletter per day (the Unique count)' : 'every landing (the Total count)'}, as Signups through the site counts them.`,
+            },
+            {
+              key: 'newsletter-visits',
+              label: 'Visits from newsletters',
+              unit: 'visits',
+              metric: data.trends.newsletterVisits,
+              what: 'Visits from newsletters = visits to aisafety.com that began with a link in one of the newsletters, as Visits from the newsletters counts them.',
+            },
+          ]),
+        ]
+      : []
+  // The feeds' readers day by day: a level, like the subscribers, so it
+  // sits beside them.
+  const feedReadersTile =
+    activeTab === 'newsletters' && feeds
+      ? feedTile(feeds.history, range, renderedAt)
+      : null
+  if (feedReadersTile) {
+    const at = newsletterTiles.findIndex(t => !t.key.startsWith('subscribers-'))
+    newsletterTiles.splice(
+      at < 0 ? newsletterTiles.length : at,
+      0,
+      feedReadersTile
+    )
+  }
+  // The subscriber figures since the move take a while to work out, so a
+  // load that finds them missing or a few hours old has them worked out
+  // again after it's sent.
+  if (subscribers && historyStale(subscribers.history))
+    after(() => refreshSubscriberHistory())
+
   return (
     <div className={styles.dashboard}>
       <div className={styles.headerRow}>
         <h1 className={admin.pageTitle}>Analytics</h1>
         <div className={styles.meta}>
-          <span className={styles.badge}>
-            {SOURCE_LABEL[data.source] ?? data.source}
-          </span>
+          {saved ? (
+            <>
+              <span className={`${styles.badge} ${styles.badgeUpdating}`}>
+                Updating
+              </span>
+              <span
+                className={styles.coverage}
+                title="This server has just started, so it's reading the latest events. Until it's done you see the figures saved the last time the dashboard was open; they swap for the live ones by themselves."
+              >
+                figures from {savedAgo(saved.at)}
+              </span>
+            </>
+          ) : (
+            <span className={styles.badge}>
+              {SOURCE_LABEL[data.source] ?? data.source}
+            </span>
+          )}
           <span className={styles.total}>
             {data.totalEvents.toLocaleString()} events
           </span>
@@ -771,9 +1238,24 @@ export default async function AnalyticsPage({
         </div>
       )}
 
-      <DateRangePicker activeKey={range.key} from={range.from} to={range.to} />
+      {/* Keyed by the range, so Back and Forward refill the date boxes. */}
+      <DateRangePicker
+        key={`${range.key}|${range.from ?? ''}|${range.to ?? ''}`}
+        activeKey={range.key}
+        from={range.from}
+        to={range.to}
+        preloadAll={preloadAll}
+      />
 
-      <ClickModeToggle unique={unique} params={sp} />
+      {!saved && (
+        <RefreshIfStale renderedAt={renderedAt} failed={data.error === true} />
+      )}
+
+      <ClickModeToggle
+        unique={unique}
+        params={sp}
+        preload={preloadTo(activeTab)}
+      />
 
       {data.error ? (
         <div className={styles.empty}>
@@ -792,10 +1274,33 @@ export default async function AnalyticsPage({
             pages={resourceTabs}
             active={activeTab}
             params={sp}
+            preloadTo={preloadTo}
           />
+
+          {activeTab === 'orgs' && (
+            <OrgView
+              org={data.org}
+              range={range}
+              labelByPage={labelByPage}
+              iconByPage={iconByPage}
+              newsletter={orgNewsletter}
+              admin={{
+                query: orgQuery,
+                params: sp,
+                unique,
+                // Keyed by the search, so Back and Forward refill the box
+                // with the search the page is showing.
+                searchBox: <OrgSearch key={orgQuery} query={orgQuery} />,
+                shareBox,
+                sharedPages,
+                leaveOutLink,
+              }}
+            />
+          )}
 
           {activeTab === 'chatbot' && (
             <ChatbotView
+              trends={chatbotTiles}
               funnel={data.funnel}
               opensByPage={data.chatbot.opensByPage}
               openShareByPage={data.chatbot.openShareByPage}
@@ -810,6 +1315,7 @@ export default async function AnalyticsPage({
 
           {activeTab === 'search' && (
             <SearchView
+              trends={searchTiles}
               search={data.search}
               index={searchIndex}
               unique={unique}
@@ -817,8 +1323,19 @@ export default async function AnalyticsPage({
           )}
 
           {activeTab === 'newsletters' && (
+            <Panel title="Subscribers and signups">
+              <TrendChart
+                tiles={newsletterTiles}
+                label="Newsletter subscribers and signups"
+              />
+              {canAddExport && <SubstackUpload />}
+            </Panel>
+          )}
+
+          {activeTab === 'newsletters' && (
             <NewsletterView
               sends={sendStats}
+              rangeStartMs={range.startMs}
               signups={
                 <>
                   <Panel title="Signup box on the site">
@@ -847,11 +1364,24 @@ export default async function AnalyticsPage({
                   </Panel>
                   <SignupResultsPanel
                     results={data.newsletterResults}
+                    confirmed={data.newsletterConfirmed}
                     labelFor={name => labelByPage.get(name) ?? name}
+                  />
+                  <NewsletterVisitsPanel
+                    visits={data.newsletterVisits}
+                    labelFor={name => labelByPage.get(name) ?? name}
+                  />
+                  <IssueCopiesPanel
+                    rows={data.newsletterCopies}
+                    unique={unique}
                   />
                   <PastIssuesPanel
                     rows={data.newsletterArchive}
                     feeds={feeds}
+                  />
+                  <NewsletterLinksPanel
+                    rows={data.newsletterLinks}
+                    unique={unique}
                   />
                 </>
               }
@@ -876,11 +1406,8 @@ export default async function AnalyticsPage({
 
           {activeTab === 'pages' && (
             <Panel title="Site traffic">
-              <div className={styles.funnel}>
-                <Stat
-                  label="Visitors"
-                  value={data.visits.uniqueVisitors.toLocaleString()}
-                />
+              <TrendChart tiles={siteTiles} label="Site traffic" />
+              <div className={`${styles.funnel} margin-top-16px`}>
                 <Stat
                   label="New visitors"
                   value={data.visits.newVisitors.toLocaleString()}
@@ -895,14 +1422,6 @@ export default async function AnalyticsPage({
                     data.visits.returningVisitors,
                     data.visits.uniqueVisitors
                   )}
-                />
-                <Stat
-                  label="Visits"
-                  value={data.visits.visitCount.toLocaleString()}
-                />
-                <Stat
-                  label="Page views"
-                  value={data.visits.totalViews.toLocaleString()}
                 />
                 <Stat
                   label="Analytics opt-outs"
@@ -981,10 +1500,17 @@ export default async function AnalyticsPage({
 
           {onResourceView && (
             <div className={styles.pageSection}>
+              <Panel title="Over time">
+                <TrendChart
+                  tiles={pageTiles}
+                  label={`${pageLabel ?? 'This page'} over time`}
+                />
+              </Panel>
               <SourceSplit
                 rows={data.bySource}
                 active={data.selectedSource}
                 params={sp}
+                preload={preloadTo(activeTab)}
                 label={
                   MAP_PAGES.has(data.selectedPage ?? '')
                     ? 'Clicks by source'
@@ -1357,6 +1883,30 @@ export default async function AnalyticsPage({
                   developers&quot;. Recording since 29 July 2026.
                 </p>
               </Panel>
+              <Panel title="Press page">
+                <CountTable
+                  rows={data.press.byAction}
+                  labelHead="Action"
+                  total={pressTotal}
+                  shareFor={name => pressActionShare.get(name)}
+                  totalShare={data.press.anyShare}
+                />
+                {data.press.byItem.length > 0 && (
+                  <CountTable
+                    rows={data.press.byItem}
+                    labelHead="Item"
+                    total={pressTotal}
+                  />
+                )}
+                <p className={styles.caption}>
+                  Clicks on /media. Copy = a boilerplate block copied, Download
+                  = a logo, screenshot, or the press kit, Contact = the press
+                  email link, Jump = one of the two buttons at the top that
+                  glide down the page. % of visitors = the share of the
+                  page&apos;s visitors who did it. Recording since 19 September
+                  2026.
+                </p>
+              </Panel>
               <Panel title="+N menu opens">
                 <CountTable
                   rows={data.navOverflowOpens}
@@ -1423,13 +1973,17 @@ export default async function AnalyticsPage({
 
 /** Switches the click tables between unique counts (one per visitor per listing
  *  per day) and total counts. Unique is the default, so its link drops the param
- *  for a clean url; both links preserve the rest of the query. */
+ *  for a clean url; both links preserve the rest of the query. The mode not
+ *  showing is preloaded, like the tabs (PreloadLink). */
 function ClickModeToggle({
   unique,
   params,
+  preload,
 }: {
   unique: boolean
   params: SearchParams
+  /** How the mode not showing preloads. */
+  preload: Preload
 }) {
   const base = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) {
@@ -1442,26 +1996,28 @@ function ClickModeToggle({
   return (
     <div className={styles.clickToggle}>
       <span className={styles.clickToggleLabel}>Count</span>
-      <Link
+      <PreloadLink
         href={uniqueQ ? `?${uniqueQ}` : '?'}
         scroll={false}
+        preload={unique ? 'off' : preload}
         className={`${styles.clickToggleBtn}${
           unique ? ` ${styles.clickToggleBtnActive}` : ''
         }`}
       >
         Unique
         <PendingMark />
-      </Link>
-      <Link
+      </PreloadLink>
+      <PreloadLink
         href={`?${totalParams.toString()}`}
         scroll={false}
+        preload={unique ? preload : 'off'}
         className={`${styles.clickToggleBtn}${
           !unique ? ` ${styles.clickToggleBtnActive}` : ''
         }`}
       >
         Total
         <PendingMark />
-      </Link>
+      </PreloadLink>
     </div>
   )
 }
@@ -1469,16 +2025,19 @@ function ClickModeToggle({
 /** For pages with a map, shows how the selected page's clicks split between the
  *  map and the cards. Each split is a link that filters the listing panels below
  *  to that source; "Total" clears the filter. Renders nothing for pages without
- *  a map. */
+ *  a map. The splits not showing are preloaded, like the tabs (PreloadLink). */
 function SourceSplit({
   rows,
   active,
   params,
+  preload,
   label,
 }: {
   rows: Counted[]
   active: string | null
   params: SearchParams
+  /** How the splits not showing preload. */
+  preload: Preload
   /** Heading for the pill row — 'Clicks by source' on map pages (map vs
    *  cards), 'Clicks by view' on pages with a view toggle. */
   label: string
@@ -1498,9 +2057,10 @@ function SourceSplit({
       <div className={styles.sourceSplit}>
         <span className={styles.sourceSplitLabel}>{label}</span>
         {rows.length > 1 && (
-          <Link
+          <PreloadLink
             href={totalHref}
             scroll={false}
+            preload={active == null ? 'off' : preload}
             className={`${styles.sourceStat} ${styles.sourceStatLink}${
               active == null ? ` ${styles.sourceStatActive}` : ''
             }`}
@@ -1510,17 +2070,18 @@ function SourceSplit({
               {total.toLocaleString()}
             </span>
             <PendingMark />
-          </Link>
+          </PreloadLink>
         )}
         {rows.map(r => {
           const key = sourceSlug(r.name)
           const q = new URLSearchParams(base)
           q.set('source', key)
           return (
-            <Link
+            <PreloadLink
               key={r.name}
               href={`?${q.toString()}`}
               scroll={false}
+              preload={active === key ? 'off' : preload}
               className={`${styles.sourceStat} ${styles.sourceStatLink}${
                 active === key ? ` ${styles.sourceStatActive}` : ''
               }`}
@@ -1535,7 +2096,7 @@ function SourceSplit({
                 </span>
               )}
               <PendingMark />
-            </Link>
+            </PreloadLink>
           )
         })}
       </div>
@@ -1554,17 +2115,25 @@ function SourceSplit({
 /** The dashboard's top tab bar: the overview tabs on one row, then a row with
  *  one tab per resource page. Each tab swaps the `tab` query param (and drops
  *  any active source filter) while preserving the date range and count mode.
- *  Resource tabs show the site's page name and nav icon. */
+ *  Resource tabs show the site's page name and nav icon. The other tabs are
+ *  preloaded in the background (Next keeps a preload for five minutes), so a
+ *  click shows one at once instead of waiting on the server; the store shares
+ *  its site-wide figures between them, so this is cheap. `preloadTo` says
+ *  which preload straight away and which on hover. RefreshIfStale freshens a
+ *  tab whose preload has aged. */
 function DashboardTabs({
   overview,
   pages,
   active,
   params,
+  preloadTo,
 }: {
   overview: { key: string; label: string }[]
   pages: { key: string; label: string; icon?: string }[]
   active: string
   params: SearchParams
+  /** How the link to a tab preloads. */
+  preloadTo: (tab: string) => Preload
 }) {
   // Preserve everything except the tab itself and the per-page source filter
   // (which is meaningless once you switch tabs); `page` is the old param name.
@@ -1584,23 +2153,25 @@ function DashboardTabs({
     <div className={styles.pageTabs}>
       <div className={styles.tabRow}>
         {overview.map(t => (
-          <Link
+          <PreloadLink
             key={t.key}
             href={hrefFor(t.key)}
             scroll={false}
+            preload={t.key === active ? 'off' : preloadTo(t.key)}
             className={tabClass(t.key)}
           >
             {t.label}
             <PendingMark />
-          </Link>
+          </PreloadLink>
         ))}
       </div>
       <div className={styles.tabRow}>
         {pages.map(t => (
-          <Link
+          <PreloadLink
             key={t.key}
             href={hrefFor(t.key)}
             scroll={false}
+            preload={t.key === active ? 'off' : preloadTo(t.key)}
             className={tabClass(t.key)}
           >
             {t.icon && (
@@ -1614,27 +2185,35 @@ function DashboardTabs({
             )}
             {t.label}
             <PendingMark />
-          </Link>
+          </PreloadLink>
         ))}
       </div>
     </div>
   )
 }
 
-/** Each newsletter's feed readers yesterday and so far today (UTC), or
- *  null when Upstash couldn't be read. */
-async function readFeedDays(): Promise<{
+/** Each newsletter's feed readers on each day the range covers (feedDays,
+ *  for the Feed readers tile), and yesterday and so far today (UTC, for the
+ *  Past issues and feeds table), in one read; null when Upstash couldn't be
+ *  read. */
+async function readFeeds(range: DateRange): Promise<{
+  history: FeedReaders[]
   yesterday: FeedReaders[]
   today: FeedReaders[]
 } | null> {
   const now = Date.now()
   const day = (ms: number) => new Date(ms).toISOString().slice(0, 10)
+  const yesterday = day(now - 86_400_000)
+  const today = day(now)
+  const days = feedDays(range, now)
   try {
-    const [yesterday, today] = await Promise.all([
-      readFeedReaders(day(now - 86_400_000)),
-      readFeedReaders(day(now)),
-    ])
-    return { yesterday, today }
+    const all = await readFeedHistory([...new Set([...days, yesterday, today])])
+    const wanted = new Set(days)
+    return {
+      history: all.filter(f => wanted.has(f.day)),
+      yesterday: all.filter(f => f.day === yesterday),
+      today: all.filter(f => f.day === today),
+    }
   } catch (err) {
     console.warn(
       `[analytics] feed readers unavailable: ${err instanceof Error ? err.message : String(err)}`
@@ -1759,18 +2338,284 @@ function PastIssuesPanel({
   )
 }
 
+/** Rows a "where they went" table shows. */
+const VISIT_TOP = 10
+
+/** The Newsletters tab's visits from links in the newsletters: per
+ *  newsletter, how many visits and what came of them, then the pages they
+ *  saw, the listings they clicked and the issues that sent them. */
+function NewsletterVisitsPanel({
+  visits,
+  labelFor,
+}: {
+  visits: NewsletterVisits
+  labelFor: (name: string) => string
+}) {
+  const rows = visits.byNewsletter
+  const sum = (pick: (r: (typeof rows)[number]) => number) =>
+    rows.reduce((n, r) => n + pick(r), 0)
+  const total = {
+    visits: sum(r => r.visits),
+    morePages: sum(r => r.morePages),
+    clicked: sum(r => r.clicked),
+    listingClicks: sum(r => r.listingClicks),
+  }
+  return (
+    <Panel title="Visits from the newsletters">
+      {rows.length === 0 ? (
+        <p className={styles.dim}>
+          No visits from links in the newsletters in this range.
+        </p>
+      ) : (
+        <>
+          <SortableTable
+            columns={[
+              { label: 'Newsletter', sort: 'text' },
+              { label: 'Visits', className: styles.numCol, sort: 'number' },
+              { label: 'Visitors', className: styles.numCol, sort: 'number' },
+              {
+                label: 'Saw another page',
+                className: styles.pctCol,
+                sort: 'number',
+              },
+              {
+                label: 'Clicked a listing',
+                className: styles.pctCol,
+                sort: 'number',
+              },
+              {
+                label: 'Listing clicks',
+                className: styles.numCol,
+                sort: 'number',
+              },
+            ]}
+            values={rows.map(r => [
+              r.name,
+              r.visits,
+              r.visitors,
+              r.visits > 0 ? r.morePages / r.visits : null,
+              r.visits > 0 ? r.clicked / r.visits : null,
+              r.listingClicks,
+            ])}
+            foot={
+              rows.length > 1 ? (
+                <tr className={styles.totalRow}>
+                  <td className={styles.totalLabel}>Total</td>
+                  <td className={styles.numCol}>
+                    {total.visits.toLocaleString()}
+                  </td>
+                  <td className={styles.numCol} />
+                  <td className={styles.pctCol}>
+                    {pct(total.morePages, total.visits)}
+                  </td>
+                  <td className={styles.pctCol}>
+                    {pct(total.clicked, total.visits)}
+                  </td>
+                  <td className={styles.numCol}>
+                    {total.listingClicks.toLocaleString()}
+                  </td>
+                </tr>
+              ) : undefined
+            }
+          >
+            {rows.map(r => (
+              <tr key={r.name}>
+                <td>{r.name}</td>
+                <td className={styles.numCol}>{r.visits.toLocaleString()}</td>
+                <td className={styles.numCol}>{r.visitors.toLocaleString()}</td>
+                <td className={styles.pctCol}>{pct(r.morePages, r.visits)}</td>
+                <td className={styles.pctCol}>{pct(r.clicked, r.visits)}</td>
+                <td className={styles.numCol}>
+                  {r.listingClicks.toLocaleString()}
+                </td>
+              </tr>
+            ))}
+          </SortableTable>
+          <div className={styles.grid}>
+            <CountTable
+              rows={visits.pages
+                .slice(0, VISIT_TOP)
+                .map(r => ({ ...r, name: labelFor(r.name) }))}
+              labelHead="Pages they saw"
+              countHead="Views"
+            />
+            <CountTable
+              rows={visits.listings.slice(0, VISIT_TOP)}
+              labelHead="Listings they clicked"
+            />
+          </div>
+          <CountTable
+            rows={visits.issues.slice(0, VISIT_TOP)}
+            labelHead="Issue (its links’ utm_campaign)"
+            countHead="Visits"
+          />
+        </>
+      )}
+      <p className={styles.caption}>
+        Every link to aisafety.com in the newsletters carries tags saying which
+        newsletter and issue it&apos;s from (utm_source=events-newsletter,
+        utm_campaign=events-2026-week-42), and a page view records the address
+        it was on. A visit from a newsletter starts with a page view carrying
+        those tags and lasts until the visitor has been away for 30 minutes;
+        reloading the page within it isn&apos;t a new visit. Events &amp;
+        Training = the two together on Substack, before 8 October 2026; Funding
+        sent from Substack with the same tags until it moved too. Saw another
+        page = the share of visits that went on to another page of the site;
+        Clicked a listing = the share with a click on a listing. Every visit
+        counts, whatever the count mode. Links to other sites in the emails go
+        straight there and are under Most-clicked links. A visitor whose browser
+        blocks the site&apos;s tracking isn&apos;t counted.
+      </p>
+    </Panel>
+  )
+}
+
+/** The Newsletters tab's views of each issue's web and text versions on
+ *  aisafety.com (/newsletter/<key>/<issue>, …/text). */
+function IssueCopiesPanel({
+  rows,
+  unique,
+}: {
+  rows: NewsletterCopyRow[]
+  unique: boolean
+}) {
+  // "Events · Week 41, 2026" → "Week 41, 2026"; the address if it isn't one.
+  const issue = (r: NewsletterCopyRow) =>
+    issueName(r.newsletter.toLowerCase(), r.issue)?.replace(/^[^·]+· /, '') ??
+    r.issue
+  const web = rows.reduce((n, r) => n + r.web, 0)
+  const text = rows.reduce((n, r) => n + r.text, 0)
+  return (
+    <Panel title="Issues read on aisafety.com">
+      {rows.length === 0 ? (
+        <p className={styles.dim}>
+          No views of the issues&apos; web or text versions in this range.
+        </p>
+      ) : (
+        <SortableTable
+          columns={[
+            { label: 'Issue', sort: 'text' },
+            { label: 'Newsletter', sort: 'text' },
+            { label: 'Web version', className: styles.numCol, sort: 'number' },
+            {
+              label: 'Text version',
+              className: styles.numCol,
+              sort: 'number',
+            },
+          ]}
+          values={rows.map(r => [issue(r), r.newsletter, r.web, r.text])}
+          foot={
+            <tr className={styles.totalRow}>
+              <td className={styles.totalLabel}>Total</td>
+              <td />
+              <td className={styles.numCol}>{web.toLocaleString()}</td>
+              <td className={styles.numCol}>{text.toLocaleString()}</td>
+            </tr>
+          }
+        >
+          {rows.map(r => (
+            <tr key={`${r.newsletter}|${r.issue}`}>
+              <td>{issue(r)}</td>
+              <td>{r.newsletter}</td>
+              <td className={styles.numCol}>{r.web.toLocaleString()}</td>
+              <td className={styles.numCol}>{r.text.toLocaleString()}</td>
+            </tr>
+          ))}
+        </SortableTable>
+      )}
+      <p className={styles.caption}>
+        Views of each issue&apos;s web version (the email on its own page,
+        aisafety.com/newsletter/events/week-41-2026, opened from &quot;View in
+        browser&quot; or the past issues page) and its text version (…/text),{' '}
+        {unique
+          ? 'once per reader per issue per day (the Unique count)'
+          : 'every load (the Total count)'}
+        . Those pages run none of the site&apos;s scripts, so each view is
+        counted by the server when the page loads a one-pixel image; a reader is
+        told apart only within a day, by a hash of their network address and
+        browser that changes daily. Link checkers, bots and anyone signed in to
+        the admin aren&apos;t counted. Recording since October 2026.
+      </p>
+    </Panel>
+  )
+}
+
+/** The Newsletters tab's other ways to the newsletters on the site: the
+ *  signup box's card link from when /funding's box handed off to Substack
+ *  (before the Funding move), and the footer's Newsletters column. */
+function NewsletterLinksPanel({
+  rows,
+  unique,
+}: {
+  rows: NewsletterLinkRow[]
+  unique: boolean
+}) {
+  const total = rows.reduce((n, r) => n + r.clicks, 0)
+  return (
+    <Panel title="Other ways to the newsletters">
+      {rows.length === 0 ? (
+        <p className={styles.dim}>
+          No clicks on the footer&apos;s newsletter links or the Funding
+          box&apos;s link in this range.
+        </p>
+      ) : (
+        <SortableTable
+          columns={[
+            { label: 'Link', sort: 'text' },
+            { label: 'Goes to', sort: 'text' },
+            { label: 'Clicks', className: styles.numCol, sort: 'number' },
+          ]}
+          values={rows.map(r => [r.name, r.to, r.clicks])}
+          foot={
+            rows.length > 1 ? (
+              <tr className={styles.totalRow}>
+                <td className={styles.totalLabel}>Total</td>
+                <td />
+                <td className={styles.numCol}>{total.toLocaleString()}</td>
+              </tr>
+            ) : undefined
+          }
+        >
+          {rows.map(r => (
+            <tr key={r.name}>
+              <td>{r.name}</td>
+              <td className={styles.dim}>{r.to}</td>
+              <td className={styles.numCol}>{r.clicks.toLocaleString()}</td>
+            </tr>
+          ))}
+        </SortableTable>
+      )}
+      <p className={styles.caption}>
+        Funding page&apos;s box = clicks on the Funding signup box outside its
+        email field, which opened the newsletter on Substack to read first until
+        the Funding newsletter moved; since then the box signs people up on the
+        site like the others. Footer = the links in the site footer&apos;s
+        Newsletters column, on every page: Events, Training and Funding go to
+        their pages, whose box signs people up; Updates goes to Substack
+        (Funding did too before its move).{' '}
+        {unique
+          ? 'Once per visitor per link per day (the Unique count).'
+          : 'Every click (the Total count).'}
+      </p>
+    </Panel>
+  )
+}
+
 /** The Newsletters tab's results of the signups made on the site: the
  *  boxes sign people up through ActiveCampaign (/events and /training from 8
  *  October 2026, /funding from its move day). Per page, how many went through and how many showed the
  *  visitor an error, then what the errors were. */
 function SignupResultsPanel({
   results,
+  confirmed,
   labelFor,
 }: {
   results: NewsletterSignupResults
+  confirmed: NewsletterConfirmRow[]
   labelFor: (name: string) => string
 }) {
   const succeeded = results.byPage.reduce((n, r) => n + r.succeeded, 0)
+  const already = results.byPage.reduce((n, r) => n + r.already, 0)
   const failed = results.byPage.reduce((n, r) => n + r.failed, 0)
   return (
     <Panel title="Signups through the site">
@@ -1781,17 +2626,24 @@ function SignupResultsPanel({
           columns={[
             { label: 'Page', sort: 'text' },
             { label: 'Signed up', className: styles.numCol, sort: 'number' },
+            {
+              label: 'Already subscribed',
+              className: styles.numCol,
+              sort: 'number',
+            },
             { label: 'Errors', className: styles.numCol, sort: 'number' },
           ]}
           values={results.byPage.map(r => [
             labelFor(r.name),
             r.succeeded,
+            r.already,
             r.failed,
           ])}
           foot={
             <tr className={styles.totalRow}>
               <td className={styles.totalLabel}>Total</td>
               <td className={styles.numCol}>{succeeded.toLocaleString()}</td>
+              <td className={styles.numCol}>{already.toLocaleString()}</td>
               <td className={styles.numCol}>{failed.toLocaleString()}</td>
             </tr>
           }
@@ -1800,6 +2652,7 @@ function SignupResultsPanel({
             <tr key={r.name}>
               <td>{labelFor(r.name)}</td>
               <td className={styles.numCol}>{r.succeeded.toLocaleString()}</td>
+              <td className={styles.numCol}>{r.already.toLocaleString()}</td>
               <td className={styles.numCol}>{r.failed.toLocaleString()}</td>
             </tr>
           ))}
@@ -1813,28 +2666,89 @@ function SignupResultsPanel({
           total={failed}
         />
       )}
+      {confirmed.length > 0 && (
+        <SortableTable
+          columns={[
+            { label: 'Newsletter', sort: 'text' },
+            { label: 'Signed up', className: styles.numCol, sort: 'number' },
+            { label: 'Confirmed', className: styles.numCol, sort: 'number' },
+            {
+              label: '% confirmed',
+              className: styles.pctCol,
+              sort: 'number',
+            },
+          ]}
+          values={confirmed.map(r => [
+            r.name,
+            r.signedUp,
+            r.confirmed,
+            r.signedUp > 0 ? r.confirmed / r.signedUp : null,
+          ])}
+        >
+          {confirmed.map(r => (
+            <tr key={r.name}>
+              <td>{r.name}</td>
+              <td className={styles.numCol}>{r.signedUp.toLocaleString()}</td>
+              <td className={styles.numCol}>{r.confirmed.toLocaleString()}</td>
+              <td className={styles.pctCol}>
+                {r.signedUp > 0 ? pct(r.confirmed, r.signedUp) : '—'}
+              </td>
+            </tr>
+          ))}
+        </SortableTable>
+      )}
       <p className={styles.caption}>
         Since 8 October 2026 the boxes on /events and /training (and, since
         October 2026, on their past issues pages) sign people up on the site,
         through ActiveCampaign; /funding&apos;s box does too since the Funding
-        newsletter moved (before that it opened Substack, so its signups
+        newsletter moved (before that it opened Substack, so its earlier signups
         don&apos;t show here). Signed up = ActiveCampaign took the address and
-        emailed a link to confirm it (whether the reader confirmed shows in
-        ActiveCampaign, not here). Errors = the visitor saw an error message
-        instead.
+        emailed a link to confirm it. Already subscribed = the address was on
+        the list already, so the visitor was told so and nothing was sent.
+        Errors = the visitor saw an error message instead. Confirmed = readers
+        who pressed the link in that email: ActiveCampaign then sends them to
+        aisafety.com/subscribed/events, /subscribed/training or
+        /subscribed/funding, and their view of that page is counted, once per
+        visitor per newsletter per day in the Unique count. A confirmation can
+        come days after its signup, so near the range&apos;s edges the two
+        don&apos;t pair up exactly, and a reader whose browser blocks the
+        site&apos;s tracking isn&apos;t counted.
       </p>
     </Panel>
   )
 }
 
-/** The Newsletters tab: the issues sent in the range (ActiveCampaign's
- *  deliveries, opens and unsubscribes; clicks counted on aisafety.com since
- *  28 Sept 2026), the most-clicked links, and the signup box on the site. */
+/** A small rate with the decimals it needs (0.36%, 2.1%, 42%): an issue's
+ *  unsubscribes or bounces would otherwise all round to 0%. */
+function pctSmall(part: number, whole: number): string {
+  if (whole <= 0) return '—'
+  const p = (100 * part) / whole
+  if (p === 0) return '0%'
+  if (p < 0.01) return '<0.01%'
+  return `${p < 1 ? p.toFixed(2) : p < 10 ? p.toFixed(1) : Math.round(p)}%`
+}
+
+/** Most-clicked links shows this many; the caption says when there are more. */
+const TOP_LINKS = 50
+
+/** An issue's hard and soft bounces together; null when neither was read. */
+function bouncesOf(s: SendStats): number | null {
+  return s.hardBounces == null && s.softBounces == null
+    ? null
+    : (s.hardBounces ?? 0) + (s.softBounces ?? 0)
+}
+
+/** The Newsletters tab: the issues first sent in the range (ActiveCampaign's
+ *  sends, opens, unsubscribes, bounces and spam complaints; clicks counted
+ *  on aisafety.com), the most-clicked links, and the signup box on the
+ *  site. */
 function NewsletterView({
   sends,
+  rangeStartMs,
   signups,
 }: {
-  sends: SendStats[] | null
+  sends: SendStatsResult | null
+  rangeStartMs: number | null
   signups: React.ReactNode
 }) {
   if (sends === null) {
@@ -1850,14 +2764,31 @@ function NewsletterView({
       </>
     )
   }
-  const delivered = sends.reduce((n, s) => n + s.delivered, 0)
-  const opens = sends.reduce((n, s) => n + (s.opens ?? 0), 0)
-  const clicks = sends.reduce((n, s) => n + s.clicks.total, 0)
-  const unsubs = sends.reduce((n, s) => n + (s.unsubscribes ?? 0), 0)
-  const topLinks = sends
-    .flatMap(s => s.clicks.links.map(l => ({ ...l, issue: s.name })))
+  const issues = sends.issues
+  const sent = issues.reduce((n, s) => n + s.sent, 0)
+  const opens = issues.reduce((n, s) => n + (s.opens ?? 0), 0)
+  // The click counts are read in one go: all there, or none.
+  const clicksKnown = issues.every(s => s.clicks != null)
+  const clicks = issues.reduce((n, s) => n + (s.clicks?.total ?? 0), 0)
+  const unsubs = issues.reduce((n, s) => n + (s.unsubscribes ?? 0), 0)
+  const bounced = issues.reduce((n, s) => n + (bouncesOf(s) ?? 0), 0)
+  // Unknown for the range when one issue's report didn't load.
+  const spam = issues.some(s => s.spamComplaints == null)
+    ? null
+    : issues.reduce((n, s) => n + (s.spamComplaints ?? 0), 0)
+  const allLinks = issues.flatMap(s =>
+    (s.clicks?.links ?? []).map(l => ({ ...l, issue: s.name }))
+  )
+  const topLinks = [...allLinks]
     .sort((a, b) => b.clicks - a.clicks)
-    .slice(0, 50)
+    .slice(0, TOP_LINKS)
+  // The site reads ActiveCampaign's newest campaigns only; say so when the
+  // range reaches back past them.
+  const readFrom =
+    sends.readFrom &&
+    (rangeStartMs == null || rangeStartMs < Date.parse(sends.readFrom))
+      ? sends.readFrom
+      : null
   const host = (url: string) => {
     try {
       return new URL(url).hostname.replace(/^www\./, '')
@@ -1865,18 +2796,35 @@ function NewsletterView({
       return url
     }
   }
+  const unfinished: Record<NonNullable<SendStats['unfinished']>, string> = {
+    sending: 'still sending',
+    paused: 'paused partway',
+    stopped: 'stopped partway',
+    scheduled: 'more waves to come',
+  }
   return (
     <>
       <Panel title="Newsletter sends">
         <div className={styles.funnel}>
-          <Stat label="Issues sent" value={sends.length.toLocaleString()} />
-          <Stat label="Emails delivered" value={delivered.toLocaleString()} />
-          <Stat label="Opened" value={pct(opens, delivered)} />
-          <Stat label="Clicks" value={clicks.toLocaleString()} />
-          <Stat label="Clicks per email" value={pct(clicks, delivered)} />
-          <Stat label="Unsubscribed" value={pct(unsubs, delivered)} />
+          <Stat label="Issues sent" value={issues.length.toLocaleString()} />
+          <Stat label="Emails sent" value={sent.toLocaleString()} />
+          <Stat label="Opened" value={pct(opens, sent)} />
+          <Stat
+            label="Clicks"
+            value={clicksKnown ? clicks.toLocaleString() : '—'}
+          />
+          <Stat
+            label="Clicks per email"
+            value={clicksKnown && sent > 0 ? (clicks / sent).toFixed(2) : '—'}
+          />
+          <Stat label="Unsubscribed" value={pctSmall(unsubs, sent)} />
+          <Stat label="Bounced" value={pctSmall(bounced, sent)} />
+          <Stat
+            label="Marked as spam"
+            value={spam == null ? '—' : spam.toLocaleString()}
+          />
         </div>
-        {sends.length === 0 ? (
+        {issues.length === 0 ? (
           <p className={styles.dim}>No issues sent in this range.</p>
         ) : (
           <SortableTable
@@ -1884,29 +2832,36 @@ function NewsletterView({
               { label: 'Issue', sort: 'text' },
               { label: 'Newsletter', sort: 'text' },
               { label: 'Sent', sort: 'text' },
-              { label: 'Delivered', className: styles.numCol, sort: 'number' },
+              { label: 'Sent to', className: styles.numCol, sort: 'number' },
               { label: 'Opened', className: styles.pctCol, sort: 'number' },
               { label: 'Clicks', className: styles.numCol, sort: 'number' },
               { label: 'Unsubs', className: styles.numCol, sort: 'number' },
+              { label: 'Bounced', className: styles.numCol, sort: 'number' },
+              { label: 'Spam', className: styles.numCol, sort: 'number' },
             ]}
-            values={sends.map(s => [
+            values={issues.map(s => [
               s.name,
               s.newsletter,
               s.sentAt ?? '',
-              s.delivered,
-              s.opens != null && s.delivered > 0 ? s.opens / s.delivered : null,
-              s.clicks.total,
+              s.sent,
+              s.opens != null && s.sent > 0 ? s.opens / s.sent : null,
+              s.clicks?.total ?? null,
               s.unsubscribes,
+              bouncesOf(s),
+              s.spamComplaints,
             ])}
           >
-            {sends.map(s => (
+            {issues.map(s => (
               <tr key={s.id}>
                 <td>
                   {s.name}
-                  {s.waves > 0 && (
+                  {(s.waves > 0 || s.unfinished) && (
                     <span className={styles.dim}>
-                      {' '}
-                      · {s.waves} wave{s.waves === 1 ? '' : 's'}
+                      {s.waves > 0 &&
+                        (s.wavesPlanned > s.waves
+                          ? ` · ${s.waves} of ${s.wavesPlanned} waves`
+                          : ` · ${s.waves} wave${s.waves === 1 ? '' : 's'}`)}
+                      {s.unfinished && ` · ${unfinished[s.unfinished]}`}
                     </span>
                   )}
                 </td>
@@ -1914,37 +2869,74 @@ function NewsletterView({
                 <td className={styles.dim}>
                   {s.sentAt ? formatDay(s.sentAt) : '—'}
                 </td>
-                <td className={styles.numCol}>
-                  {s.delivered.toLocaleString()}
-                </td>
+                <td className={styles.numCol}>{s.sent.toLocaleString()}</td>
                 <td className={styles.pctCol}>
-                  {s.opens != null ? pct(s.opens, s.delivered) : '—'}
+                  {s.opens != null ? pct(s.opens, s.sent) : '—'}
                 </td>
                 <td className={styles.numCol}>
-                  {s.clicks.total.toLocaleString()}
+                  {s.clicks ? s.clicks.total.toLocaleString() : '—'}
                 </td>
                 <td className={styles.numCol}>
                   {s.unsubscribes != null
                     ? s.unsubscribes.toLocaleString()
                     : '—'}
                 </td>
+                <td
+                  className={styles.numCol}
+                  title={
+                    s.hardBounces != null || s.softBounces != null
+                      ? `${(s.hardBounces ?? 0).toLocaleString()} hard, ${(s.softBounces ?? 0).toLocaleString()} soft`
+                      : undefined
+                  }
+                >
+                  {bouncesOf(s)?.toLocaleString() ?? '—'}
+                </td>
+                <td className={styles.numCol}>
+                  {s.spamComplaints != null
+                    ? s.spamComplaints.toLocaleString()
+                    : '—'}
+                </td>
               </tr>
             ))}
           </SortableTable>
         )}
+        {readFrom && (
+          <p className={styles.dim}>
+            ActiveCampaign holds more campaigns than the site reads (the newest{' '}
+            {CAMPAIGN_READ_MAX.toLocaleString()}), so issues first sent before{' '}
+            {formatDay(readFrom)} may be missing here, or show only some of
+            their waves.
+          </p>
+        )}
         <p className={styles.caption}>
-          Issues sent to the Events, Training and Funding lists in this range
-          (test lists left out). An issue sent in warm-up waves is one row, its
-          finished waves added up. Opened = unique opens ÷ delivered, from
-          ActiveCampaign; Apple Mail opens every email it receives, so it reads
-          high. Clicks are counted on aisafety.com as readers follow a link,
-          every click (not unique readers), link checkers left out; issues sent
-          before 28 September 2026 went through ActiveCampaign&apos;s tracker
-          and show none. Clicks per email = clicks ÷ delivered.
+          Issues sent through ActiveCampaign to the Events, Training and Funding
+          lists, by the day each first went out. Test lists, and practice sends
+          to fewer than 50 people, are left out. Events and Training moved from
+          Substack on 8 October 2026 and Funding later, so their earlier issues
+          aren&apos;t here. An issue sent in waves is one row with all its waves
+          added up. Sent to = emails sent, bounced ones included. Opened =
+          unique opens ÷ emails sent, from ActiveCampaign. Apple Mail opens
+          every email it receives, so this reads high, and the send
+          watcher&apos;s verified opens, which leave those out, read lower.
+          Clicks are counted on aisafety.com as readers follow a link in the
+          email or its web, text or feed copy, every click (not unique readers)
+          whenever it was made, link checkers left out. Clicks per email =
+          clicks ÷ emails sent. Bounced = emails turned away, hard (the address
+          doesn&apos;t exist, so ActiveCampaign sends it nothing more) and soft
+          (a full mailbox or a server down, tried again next time). Hover a
+          number for the split. Spam = readers who pressed Report spam where
+          their mail service tells the sender (Yahoo, Outlook, AOL and others;
+          Gmail tells nobody about one reader). No sender can see whether an
+          email landed in a spam folder, so falling opens are the usual sign.
         </p>
       </Panel>
       <Panel title="Most-clicked links">
-        {topLinks.length === 0 ? (
+        {!clicksKnown ? (
+          <p className={styles.dim}>
+            The click counts couldn&apos;t be read just now — try refreshing in
+            a moment.
+          </p>
+        ) : topLinks.length === 0 ? (
           <p className={styles.dim}>No clicks counted in this range yet.</p>
         ) : (
           <SortableTable
@@ -1980,238 +2972,14 @@ function NewsletterView({
             ))}
           </SortableTable>
         )}
+        {allLinks.length > TOP_LINKS && (
+          <p className={styles.caption}>
+            The {TOP_LINKS} most-clicked of {allLinks.length.toLocaleString()}{' '}
+            links clicked on these issues.
+          </p>
+        )}
       </Panel>
       {signups}
-    </>
-  )
-}
-
-function Panel({
-  title,
-  children,
-}: {
-  title: string
-  children: React.ReactNode
-}) {
-  return (
-    <section className={styles.panel}>
-      <h2 className={styles.panelTitle}>{title}</h2>
-      {children}
-    </section>
-  )
-}
-
-// Hard ceiling on rows a listings table sends to the browser. Real catalogs
-// are a few hundred listings, so organic data never comes near it; it exists
-// so a flood of fabricated distinct labels through the public track endpoint
-// can't balloon the page payload (every row crosses the server→client
-// boundary, hidden rows included). Truncation is announced, never silent.
-const MAX_TABLE_ROWS = 1000
-
-function TruncationNote({ shown, of }: { shown: number; of: number }) {
-  return (
-    <p className={styles.dim}>
-      Showing the {shown.toLocaleString()} most-clicked of {of.toLocaleString()}{' '}
-      listings.
-    </p>
-  )
-}
-
-/** What a slot label or range ('F1', '3', '3–5') sorts by: featured slots
- *  first, then numeric by the range's lowest slot. null (no slot recorded)
- *  sorts last. */
-function rankSortValue(rank: string | undefined): number | null {
-  if (!rank) return null
-  const lo = rank.split('–')[0]
-  const n = lo.startsWith('F') ? Number(lo.slice(1)) - 1000 : Number(lo)
-  return Number.isFinite(n) ? n : null
-}
-
-/** "% of visitors" cell text: the share of the page's visitors who did the
- *  thing, or a dash when the range has no page-view visitors to divide by. */
-function shareCell(share: VisitorShare | undefined): string {
-  return share && share.visitors > 0 ? pct1(share.active, share.visitors) : '—'
-}
-
-function CountTable({
-  rows: allRows,
-  labelHead,
-  countHead = 'Clicks',
-  rankHead = '#',
-  logoFor,
-  linkFor,
-  rankFor,
-  pageFor,
-  shareFor,
-  shareHead = '% of visitors',
-  total,
-  totalShare,
-}: {
-  rows: Counted[]
-  labelHead: string
-  /** Heading for the count column — 'Clicks' unless the rows count something
-   *  else (opens, conversations, …). */
-  countHead?: string
-  rankHead?: string
-  logoFor?: (name: string) => string | undefined
-  /** Destination url for a row's logo. When set, the logo becomes a link to the
-   *  listing; the name text is deliberately left unlinked so it stays
-   *  selectable/copyable. */
-  linkFor?: (name: string) => string | undefined
-  rankFor?: (name: string) => string | undefined
-  /** When set, adds a Page column: the resource page each row belongs to,
-   *  shown as the page's nav icon and name. */
-  pageFor?: (name: string) => PageBadge | undefined
-  /** When set, adds a "% of visitors" column: the share of each page's
-   *  distinct visitors who did the thing at least once — always per-visitor,
-   *  whichever count mode is on. Looked up by the row's displayed name. */
-  shareFor?: (name: string) => VisitorShare | undefined
-  /** Heading for the `shareFor` column, when it measures something other than
-   *  "did the thing" — e.g. '% returning'. */
-  shareHead?: string
-  /** When set, adds a % column (each row's share of this total) and a Total
-   *  footer row. The total is the denominator, so for a sliced "top N" table it
-   *  can exceed the sum of the visible rows. */
-  total?: number
-  /** The Total row's "% of visitors" cell: the share of visitors who did the
-   *  thing at least once, counted across the whole table. Computed from
-   *  distinct visitors, not by summing the rows — a visitor who did several
-   *  things counts once. Blank when unset. */
-  totalShare?: VisitorShare
-}) {
-  if (allRows.length === 0) return <p className={styles.dim}>No data yet.</p>
-  const rows = allRows.slice(0, MAX_TABLE_ROWS)
-  const showPct = total != null && total > 0
-  const columns: SortColumn[] = [
-    ...(rankFor
-      ? [{ label: rankHead, className: styles.rankCol, sort: 'rank' as const }]
-      : []),
-    { label: labelHead, sort: 'text' as const },
-    ...(pageFor ? [{ label: 'Page', sort: 'text' as const }] : []),
-    { label: countHead, className: styles.numCol, sort: 'number' as const },
-    ...(showPct
-      ? [{ label: '%', className: styles.pctCol, sort: 'number' as const }]
-      : []),
-    ...(shareFor
-      ? [
-          {
-            label: shareHead,
-            className: styles.pctCol,
-            sort: 'number' as const,
-          },
-        ]
-      : []),
-  ]
-  const values: SortValue[][] = rows.map(r => {
-    const share = shareFor?.(r.name)
-    return [
-      ...(rankFor ? [rankSortValue(rankFor(r.name))] : []),
-      r.name,
-      ...(pageFor ? [pageFor(r.name)?.label ?? null] : []),
-      r.count,
-      ...(showPct ? [r.count] : []),
-      ...(shareFor
-        ? [share && share.visitors > 0 ? share.active / share.visitors : null]
-        : []),
-    ]
-  })
-  return (
-    <>
-      <SortableTable
-        columns={columns}
-        values={values}
-        foot={
-          total != null ? (
-            <tr className={styles.totalRow}>
-              {rankFor && <td className={styles.rankCol} />}
-              <td className={styles.totalLabel}>Total</td>
-              {pageFor && <td />}
-              <td className={styles.numCol}>{total.toLocaleString()}</td>
-              {showPct && (
-                <td className={styles.pctCol}>{pct1(total, total)}</td>
-              )}
-              {shareFor && (
-                <td className={styles.pctCol}>
-                  {/* active 0 means the range's clicks predate visitor ids
-                      (or all came from private browsing) — that's unknown,
-                      not a true 0%, so it gets the same dash as the rows. */}
-                  {totalShare
-                    ? totalShare.active > 0
-                      ? shareCell(totalShare)
-                      : '—'
-                    : null}
-                </td>
-              )}
-            </tr>
-          ) : undefined
-        }
-      >
-        {rows.map((r, i) => {
-          const rank = rankFor?.(r.name)
-          const featured = rank?.startsWith('F')
-          const href = linkFor?.(r.name)
-          const badge = pageFor?.(r.name)
-          return (
-            <tr key={i}>
-              {rankFor && (
-                <td
-                  className={`${styles.rankCol}${
-                    featured ? ` ${styles.rankFeatured}` : ''
-                  }`}
-                >
-                  {rank ?? '—'}
-                </td>
-              )}
-              <td className={styles.nameCell}>
-                {logoFor &&
-                  (href && href !== '#' ? (
-                    <a
-                      className={styles.logoLink}
-                      href={href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title={`Open ${r.name}`}
-                    >
-                      <Logo src={logoFor(r.name)} />
-                    </a>
-                  ) : (
-                    <Logo src={logoFor(r.name)} />
-                  ))}
-                <span>{r.name}</span>
-              </td>
-              {pageFor && (
-                <td>
-                  {badge && (
-                    <span className={styles.pageBadge}>
-                      {badge.icon && (
-                        <span className={styles.pageTabIcon}>
-                          <Image
-                            src={badge.icon}
-                            alt=""
-                            width={12}
-                            height={12}
-                          />
-                        </span>
-                      )}
-                      {badge.label}
-                    </span>
-                  )}
-                </td>
-              )}
-              <td className={styles.numCol}>{r.count.toLocaleString()}</td>
-              {showPct && (
-                <td className={styles.pctCol}>{pct1(r.count, total)}</td>
-              )}
-              {shareFor && (
-                <td className={styles.pctCol}>{shareCell(shareFor(r.name))}</td>
-              )}
-            </tr>
-          )
-        })}
-      </SortableTable>
-      {allRows.length > rows.length && (
-        <TruncationNote shown={rows.length} of={allRows.length} />
-      )}
     </>
   )
 }
@@ -2308,6 +3076,7 @@ function OverallListingsTable({
  *  transcript-derived conversation stats (the Airtable conversation log), and
  *  what visitors click out of replies. */
 function ChatbotView({
+  trends,
   funnel,
   opensByPage,
   openShareByPage,
@@ -2318,6 +3087,7 @@ function ChatbotView({
   themes,
   unique,
 }: {
+  trends: TrendTile[]
   funnel: ChatbotFunnel
   opensByPage: Counted[]
   openShareByPage: VisitorShare[]
@@ -2347,6 +3117,10 @@ function ChatbotView({
   const n = (v: number) => v.toLocaleString()
   return (
     <>
+      <Panel title="Over time">
+        <TrendChart tiles={trends} label="Chatbot over time" />
+      </Panel>
+
       <Panel title="Funnel · unique users">
         <Funnel
           stages={[
@@ -2547,10 +3321,12 @@ function ChatbotView({
  *  what people search for, which searches come back empty, and what gets
  *  clicked out of the results. */
 function SearchView({
+  trends,
   search,
   index,
   unique,
 }: {
+  trends: TrendTile[]
   search: SearchPanelData
   index: SearchEntry[]
   unique: boolean
@@ -2567,6 +3343,10 @@ function SearchView({
   const pageBadges = searchPageBadges(index, destRows)
   return (
     <>
+      <Panel title="Over time">
+        <TrendChart tiles={trends} label="Search over time" />
+      </Panel>
+
       <Panel title="Funnel · unique users">
         <Funnel
           stages={[
@@ -2753,17 +3533,6 @@ function MapSearchPanels({
         </p>
       </Panel>
     </>
-  )
-}
-
-/** One stat in the Conversations row — reuses the funnel-stage styling so the
- *  row reads like the funnel above it. */
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className={styles.funnelStage}>
-      <div className={styles.funnelValue}>{value}</div>
-      <div className={styles.funnelLabel}>{label}</div>
-    </div>
   )
 }
 

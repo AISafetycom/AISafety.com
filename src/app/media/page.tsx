@@ -41,7 +41,6 @@ const DIRECTORIES = [
   { path: '/media-channels', label: 'Media channels indexed' },
   { path: '/advisors', label: 'Advisors' },
   { path: '/self-study', label: 'Self-study courses' },
-  { path: '/projects', label: 'Volunteer projects' },
   { path: '/founders', label: 'Founder resources' },
 ] as const
 
@@ -679,7 +678,7 @@ export default async function MediaPage() {
               </a>
               , or{' '}
               <a
-                href="mailto:bryceerobertson@gmail.com?subject=Volunteering%20for%20AISafety.com"
+                href="https://discord.gg/faamWzPcv8"
                 target="_blank"
                 rel="noopener noreferrer"
                 className={styles.inlineLink}

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { ruleTestHeadline, ruleTestOf } from './queue-rule-test'
+import {
+  leadSentence,
+  ruleTestHeadline,
+  ruleTestOf,
+  ruleTestShort,
+} from './queue-rule-test'
 
 const block = {
   for: 'rule:Comb/review-rules.md:abc123def456',
@@ -102,5 +107,56 @@ describe('ruleTestHeadline', () => {
     expect(ruleTestHeadline(t)).toBe(
       'There are no past decisions to test it on yet.'
     )
+  })
+})
+
+describe('ruleTestShort', () => {
+  it('says how many and whether it ever goes against him', () => {
+    const t = ruleTestOf(block)!
+    expect(ruleTestShort(t)).toBe(
+      'Tested on 50 past decisions, never against you'
+    )
+    const against = ruleTestOf({
+      ...block,
+      results: [{ row: 'recB', title: 'X', outcome: 'breaks', why: 'No.' }],
+    })!
+    expect(ruleTestShort(against)).toBe('Tested on 50 past decisions')
+    expect(ruleTestShort({ ...t, checked: 1 })).toBe(
+      'Tested on 1 past decision, never against you'
+    )
+    expect(ruleTestShort({ ...t, checked: 0 })).toBe(
+      'No past decisions to test it on yet'
+    )
+  })
+})
+
+describe('leadSentence', () => {
+  it('splits off the first sentence', () => {
+    expect(
+      leadSentence(
+        'The sweep stops flagging dormant funders. It still asks for a paused note. Tightened after its test: more.'
+      )
+    ).toEqual({
+      lead: 'The sweep stops flagging dormant funders.',
+      rest: 'It still asks for a paused note. Tightened after its test: more.',
+    })
+  })
+
+  it('keeps a one-sentence summary whole', () => {
+    expect(leadSentence('  Only one sentence here.  ')).toEqual({
+      lead: 'Only one sentence here.',
+      rest: null,
+    })
+  })
+
+  it('does not split inside a web address or a number', () => {
+    expect(
+      leadSentence(
+        'It goes on aisafety.com/listing-policy as 2.5 lines. Then more.'
+      )
+    ).toEqual({
+      lead: 'It goes on aisafety.com/listing-policy as 2.5 lines.',
+      rest: 'Then more.',
+    })
   })
 })

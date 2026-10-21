@@ -9,8 +9,18 @@ export function publicOrigin(req: NextRequest): string {
   return originFrom(req.headers, req.nextUrl)
 }
 
+/** The origin a server page was requested on, from next/headers, for links
+ *  it hands out (the org pages' addresses). Behind Vercel's proxy that's the
+ *  public host. */
+export function requestOrigin(headers: Pick<Headers, 'get'>): string {
+  return originFrom(headers, {
+    protocol: 'https:',
+    host: headers.get('host') ?? 'aisafety.com',
+  })
+}
+
 function originFrom(
-  headers: Headers,
+  headers: Pick<Headers, 'get'>,
   url: { protocol: string; host: string }
 ): string {
   const proto =

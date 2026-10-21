@@ -135,7 +135,7 @@ function listFromRaw(listId: string, raw: Uint8Array): LinkList | null {
 }
 
 /** Null when `p` hasn't settled within `ms` (the work itself carries on). */
-function within<T>(p: Promise<T>, ms: number): Promise<T | null> {
+export function within<T>(p: Promise<T>, ms: number): Promise<T | null> {
   let timer: ReturnType<typeof setTimeout> | undefined
   return Promise.race([
     p,

@@ -68,6 +68,10 @@ export default async function RootLayout({
             var noTrack = false;
             try { noTrack = !!localStorage.getItem('aisafety_no_track'); } catch (e) {}
             if (!noTrack) {
+              // An org's private page (/stats/<token>) goes in as '/stats',
+              // never its token (trackedPath in src/lib/analytics.ts).
+              if (location.pathname.indexOf('/stats/') === 0)
+                _paq.push(['setCustomUrl', location.origin + '/stats']);
               _paq.push(['trackPageView']);
               _paq.push(['enableLinkTracking']);
             }

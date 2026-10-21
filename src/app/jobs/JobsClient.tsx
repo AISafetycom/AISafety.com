@@ -228,7 +228,13 @@ export default function JobsClient({ jobs }: JobsClientProps) {
       },
       workLocation: {
         selected: selectedWorkLocation,
-        matches: (job: Job, value: string) => job.workLocation === value,
+        // Hybrid roles carry both values ("Remote, On-site"), so they
+        // count under each option.
+        matches: (job: Job, value: string) =>
+          job.workLocation
+            .split(',')
+            .map(w => w.trim())
+            .includes(value),
       },
       country: {
         selected: selectedCountries,

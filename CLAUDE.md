@@ -2,7 +2,7 @@
 
 ## What this is
 
-The code behind [aisafety.com](https://aisafety.com): a Next.js 16 (App Router) + TypeScript site on Vercel. It is a directory of AI safety resources across twelve resource pages (events, training, field map, communities, self-study, jobs, funding, media channels, advisors, volunteer projects, donation guide, founder toolkit), all fed from one Airtable base. Around that sit a chatbot, a public read-only Data API, first-party analytics, and a password-gated admin area.
+The code behind [aisafety.com](https://aisafety.com): a Next.js 16 (App Router) + TypeScript site on Vercel. It is a directory of AI safety resources across eleven resource pages (events, training, field map, communities, self-study, jobs, funding, media channels, advisors, donation guide, founder toolkit), all fed from one Airtable base. Around that sit a chatbot, a public read-only Data API, first-party analytics, and a password-gated admin area.
 
 The site was migrated from Webflow in 2026 and the migration is finished. **The code is the source of truth now.** `backup/` is the old Webflow snapshot, kept only for reference until issue #297 removes it. Do not copy from it, and do not treat the live site as a spec to replicate.
 
@@ -32,7 +32,7 @@ docs/                    css-guidelines, api + changelog, architecture notes
 ## Airtable is the database
 
 - **Reference fields by permanent field ID, never by name.** Each data file has a `FIELD` map of IDs with the field name as a comment, and records are fetched with `returnFieldsByFieldId`. Renames in Airtable then cannot break the site. If you change a helper's signature, grep every call site.
-- **Only records with Publish? checked and Hide? unchecked are live** (`publishedFormula` in `src/lib/data/airtable.ts`). Code never sets those two fields. The site's only Airtable writes are the admin map editor (x and y, or Scale), the chatbot conversation log, the admin's annotations on that log, the Queue's decisions (also made from /admin/newsletter, when the owner presses Fix on a listing in a waiting email that Broom flagged), a listing's Description when the owner edits a newsletter card and presses "Use this description on the site too", and a listing's Newsletter tick (cleared) when the owner removes its card from a newsletter draft.
+- **Only records with Publish? checked and Hide? unchecked are live** (`publishedFormula` in `src/lib/data/airtable.ts`). Code never sets those two fields. The site's only Airtable writes are the admin map editor (x and y, or Scale), the chatbot conversation log, the admin's annotations on that log, the Queue's decisions (also made from /admin/newsletter, when the owner presses Fix on a listing in a waiting email that Broom flagged) and fields the owner fixes on a listing after the Queue has published or changed it, a listing's Description when the owner edits a newsletter card and presses "Use this description on the site too", and a listing's Newsletter tick (cleared) when the owner removes its card from a newsletter draft.
 - **Never put a raw Airtable attachment URL in a page or API response.** They expire within hours. Attachments are mirrored to Vercel Blob and the Blob URL is what gets served.
 - **Pages are prerendered at build time; runtime readers use an hourly cache** (`unstable_cache`, tag `airtable-records`). A Vercel cron calls `/api/check-rebuild` every minute; when a published row has changed it clears that cache and triggers a redeploy through a deploy hook, so an Airtable edit reaches the live site in about two to three minutes. Preview mode (`/admin/preview`, Next Draft Mode) bypasses the caches for that admin only.
 - **Airtable allows five requests per second per base.** Don't add uncached Airtable reads on request paths; go through `fetchAirtableRecords` and the existing data functions.
@@ -75,12 +75,12 @@ Read `docs/css-guidelines.md` (Melissa's rules) before writing any styles. In sh
 
 - Two systems: Matomo (script in the root layout, plus `src/proxy.ts` for AI-assistant fetches) and the first-party store in `src/lib/analytics/events.ts` behind `/api/track`, shown at `/admin/analytics`.
 - New event kinds go in `ALLOWED_EVENT_TYPES`; every field the beacon accepts is length-capped. Keep it that way.
-- Newsletter link clicks are counted separately, server-side, by `/api/nl` into their own Upstash hashes (`src/lib/newsletter-clicks.ts`), and shown on /admin/newsletter.
+- Newsletter link clicks are counted separately, server-side, by `/api/nl` into their own Upstash hashes (`src/lib/newsletter-clicks.ts`), and shown on /admin/analytics' Newsletters tab.
 - **Never delete anything under `newsletter/` in the Blob store.** Every sent email's links (`newsletter/links/`) and images live there for good.
 
 ## Admin area
 
-- People sign in with Google; each has one boolean per area (`src/lib/admin/access.ts`). A new admin page must check the specific capability it needs (`src/lib/admin/auth.ts`), not just `isAdmin()`.
+- People sign in with Google; each has one boolean per area (`src/lib/admin/access.ts`). A new admin page must start with `await requireAccess('<area>')` (`src/lib/admin/auth.ts`) even though its layout checks too: a client navigation renders the page without the layout. API routes check the specific capability themselves, never just `isAdmin()`.
 - `/admin/queue` is the owner's review inbox for proposed directory changes (docs/architecture.md, "Queue"). Bots write the rows on the owner's Mac; the site only decides them. Nothing there may ever auto-apply.
 - Keep admin writes narrow and explicit. The map editor accepts only x, y and Scale and rejects any other key; follow that pattern.
 

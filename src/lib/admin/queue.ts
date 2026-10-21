@@ -19,6 +19,12 @@
                       review it again when it is due (queue-later.ts)
     undo            → reverse an accept or reject made in the last day, or
                       bring back an item set aside
+    reopen          → bring a declined addition back, however old: marks the
+                      row and the Mac rebuilds the record if it was deleted,
+                      then reopens the row (queue-reopen.ts)
+    flag            → the verdict, reasons and reject buttons Fable gave in
+                      the chat onto the row ("Update flag", queue-flag.ts);
+                      its Undo puts back what they replaced
 
   Writes to the resource tables go through the raw admin client (no cache);
   after a publish or a field change the public cache tag is revalidated so
@@ -42,6 +48,21 @@ import { roomFor, SORT_FIELD, type Placed } from './queue-place'
 import type { ListingDates } from './queue-urgent'
 import { reviewAgainAt } from './queue-later'
 import { ruleTestOf, type RuleTest } from './queue-rule-test'
+import { alreadyRepliedOf, type AlreadyReplied } from './queue-already'
+import { reasonsText, type FlagUpdate } from './queue-flag'
+import { LEFT_OUT_KEY, leftOutOf, withLeftOut } from './queue-left-out'
+import {
+  declinedBeforeOf,
+  pushbackOf,
+  reopenedOf,
+  reopeningOf,
+  wasDeclined,
+  withReopenMarker,
+  type DeclinedBefore,
+  type Pushback,
+  type Reopened,
+  type Reopening,
+} from './queue-reopen'
 
 export const QUEUE_TABLE_ID = 'tblonlKwIFJ7Aa8QN'
 const BROOM_ISSUES_TABLE_ID = 'tblntD3WITPEgjHRK'
@@ -77,6 +98,9 @@ const F = {
   rejectReply: 'fldUQqwJn7btv6EBP',
   // "Review again in a week": when the item comes back (queue-later.ts).
   reviewAgainOn: 'fldm9eFBj0iWuN23P',
+  // When it came back: the date it was due, written by the Mac worker as it
+  // clears Review again on, so the page can say it is back (queue-later.ts).
+  cameBackOn: 'fldAaN9yEat8xWq00',
 } as const
 
 export type QueueType = 'Add' | 'Change' | 'Rule'
@@ -138,6 +162,10 @@ export interface QueueItem {
   /** Rule: the Mac's test of the rule on the owner's past decisions
    *  (proposal `replay`, ~/Queue/replay.py); null until it has run. */
   ruleTest: RuleTest | null
+  /** Rule: it only changes the public listing policy page (the Mac's
+   *  policy check, proposal `public_policy`), which no bot reads, so it is
+   *  never tested on past decisions. */
+  rulePublicPolicy: boolean
   verdict: Verdict | null
   reasons: string[]
   rejectChips: string[]
@@ -156,6 +184,12 @@ export interface QueueItem {
    *  the proposal's `no_reply` (worker duty f); shown where the draft would
    *  be (Bryce, 8 Oct 2026). Null once a `reply` block is there. */
   noReply: NoReply | null
+  /** Email/Form: the owner already replied to them by hand in the
+   *  request's Gmail thread, so neither Publish nor Reject saves a draft.
+   *  From the proposal's reply.already, written by the Mac (Bryce, 12 Oct
+   *  2026: a second decline nearly went to someone he had already
+   *  answered). Null when he hasn't. */
+  alreadyReplied: AlreadyReplied | null
   /** Rejected Email/Form: the reply the Mac wrote for this rejection and
    *  saved as a Gmail draft (Bryce, 4 Oct 2026: "when I reject something
    *  which was suggested, it should have an email response like when I
@@ -177,12 +211,34 @@ export interface QueueItem {
    *  had already changed them on the record from the chat; Undo leaves
    *  them too. */
   keptByFable?: string[] | null
+  /** Change: the proposed fields the admin left out with the cross
+   *  (queue-left-out.ts) – a draft while the item is open; once applied,
+   *  the fields Accept did not write, which Undo leaves alone too. */
+  leftOut?: string[] | null
   decidedAt: string | null
   appliedAt: string | null
   error: string | null
   /** Set aside with "Review again in a week": when it comes back. The Mac
    *  worker clears it once Fable has looked again. */
   reviewAgainOn: string | null
+  /** It came back from being set aside: the date it was due. */
+  cameBackOn: string | null
+  /** The flag was updated from the chat (queue-flag.ts) and what it said
+   *  before is kept, so Undo can put it back. */
+  flagUndo: boolean
+  /** The decision was a Reject of an addition – also once the Mac deleted
+   *  the record and marked the row Applied (queue-reopen.ts). */
+  declined: boolean
+  /** Reopen pressed (or their reply to the decline came): the Mac is
+   *  bringing it back, or could not (`error`). */
+  reopening: Reopening | null
+  /** Their reply to the decline, which brought the item back. */
+  pushback: Pushback | null
+  /** When and how it came back. */
+  reopened: Reopened | null
+  /** Brought back with no word from them since: the decline they already
+   *  have, so Reject saves no second one. */
+  declinedBefore: DeclinedBefore | null
 }
 
 export type NoReply = 'no email' | 'no notification'
@@ -234,6 +290,12 @@ const BEFORE_KEY = '(before)'
  *  applied, the proposed fields Accept did not write because Fable had
  *  changed them on the record already; never a field name. */
 const KEPT_KEY = '(kept by Fable)'
+
+/** The key in a row's Proposal (JSON) that keeps the verdict, reasons,
+ *  reject buttons and title – and the field changes, when those were
+ *  replaced too – as they were before the flag was updated from the chat,
+ *  for Undo. Raw, as the row held them. */
+const FLAG_BEFORE_KEY = 'flag_before'
 
 /** Columns Airtable fills itself, and ones the page has no editor for
  *  (pictures, links to other records): never written as an extra field. */
@@ -385,12 +447,9 @@ async function targetLogos(
               const v = r.fields[f.name]
               const first: unknown = Array.isArray(v) ? v[0] : null
               if (!isRecord(first)) continue
-              const large =
-                isRecord(first.thumbnails) && isRecord(first.thumbnails.large)
-                  ? first.thumbnails.large.url
-                  : first.url
-              if (typeof large === 'string') {
-                url = large
+              const shown = pictureUrl(first)
+              if (typeof shown === 'string') {
+                url = shown
                 break
               }
             }
@@ -506,11 +565,26 @@ function rowToItem(
   let ruleWording: string | null = null
   let ruleWas: string | null = null
   let ruleTest: RuleTest | null = null
+  let rulePublicPolicy = false
   let replyTo: string | null = null
   let noReply: NoReply | null = null
+  let alreadyReplied: AlreadyReplied | null = null
   let rejectReply: RejectReply | null = null
   let saidBy: SaidBy | null = null
+  let rejectReplied = false
+  let reopening: Reopening | null = null
+  let pushback: Pushback | null = null
+  let reopened: Reopened | null = null
+  let declinedBefore: DeclinedBefore | null = null
   if (isRecord(proposal)) {
+    reopening = reopeningOf(proposal.reopen)
+    pushback = pushbackOf(proposal.pushback)
+    reopened = reopenedOf(proposal.reopened)
+    declinedBefore = declinedBeforeOf(proposal.reply, pushback)
+    rejectReplied =
+      isRecord(proposal.reply) &&
+      isRecord(proposal.reply.reject) &&
+      Boolean(str(proposal.reply.reject.since))
     changes = toChanges(proposal.changes)
     diff = str(proposal.diff)
     summary = str(proposal.summary)
@@ -518,6 +592,7 @@ function rowToItem(
     ruleWording = str(proposal.wording)
     ruleWas = str(proposal.was)
     ruleTest = ruleTestOf(proposal.replay)
+    rulePublicPolicy = proposal.public_policy === true
     name = str(proposal.name)
     url = str(proposal.url)
     if (isRecord(proposal.reply)) {
@@ -525,6 +600,7 @@ function rowToItem(
       const who = str(proposal.reply.name)
       replyTo = to ? (who ? `${who} <${to}>` : to) : null
       rejectReply = rejectReplyOf(proposal.reply.reject, str(f[F.decidedAt]))
+      alreadyReplied = alreadyRepliedOf(proposal.reply.already)
       if (proposal.reply.platform === 'discord' && who) {
         const how = str(proposal.reply.how)
         saidBy = {
@@ -547,7 +623,16 @@ function rowToItem(
     } else if (changes.length === 0 && !diff) {
       const rest: Record<string, unknown> = {}
       for (const [k, v] of Object.entries(proposal)) {
-        if (k !== 'name' && k !== 'url' && k !== 'no_reply') rest[k] = v
+        if (
+          k !== 'name' &&
+          k !== 'url' &&
+          k !== 'no_reply' &&
+          k !== FLAG_BEFORE_KEY &&
+          k !== 'reopen' &&
+          k !== 'pushback' &&
+          k !== 'reopened'
+        )
+          rest[k] = v
       }
       fields = rest
     }
@@ -556,13 +641,24 @@ function rowToItem(
   let edits: Record<string, unknown> | null = null
   let before: Record<string, unknown> | null = null
   let keptByFable: string[] | null = null
+  let leftOut: string[] | null = null
   if (isRecord(saved)) {
-    const { [BEFORE_KEY]: was, [KEPT_KEY]: kept, ...rest } = saved
+    const {
+      [BEFORE_KEY]: was,
+      [KEPT_KEY]: kept,
+      [LEFT_OUT_KEY]: left,
+      ...rest
+    } = saved
     edits = rest
     before = isRecord(was) ? was : null
     keptByFable = Array.isArray(kept)
       ? kept.filter((k): k is string => typeof k === 'string')
       : null
+    const names = leftOutOf(
+      left,
+      changes.map(c => c.field)
+    )
+    leftOut = names.length ? names : null
   }
   // The reply the page sent with Reject shows at once, before the Mac has
   // saved it (Undo clears it, so it always belongs to this decision).
@@ -599,6 +695,7 @@ function rowToItem(
     ruleWording,
     ruleWas,
     ruleTest,
+    rulePublicPolicy,
     verdict: str(f[F.verdict]) as Verdict | null,
     reasons: lines(f[F.reasons]),
     rejectChips: lines(f[F.rejectChips]),
@@ -606,6 +703,7 @@ function rowToItem(
     replyStatus: str(f[F.replyStatus]),
     replyTo,
     noReply,
+    alreadyReplied,
     rejectReply,
     rejectDrafts: parseRejectDrafts(f[F.rejectDrafts]),
     saidBy,
@@ -614,10 +712,26 @@ function rowToItem(
     edits,
     before,
     keptByFable,
+    leftOut,
     decidedAt: str(f[F.decidedAt]),
     appliedAt: str(f[F.appliedAt]),
     error: str(f[F.error]),
     reviewAgainOn: str(f[F.reviewAgainOn]),
+    cameBackOn: str(f[F.cameBackOn]),
+    flagUndo: isRecord(proposal) && isRecord(proposal[FLAG_BEFORE_KEY]),
+    declined: wasDeclined({
+      type: str(f[F.type]) ?? 'Add',
+      status: str(f[F.status]) ?? 'Pending',
+      decidedAt: str(f[F.decidedAt]),
+      appliedAt: str(f[F.appliedAt]),
+      rejectReason: str(f[F.rejectReason]),
+      rejectReplied: rejectReplied || Boolean(str(f[F.rejectReply])),
+      error: str(f[F.error]),
+    }),
+    reopening,
+    pushback,
+    reopened,
+    declinedBefore,
   }
 }
 
@@ -641,6 +755,27 @@ export async function listQueue(): Promise<QueueItem[]> {
   params.set('filterByFormula', LIST_FORMULA)
   const rows = await listAll<RawFields>(QUEUE_TABLE_ID, params)
   return rows.map(r => rowToItem(r))
+}
+
+// Every decision ever made, newest first, for the search's "Earlier" group
+// (Bryce, 20 Oct 2026: a decline from a week before could not be found).
+// Only read while a search is typed, once per page visit.
+const DECIDED_FORMULA = 'NOT({Decided at} = BLANK())'
+
+/** Every decided row, newest decision first. The rejection replies written
+ *  in advance are left off: nobody decides from this list. */
+export async function listDecided(): Promise<QueueItem[]> {
+  const params = new URLSearchParams()
+  params.set('returnFieldsByFieldId', 'true')
+  params.set('filterByFormula', DECIDED_FORMULA)
+  params.set('sort[0][field]', F.decidedAt)
+  params.set('sort[0][direction]', 'desc')
+  const rows = await listAll<RawFields>(QUEUE_TABLE_ID, params)
+  return rows.map(r => {
+    const fields = { ...r.fields }
+    delete fields[F.rejectDrafts]
+    return rowToItem({ ...r, fields })
+  })
 }
 
 /** Logo and link by target record for the rows that came without one:
@@ -787,14 +922,25 @@ export interface AttachmentInfo {
   type: string | null
 }
 
-function attachmentInfo(x: Record<string, unknown>): AttachmentInfo | null {
-  if (typeof x.url !== 'string') return null
+/** Airtable's "large" thumbnail is a JPEG, so a transparent logo (PNG,
+ *  WebP, GIF, SVG) comes back on a black square – on 12 Oct 2026 AI Safety
+ *  Purdue's prepared WebP showed that way on its card. For those types the
+ *  page shows the file itself; anything else keeps the thumbnail. */
+const TRANSPARENT_TYPES = /^image\/(png|webp|gif|svg\+xml)$/
+export function pictureUrl(x: Record<string, unknown>): unknown {
   const large =
     isRecord(x.thumbnails) && isRecord(x.thumbnails.large)
       ? x.thumbnails.large.url
       : null
+  if (typeof x.type === 'string' && TRANSPARENT_TYPES.test(x.type)) return x.url
+  return typeof large === 'string' ? large : x.url
+}
+
+function attachmentInfo(x: Record<string, unknown>): AttachmentInfo | null {
+  if (typeof x.url !== 'string') return null
+  const shown = pictureUrl(x)
   return {
-    url: typeof large === 'string' ? large : x.url,
+    url: typeof shown === 'string' ? shown : x.url,
     filename: typeof x.filename === 'string' ? x.filename : null,
     width: typeof x.width === 'number' ? x.width : null,
     height: typeof x.height === 'number' ? x.height : null,
@@ -1603,7 +1749,14 @@ export function extraEdits(
   const types = new Map(schema.map(f => [f.name, f.type]))
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(edits)) {
-    if (proposed.has(k) || k === BEFORE_KEY || k === KEPT_KEY) continue
+    if (
+      proposed.has(k) ||
+      k === BEFORE_KEY ||
+      k === KEPT_KEY ||
+      k === LEFT_OUT_KEY
+    ) {
+      continue
+    }
     if (PROTECTED_FIELDS.has(k) || k.length > 100) continue
     if (UNWRITABLE_TYPES.has(types.get(k) ?? '')) continue
     out[k] = v
@@ -1639,13 +1792,24 @@ async function currentValues(
 
 export async function acceptItem(
   item: QueueItem,
-  edits: Record<string, unknown>,
+  pageEdits: Record<string, unknown>,
   replyDraft: string | null = null,
   keep: string[] = []
 ): Promise<void> {
   requireOpen(item)
   const stamp = now()
+  // The proposed fields left out with the cross come with the page's edits
+  // under their own key, which is never a field to write.
+  const { [LEFT_OUT_KEY]: left, ...edits } = pageEdits
+  const leftOut =
+    item.type === 'Change'
+      ? leftOutOf(
+          left,
+          item.changes.map(c => c.field)
+        )
+      : []
   const saved: Record<string, unknown> = { ...edits }
+  for (const k of leftOut) delete saved[k]
   // The reply draft as it reads on the page goes on the row first, so the
   // Mac agent (or the worker) saves exactly what the admin approved.
   const draft =
@@ -1664,18 +1828,35 @@ export async function acceptItem(
       if (typeof sort === 'number') await makeRoom(t.table, t.record, sort)
       await patchRecord(t.table, t.record, { ...fields, 'Publish?': true })
     } else if (item.type === 'Change') {
-      const t = target(item)
+      // A row with no listing at all is a correction the Mac could not place
+      // (no page named, no listing plainly the one): nothing to apply, so
+      // accepting it just marks it done (12 Oct 2026).
+      const t = item.targetTable || item.targetRecord ? target(item) : null
       const fields: Record<string, unknown> = {}
       // A proposed field Fable has since changed on the record from the
       // chat holds Fable's value, which the page shows in the proposal's
       // place: Accept leaves it, so the older proposal never lands over it
       // (Threading the Needle, 7 Oct 2026: Broom's raw logo and a "dark
       // version of the same new mark" placeholder sat above Fable's
-      // finished logos, and Apply would have written them back).
-      const kept = item.changes.map(c => c.field).filter(k => keep.includes(k))
+      // finished logos, and Apply would have written them back). One the
+      // admin edited on the page is written as edited (Bryce, 12 Oct 2026).
+      const kept = item.changes
+        .map(c => c.field)
+        .filter(k => keep.includes(k) && !(k in edits))
       if (kept.length > 0) saved[KEPT_KEY] = kept
+      // A proposed field the admin left out is not written at all: the
+      // listing keeps what it holds there (Bryce, 15 Oct 2026: "I want to
+      // be able to delete a suggested field change"). The row keeps which,
+      // for the Done view and for Undo.
+      if (leftOut.length > 0) saved[LEFT_OUT_KEY] = leftOut
       for (const c of item.changes) {
-        if (c.field.length > 100 || kept.includes(c.field)) continue
+        if (
+          c.field.length > 100 ||
+          kept.includes(c.field) ||
+          leftOut.includes(c.field)
+        ) {
+          continue
+        }
         if (PROTECTED_FIELDS.has(c.field)) {
           fields[c.field] = asBox(c.to)
           continue
@@ -1686,8 +1867,10 @@ export async function acceptItem(
       }
       // Fields edited beyond the proposal go in the same write; what they
       // held is kept on the row so Undo can put it back.
-      const extra = extraEdits(item, edits, await getTableSchema(t.table))
-      if (Object.keys(extra).length > 0) {
+      const extra = t
+        ? extraEdits(item, edits, await getTableSchema(t.table))
+        : {}
+      if (t && Object.keys(extra).length > 0) {
         const before = await currentValues(
           t.table,
           t.record,
@@ -1697,10 +1880,11 @@ export async function acceptItem(
         saved[BEFORE_KEY] = before
       }
       if (Object.keys(fields).length > 0) {
+        const to = t ?? target(item) // fields but no listing: the usual error
         await patchRecord(
-          t.table,
-          t.record,
-          await withAttachmentShapes(t.table, fields, 'throw')
+          to.table,
+          to.record,
+          await withAttachmentShapes(to.table, fields, 'throw')
         )
       }
       // The Broom flag row goes either way: an applied fix clears it, and
@@ -1786,7 +1970,12 @@ export async function rejectItem(
   const stamp = now()
   // The rejection reply as the page showed it, saved by the Mac as it
   // reads; none (a typed reason) and Fable writes it from the reason.
-  const words = item.replyTo ? (reply ?? '').trim().slice(0, 5000) : ''
+  // None for an item brought back after a decline with no word from them
+  // since: they have the first one (queue-reopen.ts).
+  const words =
+    item.replyTo && !item.declinedBefore
+      ? (reply ?? '').trim().slice(0, 5000)
+      : ''
   const fields: Record<string, unknown> = {
     [F.status]: 'Rejected',
     [F.rejectReason]: why || null,
@@ -1808,6 +1997,92 @@ export async function rejectItem(
 export async function laterItem(item: QueueItem): Promise<void> {
   requireOpen(item)
   await patchQueueRow(item.id, { [F.reviewAgainOn]: reviewAgainAt(Date.now()) })
+}
+
+/** The row's fields as Airtable holds them, for a write that must keep
+ *  what it does not change (the Proposal JSON). */
+async function rawQueueFields(id: string): Promise<RawFields> {
+  const res = await airtableRequest(
+    `${QUEUE_TABLE_ID}/${id}?returnFieldsByFieldId=true`
+  )
+  if (!res.ok) {
+    throw new QueueError(
+      `Airtable read failed: ${res.status} ${await res.text()}`,
+      502
+    )
+  }
+  return ((await res.json()) as { fields: RawFields }).fields
+}
+
+/** "Update flag" from the chat (queue-flag.ts): Fable's new verdict,
+ *  reasons and reject buttons – and title and field changes, when it gave
+ *  them – onto the row, keeping what they replace for Undo. Reply draft,
+ *  Reply status and the page's edits stay as they are, and nothing is
+ *  written to the listing. */
+export async function flagItem(
+  item: QueueItem,
+  flag: FlagUpdate
+): Promise<void> {
+  requireOpen(item)
+  const f = await rawQueueFields(item.id)
+  const proposal = parseJson(f[F.proposal])
+  const next: Record<string, unknown> = isRecord(proposal)
+    ? { ...proposal }
+    : {}
+  // What the row says now – Undo goes back one step, so a review that ran
+  // again in between is what comes back, not an older one.
+  const before: Record<string, unknown> = {
+    verdict: f[F.verdict] ?? null,
+    reasons: f[F.reasons] ?? null,
+    chips: f[F.rejectChips] ?? null,
+    title: f[F.title] ?? null,
+  }
+  const fields: Record<string, unknown> = {
+    [F.verdict]: flag.verdict,
+    [F.reasons]: reasonsText(flag.reasons),
+    [F.rejectChips]: flag.chips ? flag.chips.join('\n') : null,
+  }
+  if (flag.title) fields[F.title] = flag.title
+  if (flag.changes) {
+    before.changes = next.changes ?? null
+    // The shape the Mac writes: each change names its record.
+    next.changes = flag.changes.map(c => ({
+      ...(item.targetTable && item.targetRecord
+        ? { table: item.targetTable, record: item.targetRecord }
+        : {}),
+      field: c.field,
+      from: c.from,
+      to: c.to,
+    }))
+  }
+  next[FLAG_BEFORE_KEY] = before
+  fields[F.proposal] = JSON.stringify(next, null, 1)
+  await patchQueueRow(item.id, fields)
+}
+
+/** Undo for "Update flag": the row says again what it said before. */
+export async function unflagItem(item: QueueItem): Promise<void> {
+  requireOpen(item)
+  const f = await rawQueueFields(item.id)
+  const proposal = parseJson(f[F.proposal])
+  const before = isRecord(proposal) ? proposal[FLAG_BEFORE_KEY] : null
+  if (!isRecord(proposal) || !isRecord(before)) {
+    throw new QueueError('Nothing to undo: the flag has not been updated.', 409)
+  }
+  const next: Record<string, unknown> = { ...proposal }
+  delete next[FLAG_BEFORE_KEY]
+  if ('changes' in before) {
+    if (before.changes === null) delete next.changes
+    else next.changes = before.changes
+  }
+  const fields: Record<string, unknown> = {
+    [F.verdict]: before.verdict ?? null,
+    [F.reasons]: before.reasons ?? null,
+    [F.rejectChips]: before.chips ?? null,
+    [F.proposal]: JSON.stringify(next, null, 1),
+  }
+  if (typeof before.title === 'string') fields[F.title] = before.title
+  await patchQueueRow(item.id, fields)
 }
 
 /** What one save changes on the row: with `keys` (the fields the page
@@ -1845,7 +2120,13 @@ export async function saveEdits(
   keys?: string[]
 ): Promise<void> {
   requireOpen(item)
-  const merged = mergeEdits(item.edits, edits, keys)
+  // The fields left out sit on the row with the edits, under their own key,
+  // so a save that does not touch them keeps them.
+  const merged = mergeEdits(
+    withLeftOut(item.edits ?? {}, item.leftOut ?? []),
+    edits,
+    keys
+  )
   const fields: Record<string, unknown> = {
     [F.edits]: Object.keys(merged).length ? JSON.stringify(merged) : null,
   }
@@ -1856,6 +2137,120 @@ export async function saveEdits(
     fields[F.replyDraft] = replyDraft.trim().slice(0, 5000)
   }
   await patchQueueRow(item.id, fields)
+}
+
+/** A field fixed after the decision, from Done today (Bryce, 21 Oct 2026:
+ *  "make fields in the today view editable", for every kind). The listing
+ *  is live, so the edit goes straight onto it, and onto the row's edits as
+ *  if it had been made before Accept: the Done view reads what the
+ *  decision wrote from there, and Undo treats it the same way – an
+ *  addition's Undo only unpublishes, a change's puts back what it
+ *  replaced. A declined addition is left alone (the Mac deletes its
+ *  record), and a rule has no fields. */
+export function isFixable(item: QueueItem): boolean {
+  if (item.status !== 'Applied' || item.declined) return false
+  if (item.type === 'Add') return true
+  return (
+    item.type === 'Change' && Boolean(item.targetTable && item.targetRecord)
+  )
+}
+
+export async function fixItem(
+  item: QueueItem,
+  edits: Record<string, unknown>
+): Promise<void> {
+  if (!isFixable(item)) {
+    throw new QueueError(
+      'Only a published addition or an applied change can be edited after the decision.',
+      409
+    )
+  }
+  const keys = Object.keys(edits)
+  if (keys.length === 0) throw new QueueError('Nothing to save.', 400)
+  if (keys.includes(LEFT_OUT_KEY)) {
+    throw new QueueError('A field is left out only before the decision.', 400)
+  }
+  const t = target(item)
+  const raw = parseJson((await rawQueueFields(item.id))[F.edits])
+  const saved: Record<string, unknown> = isRecord(raw) ? { ...raw } : {}
+  if (item.type === 'Change') {
+    // A field beyond the proposal keeps what it held before, for Undo, as
+    // one edited before Accept does.
+    const proposed = new Set(item.changes.map(c => c.field))
+    const before = isRecord(saved[BEFORE_KEY]) ? { ...saved[BEFORE_KEY] } : {}
+    const fresh = keys.filter(k => !proposed.has(k) && !(k in before))
+    if (fresh.length > 0) {
+      Object.assign(before, await currentValues(t.table, t.record, fresh))
+    }
+    if (Object.keys(before).length > 0) saved[BEFORE_KEY] = before
+    // A proposed field Fable had changed, or that was left out, is now
+    // written as edited here.
+    for (const key of [KEPT_KEY, LEFT_OUT_KEY]) {
+      const list = saved[key]
+      if (!Array.isArray(list)) continue
+      const rest = list.filter(k => !keys.includes(k))
+      if (rest.length > 0) saved[key] = rest
+      else delete saved[key]
+    }
+  } else {
+    // A new place on the page moves the listings after it down one, as
+    // Accept does.
+    const sort = edits[SORT_FIELD]
+    if (typeof sort === 'number') await makeRoom(t.table, t.record, sort)
+  }
+  await patchRecord(
+    t.table,
+    t.record,
+    await withAttachmentShapes(t.table, edits, 'throw')
+  )
+  await patchQueueRow(item.id, {
+    [F.edits]: JSON.stringify({ ...saved, ...edits }),
+  })
+  refreshCache()
+}
+
+/** A picture dropped on a published addition: from then on the Done view
+ *  shows the listing's own, not the one the decision wrote over it (an
+ *  attachment link expires within hours, so the new one is not kept). */
+export async function forgetRowEdit(
+  item: QueueItem,
+  field: string
+): Promise<void> {
+  const saved = parseJson((await rawQueueFields(item.id))[F.edits])
+  if (!isRecord(saved) || !(field in saved)) return
+  const rest = { ...saved }
+  delete rest[field]
+  await patchQueueRow(item.id, {
+    [F.edits]: Object.keys(rest).length ? JSON.stringify(rest) : null,
+  })
+}
+
+/** Reopen a declined addition, however old (queue-reopen.ts): the row gets
+ *  the marker and stays decided until the Mac has the record back – the
+ *  same one when it still exists, else one rebuilt from the row's saved
+ *  copy – and then reopens it in one write. The page asks the Mac's agent
+ *  to do that at once; the worker is the fallback. */
+export async function reopenItem(item: QueueItem): Promise<void> {
+  if (item.type !== 'Add') {
+    throw new QueueError('Only an addition can be reopened.', 400)
+  }
+  if (!item.declined) {
+    throw new QueueError(
+      `Only a declined addition can be reopened; this one is ${item.status.toLowerCase()}.`,
+      409
+    )
+  }
+  if (item.reopening && !item.reopening.error) {
+    throw new QueueError('It is on its way back already.', 409)
+  }
+  const raw = parseJson((await rawQueueFields(item.id))[F.proposal])
+  if (!isRecord(raw)) {
+    throw new QueueError('This item has no saved copy to bring back.', 409)
+  }
+  await patchQueueRow(item.id, {
+    [F.proposal]: JSON.stringify(withReopenMarker(raw, now()), null, 1),
+    [F.error]: null,
+  })
 }
 
 export async function undoItem(item: QueueItem): Promise<void> {
@@ -1875,6 +2270,27 @@ export async function undoItem(item: QueueItem): Promise<void> {
     [F.error]: null,
     [F.rejectReply]: null,
   }
+  // Accept and Reject both clear a Broom flag's row, and it cannot come
+  // back. The reopened item lets go of it: the Mac worker takes a flag
+  // whose row is gone for one cleared in Airtable and closes the item
+  // within five minutes (Bryce, 12 Oct 2026: SteadRise, rejected and
+  // undone, then "already closed" on the second Reject).
+  if (
+    item.type === 'Change' &&
+    item.issueRow &&
+    isRecordId(item.issueRow) &&
+    !(await recordExists(BROOM_ISSUES_TABLE_ID, item.issueRow))
+  ) {
+    reopen[F.issueRow] = null
+  }
+  // A rejected suggestion the Mac has deleted is marked Applied, but there
+  // is no publish to take back: Reopen brings it back instead.
+  if (item.declined && item.status !== 'Rejected') {
+    throw new QueueError(
+      'Too late to undo: the record was deleted after the decline. Reopen brings it back.',
+      409
+    )
+  }
   if (item.status === 'Applied' && item.type === 'Add') {
     const t = target(item)
     await patchRecord(t.table, t.record, { 'Publish?': false })
@@ -1886,8 +2302,14 @@ export async function undoItem(item: QueueItem): Promise<void> {
     const t = target(item)
     const fields: Record<string, unknown> = {}
     for (const c of item.changes) {
-      // Accept did not write it (Fable had changed it), so it stays.
-      if (item.keptByFable?.includes(c.field)) continue
+      // Accept did not write it (Fable had changed it, or it was left
+      // out), so it stays.
+      if (
+        item.keptByFable?.includes(c.field) ||
+        item.leftOut?.includes(c.field)
+      ) {
+        continue
+      }
       fields[c.field] = PROTECTED_FIELDS.has(c.field)
         ? asBox(c.from)
         : (c.from ?? null)
@@ -1899,9 +2321,10 @@ export async function undoItem(item: QueueItem): Promise<void> {
     }
     const back = await withAttachmentShapes(t.table, fields, 'skip')
     if (Object.keys(back).length) await patchRecord(t.table, t.record, back)
-    // The edits stay as the page's draft; what they replaced is spent.
+    // The edits stay as the page's draft, the fields left out too; what
+    // they replaced is spent.
     if (item.before || item.keptByFable) {
-      const kept = item.edits ?? {}
+      const kept = withLeftOut(item.edits ?? {}, item.leftOut ?? [])
       reopen[F.edits] = Object.keys(kept).length ? JSON.stringify(kept) : null
     }
     await patchQueueRow(item.id, reopen)
@@ -1913,7 +2336,7 @@ export async function undoItem(item: QueueItem): Promise<void> {
       const t = target(item)
       if (!(await recordExists(t.table, t.record))) {
         throw new QueueError(
-          'Too late: the record has already been deleted.',
+          'Too late to undo: the record has already been deleted. Reopen brings it back.',
           409
         )
       }

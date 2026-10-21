@@ -21,6 +21,7 @@ import StickyBar, { scrollToAnchor } from '@/components/StickyBar'
 import { EVENT_TYPES, eventTypeColor } from '@/lib/event-types'
 import { selectFeatured, withRandomStandIns } from '@/lib/featured'
 import { trackFilterApply } from '@/lib/analytics'
+import { foldForSearch } from '@/lib/search'
 import { gridListings, placementsById } from '@/lib/placements'
 import type { EventListing } from '@/lib/data/events'
 import { bottomMetaFor, eventCardProps, parseISO, titleMetaFor } from './card'
@@ -135,9 +136,10 @@ function CitySearch({
     }
   }, [open])
 
-  const normalized = query.trim().toLowerCase()
+  // Folded like the site search: "washington dc" finds "Washington D.C.".
+  const normalized = foldForSearch(query.trim())
   const matches = cities.filter(
-    c => c.toLowerCase().includes(normalized) && !selectedCities.includes(c)
+    c => foldForSearch(c).includes(normalized) && !selectedCities.includes(c)
   )
 
   function selectCity(city: string) {

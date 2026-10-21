@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { issueName, missingPage, webPage, webPath } from './newsletter-web'
+import {
+  beforeBodyEnd,
+  issueName,
+  missingPage,
+  seenImage,
+  webPage,
+  webPath,
+} from './newsletter-web'
 
 describe('issue addresses', () => {
   it('turn into the campaign name the pipeline gives the issue', () => {
@@ -103,6 +110,28 @@ describe('webPage', () => {
     expect(
       webPage(email(`<!--web:hide-->${LINKS}<!--/web:hide-->`))
     ).not.toContain('>Text version<')
+  })
+
+  it('loads the image that counts the view at the end of the body', () => {
+    const seen = seenImage('events', 'week-41-2026', 'web')
+    expect(seen).toBe(
+      '<img src="/newsletter/events/week-41-2026/seen?as=web" width="1" height="1" alt="" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none">'
+    )
+    const page = webPage(email(''), undefined, seen)
+    expect(page).toMatch(
+      /<img src="\/newsletter\/events\/week-41-2026\/seen\?as=web"[^>]*>\s*<\/body>/
+    )
+    expect(page.match(/seen\?as=/g)).toHaveLength(1)
+    // Without one, nothing is added.
+    expect(webPage(email(''))).not.toContain('/seen?')
+  })
+
+  it('puts an addition before the closing body tag, or at the end without one', () => {
+    expect(beforeBodyEnd('<p>a</p></BODY></html>', '<i>')).toBe(
+      '<p>a</p><i></BODY></html>'
+    )
+    expect(beforeBodyEnd('<p>a</p>', '<i>')).toBe('<p>a</p><i>')
+    expect(beforeBodyEnd('<p>a</p></body>', '')).toBe('<p>a</p></body>')
   })
 
   it('keeps the page out of search engines', () => {

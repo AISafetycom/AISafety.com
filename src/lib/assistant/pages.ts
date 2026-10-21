@@ -152,20 +152,6 @@ export const PAGES: PageInfo[] = [
     ],
   },
   {
-    path: '/projects',
-    title: 'Volunteer projects',
-    purpose:
-      'Initiatives seeking your volunteer help. These projects are focused on supporting and improving the AI safety field.',
-    audience: 'People with time to volunteer on AI safety work.',
-    greeting:
-      'Want to volunteer on AI safety work? I can match you to an active project.',
-    chips: [
-      'I can code – show me projects',
-      'Non-technical ways to volunteer',
-      'Projects needing the least time',
-    ],
-  },
-  {
     path: '/media-channels',
     title: 'Media channels',
     purpose:

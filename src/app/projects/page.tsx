@@ -2,10 +2,14 @@ import { fetchLastUpdated } from '@/lib/data/last-updated'
 import PageHeader from '@/components/PageHeader'
 import FeaturedCard from '@/components/FeaturedCard'
 import ProjectsClient from './ProjectsClient'
+import { projectCardProps } from './card'
 import { getProjects } from '@/lib/data/projects'
 import { pageMetadata } from '@/lib/page-metadata'
 import { SITE_PAGES } from '@/lib/site-pages'
 
+// Retired on 19 October 2026: next.config.ts redirects /projects to /about,
+// so this page is never served, and the nav, sitemap, search and chatbot no
+// longer point here. The code stays for the rebuilt projects page.
 export const metadata = pageMetadata(SITE_PAGES.projects)
 
 export default async function ProjectsPage() {
@@ -44,15 +48,7 @@ export default async function ProjectsPage() {
             tagline={project.featuredTagline!}
             name={project.name}
             description={project.description}
-            meta={[
-              ...(project.contact
-                ? [{ icon: '/images/icons/person.svg', value: project.contact }]
-                : []),
-              ...(project.email
-                ? [{ icon: '/images/icons/mail.svg', value: project.email }]
-                : []),
-              { icon: '/images/icons/activity.svg', value: project.status },
-            ]}
+            meta={projectCardProps(project).meta}
             trackingPage="Projects"
             trackingId={project.id}
             trackingPosition={`F${project.featured}`}

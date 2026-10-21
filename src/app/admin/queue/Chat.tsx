@@ -7,8 +7,15 @@ import {
   wentOutNote,
   type FableChange,
 } from '@/lib/admin/queue-fable'
+import {
+  flagShown,
+  parseFlag,
+  verdictWords,
+  type FlagUpdate,
+} from '@/lib/admin/queue-flag'
 import Icon from '@/components/Icon'
 import type { AgentInfo, QueueItem } from '@/lib/admin/queue'
+import { reviewNewerThanChat } from '@/lib/admin/queue-reopen'
 import styles from './queue.module.css'
 
 // A conversation with Fable about the open item, beside the verdict. Each
@@ -59,6 +66,106 @@ interface Pending {
 const MAX_FILES = 8
 const MAX_FILE_BYTES = 15 * 1024 * 1024
 
+// A message half typed when Bryce moves to another item waits in the box
+// for him when he comes back (13 Oct 2026: "when I start typing then switch
+// listings, please make it save my text"). The words and a picked quote are
+// kept in this browser per item, so a reload keeps them too; files can't
+// be, so those wait only while the page stays open. Drafts untouched for a
+// month drop out.
+const DRAFTS_KEY = 'aisafety-admin-queue:chat-drafts'
+const DRAFT_DAYS = 30
+
+interface Draft {
+  text: string
+  quote: string | null
+  at: number
+}
+
+function readDrafts(): Record<string, Draft> {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(DRAFTS_KEY) ?? '{}')
+    if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+      return saved as Record<string, Draft>
+    }
+  } catch {
+    // storage refused or garbled: no drafts
+  }
+  return {}
+}
+
+function draftOf(id: string): Draft | null {
+  const d = readDrafts()[id]
+  return d && typeof d.text === 'string' ? d : null
+}
+
+function saveDraft(id: string, text: string, quote: string | null) {
+  const drafts = readDrafts()
+  const cutoff = Date.now() - DRAFT_DAYS * 86_400_000
+  for (const [k, d] of Object.entries(drafts)) {
+    if (!(d?.at > cutoff)) delete drafts[k]
+  }
+  if (text.trim() || quote) drafts[id] = { text, quote, at: Date.now() }
+  else delete drafts[id]
+  try {
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify(drafts))
+  } catch {
+    // storage refused: the draft lasts only while the item stays open
+  }
+}
+
+// Files waiting to go, per item, while the page stays open.
+const draftFiles = new Map<string, Pending[]>()
+
+// Fable's edits and reply drafts go on the page by themselves, with a
+// small Undo (Bryce, 16 Oct 2026: "let's make edits apply automatically,
+// and instead have a small Undo Edit button"). They used to apply only
+// when the reply finished while its item was open, so one that finished
+// after Bryce had moved on waited behind an Apply button (Guidelight AI's
+// link, 13–16 Oct 2026). The page now keeps, per item in this browser, the
+// time of the newest message it has looked at – anything newer is applied
+// when the item next opens – and what each applied reply replaced, so Undo
+// works after moving away and back, and after a reload.
+const APPLIED_KEY = 'aisafety-admin-queue:chat-applied'
+
+interface Applied {
+  /** The newest message looked at ('' for a thread that was empty). */
+  seen: string
+  /** Per reply (by its time stamp): what applying it replaced. */
+  undo: Record<string, Undo>
+  at: number
+}
+
+function readApplied(): Record<string, Applied> {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(APPLIED_KEY) ?? '{}')
+    if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+      return saved as Record<string, Applied>
+    }
+  } catch {
+    // storage refused or garbled: nothing kept
+  }
+  return {}
+}
+
+function appliedOf(id: string): Applied | null {
+  const a = readApplied()[id]
+  return a && typeof a.seen === 'string' ? a : null
+}
+
+function saveApplied(id: string, seen: string, undo: Record<string, Undo>) {
+  const all = readApplied()
+  const cutoff = Date.now() - DRAFT_DAYS * 86_400_000
+  for (const [k, a] of Object.entries(all)) {
+    if (!(a?.at > cutoff)) delete all[k]
+  }
+  all[id] = { seen, undo, at: Date.now() }
+  try {
+    localStorage.setItem(APPLIED_KEY, JSON.stringify(all))
+  } catch {
+    // storage refused: only replies that land while the item is open apply
+  }
+}
+
 interface Msg {
   role: 'you' | 'fable' | 'error'
   text?: string
@@ -72,6 +179,10 @@ interface Msg {
   /** What that reply changed on this item's own listing, read by the Mac
    *  before and after it. */
   changed?: FableChange[]
+  /** A new verdict and reasons for the item, when the reply found the flag
+   *  out of date (the ```flag block, taken off the text on the Mac;
+   *  queue-flag.ts). Shown as a card with an Update flag button. */
+  flag?: unknown
 }
 
 interface Event {
@@ -143,10 +254,21 @@ function textOf(msg: Msg): string {
   return (msg.parts ?? []).map(p => (p.t === 'text' ? p.text : '')).join('')
 }
 
-/** What an auto-applied reply changed, so Undo can put it back. */
+/** What an applied reply changed, so Undo can put it back. */
 interface Undo {
-  edits?: Record<string, string | undefined>
-  reply?: string | null
+  /** Each field's edit before (null: the field had none). */
+  edits?: Record<string, string | null>
+  /** The reply draft before. */
+  reply?: string
+}
+
+/** What a reply's cards can do once it has landed: put its edits or draft
+ *  on the page (again), or take them back off. */
+interface CardActs {
+  applyEdits: (usable: Record<string, string>) => void
+  applyReply: (text: string) => void
+  undoEdits?: () => void
+  undoReply?: () => void
 }
 
 /** A decided item, opened from Done today: its cards are read-only and
@@ -207,6 +329,7 @@ export default function Chat({
   onSetEdits,
   onSetReply,
   onWrote,
+  onFlag,
   onFableChanges,
   focusTick,
 }: {
@@ -227,6 +350,11 @@ export default function Chat({
   onSetReply: (text: string | null) => void
   /** A reply that changed Airtable has landed: re-read the live record. */
   onWrote?: () => void
+  /** Write a flag update onto the row, or undo it; resolves to an error
+   *  to show, or null. */
+  onFlag: (
+    body: { flag: FlagUpdate } | { undo: true }
+  ) => Promise<string | null>
   /** The fields Fable has changed on the listing so far in this thread. */
   onFableChanges?: (changes: FableChange[]) => void
   /** Bumped by the F key: focus the box. */
@@ -239,7 +367,8 @@ export default function Chat({
   // The reply being streamed now.
   const [live, setLive] = useState<Part[] | null>(null)
   const [note, setNote] = useState<string | null>(null)
-  const [text, setText] = useState('')
+  // What was typed here before, if Bryce left this item mid-message.
+  const [text, setText] = useState(() => draftOf(item.id)?.text ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Text picked out of the panel to answer to: the Reply button that
@@ -249,7 +378,9 @@ export default function Chat({
     x: number
     y: number
   } | null>(null)
-  const [quote, setQuote] = useState<string | null>(null)
+  const [quote, setQuote] = useState<string | null>(
+    () => draftOf(item.id)?.quote ?? null
+  )
   // Messages typed while Fable was still answering. Sending one stops the
   // reply being written (the Mac kills that call; what it wrote stays, with
   // a note) and this goes as soon as its stream ends – like the Claude Code
@@ -258,7 +389,9 @@ export default function Chat({
   const [queued, setQueued] = useState<{ text: string; files: Pending[] }[]>([])
   // Files waiting to go with the next message, and whether one is being
   // dragged over the panel right now.
-  const [files, setFiles] = useState<Pending[]>([])
+  const [files, setFiles] = useState<Pending[]>(
+    () => draftFiles.get(item.id) ?? []
+  )
   const [dragging, setDragging] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const dragDepth = useRef(0)
@@ -270,10 +403,45 @@ export default function Chat({
   const cap = descriptionCap(item)
   const replyRef = useRef(reply)
   replyRef.current = reply
+  // What this browser kept for the item last time: the newest message it
+  // looked at, and what each applied reply replaced (APPLIED_KEY).
+  const [kept] = useState(() => appliedOf(item.id))
   // Per reply (by its time stamp): what applying it changed, for Undo.
-  const undoRef = useRef<Record<string, Undo>>({})
+  const undoRef = useRef<Record<string, Undo>>(kept?.undo ?? {})
+  // The newest message looked at; null until the thread first loads in a
+  // browser that had not seen it before.
+  const seenAtRef = useRef<string | null>(kept?.seen ?? null)
+  const keep = useCallback(() => {
+    if (seenAtRef.current !== null) {
+      saveApplied(item.id, seenAtRef.current, undoRef.current)
+    }
+  }, [item.id])
+  // Whether this item is still the open one. A reply's stream outlives the
+  // panel when Bryce moves on mid-answer; what lands after that is left
+  // for the next time the item opens (it is newer than seenAtRef), rather
+  // than applied on top of the edits as they stood when he left.
+  const mountedRef = useRef(false)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+  /** Note a message as looked at, once its blocks are applied. */
+  const markSeen = useCallback(
+    (at: string) => {
+      if (!mountedRef.current) return
+      if (seenAtRef.current === null || at > seenAtRef.current) {
+        seenAtRef.current = at
+        keep()
+      }
+    },
+    [keep]
+  )
   // How many messages the page has already looked at for blocks to apply.
   const seenRef = useRef<number | null>(null)
+  // Whether the thread has loaded from the Mac yet.
+  const loadedRef = useRef(false)
 
   // The page's changed fields list what Fable changed on the listing.
   const onChangesRef = useRef(onFableChanges)
@@ -282,71 +450,124 @@ export default function Chat({
     if (messages) onChangesRef.current?.(fableChangesOf(messages))
   }, [messages])
 
+  /** Put a reply's field values on the page, keeping what they replace
+   *  for its Undo. The refs move at once, so a second reply applied in the
+   *  same breath builds on this one rather than on what came before. */
+  const putEdits = useCallback(
+    (at: string, usable: Record<string, string>) => {
+      const before = editsRef.current
+      const moved = Object.keys(usable).filter(k => before[k] !== usable[k])
+      if (!moved.length) return
+      undoRef.current[at] = {
+        ...undoRef.current[at],
+        edits: Object.fromEntries(moved.map(k => [k, before[k] ?? null])),
+      }
+      const next = { ...before, ...usable }
+      editsRef.current = next
+      onSetEdits(next)
+      keep()
+    },
+    [keep, onSetEdits]
+  )
+  /** The same for a reply's new reply draft. */
+  const putReply = useCallback(
+    (at: string, text: string) => {
+      const before = replyRef.current
+      if (before === null || before === text) return
+      undoRef.current[at] = { ...undoRef.current[at], reply: before }
+      replyRef.current = text
+      onSetReply(text)
+      keep()
+    },
+    [keep, onSetReply]
+  )
+
   /** Apply the blocks in a reply that has just arrived. */
   const applyFrom = useCallback(
     (msg: Msg) => {
-      if (msg.role !== 'fable') return
+      if (msg.role !== 'fable' || !mountedRef.current) return
       if (msg.wrote) onWrote?.()
       // A decided item keeps what went with its decision: a reply that
       // lands after it changes nothing on the page.
       if (decided) return
       const { edits: proposed, reply: draft } = blocksOf(textOf(msg))
-      const undo: Undo = {}
       if (proposed) {
         const usable = Object.fromEntries(
           Object.entries(proposed).filter(([k]) => canEditField(k))
         )
-        if (Object.keys(usable).length) {
-          const before = editsRef.current
-          undo.edits = Object.fromEntries(
-            Object.keys(usable).map(k => [k, before[k]])
-          )
-          onSetEdits({ ...before, ...usable })
-        }
+        if (Object.keys(usable).length) putEdits(msg.at, usable)
       }
-      if (draft && replyRef.current !== null) {
-        undo.reply = replyRef.current
-        onSetReply(draft)
-      }
-      if (undo.edits || undo.reply !== undefined) undoRef.current[msg.at] = undo
+      if (draft) putReply(msg.at, draft)
     },
-    [canEditField, decided, onSetEdits, onSetReply, onWrote]
+    [canEditField, decided, onWrote, putEdits, putReply]
   )
   // Read through a ref by loadHistory, so that it changes only with the
-  // agent's token or the item. The page hands down new callbacks on every
-  // render, and each loaded history re-renders the page (the changed
-  // fields above): with applyFrom as a dependency the history reloaded the
+  // item. The page hands down new callbacks on every render, and each
+  // loaded history re-renders the page (the changed fields above): with
+  // applyFrom as a dependency the history reloaded the
   // moment it landed, thousands of times a minute, and an expired token
   // turned that into 2.4 million refusals in the Mac agent's log (7 Oct 2026).
   const applyFromRef = useRef(applyFrom)
   applyFromRef.current = applyFrom
 
-  const undoFor = (msg: Msg): (() => void) | undefined => {
+  /** Forget one part of a reply's Undo once it has been used. */
+  const dropUndo = (at: string, part: keyof Undo) => {
+    const rest = { ...undoRef.current[at] }
+    delete rest[part]
+    if (rest.edits || rest.reply !== undefined) undoRef.current[at] = rest
+    else delete undoRef.current[at]
+    keep()
+  }
+
+  /** What a landed reply's cards can do: its edits and its draft each have
+   *  their own Undo, and their own Apply once taken back off. */
+  const actsFor = (msg: Msg): CardActs => {
     const u = undoRef.current[msg.at]
-    if (!u) return undefined
-    return () => {
-      if (u.edits) {
-        const next = { ...editsRef.current }
-        for (const [k, v] of Object.entries(u.edits)) {
-          if (v === undefined) delete next[k]
-          else next[k] = v
-        }
-        onSetEdits(next)
-      }
-      if (u.reply !== undefined) onSetReply(u.reply)
-      delete undoRef.current[msg.at]
+    const edits = u?.edits
+    const draft = u?.reply
+    return {
+      applyEdits: usable => putEdits(msg.at, usable),
+      applyReply: text => putReply(msg.at, text),
+      undoEdits: edits
+        ? () => {
+            const next = { ...editsRef.current }
+            for (const [k, v] of Object.entries(edits)) {
+              if (v === null) delete next[k]
+              else next[k] = v
+            }
+            editsRef.current = next
+            onSetEdits(next)
+            dropUndo(msg.at, 'edits')
+          }
+        : undefined,
+      undoReply:
+        draft !== undefined
+          ? () => {
+              replyRef.current = draft
+              onSetReply(draft)
+              dropUndo(msg.at, 'reply')
+            }
+          : undefined,
     }
   }
 
+  // The page gets a fresh token with every list refresh (each minute, and
+  // on coming back to the tab), so it is read through a ref: a new token
+  // must not reload the thread. It did, and a reload that landed before the
+  // Mac had saved the message just sent took it off the screen while Fable
+  // answered (15 Oct 2026, "Didn't we get contacted about this?" on
+  // Organization Builders Program).
+  const tokenRef = useRef(agent.token)
+  tokenRef.current = agent.token
   const call = useCallback(
     (path: string, body: Record<string, unknown>) =>
       fetch(`http://127.0.0.1:${agent.port}${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...body, id: item.id, token: agent.token }),
+        body: JSON.stringify({ ...body, id: item.id, token: tokenRef.current }),
         cache: 'no-store',
       }),
-    [agent.port, agent.token, item.id]
+    [agent.port, item.id]
   )
 
   /** A file from an earlier message, back from the Mac. */
@@ -369,29 +590,46 @@ export default function Chat({
     }
     if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
     const list = data.messages ?? []
-    // A reply that landed while the page was away (or reloading mid-answer)
-    // still applies its blocks; ones from before the page opened do not –
-    // they were applied when they came, and are on the row.
+    // A reply that landed since the page last looked applies its blocks:
+    // one that came while this item stayed open (the pending poll), and
+    // one that came while Bryce was on another item or the page was shut
+    // (newer than the last message this browser looked at). Older ones
+    // were applied when they came, and are on the row.
     if (seenRef.current !== null) {
       for (const msg of list.slice(seenRef.current)) applyFromRef.current(msg)
+    } else if (seenAtRef.current !== null) {
+      const since = seenAtRef.current
+      for (const msg of list) if (msg.at > since) applyFromRef.current(msg)
     }
     seenRef.current = list.length
+    markSeen(list.reduce((a, m) => (m.at > a ? m.at : a), ''))
+    loadedRef.current = true
     setMessages(list)
     setPending(Boolean(data.pending))
     return { list, pending: Boolean(data.pending) }
-  }, [call])
+  }, [call, markSeen])
 
+  // The thread loads once per item. One that could not load (the Mac was
+  // down, or the token had run out) tries again with the page's next token.
   useEffect(() => {
+    if (loadedRef.current) return
     let alive = true
-    loadHistory().catch(e => {
-      if (!alive) return
-      setMessages([])
-      setError(e instanceof Error ? e.message : 'The Mac agent did not answer.')
-    })
+    loadHistory().then(
+      () => {
+        if (alive) setError(null)
+      },
+      e => {
+        if (!alive) return
+        setMessages([])
+        setError(
+          e instanceof Error ? e.message : 'The Mac agent did not answer.'
+        )
+      }
+    )
     return () => {
       alive = false
     }
-  }, [loadHistory])
+  }, [loadHistory, agent.token])
 
   // A reply still being written on the Mac lands in the history when done.
   useEffect(() => {
@@ -415,7 +653,10 @@ export default function Chat({
   // after the thread first opens, only while the panel is already at its
   // foot. Scrolled up to read something, the view stays put when a message
   // goes, Fable starts thinking, writes or finishes (Bryce, 30 Sept 2026:
-  // "it jumps the viewer to the bottom").
+  // "it jumps the viewer to the bottom"). An item that came back or was
+  // reviewed again since the chat's last word opens at the panel's top
+  // instead, on Fable's verdict (reviewNewerThanChat). The panel stays on
+  // the page from one item to the next, so it is put there, not left.
   const atFootRef = useRef(true)
   const openedRef = useRef(false)
   useEffect(() => {
@@ -433,7 +674,16 @@ export default function Chat({
     if (opening) openedRef.current = true
     if (!opening && !atFootRef.current) return
     const box = endRef.current?.closest<HTMLElement>('[data-chat-scroll]')
-    if (box) box.scrollTop = box.scrollHeight
+    if (!box) return
+    const newest = (messages ?? []).reduce((a, m) => (m.at > a ? m.at : a), '')
+    if (opening && reviewNewerThanChat(item, newest || null)) {
+      box.scrollTop = 0
+      atFootRef.current = box.scrollHeight - box.clientHeight < 40
+      return
+    }
+    box.scrollTop = box.scrollHeight
+    // Only the opening reads the item: a list refresh must not scroll.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, live, note, queued])
 
   // Select words anywhere in the panel (Fable's verdict included) and a
@@ -581,6 +831,7 @@ export default function Chat({
           applyFrom(msg)
           setMessages(m => [...(m ?? []), msg])
           seenRef.current = (seenRef.current ?? 0) + 1
+          markSeen(msg.at)
         }
         setLive(null)
         setNote(null)
@@ -740,7 +991,7 @@ export default function Chat({
 
   // Messages still waiting when the panel closes – Bryce moved to another
   // item before the stopped reply ended – go anyway, as one message. The Mac
-  // answers in the background and the item shows under "Fable replying".
+  // answers in the background and the item shows under "Fable chats".
   // Before, they were thrown away, and the reply they had stopped was never
   // answered (8 Oct 2026, Mexico Tech Policy Panel).
   const callRef = useRef(call)
@@ -798,6 +1049,19 @@ export default function Chat({
     el.style.height = `${Math.min(el.scrollHeight, 180)}px`
   }
 
+  // Keep the half-typed message for this item; sending it clears the box
+  // and so the draft.
+  const itemId = item.id
+  useEffect(() => saveDraft(itemId, text, quote), [itemId, text, quote])
+  useEffect(() => {
+    if (files.length) draftFiles.set(itemId, files)
+    else draftFiles.delete(itemId)
+  }, [itemId, files])
+  // A draft brought back is as tall as it was.
+  useEffect(() => {
+    if (inputRef.current?.value) grow(inputRef.current)
+  }, [])
+
   const thread = messages ?? []
   const hasThread = thread.length > 0 || live !== null
 
@@ -835,11 +1099,17 @@ export default function Chat({
                   reply={reply}
                   canEditField={canEditField}
                   decided={decided}
-                  onSetEdits={onSetEdits}
-                  onSetReply={onSetReply}
-                  undo={undoFor(m)}
+                  acts={actsFor(m)}
                   cap={cap}
                 />
+                {m.flag !== undefined && (
+                  <FlagCard
+                    raw={m.flag}
+                    item={item}
+                    decided={decided}
+                    onFlag={onFlag}
+                  />
+                )}
               </div>
             )
           )}
@@ -853,8 +1123,6 @@ export default function Chat({
                 reply={reply}
                 canEditField={canEditField}
                 decided={decided}
-                onSetEdits={onSetEdits}
-                onSetReply={onSetReply}
                 streaming
                 cap={cap}
               />
@@ -1182,9 +1450,7 @@ function Parts({
   reply,
   canEditField,
   decided,
-  onSetEdits,
-  onSetReply,
-  undo,
+  acts,
   streaming,
   cap,
 }: {
@@ -1193,9 +1459,8 @@ function Parts({
   reply: string | null
   canEditField: (field: string) => boolean
   decided: Decided | null
-  onSetEdits: (edits: Record<string, string>) => void
-  onSetReply: (text: string | null) => void
-  undo?: () => void
+  /** Missing while the reply is still being written. */
+  acts?: CardActs
   streaming?: boolean
   cap: DescCap
 }) {
@@ -1219,9 +1484,7 @@ function Parts({
             reply={reply}
             canEditField={canEditField}
             decided={decided}
-            onSetEdits={onSetEdits}
-            onSetReply={onSetReply}
-            undo={undo}
+            acts={acts}
             caret={Boolean(streaming) && i === answer}
             blocksOnly={i !== answer}
             cap={cap}
@@ -1238,9 +1501,7 @@ function Prose({
   reply,
   canEditField,
   decided,
-  onSetEdits,
-  onSetReply,
-  undo,
+  acts,
   caret,
   blocksOnly,
   cap,
@@ -1250,9 +1511,7 @@ function Prose({
   reply: string | null
   canEditField: (field: string) => boolean
   decided: Decided | null
-  onSetEdits: (edits: Record<string, string>) => void
-  onSetReply: (text: string | null) => void
-  undo?: () => void
+  acts?: CardActs
   caret: boolean
   /** Text that isn't the answer: only its edits and reply cards show, so a
    *  change Fable proposed before its last lookup still has its Undo. */
@@ -1273,8 +1532,7 @@ function Prose({
           proposed={m[2].trim()}
           current={reply}
           decided={decided}
-          onSet={onSetReply}
-          undo={undo}
+          acts={acts}
         />
       )
     } else {
@@ -1287,8 +1545,7 @@ function Prose({
             edits={edits}
             canEditField={canEditField}
             decided={decided}
-            onSet={onSetEdits}
-            undo={undo}
+            acts={acts}
             cap={cap}
           />
         ) : (
@@ -1311,25 +1568,25 @@ function Prose({
   )
 }
 
-/** Field values from a reply. They are applied the moment the reply
- *  lands; the card shows what changed, with Undo, and turns back into an
- *  Apply button if the page's value is later edited away from it. On a
- *  decided item it only says whether they went out with the decision. */
+/** Field values from a reply. They go on the page by themselves once the
+ *  reply has landed (into the item's edits – the listing itself changes
+ *  only with Accept); the card shows what changed with a small Undo, and
+ *  a small Apply once they are off the page again (undone, or edited away
+ *  by hand). On a decided item it only says whether they went out with
+ *  the decision. */
 function EditsCard({
   proposed,
   edits,
   canEditField,
   decided,
-  onSet,
-  undo,
+  acts,
   cap,
 }: {
   proposed: Record<string, string>
   edits: Record<string, string>
   canEditField: (field: string) => boolean
   decided: Decided | null
-  onSet: (edits: Record<string, string>) => void
-  undo?: () => void
+  acts?: CardActs
   cap: DescCap
 }) {
   // Only what the page can take: a formula or housekeeping field Fable
@@ -1375,29 +1632,30 @@ function EditsCard({
         <CardFoot
           applied={applied}
           appliedText="Applied – goes with Accept"
-          applyText="Apply to the listing"
-          onApply={() => onSet({ ...edits, ...usable })}
-          undo={undo}
+          offText="Not applied"
+          waitText="Applies when Fable finishes"
+          applyText="Apply"
+          onApply={acts ? () => acts.applyEdits(usable) : undefined}
+          undoText={keys.length > 1 ? 'Undo edits' : 'Undo edit'}
+          undo={acts?.undoEdits}
         />
       )}
     </div>
   )
 }
 
-/** A new reply draft from a reply: put on the page's draft the moment it
- *  lands (it is a draft – nothing is sent), with Undo. */
+/** A new reply draft from a reply: put on the page's draft once the reply
+ *  has landed (it is a draft – nothing is sent), with a small Undo. */
 function ReplyCard({
   proposed,
   current,
   decided,
-  onSet,
-  undo,
+  acts,
 }: {
   proposed: string
   current: string | null
   decided: Decided | null
-  onSet: (text: string | null) => void
-  undo?: () => void
+  acts?: CardActs
 }) {
   if (current === null) {
     return (
@@ -1422,11 +1680,134 @@ function ReplyCard({
         <CardFoot
           applied={applied}
           appliedText="The draft on the page is updated"
-          applyText="Use as the reply draft"
-          onApply={() => onSet(proposed)}
-          undo={undo}
+          offText="Not the draft on the page"
+          waitText="Goes on the draft when Fable finishes"
+          applyText="Use it"
+          onApply={acts ? () => acts.applyReply(proposed) : undefined}
+          undoText="Undo"
+          undo={acts?.undoReply}
         />
       )}
+    </div>
+  )
+}
+
+/** A field change's new value, as the card shows it. */
+function shownValue(v: unknown): string {
+  if (v === true) return 'ticked'
+  if (v === false) return 'unticked'
+  if (v === null || v === '') return 'empty'
+  if (Array.isArray(v)) return v.map(x => String(x)).join(', ')
+  return typeof v === 'string' ? v : JSON.stringify(v)
+}
+
+/** The flag as Fable now sees it (queue-flag.ts; Bryce, 13 Oct 2026: "the
+ *  chat should end with an 'update flag' button"). Unlike edits it is not
+ *  applied when the reply lands: the button writes it onto the row, and
+ *  Undo puts back what the row said before. On a decided item it only
+ *  says whether the decision was made on it. */
+function FlagCard({
+  raw,
+  item,
+  decided,
+  onFlag,
+}: {
+  raw: unknown
+  item: QueueItem
+  decided: Decided | null
+  onFlag: (
+    body: { flag: FlagUpdate } | { undo: true }
+  ) => Promise<string | null>
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const parsed = parseFlag(raw, item.type)
+  if ('error' in parsed) {
+    return (
+      <p className={styles.chatTool}>
+        Fable&apos;s new flag could not be used: {parsed.error}
+      </p>
+    )
+  }
+  const flag = parsed.flag
+  const shown = flagShown(item, flag)
+  const noun = item.type === 'Add' ? 'verdict' : 'flag'
+  const run = async (body: { flag: FlagUpdate } | { undo: true }) => {
+    setBusy(true)
+    setError(null)
+    const failed = await onFlag(body)
+    setBusy(false)
+    if (failed) setError(failed)
+  }
+  return (
+    <div className={styles.chatEdits}>
+      <span className={styles.chatWho}>
+        {shown
+          ? `${noun === 'flag' ? 'Flag' : 'Verdict'} updated`
+          : `New ${noun}`}
+      </span>
+      <div className={styles.chatEditRow}>
+        <span className={styles.label}>Verdict</span>
+        <span>{verdictWords(flag.verdict)}</span>
+      </div>
+      <div className={styles.chatEditRow}>
+        <span className={styles.label}>Reasons</span>
+        <ul className={styles.reasons}>
+          {flag.reasons.map((r, i) => (
+            <li key={i}>{r}</li>
+          ))}
+        </ul>
+      </div>
+      {flag.title && (
+        <div className={styles.chatEditRow}>
+          <span className={styles.label}>Title</span>
+          <span>{flag.title}</span>
+        </div>
+      )}
+      {flag.changes && (
+        <div className={styles.chatEditRow}>
+          <span className={styles.label}>Changes</span>
+          {flag.changes.length ? (
+            <ul className={styles.reasons}>
+              {flag.changes.map((c, i) => (
+                <li key={i}>
+                  {c.field} → {shownValue(c.to)}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <span>None</span>
+          )}
+        </div>
+      )}
+      {flag.chips && (
+        <div className={styles.chatEditRow}>
+          <span className={styles.label}>Reject reasons</span>
+          <ul className={styles.reasons}>
+            {flag.chips.map((c, i) => (
+              <li key={i}>{c}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {decided ? (
+        <DecidedFoot
+          done={shown}
+          text={shown ? `Decided on this ${noun}` : 'Not used'}
+        />
+      ) : (
+        <CardFoot
+          applied={shown}
+          appliedText={`The item shows this ${noun}`}
+          applyText={busy ? 'Updating…' : `Update ${noun}`}
+          onApply={() => void run({ flag })}
+          undo={
+            item.flagUndo && !busy ? () => void run({ undo: true }) : undefined
+          }
+          busy={busy}
+        />
+      )}
+      {error && <p className={styles.chatError}>{error}</p>}
     </div>
   )
 }
@@ -1447,36 +1828,65 @@ function DecidedFoot({ done, text }: { done: boolean; text: string }) {
 function CardFoot({
   applied,
   appliedText,
+  offText,
+  waitText,
   applyText,
   onApply,
+  undoText = 'Undo',
   undo,
+  busy = false,
 }: {
   applied: boolean
   appliedText: string
+  /** Set on a card that applies by itself: once off the page its Apply is
+   *  a small link beside these words, not a button. */
+  offText?: string
+  /** What such a card says while its reply is still being written
+   *  (onApply missing). */
+  waitText?: string
   applyText: string
-  onApply: () => void
+  onApply?: () => void
+  undoText?: string
   undo?: () => void
+  /** A write is on its way: the button waits. */
+  busy?: boolean
 }) {
+  if (applied) {
+    return (
+      <div className={styles.chatCardFoot}>
+        <span className={styles.chatTool}>{appliedText}</span>
+        {undo && (
+          <button type="button" className={styles.chatLink} onClick={undo}>
+            {undoText}
+          </button>
+        )}
+      </div>
+    )
+  }
+  if (offText !== undefined) {
+    return (
+      <div className={styles.chatCardFoot}>
+        <span className={`${styles.chatTool} ${styles.chatNotApplied}`}>
+          {onApply ? offText : waitText}
+        </span>
+        {onApply && (
+          <button type="button" className={styles.chatLink} onClick={onApply}>
+            {applyText}
+          </button>
+        )}
+      </div>
+    )
+  }
   return (
     <div className={styles.chatCardFoot}>
-      {applied ? (
-        <>
-          <span className={styles.chatTool}>{appliedText}</span>
-          {undo && (
-            <button type="button" className={styles.chatLink} onClick={undo}>
-              Undo
-            </button>
-          )}
-        </>
-      ) : (
-        <button
-          type="button"
-          className={`${styles.button} ${styles.primary}`}
-          onClick={onApply}
-        >
-          {applyText}
-        </button>
-      )}
+      <button
+        type="button"
+        className={`${styles.button} ${styles.primary}`}
+        disabled={busy}
+        onClick={onApply}
+      >
+        {applyText}
+      </button>
     </div>
   )
 }
