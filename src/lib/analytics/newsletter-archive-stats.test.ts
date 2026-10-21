@@ -87,20 +87,29 @@ describe('newsletterArchiveStats', () => {
   })
 
   it('leaves out views of the 404 page that stood at the address', () => {
-    // Before the pages went live (about 12:30 UTC on 11 October 2026), and
-    // Funding's, which has no page until its move.
+    // Before the pages went live (about 12:30 UTC on 11 October 2026, and
+    // Funding's at about 17:16 UTC on 21 October 2026, after its move).
     expect(
       newsletterArchiveStats(
         [
           view('/newsletter/events', 'a', '2026-10-11T12:00:00Z'),
           view('/newsletter/funding', 'b', DAY1),
           view('/newsletter/training', 'c', '2026-10-11T12:45:00Z'),
+          view('/newsletter/funding', 'd', '2026-10-21T17:00:00Z'),
+          view('/newsletter/funding', 'e', '2026-10-21T17:30:00Z'),
         ],
         true
       )
     ).toEqual([
       {
         name: 'Training',
+        views: 1,
+        issueClicks: 0,
+        feedClicks: 0,
+        substackClicks: 0,
+      },
+      {
+        name: 'Funding',
         views: 1,
         issueClicks: 0,
         feedClicks: 0,
