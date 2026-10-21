@@ -21,3 +21,5 @@ Initial release.
   `/developers`.
 - New `events` endpoint normalizes the events table (previously only an Airtable
   iframe embed on the site).
+- `jobs` `logo` is a 256-pixel WebP copy on Vercel Blob instead of a link to
+  80000hours.org (20 October 2026).
