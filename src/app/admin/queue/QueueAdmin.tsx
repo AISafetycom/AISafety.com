@@ -14,7 +14,7 @@ import type {
   RejectReply,
 } from '@/lib/admin/queue'
 import { missingFields } from '@/lib/admin/queue-needed'
-import { laterSince, laterUntil } from '@/lib/admin/queue-later'
+import { backSince, laterSince, laterUntil } from '@/lib/admin/queue-later'
 import { LEFT_OUT_KEY, withLeftOut } from '@/lib/admin/queue-left-out'
 import { verdictWords, type FlagUpdate } from '@/lib/admin/queue-flag'
 import { rejectReplyFor, shownDeclineChip } from '@/lib/admin/queue-decline'
@@ -490,6 +490,12 @@ function dayMonth(iso: string): string {
     day: 'numeric',
     month: 'long',
   })
+}
+
+/** Back from "Review again in a week": when it was set aside, while it is
+ *  open again (queue-later.ts). */
+function backFrom(item: QueueItem): string | null {
+  return isOpen(item) ? backSince(item, Date.now()) : null
 }
 
 function show(v: unknown): string {
@@ -4262,7 +4268,8 @@ export default function QueueAdmin({
               </dt>
               <dd>
                 review again in a week: out of the list until then, and Fable
-                reviews an addition again before it comes back
+                reviews an addition again before it comes back, marked Back from
+                the day you set it aside
               </dd>
               <dt>
                 <kbd>F</kbd>
@@ -4345,6 +4352,25 @@ function FableDot({ mark }: { mark: FableMark | null }) {
       className={`${styles.fableDot} ${mark === 'answering' ? styles.fableDotLive : ''}`}
       title={FABLE_MARK_TITLE[mark]}
     />
+  )
+}
+
+/** On a row that came back from "Review again in a week": since when. */
+function BackTag({ item }: { item: QueueItem }) {
+  const back = backFrom(item)
+  if (!back) return null
+  return (
+    <span
+      className={styles.withIcon}
+      title={`You set it aside on ${dayMonth(back)} to review again in a week`}
+    >
+      <Icon src={ICON.clock} size={12} />
+      Back from{' '}
+      {new Date(back).toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'short',
+      })}
+    </span>
   )
 }
 
@@ -4433,6 +4459,7 @@ function Row({
               </span>
             )
           )}
+          <BackTag item={item} />
           {showKind && <span>{KIND_WORD[item.type]}</span>}
           {item.source !== 'Comb' && <span>{item.source}</span>}
           {showPage && item.page && <span>{pageLabel(item)}</span>}
@@ -5177,6 +5204,9 @@ function Detail({
   // with Fable's one line on whether it changes the call; or, when Bryce
   // reopened it himself, how it came back.
   const pushback = isOpen(item) ? item.pushback : null
+  // Back from "Review again in a week" (Bryce, 20 Oct 2026: "I need to know
+  // if something is coming back a week later").
+  const back = backFrom(item)
   const returnBlock = pushback ? (
     <section className={`${styles.block} ${styles.pushback}`}>
       <h3 className={`${styles.h3} ${styles.withIcon}`}>
@@ -5214,7 +5244,7 @@ function Detail({
       </p>
     </section>
   ) : item.reopened && isOpen(item) ? (
-    <p className={`${styles.note} ${styles.withIcon} ${styles.reopenedNote}`}>
+    <p className={`${styles.note} ${styles.withIcon} ${styles.returnNote}`}>
       <Icon src={ICON.reopen} size={12} />
       Brought back {ago(item.reopened.at)}
       {item.reopened.rebuilt
@@ -5225,6 +5255,14 @@ function Detail({
         : item.reopened.logo === 'none'
           ? ' · no logo found, add one before Publish'
           : ''}
+    </p>
+  ) : back ? (
+    <p className={`${styles.note} ${styles.withIcon} ${styles.returnNote}`}>
+      <Icon src={ICON.clock} size={12} />
+      Back after a week · you set it aside on {dayMonth(back)}
+      {item.type === 'Add' && item.targetRecord
+        ? ' · Fable reviewed it again'
+        : ' · not checked again since'}
     </p>
   ) : null
 

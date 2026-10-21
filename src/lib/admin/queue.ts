@@ -98,6 +98,9 @@ const F = {
   rejectReply: 'fldUQqwJn7btv6EBP',
   // "Review again in a week": when the item comes back (queue-later.ts).
   reviewAgainOn: 'fldm9eFBj0iWuN23P',
+  // When it came back: the date it was due, written by the Mac worker as it
+  // clears Review again on, so the page can say it is back (queue-later.ts).
+  cameBackOn: 'fldAaN9yEat8xWq00',
 } as const
 
 export type QueueType = 'Add' | 'Change' | 'Rule'
@@ -218,6 +221,8 @@ export interface QueueItem {
   /** Set aside with "Review again in a week": when it comes back. The Mac
    *  worker clears it once Fable has looked again. */
   reviewAgainOn: string | null
+  /** It came back from being set aside: the date it was due. */
+  cameBackOn: string | null
   /** The flag was updated from the chat (queue-flag.ts) and what it said
    *  before is kept, so Undo can put it back. */
   flagUndo: boolean
@@ -712,6 +717,7 @@ function rowToItem(
     appliedAt: str(f[F.appliedAt]),
     error: str(f[F.error]),
     reviewAgainOn: str(f[F.reviewAgainOn]),
+    cameBackOn: str(f[F.cameBackOn]),
     flagUndo: isRecord(proposal) && isRecord(proposal[FLAG_BEFORE_KEY]),
     declined: wasDeclined({
       type: str(f[F.type]) ?? 'Add',
