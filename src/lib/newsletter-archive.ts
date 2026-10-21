@@ -44,7 +44,7 @@ export const NEWSLETTER_ABOUT: Record<WebKey, string> = {
   training:
     'is a weekly newsletter that lists newly announced training programs addressing existential risk from AI.',
   funding:
-    'is a newsletter that lists new funding opportunities for work on existential risk from AI.',
+    'is a newsletter that lists new and closing-soon funding opportunities for addressing existential risk from AI.',
 }
 
 /** Where the Substack issues are, said after the list. */
