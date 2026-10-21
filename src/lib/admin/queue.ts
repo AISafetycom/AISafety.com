@@ -2139,6 +2139,92 @@ export async function saveEdits(
   await patchQueueRow(item.id, fields)
 }
 
+/** A field fixed after the decision, from Done today (Bryce, 21 Oct 2026:
+ *  "make fields in the today view editable", for every kind). The listing
+ *  is live, so the edit goes straight onto it, and onto the row's edits as
+ *  if it had been made before Accept: the Done view reads what the
+ *  decision wrote from there, and Undo treats it the same way – an
+ *  addition's Undo only unpublishes, a change's puts back what it
+ *  replaced. A declined addition is left alone (the Mac deletes its
+ *  record), and a rule has no fields. */
+export function isFixable(item: QueueItem): boolean {
+  if (item.status !== 'Applied' || item.declined) return false
+  if (item.type === 'Add') return true
+  return (
+    item.type === 'Change' && Boolean(item.targetTable && item.targetRecord)
+  )
+}
+
+export async function fixItem(
+  item: QueueItem,
+  edits: Record<string, unknown>
+): Promise<void> {
+  if (!isFixable(item)) {
+    throw new QueueError(
+      'Only a published addition or an applied change can be edited after the decision.',
+      409
+    )
+  }
+  const keys = Object.keys(edits)
+  if (keys.length === 0) throw new QueueError('Nothing to save.', 400)
+  if (keys.includes(LEFT_OUT_KEY)) {
+    throw new QueueError('A field is left out only before the decision.', 400)
+  }
+  const t = target(item)
+  const raw = parseJson((await rawQueueFields(item.id))[F.edits])
+  const saved: Record<string, unknown> = isRecord(raw) ? { ...raw } : {}
+  if (item.type === 'Change') {
+    // A field beyond the proposal keeps what it held before, for Undo, as
+    // one edited before Accept does.
+    const proposed = new Set(item.changes.map(c => c.field))
+    const before = isRecord(saved[BEFORE_KEY]) ? { ...saved[BEFORE_KEY] } : {}
+    const fresh = keys.filter(k => !proposed.has(k) && !(k in before))
+    if (fresh.length > 0) {
+      Object.assign(before, await currentValues(t.table, t.record, fresh))
+    }
+    if (Object.keys(before).length > 0) saved[BEFORE_KEY] = before
+    // A proposed field Fable had changed, or that was left out, is now
+    // written as edited here.
+    for (const key of [KEPT_KEY, LEFT_OUT_KEY]) {
+      const list = saved[key]
+      if (!Array.isArray(list)) continue
+      const rest = list.filter(k => !keys.includes(k))
+      if (rest.length > 0) saved[key] = rest
+      else delete saved[key]
+    }
+  } else {
+    // A new place on the page moves the listings after it down one, as
+    // Accept does.
+    const sort = edits[SORT_FIELD]
+    if (typeof sort === 'number') await makeRoom(t.table, t.record, sort)
+  }
+  await patchRecord(
+    t.table,
+    t.record,
+    await withAttachmentShapes(t.table, edits, 'throw')
+  )
+  await patchQueueRow(item.id, {
+    [F.edits]: JSON.stringify({ ...saved, ...edits }),
+  })
+  refreshCache()
+}
+
+/** A picture dropped on a published addition: from then on the Done view
+ *  shows the listing's own, not the one the decision wrote over it (an
+ *  attachment link expires within hours, so the new one is not kept). */
+export async function forgetRowEdit(
+  item: QueueItem,
+  field: string
+): Promise<void> {
+  const saved = parseJson((await rawQueueFields(item.id))[F.edits])
+  if (!isRecord(saved) || !(field in saved)) return
+  const rest = { ...saved }
+  delete rest[field]
+  await patchQueueRow(item.id, {
+    [F.edits]: Object.keys(rest).length ? JSON.stringify(rest) : null,
+  })
+}
+
 /** Reopen a declined addition, however old (queue-reopen.ts): the row gets
  *  the marker and stays decided until the Mac has the record back – the
  *  same one when it still exists, else one rebuilt from the row's saved
