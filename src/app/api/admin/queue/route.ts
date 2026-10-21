@@ -19,7 +19,7 @@
   GET  /api/admin/queue?order=<tbl>            → { order } – the page's published
        listings by Sort, for placing an addition (null for a table with no Sort)
   POST /api/admin/queue  body { id, action, edits?, reason?, replyDraft? } → { item }
-       action: accept | reject | edit | later | undo | flag | reopen
+       action: accept | reject | edit | later | undo | flag | reopen | fix
        (later sets the item aside for a week, Fable reviews it again then;
        undo also brings back an item set aside; edit keeps the page's pending edits, and the reply draft as
        edited, on the row – nothing more; flag writes the verdict, reasons
@@ -27,7 +27,8 @@
        { flag } – or { undo: true } to put back what it replaced –
        queue-flag.ts; reopen brings a declined addition back, however
        old: the Mac rebuilds a deleted record from the row's saved copy –
-       queue-reopen.ts)
+       queue-reopen.ts; fix writes edits straight onto an addition already
+       published, from Done today)
 
   `agent` is { port, token } for the local agent on the owner's Mac (null
   when QUEUE_AGENT_SECRET is not set): the page calls it after an accept so
@@ -45,6 +46,7 @@ import {
   acceptItem,
   agentInfo,
   closeHandledRows,
+  fixItem,
   flagItem,
   getPageOrder,
   getQueueItem,
@@ -146,6 +148,7 @@ const ACTIONS = new Set([
   'undo',
   'flag',
   'reopen',
+  'fix',
 ])
 
 export async function POST(req: NextRequest) {
@@ -193,6 +196,8 @@ export async function POST(req: NextRequest) {
           : undefined
       )
       return json({ item: await getQueueItem(id) })
+    } else if (action === 'fix') {
+      await fixItem(item, sanitiseEdits(body.edits))
     } else if (action === 'later') {
       await laterItem(item)
     } else if (action === 'reopen') {

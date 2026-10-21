@@ -2139,6 +2139,61 @@ export async function saveEdits(
   await patchQueueRow(item.id, fields)
 }
 
+/** A field fixed on an addition already published, from Done today (Bryce,
+ *  21 Oct 2026: "make fields in the today view editable"). The listing is
+ *  live, so the edit goes straight onto it, and onto the row's edits too,
+ *  where the Done view reads what the decision wrote. Undo still only
+ *  unpublishes; the fix stays on the listing. */
+export function isFixable(item: QueueItem): boolean {
+  return item.type === 'Add' && item.status === 'Applied' && !item.declined
+}
+
+export async function fixItem(
+  item: QueueItem,
+  edits: Record<string, unknown>
+): Promise<void> {
+  if (!isFixable(item)) {
+    throw new QueueError(
+      'Only a published addition can be edited after the decision.',
+      409
+    )
+  }
+  const keys = Object.keys(edits)
+  if (keys.length === 0) throw new QueueError('Nothing to save.', 400)
+  // Its place on the page moves the listings around it (makeRoom), which
+  // only Accept does.
+  if (keys.includes(SORT_FIELD) || keys.includes(LEFT_OUT_KEY)) {
+    throw new QueueError('Its place on the page is not edited here.', 400)
+  }
+  const t = target(item)
+  await patchRecord(
+    t.table,
+    t.record,
+    await withAttachmentShapes(t.table, edits, 'throw')
+  )
+  const saved = parseJson((await rawQueueFields(item.id))[F.edits])
+  await patchQueueRow(item.id, {
+    [F.edits]: JSON.stringify({ ...(isRecord(saved) ? saved : {}), ...edits }),
+  })
+  refreshCache()
+}
+
+/** A picture dropped on a published addition: from then on the Done view
+ *  shows the listing's own, not the one the decision wrote over it (an
+ *  attachment link expires within hours, so the new one is not kept). */
+export async function forgetRowEdit(
+  item: QueueItem,
+  field: string
+): Promise<void> {
+  const saved = parseJson((await rawQueueFields(item.id))[F.edits])
+  if (!isRecord(saved) || !(field in saved)) return
+  const rest = { ...saved }
+  delete rest[field]
+  await patchQueueRow(item.id, {
+    [F.edits]: Object.keys(rest).length ? JSON.stringify(rest) : null,
+  })
+}
+
 /** Reopen a declined addition, however old (queue-reopen.ts): the row gets
  *  the marker and stays decided until the Mac has the record back – the
  *  same one when it still exists, else one rebuilt from the row's saved

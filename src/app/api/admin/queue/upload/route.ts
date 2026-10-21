@@ -11,14 +11,17 @@
   the write took off the record (bytes included), so the page can offer
   Undo without Airtable keeping anything extra. The record is unpublished,
   so the site does not change; Accept is still the only thing that
-  publishes.
+  publishes. On an addition already published (opened from Done today)
+  the picture goes live with the listing, as any field fixed there does.
 */
 
 import { NextRequest } from 'next/server'
 import { canReviewQueue, currentAdmin } from '@/lib/admin/auth'
 import {
   clearImage,
+  forgetRowEdit,
   getQueueItem,
+  isFixable,
   QueueError,
   uploadImage,
 } from '@/lib/admin/queue'
@@ -70,6 +73,7 @@ export async function POST(req: NextRequest) {
           contentType,
           base64: data,
         })
+    if (isFixable(item)) await forgetRowEdit(item, field)
     const me = await currentAdmin()
     console.log(
       `[admin-queue] image ${field} ${clear ? 'cleared' : 'replaced'} on ${item.targetRecord} (${item.title}) by ${me?.name ?? '?'}`

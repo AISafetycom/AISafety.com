@@ -2133,6 +2133,12 @@ select.input {
   z-index: 20;
   /* slides up from below the window edge, and back down at the end */
   animation: toastIn 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  /* a click outside its buttons opens the item, as a list row does */
+  cursor: pointer;
+}
+
+.toast:hover {
+  background: var(--q-sel);
 }
 
 .toastLeaving {
