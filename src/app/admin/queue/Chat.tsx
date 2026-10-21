@@ -15,6 +15,7 @@ import {
 } from '@/lib/admin/queue-flag'
 import Icon from '@/components/Icon'
 import type { AgentInfo, QueueItem } from '@/lib/admin/queue'
+import { reviewNewerThanChat } from '@/lib/admin/queue-reopen'
 import styles from './queue.module.css'
 
 // A conversation with Fable about the open item, beside the verdict. Each
@@ -652,7 +653,10 @@ export default function Chat({
   // after the thread first opens, only while the panel is already at its
   // foot. Scrolled up to read something, the view stays put when a message
   // goes, Fable starts thinking, writes or finishes (Bryce, 30 Sept 2026:
-  // "it jumps the viewer to the bottom").
+  // "it jumps the viewer to the bottom"). An item that came back or was
+  // reviewed again since the chat's last word opens at the panel's top
+  // instead, on Fable's verdict (reviewNewerThanChat). The panel stays on
+  // the page from one item to the next, so it is put there, not left.
   const atFootRef = useRef(true)
   const openedRef = useRef(false)
   useEffect(() => {
@@ -670,7 +674,16 @@ export default function Chat({
     if (opening) openedRef.current = true
     if (!opening && !atFootRef.current) return
     const box = endRef.current?.closest<HTMLElement>('[data-chat-scroll]')
-    if (box) box.scrollTop = box.scrollHeight
+    if (!box) return
+    const newest = (messages ?? []).reduce((a, m) => (m.at > a ? m.at : a), '')
+    if (opening && reviewNewerThanChat(item, newest || null)) {
+      box.scrollTop = 0
+      atFootRef.current = box.scrollHeight - box.clientHeight < 40
+      return
+    }
+    box.scrollTop = box.scrollHeight
+    // Only the opening reads the item: a list refresh must not scroll.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, live, note, queued])
 
   // Select words anywhere in the panel (Fable's verdict included) and a
