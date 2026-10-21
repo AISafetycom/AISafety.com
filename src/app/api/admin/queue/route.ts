@@ -27,8 +27,9 @@
        { flag } – or { undo: true } to put back what it replaced –
        queue-flag.ts; reopen brings a declined addition back, however
        old: the Mac rebuilds a deleted record from the row's saved copy –
-       queue-reopen.ts; fix writes edits straight onto an addition already
-       published, from Done today)
+       queue-reopen.ts; fix writes edits straight onto the listing of an
+       addition already published or a change already applied, from Done
+       today)
 
   `agent` is { port, token } for the local agent on the owner's Mac (null
   when QUEUE_AGENT_SECRET is not set): the page calls it after an accept so

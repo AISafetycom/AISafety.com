@@ -821,7 +821,8 @@ function editsAsText(edits: Record<string, unknown>): Record<string, string> {
  *  out, when it is still open. */
 function draftOfRow(items: QueueItem[] | null | undefined, id: string): Draft {
   const item = items?.find(i => i.id === id)
-  if (!item || (!item.edits && !item.leftOut) || !isOpen(item)) return FRESH
+  if (!item || (!item.edits && !item.leftOut)) return FRESH
+  if (!isOpen(item) && !setAsideUntil(item)) return FRESH
   return {
     ...FRESH,
     edits: editsAsText(item.edits ?? {}),
@@ -1171,10 +1172,14 @@ function doneLabel(item: QueueItem): string {
 
 /** The page's edits that went out with an applied item, as text; none for
  *  any other decision (a rejection keeps them on the row unwritten). */
-/** An addition already published: its fields still edit, straight onto the
- *  listing (fixItem in queue.ts). */
+/** An addition already published or a change already applied: its fields
+ *  still edit, straight onto the listing (fixItem in queue.ts). */
 function fixable(item: QueueItem): boolean {
-  return item.type === 'Add' && item.status === 'Applied' && !item.declined
+  if (item.status !== 'Applied' || item.declined) return false
+  if (item.type === 'Add') return true
+  return (
+    item.type === 'Change' && Boolean(item.targetTable && item.targetRecord)
+  )
 }
 
 function appliedEdits(item: QueueItem): Record<string, string> {
@@ -3459,7 +3464,11 @@ export default function QueueAdmin({
           break
         case 'p':
           // Where the addition goes on its page (Bryce, 30 Sept 2026).
-          if (canEdit && item?.type === 'Add' && isOpen(item)) {
+          if (
+            canEdit &&
+            item?.type === 'Add' &&
+            (isOpen(item) || setAsideUntil(item) || fixable(item))
+          ) {
             e.preventDefault()
             setPlaceFocus(n => n + 1)
           }
@@ -3469,7 +3478,7 @@ export default function QueueAdmin({
           if (
             canEdit &&
             item?.type === 'Change' &&
-            isOpen(item) &&
+            (isOpen(item) || setAsideUntil(item) || fixable(item)) &&
             item.status !== 'Revising'
           ) {
             e.preventDefault()
@@ -4121,7 +4130,10 @@ export default function QueueAdmin({
                 chatFocus={chatFocus}
                 placeFocus={placeFocus}
                 fieldFocus={fieldFocus}
-                readOnly={!canEdit || !isOpen(selected)}
+                readOnly={
+                  !canEdit ||
+                  !(isOpen(selected) || Boolean(setAsideUntil(selected)))
+                }
               />
             ) : !searching && ordered.openPerKind[kind] === 0 ? (
               <TabDone
@@ -4718,8 +4730,10 @@ function Detail({
   // Nothing on the item can be touched while Claude is revising it, and a
   // view-only session can never touch it.
   const revising = item.status === 'Revising' || readOnly
-  // Set aside with "Review again in a week": when it comes back.
+  // Set aside with "Review again in a week": when it comes back. Until
+  // then its fields edit into the draft, as an open item's do.
   const later = setAsideUntil(item)
+  const draftable = isOpen(item) || Boolean(later)
   const nothingToApply = item.type === 'Change' && item.changes.length === 0
   const reason = d.chip ?? d.other.trim()
   // The reasons open in the bar at the bottom, which then grows over the
@@ -4766,35 +4780,41 @@ function Detail({
   // before the decision (or Comb's snapshot, until a fresh read lands)
   // holds the old values (8 Oct 2026: a published event's list showed the
   // submitted 209-character Description, not Fable's that went out).
-  // A published addition opened from Done today keeps its fields editable,
-  // each save written straight onto the live listing (Bryce, 21 Oct 2026:
-  // "make fields in the today view editable"). A value on its way shows at
-  // once; a failed one goes back, with the error under the fields.
+  // An addition already published or a change already applied, opened
+  // from Done today, keeps its fields editable, each save written straight
+  // onto the live listing (Bryce, 21 Oct 2026: "make fields in the today
+  // view editable", for every kind). A value on its way shows at once; a
+  // failed one goes back, with the error under the fields.
   const [fixing, setFixing] = useState<{
     id: string
     fields: Record<string, unknown>
     error: string | null
   }>({ id: '', fields: {}, error: null })
   const fixNow = fixing.id === item.id ? fixing : null
+  const canFix = Boolean(onFix)
+  const fixWith = (field: string, edits: Record<string, unknown>) => {
+    if (!onFix) return
+    const id = item.id
+    setFixing(prev => ({
+      id,
+      fields: { ...(prev.id === id ? prev.fields : {}), ...edits },
+      error: null,
+    }))
+    void onFix(edits).then(error =>
+      setFixing(prev => {
+        if (prev.id !== id) return prev
+        const fields = { ...prev.fields }
+        delete fields[field]
+        return { id, fields, error }
+      })
+    )
+  }
   const fix = onFix
-    ? (field: string, text: string) => {
-        const id = item.id
-        const edits = coerceEdits({ [field]: text }, original, types)
-        setFixing(prev => ({
-          id,
-          fields: { ...(prev.id === id ? prev.fields : {}), ...edits },
-          error: null,
-        }))
-        void onFix(edits).then(error =>
-          setFixing(prev => {
-            if (prev.id !== id) return prev
-            const fields = { ...prev.fields }
-            delete fields[field]
-            return { id, fields, error }
-          })
-        )
-      }
+    ? (field: string, text: string) =>
+        fixWith(field, coerceEdits({ [field]: text }, original, types))
     : null
+  // The fixes on their way, as the change rows hold values: text.
+  const fixText = editsAsText(fixNow?.fields ?? {})
   const shownFields: Record<string, unknown> = {
     ...(live?.fields ?? item.fields ?? {}),
     ...(item.status === 'Applied' ? (item.edits ?? {}) : {}),
@@ -4822,17 +4842,19 @@ function Detail({
   // Proposed fields left out with the cross (Bryce, 15 Oct 2026: "I want
   // to be able to delete a suggested field change"): Accept leaves them as
   // the listing has them. An applied change shows the ones it left out.
-  const leftOut = isOpen(item)
+  const leftOut = draftable
     ? d.leftOut
     : item.status === 'Applied'
       ? (item.leftOut ?? [])
       : []
-  // The proposal's fields can be edited or left out only while it is open.
-  const canChange = isOpen(item) && !revising
-  // The edits a change's fields show: the draft's while it is open; once
+  // The proposal's fields can be edited or left out only while it waits;
+  // once applied, they are fixed straight on the listing (canFix).
+  const canChange = draftable && !revising
+  // The edits a change's fields show: the draft's while it waits; once
   // applied, the ones that went out with it (Bryce, 15 Oct 2026: an applied
-  // change showed its proposals again, not the values Apply wrote).
-  const shownEdits = isOpen(item) ? d.edits : appliedEdits(item)
+  // change showed its proposals again, not the values Apply wrote), and
+  // any fix on its way.
+  const shownEdits = draftable ? d.edits : { ...appliedEdits(item), ...fixText }
   // An edit to the field waits with it, unsent, and comes back with it.
   const leaveOut = (field: string, out: boolean) => {
     const rest = d.leftOut.filter(k => k !== field)
@@ -4857,15 +4879,20 @@ function Detail({
   const extraEdits: Record<string, string> =
     item.type !== 'Change'
       ? {}
-      : isOpen(item)
+      : draftable
         ? d.edits
-        : item.status === 'Applied' && item.before
-          ? Object.fromEntries(
-              Object.entries(editsAsText(item.edits ?? {})).filter(
-                ([k]) => k in item.before!
-              )
-            )
-          : {}
+        : {
+            ...(item.status === 'Applied' && item.before
+              ? Object.fromEntries(
+                  Object.entries(editsAsText(item.edits ?? {})).filter(
+                    ([k]) => k in item.before!
+                  )
+                )
+              : {}),
+            ...Object.fromEntries(
+              Object.entries(fixText).filter(([k]) => !proposedFields.has(k))
+            ),
+          }
   const extraFields =
     item.type !== 'Change'
       ? []
@@ -4879,7 +4906,9 @@ function Detail({
             !UNPICKABLE_TYPES.has(types.get(k)?.type ?? '')
         )
   const extraWas = (k: string): unknown =>
-    isOpen(item) ? live?.fields[k] : item.before?.[k]
+    draftable || !item.before || !(k in item.before)
+      ? live?.fields[k]
+      : item.before[k]
   // A field Fable changed from the chat: its picture is shown as it is;
   // anything else can be edited like a field picked with E, from Fable's
   // value. A decided change shows the edit that went out with it.
@@ -4906,9 +4935,10 @@ function Detail({
         fable={c}
         edit={edit}
         editing={d.editing === c.field}
-        canEdit={!revising && isOpen(item)}
+        canEdit={(!revising && draftable) || canFix}
         cap={c.field === cap.field ? cap.cap : undefined}
         onEditing={on => setD({ editing: on ? c.field : null })}
+        onFix={fix ? text => fix(c.field, text) : undefined}
         onEdit={text => {
           const edits = { ...d.edits }
           if (text === null) delete edits[c.field]
@@ -4941,7 +4971,8 @@ function Detail({
     // A box is ticked or unticked at once; anything else opens its editor.
     if (types.get(name)?.type === 'checkbox') {
       const was = live?.fields[name] === true
-      setD({ edits: { ...d.edits, [name]: was ? 'false' : 'true' } })
+      if (fix) fix(name, was ? 'false' : 'true')
+      else setD({ edits: { ...d.edits, [name]: was ? 'false' : 'true' } })
     } else {
       setD({ editing: name })
     }
@@ -5528,9 +5559,15 @@ function Detail({
                   name={splitTitle(item).name ?? item.title}
                   value={SORT_FIELD in d.edits ? d.edits[SORT_FIELD] : sortWas}
                   edited={SORT_FIELD in d.edits}
-                  canEdit={!revising && isOpen(item)}
+                  canEdit={(!revising && draftable) || canFix}
                   focusTick={placeFocus}
                   onChange={sort => {
+                    if (fix) {
+                      if (sort !== sortValue(sortWas)) {
+                        fix(SORT_FIELD, String(sort))
+                      }
+                      return
+                    }
                     // Back where the record has it is not an edit.
                     const edits = { ...d.edits }
                     if (sort === sortValue(sortWas)) delete edits[SORT_FIELD]
@@ -5582,12 +5619,16 @@ function Detail({
                     <LeftOutRow
                       key={c.field}
                       change={c}
-                      edit={isOpen(item) ? d.edits[c.field] : undefined}
+                      edit={draftable ? d.edits[c.field] : undefined}
                       page={item.page}
                       live={live?.fields[c.field]}
-                      open={isOpen(item)}
+                      open={draftable}
                       onPutBack={
-                        canChange ? () => leaveOut(c.field, false) : null
+                        canChange
+                          ? () => leaveOut(c.field, false)
+                          : canFix && !LISTING_SWITCHES.has(c.field)
+                            ? () => fixWith(c.field, { [c.field]: c.to })
+                            : null
                       }
                     />
                   )
@@ -5607,7 +5648,7 @@ function Detail({
                       {(() => {
                         const pic = pictureOf(c.from, live?.fields[c.field], {
                           pictureField: touchesPicture(c),
-                          open: isOpen(item),
+                          open: draftable,
                         })
                         return pic ? (
                           <Picture key={pic.url ?? ''} {...pic} />
@@ -5636,10 +5677,20 @@ function Detail({
                         (d.editing === c.field ? (
                           <FieldEditor
                             info={types.get(c.field)}
-                            value={d.edits[c.field] ?? editText(c.to)}
+                            value={shownEdits[c.field] ?? editText(c.to)}
                             cap={c.field === cap.field ? cap.cap : undefined}
                             onCancel={() => setD({ editing: null })}
                             onSave={text => {
+                              if (fix) {
+                                setD({ editing: null })
+                                if (
+                                  text !==
+                                  (shownEdits[c.field] ?? editText(c.to))
+                                ) {
+                                  fix(c.field, text)
+                                }
+                                return
+                              }
                               // Closing the box without changing anything is
                               // not an edit.
                               const edits = { ...d.edits }
@@ -5657,7 +5708,10 @@ function Detail({
                                   : show(c.to)
                               )}
                               edited={c.field in shownEdits}
-                              canEdit={canChange}
+                              canEdit={
+                                canChange ||
+                                (canFix && !LISTING_SWITCHES.has(c.field))
+                              }
                               onEdit={() => setD({ editing: c.field })}
                             />
                             {c.field === cap.field && (
@@ -5694,9 +5748,10 @@ function Detail({
                   was={extraWas(k)}
                   edit={extraEdits[k]}
                   editing={d.editing === k}
-                  canEdit={canChange}
+                  canEdit={canChange || canFix}
                   cap={k === cap.field ? cap.cap : undefined}
                   onEditing={on => setD({ editing: on ? k : null })}
+                  onFix={fix ? text => fix(k, text) : undefined}
                   onEdit={text => {
                     const edits = { ...d.edits }
                     if (text === null) delete edits[k]
@@ -5713,7 +5768,7 @@ function Detail({
           <FieldPicker
             key={item.id}
             fields={pickable}
-            canEdit={!revising}
+            canEdit={!revising || canFix}
             focusTick={fieldFocus}
             onPick={pickField}
           />
@@ -6269,7 +6324,8 @@ function LeftOutRow({
   /** The record's field now, for a fresh link to the picture it keeps. */
   live: unknown
   open: boolean
-  /** Null when it cannot come back: a decided item, or view only. */
+  /** Null when it cannot come back: view only. On an applied change it
+   *  writes the proposed value onto the listing now. */
   onPutBack: (() => void) | null
 }) {
   const pictureField = touchesPicture(change)
@@ -6304,7 +6360,7 @@ function LeftOutRow({
         <em className={styles.leftOutMark}>left out</em>
         {onPutBack && (
           <button type="button" className={styles.putBack} onClick={onPutBack}>
-            Put back
+            {open ? 'Put back' : 'Apply now'}
           </button>
         )}
       </span>
@@ -6348,6 +6404,7 @@ function ExtraChangeRow({
   cap,
   onEditing,
   onEdit,
+  onFix,
 }: {
   field: string
   page: string | null
@@ -6366,13 +6423,20 @@ function ExtraChangeRow({
   /** The new text, or null to drop the edit (also when it is back to
    *  what the record holds). */
   onEdit: (text: string | null) => void
+  /** A change already applied: a new value goes straight onto the
+   *  listing, and there is no edit to drop. */
+  onFix?: (text: string) => void
 }) {
   const box = info?.type === 'checkbox'
   const now = fable ? fable.to : was
   const base = box ? (now === true ? 'true' : 'false') : editText(now)
   const value = edit ?? base
   // Back to what the record holds is not an edit.
-  const save = (text: string) => onEdit(text === base ? null : text)
+  const save = (text: string) => {
+    if (!onFix) return onEdit(text === base ? null : text)
+    onEditing(false)
+    if (text !== value) onFix(text)
+  }
   let to: React.ReactNode
   if (editing && !box) {
     to = (
@@ -6431,7 +6495,7 @@ function ExtraChangeRow({
         )}
         {cap !== undefined && !editing && <Counted text={value} cap={cap} />}
       </span>
-      {canEdit && edit !== undefined && !editing && (
+      {canEdit && !onFix && edit !== undefined && !editing && (
         <DropButton field={field} onDrop={() => onEdit(null)} />
       )}
     </div>
