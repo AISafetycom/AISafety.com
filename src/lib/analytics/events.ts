@@ -130,17 +130,18 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   // A submit of the newsletter signup box (Events, Training, Funding).
   // Counts the attempt. Never carries the email address.
   'newsletter_signup',
-  // How a submit on Events or Training ended: those boxes sign the reader up
-  // on the site, through ActiveCampaign (from 8 October 2026). Success = the
-  // confirmation email went out; error = the visitor saw an error, `source`
-  // saying which (/api/subscribe's reason code, 'network', or
-  // 'http_<status>'). Funding's box still opens Substack, so its signups
-  // finish off-site and record neither. Never carry the email address.
+  // How a submit ended: the boxes sign the reader up on the site, through
+  // ActiveCampaign (Events and Training from 8 October 2026, Funding from its
+  // move day; before that Funding's box opened Substack and recorded
+  // neither). Success = the confirmation email went out; error = the visitor
+  // saw an error, `source` saying which (/api/subscribe's reason code,
+  // 'network', or 'http_<status>'). Never carry the email address.
   'newsletter_signup_success',
   'newsletter_signup_error',
-  // A click on the newsletter signup box outside the email pill — in the
-  // Substack mode (Funding) the card doubles as a link to the newsletter's
-  // own page, so visitors can read it before subscribing.
+  // A click on the newsletter signup box outside the email pill, while
+  // /funding's box was in Substack mode (the card doubled as a link to the
+  // newsletter's own page). No longer sent since the Funding move; kept for
+  // the events already recorded.
   'newsletter_view',
   // A click on a newsletter's past issues page (/newsletter/events,
   // /newsletter/training): `page` is the newsletter ('Events'), `source`
@@ -836,9 +837,9 @@ export interface DashboardData {
   /** Same for the newsletter box, but divided by visitors to the pages that
    *  have it (Events, Training, and Funding) rather than the whole site. */
   siteNewsletterShare: VisitorShare | null
-  /** How the boxes' signups through the site ended (Events and Training,
-   *  through ActiveCampaign, from 8 October 2026), per page, and what went
-   *  wrong when they didn't. */
+  /** How the boxes' signups through the site ended (through ActiveCampaign:
+   *  Events and Training from 8 October 2026, Funding from its move day),
+   *  per page, and what went wrong when they didn't. */
   newsletterResults: NewsletterSignupResults
   /** Each newsletter's past issues page (/newsletter/<key>, from 10 October
    *  2026): its views and where its clicks went. */
@@ -2329,14 +2330,16 @@ export function newsletterArchiveStats(
 const NEWSLETTER_OF_PAGE: Readonly<Record<string, string>> = {
   Events: 'Events',
   Training: 'Training',
+  Funding: 'Funding',
   '/newsletter/events': 'Events',
   '/newsletter/training': 'Training',
+  '/newsletter/funding': 'Funding',
 }
 
 /** Where ActiveCampaign sends a reader once they've pressed "Confirm
  *  subscription" in the email a signup on the site triggers
  *  (src/app/subscribed), per newsletter. */
-const CONFIRM_PAGE = /^\/subscribed\/(events|training)\/?$/
+const CONFIRM_PAGE = /^\/subscribed\/(events|training|funding)\/?$/
 
 /** The page views of the confirm pages that count as confirmations: every
  *  one in total mode, one per visitor per newsletter per day in unique mode
@@ -2362,7 +2365,7 @@ export function confirmLandings(
 }
 
 export interface NewsletterConfirmRow {
-  /** 'Events', 'Training'. */
+  /** 'Events', 'Training', 'Funding'. */
   name: string
   /** Signups ActiveCampaign took (a link to confirm went out), from the
    *  newsletter's boxes: its resource page and its past issues page. */
@@ -2458,8 +2461,9 @@ export interface NewsletterLinkRow {
 }
 
 /** The ways to the newsletters elsewhere on the site, busiest first: the
- *  signup box's card link where the box still hands off to Substack (the
- *  card opens the newsletter there to read first; newsletter_view), and the
+ *  signup box's card link from when /funding's box handed off to Substack
+ *  (the card opened the newsletter there to read first; newsletter_view,
+ *  no longer sent since the Funding move), and the
  *  footer's Newsletters column. Unique mode counts a visitor once per link
  *  per day. Exported for the unit test. */
 export function newsletterLinkClicks(

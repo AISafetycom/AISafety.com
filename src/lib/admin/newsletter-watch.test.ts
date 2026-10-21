@@ -1205,10 +1205,10 @@ describe('runWatch: waves still to go (approve once)', () => {
     expect(s.canceled.map(c => c.campaignId)).toEqual(['402'])
   })
 
-  it('leaves test lists and Funding alone', async () => {
+  it('leaves test lists alone', async () => {
     const { store, run } = setup()
     await issue(store, { 1: { hardbounces: '25' } })
-    for (const c of ac.campaigns) ac.lists[c.id] = ['8']
+    for (const c of ac.campaigns) ac.lists[c.id] = ['5']
     const s = await run()
     expect(s.canceled).toEqual([])
     expect(writes()).toEqual([])
@@ -1401,15 +1401,23 @@ describe('runWatch: health checks', () => {
     )
   })
 
-  it('waits the full 18 hours, and skips Funding', async () => {
+  it('waits the full 18 hours, and skips the test lists', async () => {
     const { run } = setup()
     ac.campaigns = [
       sentWave({ ldate: acDate(17 * HOUR) }),
       sentWave({ id: '261', ldate: acDate(19 * HOUR) }),
     ]
-    ac.lists = { '260': ['7'], '261': ['8'] }
+    ac.lists = { '260': ['7'], '261': ['5'] }
     const s = await run()
     expect(s.health).toEqual([])
+  })
+
+  it('checks Funding since its move', async () => {
+    const { run } = setup()
+    ac.campaigns = [sentWave({ id: '261', ldate: acDate(19 * HOUR) })]
+    ac.lists = { '261': ['8'] }
+    const s = await run()
+    expect(s.health.map(h => h.campaignId)).toEqual(['261'])
   })
 
   it('stores but does not email a check on a rehearsal to a few people', async () => {

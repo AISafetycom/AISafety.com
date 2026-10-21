@@ -338,7 +338,7 @@ export function digestMail(p: {
   return { subject, text, html }
 }
 
-/** To the owner: the newsletter signup boxes on /events and /training passed
+/** To the owner: the newsletter signup boxes (/events, /training, /funding) passed
  *  their daily alert line (`alertAfter` signups sent to ActiveCampaign in one
  *  UTC day). Sent once a day at most, as kind "digest". */
 export function signupAlertMail(p: {
@@ -358,7 +358,7 @@ export function signupAlertMail(p: {
   const n = (x: number) => x.toLocaleString('en-US')
   const subject = `Newsletter signups passed ${n(p.alertAfter)} today`
   const lines = [
-    `More than ${n(p.alertAfter)} signups have come through the newsletter boxes on /events and /training today (${date}, UTC).`,
+    `More than ${n(p.alertAfter)} signups have come through the newsletter boxes on /events, /training and /funding today (${date}, UTC).`,
     'That can be real interest, such as a mention somewhere popular, or a bot. A bot’s addresses never confirm, so a pile of unconfirmed contacts in ActiveCampaign points to a bot.',
     `Above ${n(p.cap)} signups in a day, the boxes stop taking signups until midnight UTC.`,
   ]

@@ -36,13 +36,15 @@ describe('confirmations (/subscribed/<key>)', () => {
     view('/subscribed/events/', 'a', '2026-10-13T09:00:00Z'),
     view('/subscribed/training', 'b', '2026-10-12T11:00:00Z'),
     view('/subscribed/training', undefined, '2026-10-12T11:00:00Z'),
+    // Funding's box signs people up on the site since its move too.
+    view('/subscribed/funding', 'd', '2026-10-21T12:00:00Z'),
     view('/events', 'a', '2026-10-12T10:06:00Z'),
     view('/subscribed/updates', 'c', '2026-10-12T10:06:00Z'),
   ])
 
   it('counts a reader once per newsletter per day by default, every landing in total mode', () => {
-    expect(confirmLandings(EVENTS, true)).toHaveLength(4)
-    expect(confirmLandings(EVENTS, false)).toHaveLength(5)
+    expect(confirmLandings(EVENTS, true)).toHaveLength(5)
+    expect(confirmLandings(EVENTS, false)).toHaveLength(6)
   })
 
   it('sets them beside the signups each newsletter’s boxes made', () => {
@@ -51,12 +53,13 @@ describe('confirmations (/subscribed/<key>)', () => {
         { name: 'Events', succeeded: 3, already: 1, failed: 0 },
         { name: '/newsletter/events', succeeded: 1, already: 0, failed: 0 },
         { name: 'Training', succeeded: 4, already: 0, failed: 2 },
-        { name: 'Funding', succeeded: 0, already: 0, failed: 1 },
+        { name: 'Funding', succeeded: 2, already: 0, failed: 1 },
       ],
       errors: [],
     }
     expect(newsletterConfirmations(EVENTS, true, results)).toEqual([
       { name: 'Events', signedUp: 4, confirmed: 2 },
+      { name: 'Funding', signedUp: 2, confirmed: 1 },
       { name: 'Training', signedUp: 4, confirmed: 2 },
     ])
     expect(

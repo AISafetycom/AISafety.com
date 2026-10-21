@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 
 // Where ActiveCampaign sends readers after they click "Confirm subscription"
-// in the email the signup boxes on /events and /training trigger (each
+// in the email the signup boxes on /events, /training and /funding trigger (each
 // form's confirmation redirect points at its own path), in place of
 // ActiveCampaign's unbranded confirmation page. The subscription is already
 // confirmed by the time they land here. The twin of /unsubscribed.
@@ -12,11 +12,20 @@ const NEWSLETTERS = {
     name: 'AI Safety Events',
     page: '/events',
     what: 'upcoming events',
+    when: 'once a week',
   },
   training: {
     name: 'AI Safety Training',
     page: '/training',
     what: 'upcoming training programs',
+    when: 'once a week',
+  },
+  // No set rhythm: an issue goes out only when there's something new.
+  funding: {
+    name: 'AI Safety Funding',
+    page: '/funding',
+    what: 'funders in AI safety',
+    when: 'whenever there are new funding opportunities',
   },
 } as const
 
@@ -40,7 +49,7 @@ export default async function SubscribedPage({
 }) {
   const { newsletter } = await params
   if (!(newsletter in NEWSLETTERS)) notFound()
-  const { name, page, what } = NEWSLETTERS[newsletter as Key]
+  const { name, page, what, when } = NEWSLETTERS[newsletter as Key]
 
   return (
     <div className="container-narrow">
@@ -52,7 +61,7 @@ export default async function SubscribedPage({
           <h2 className="padding-bottom-40px">
             Thanks for confirming.{' '}
             <span className="color-light-teal">{name}</span> will arrive in your
-            inbox once a week.
+            inbox {when}.
           </h2>
           <p className="color-teal-300 padding-bottom-16px">
             If it lands in spam or Promotions, move it to your inbox and it will
