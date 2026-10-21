@@ -45,6 +45,9 @@ Every collection endpoint returns a wrapped envelope:
 - IDs are stable Airtable record IDs.
 - Image fields (`logo`, `image`, `mapLogo`) are permanent Vercel Blob URLs
   (`*.public.blob.vercel-storage.com`), not Airtable's expiring attachment URLs.
+  Job logos are 256-pixel WebP copies of images hosted by 80,000 Hours; a logo
+  whose source can't be reached when it first appears keeps the source address
+  until a later refresh copies it.
 - Dates are ISO-8601 strings.
 
 ## Filtering

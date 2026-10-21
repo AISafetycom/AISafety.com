@@ -141,6 +141,8 @@ export async function getJobs(): Promise<Job[]> {
     viewId: VIEW_ID,
     returnFieldsByFieldId: true,
     fields: FIELDS,
+    // The logo is a URL on 80000hours.org; serve a Blob copy instead.
+    logoUrlFields: [FIELD.orgLogo],
   })
 
   const results: Job[] = []
@@ -149,7 +151,8 @@ export async function getJobs(): Promise<Job[]> {
     const name = fieldString(f[FIELD.title])
     if (!name) continue
 
-    // Org's logo is usually a URL string, but has also held attachments.
+    // Org's logo is usually a URL string (by now a Blob copy, see
+    // logoUrlFields above), but has also held attachments.
     const logoRaw = f[FIELD.orgLogo]
     const logo = fieldString(logoRaw) ?? fieldAttachmentUrl(logoRaw)
 
