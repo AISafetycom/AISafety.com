@@ -14,6 +14,7 @@ import { validHref } from '@/lib/donation-guide/validate'
 import type { RichText } from '@/lib/donation-guide/types'
 import Icon from '@/components/Icon'
 import styles from '../donation-guide.module.css'
+import { Collapse } from '../../Collapse'
 
 // One text box, typed like a document. TipTap trimmed to what the guide
 // can hold: paragraphs, bold, bullet and numbered lists, links. The
@@ -251,7 +252,7 @@ export default function RichEditor({ value, onChange, mode, editable }: Props) {
           )}
         </div>
       )}
-      {linkOpen && (
+      <Collapse open={linkOpen}>
         <div className={styles.linkPop}>
           <input
             className={styles.input}
@@ -289,7 +290,7 @@ export default function RichEditor({ value, onChange, mode, editable }: Props) {
           </button>
           {linkError && <span className={styles.linkHint}>{linkError}</span>}
         </div>
-      )}
+      </Collapse>
       <div className={`${styles.prose} ${intro ? styles.proseIntro : ''}`}>
         <EditorContent editor={editor} />
       </div>

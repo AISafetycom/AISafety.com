@@ -637,7 +637,9 @@
   position: fixed;
   top: 50%;
   left: 50%;
-  transform: translate(-50%, -50%);
+  /* the translate property, not transform, so the opening scale
+     (motion.module.css) grows it from its centre */
+  translate: -50% -50%;
   z-index: 100;
   width: 560px;
   max-width: calc(100vw - 32px);

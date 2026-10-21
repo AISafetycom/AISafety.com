@@ -22,6 +22,7 @@ import {
 } from '@/lib/admin/queue-place'
 import styles from './queue.module.css'
 import own from './Position.module.css'
+import motion from '../motion.module.css'
 
 const API = '/api/admin/queue'
 const ORDER_TTL_MS = 2 * 60 * 1000
@@ -290,7 +291,7 @@ export default function Position({
       )}
 
       {open && (
-        <div className={own.panel}>
+        <div className={`${own.panel} ${motion.pop}`}>
           <input
             ref={inputRef}
             className={styles.input}
