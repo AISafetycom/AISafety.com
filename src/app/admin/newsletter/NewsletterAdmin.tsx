@@ -274,9 +274,23 @@ const LINEUP: Array<{
   key: keyof Payload['lineup']
   label: string
   since: string
+  /** After the date: Events and Training count only listings Pen hasn't
+   *  put in an issue yet (Newsletter not ticked), so the caption says so
+   *  (Bryce, 22 Oct 2026). */
+  after?: string
 }> = [
-  { key: 'events', label: 'Events', since: 'added since' },
-  { key: 'training', label: 'Training', since: 'added since' },
+  {
+    key: 'events',
+    label: 'Events',
+    since: 'added since',
+    after: 'and not yet in an issue',
+  },
+  {
+    key: 'training',
+    label: 'Training',
+    since: 'added since',
+    after: 'and not yet in an issue',
+  },
   { key: 'funding', label: 'Funding', since: 'new since' },
 ]
 
@@ -411,6 +425,14 @@ function waveTimeBoth(at: string | number): string {
   return offset === 0
     ? `${waveTime(at)} UTC`
     : `${waveTime(at)} (${waveTimeUtc(at)})`
+}
+
+/** The waves box on a draft: always while the warm-up is on; with it off
+ *  (12 Oct 2026) only for an issue already going out in waves, so its
+ *  Cancel buttons stay reachable. Otherwise every issue goes to the whole
+ *  list (Bryce, 22 Oct 2026: "I guess we can turn off the waves thing?"). */
+function showWaves(p: WavePlan): boolean {
+  return NEWSLETTER_WARMUP || p.going || p.reached > 0
 }
 
 /** What Approve sends unless the approver picks otherwise: the waves still
@@ -1204,10 +1226,12 @@ export default function NewsletterAdmin({
       {canSend && (
         <div className={`${adminStyles.notice} ${styles.liveWarning}`}>
           <strong>This sends real emails.</strong> Approving schedules an issue
-          to go out five minutes later (two on the test lists); an issue that
-          goes out in waves gets all its remaining waves scheduled at once, a
-          day apart. Until a send starts you can cancel it; while it’s sending
-          you can pause or stop it under Recent sends. Use with caution.
+          to go out five minutes later (two on the test lists)
+          {NEWSLETTER_WARMUP
+            ? '; an issue that goes out in waves gets all its remaining waves scheduled at once, a day apart'
+            : ''}
+          . Until a send starts you can cancel it; while it’s sending you can
+          pause or stop it under Recent sends. Use with caution.
         </div>
       )}
       {!canSend && (
@@ -1241,7 +1265,7 @@ export default function NewsletterAdmin({
           already in a draft waiting below aren’t counted.
         </p>
         <div className={styles.lineup}>
-          {LINEUP.map(({ key, label, since }) => {
+          {LINEUP.map(({ key, label, since, after }) => {
             const section = data?.lineup[key]
             return (
               <div key={key} className={styles.lineupTile}>
@@ -1251,7 +1275,7 @@ export default function NewsletterAdmin({
                 ) : 'error' in section ? (
                   <span className={styles.noticeError}>{section.error}</span>
                 ) : (
-                  <LineupCounts section={section} since={since} />
+                  <LineupCounts section={section} since={since} after={after} />
                 )}
               </div>
             )
@@ -1279,10 +1303,9 @@ export default function NewsletterAdmin({
           Issues the pipeline has drafted from Pen. Each one is re-checked here
           before sending: still a draft, wired to exactly one list, content
           untouched since the pipeline wrote it, the right sender for its list,
-          a working footer and links, and not already sent. During the warm-up a
-          big list goes out in waves: one approval schedules them all, a day
-          apart, and the send watcher cancels the rest if a wave’s 18-hour check
-          comes back red. The draft stays here until its last wave has gone.
+          a working footer and links, and not already sent.
+          {NEWSLETTER_WARMUP &&
+            ' During the warm-up a big list goes out in waves: one approval schedules them all, a day apart, and the send watcher cancels the rest if a wave’s 18-hour check comes back red. The draft stays here until its last wave has gone.'}
         </p>
         {/* The first read takes several seconds; say so where the drafts
             will appear, not only in the small line at the top (Bryce, 16
@@ -1395,7 +1418,7 @@ export default function NewsletterAdmin({
                   ))}
                 </ul>
               )}
-              {draft.waves && (
+              {draft.waves && showWaves(draft.waves) && (
                 <WavePanel
                   draftId={draft.id}
                   issue={draft.name}
@@ -3014,9 +3037,11 @@ const STOP_LABELS: Record<StopAction, string> = {
 function LineupCounts({
   section,
   since,
+  after,
 }: {
   section: Extract<LineupSection, { items: unknown }>
   since: string
+  after?: string
 }) {
   const groups = [
     { title: section.closing ? 'New' : null, items: section.items },
@@ -3031,6 +3056,7 @@ function LineupCounts({
           <span className={styles.lineupCount}>{section.items.length}</span>
           <span className={styles.lineupSince}>
             {since} {section.since}
+            {after && ` ${after}`}
           </span>
         </div>
         {section.closing && (
