@@ -99,6 +99,7 @@ function item(over: Partial<QueueItem>): QueueItem {
     reviewAgainOn: null,
     cameBackOn: null,
     flagUndo: false,
+    flagWas: null,
     declined: false,
     reopening: null,
     pushback: null,
@@ -930,6 +931,7 @@ describe('flagItem / unflagItem', () => {
       record: rid('club'),
     })
     expect(flagged.flagUndo).toBe(true)
+    expect(flagged.flagWas).toBe('Dismiss')
 
     await unflagItem(flagged)
     expect(row).toEqual({
@@ -937,6 +939,7 @@ describe('flagItem / unflagItem', () => {
       [FLD.proposal]: JSON.stringify(proposal, null, 1),
     })
     expect((await current()).flagUndo).toBe(false)
+    expect((await current()).flagWas).toBe(null)
   })
 
   it('clears the reject buttons when Fable gave none, keeps the rest', async () => {

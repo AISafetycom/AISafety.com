@@ -64,6 +64,7 @@ function item(over: Partial<QueueItem>): QueueItem {
     reviewAgainOn: null,
     cameBackOn: null,
     flagUndo: false,
+    flagWas: null,
     declined: false,
     reopening: null,
     pushback: null,

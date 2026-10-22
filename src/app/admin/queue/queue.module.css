@@ -755,6 +755,14 @@ button.earlierMore {
   color: inherit;
 }
 
+/* Under a verdict the chat updated: says the messages below came first. */
+.verdictRevised {
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.4;
+  color: var(--q-muted);
+}
+
 .detailAside .reasons {
   font-size: 13.5px;
   line-height: 1.5;

@@ -226,6 +226,9 @@ export interface QueueItem {
   /** The flag was updated from the chat (queue-flag.ts) and what it said
    *  before is kept, so Undo can put it back. */
   flagUndo: boolean
+  /** The verdict the chat's update replaced (null when it had none, or the
+   *  flag was not updated), so the card can say it changed. */
+  flagWas: Verdict | null
   /** The decision was a Reject of an addition – also once the Mac deleted
    *  the record and marked the row Applied (queue-reopen.ts). */
   declined: boolean
@@ -719,6 +722,10 @@ function rowToItem(
     reviewAgainOn: str(f[F.reviewAgainOn]),
     cameBackOn: str(f[F.cameBackOn]),
     flagUndo: isRecord(proposal) && isRecord(proposal[FLAG_BEFORE_KEY]),
+    flagWas:
+      isRecord(proposal) && isRecord(proposal[FLAG_BEFORE_KEY])
+        ? (str(proposal[FLAG_BEFORE_KEY].verdict) as Verdict | null)
+        : null,
     declined: wasDeclined({
       type: str(f[F.type]) ?? 'Add',
       status: str(f[F.status]) ?? 'Pending',

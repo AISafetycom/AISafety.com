@@ -16,7 +16,11 @@ import type {
 import { missingFields } from '@/lib/admin/queue-needed'
 import { backSince, laterSince, laterUntil } from '@/lib/admin/queue-later'
 import { LEFT_OUT_KEY, withLeftOut } from '@/lib/admin/queue-left-out'
-import { verdictWords, type FlagUpdate } from '@/lib/admin/queue-flag'
+import {
+  flagRevisedNote,
+  verdictWords,
+  type FlagUpdate,
+} from '@/lib/admin/queue-flag'
 import { rejectReplyFor, shownDeclineChip } from '@/lib/admin/queue-decline'
 import { reopeningLabel, type Reopening } from '@/lib/admin/queue-reopen'
 import { discordAppLink, replyToCopy } from '@/lib/admin/queue-discord'
@@ -5802,11 +5806,18 @@ function Detail({
           )}
           {item.verdict && (
             <div className={styles.verdictHead}>
-              <span className={styles.verdictKicker}>Fable says</span>
+              <span className={styles.verdictKicker}>
+                {item.flagUndo ? 'Fable now says' : 'Fable says'}
+              </span>
               <span className={`${styles.verdictBig} ${styles.withIcon}`}>
                 <Icon src={verdictIcon(item)} size={16} />
                 {verdictWord(item)}
               </span>
+              {flagRevisedNote(item) && (
+                <span className={styles.verdictRevised}>
+                  {flagRevisedNote(item)}
+                </span>
+              )}
             </div>
           )}
           {item.reasons.length > 0 &&
