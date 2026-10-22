@@ -1300,10 +1300,7 @@ export default function NewsletterAdmin({
           </h2>
         </div>
         <p className={adminStyles.sectionHint}>
-          Issues the pipeline has drafted from Pen. Each one is re-checked here
-          before sending: still a draft, wired to exactly one list, content
-          untouched since the pipeline wrote it, the right sender for its list,
-          a working footer and links, and not already sent.
+          Issues the pipeline has drafted from Pen.
           {NEWSLETTER_WARMUP &&
             ' During the warm-up a big list goes out in waves: one approval schedules them all, a day apart, and the send watcher cancels the rest if a wave’s 18-hour check comes back red. The draft stays here until its last wave has gone.'}
         </p>
