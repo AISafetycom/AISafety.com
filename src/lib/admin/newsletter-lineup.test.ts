@@ -3,6 +3,8 @@ import {
   addDays,
   closingDay,
   fundingAccepting,
+  hasStarted,
+  inAnIssue,
   issueLabel,
   monthBefore,
   closingKeys,
@@ -25,19 +27,73 @@ describe('monthBefore', () => {
   })
 })
 
+describe('hasStarted', () => {
+  it('counts the issue’s own day as started', () => {
+    expect(hasStarted({ startDate: '2026-10-22' }, '2026-10-22')).toBe(true)
+    expect(hasStarted({ startDate: '2026-10-06' }, '2026-10-22')).toBe(true)
+    expect(hasStarted({ startDate: '2026-10-23' }, '2026-10-22')).toBe(false)
+  })
+  it('never calls rough timing or no date started', () => {
+    expect(
+      hasStarted(
+        { startDate: '2026-10-01', startDateApprox: 'October 2026' },
+        '2026-10-08'
+      )
+    ).toBe(false)
+    expect(hasStarted({ startDate: null }, '2026-10-22')).toBe(false)
+  })
+})
+
+describe('inAnIssue', () => {
+  const listings = [
+    { id: 'recSent', dateAdded: '2026-10-16' },
+    { id: 'recStray', dateAdded: '2026-10-16' },
+    { id: 'recSubstack', dateAdded: '2026-09-24' },
+    { id: 'recUnticked', dateAdded: '2026-10-16' },
+  ]
+  const ticked = new Set(['recSent', 'recStray', 'recSubstack'])
+  it('keeps out a tick no issue explains', () => {
+    expect([...inAnIssue(listings, ticked, new Set(['recSent']))]).toEqual([
+      'recSent',
+      'recSubstack',
+    ])
+  })
+  it('takes every tick at its word when the issues couldn’t be read', () => {
+    expect([...inAnIssue(listings, ticked, null)]).toEqual([
+      'recSent',
+      'recStray',
+      'recSubstack',
+    ])
+  })
+})
+
 describe('pickNewListings', () => {
   const listings = [
-    { id: 'recNew', name: 'New', dateAdded: '2026-10-07' },
-    { id: 'recEdge', name: 'Edge', dateAdded: '2026-09-08' },
-    { id: 'recOld', name: 'Old', dateAdded: '2026-09-07' },
-    { id: 'recSent', name: 'Sent', dateAdded: '2026-10-01' },
-    { id: 'recUndated', name: 'Undated', dateAdded: null },
+    { id: 'recNew', name: 'New', dateAdded: '2026-10-07', startDate: null },
+    {
+      id: 'recEdge',
+      name: 'Edge',
+      dateAdded: '2026-09-08',
+      startDate: '2026-10-09',
+    },
+    { id: 'recOld', name: 'Old', dateAdded: '2026-09-07', startDate: null },
+    { id: 'recSent', name: 'Sent', dateAdded: '2026-10-01', startDate: null },
+    {
+      id: 'recToday',
+      name: 'Today',
+      dateAdded: '2026-10-05',
+      startDate: '2026-10-08',
+    },
+    { id: 'recUndated', name: 'Undated', dateAdded: null, startDate: null },
   ]
-  it('takes listings added since the boundary, Newsletter not ticked', () => {
+  it('takes listings added since the boundary, not started, not in an issue', () => {
     expect(
-      pickNewListings(listings, new Set(['recSent']), '2026-09-08').map(
-        l => l.id
-      )
+      pickNewListings(
+        listings,
+        new Set(['recSent']),
+        '2026-09-08',
+        '2026-10-08'
+      ).map(l => l.id)
     ).toEqual(['recNew', 'recEdge'])
   })
 })

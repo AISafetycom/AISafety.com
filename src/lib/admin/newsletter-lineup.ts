@@ -4,8 +4,11 @@
   Pen's own (~/Pen/events/CLAUDE.md step 1, ~/Pen/funding/CLAUDE.md step 2):
 
   - Events / Training: on the site now (getEvents / getTrainingPrograms:
-    published, not hidden, not over or already started, which is also what
-    the build keeps), Newsletter not ticked, added in the last month.
+    published, not hidden, not over, which is also what the build keeps),
+    added in the last month, not started yet, and not in an issue: Newsletter
+    not ticked, or ticked but in no issue sent (Bryce, 22 Oct 2026: "These
+    numbers should reflect exactly how many would go into an issue if Pen
+    created an issue right now").
   - Funding, new: on the site and accepting applications now, and not
     accepting (or not listed) when the last Funding issue went out. Pen keeps that
     baseline in a file on Bryce's Mac, which the site can't read, so the site
@@ -32,7 +35,8 @@ import { getEvents, TABLE_ID as EVENTS_TABLE } from '@/lib/data/events'
 import { getFunders } from '@/lib/data/funding'
 import { getTrainingPrograms, TRAINING_TABLE_ID } from '@/lib/data/training'
 import { isAcceptingApplications } from '@/lib/funding-status'
-import { issueSlug } from '@/lib/newsletter-archive'
+import { MIN_READERS, issueSlug } from '@/lib/newsletter-archive'
+import { WEB_NEWSLETTERS } from '@/lib/newsletter-web'
 import { sentEmail } from '@/lib/newsletter-web-copy'
 
 /** The real Funding list (newsletter.ts REAL_LISTS). */
@@ -96,16 +100,77 @@ export function monthBefore(day: string): string {
   return `${year}-${String(month).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`
 }
 
-/** Pure: the listings Pen would take as new events or training — added on
- *  or after `since`, Newsletter not ticked. */
-export function pickNewListings(
-  listings: Array<{ id: string; name: string; dateAdded: string | null }>,
+/** Pure: the listing has started by `today`, the day an issue Pen drafted
+ *  now would carry. Pen leaves those out, competitions included (Bryce,
+ *  8 Oct 2026, of week 41's Spillover Prediction Challenge: "Please remove
+ *  this, it's already started"), and the issue's own day counts: an event
+ *  on 8 October stayed out of that day's week 41. A training program with
+ *  only rough timing ("October 2026") hasn't visibly started: the site keeps
+ *  it until that period is over, and week 41 kept DISPATCH. */
+export function hasStarted(
+  listing: { startDate: string | null; startDateApprox?: string | null },
+  today: string
+): boolean {
+  return (
+    !listing.startDateApprox &&
+    listing.startDate != null &&
+    listing.startDate <= today
+  )
+}
+
+/** The last Events & Training issue sent through Substack (week 40). The
+ *  site can't read what those issues carried, so a listing added by then
+ *  with Newsletter ticked counts as sent. From 1 November 2026 the month
+ *  Pen looks back over starts after this and it no longer matters. */
+const LAST_SUBSTACK_ISSUE = '2026-10-01'
+
+/** Pure: the ticked listings an issue really carried. Pen also takes a
+ *  listing added inside the month whose tick no issue explains: a record
+ *  copied from an earlier round can arrive ticked (Foresight Fellowship:
+ *  2028, created 15 September 2026 with the 2027 round's tick, never sent).
+ *  `sentKeys` is every record id in the issues sent in that month, or null
+ *  when they couldn't be read, and every tick then counts as sent. */
+export function inAnIssue(
+  listings: ReadonlyArray<{ id: string; dateAdded: string | null }>,
   ticked: ReadonlySet<string>,
-  since: string
+  sentKeys: ReadonlySet<string> | null
+): Set<string> {
+  return new Set(
+    listings
+      .filter(
+        l =>
+          ticked.has(l.id) &&
+          (sentKeys == null ||
+            l.dateAdded == null ||
+            l.dateAdded <= LAST_SUBSTACK_ISSUE ||
+            sentKeys.has(l.id))
+      )
+      .map(l => l.id)
+  )
+}
+
+/** Pure: the listings Pen would take as new events or training — added on
+ *  or after `since`, not started by `today`, not in an issue (`sent`, from
+ *  inAnIssue). */
+export function pickNewListings(
+  listings: Array<{
+    id: string
+    name: string
+    dateAdded: string | null
+    startDate: string | null
+    startDateApprox?: string | null
+  }>,
+  sent: ReadonlySet<string>,
+  since: string,
+  today: string
 ): LineupItem[] {
   return listings
     .filter(
-      l => l.dateAdded != null && l.dateAdded >= since && !ticked.has(l.id)
+      l =>
+        l.dateAdded != null &&
+        l.dateAdded >= since &&
+        !sent.has(l.id) &&
+        !hasStarted(l, today)
     )
     .map(({ id, name }) => ({ id, name }))
 }
@@ -286,6 +351,46 @@ async function remindedFunders(today: string): Promise<Set<string>> {
   return reminded
 }
 
+/** Every record id in the Events and Training issues sent since `since`,
+ *  read from the emails as sent. Null, logged, when one of them can't be
+ *  read: counting its listings as never sent would count them again. */
+async function sentListingKeys(since: string): Promise<Set<string> | null> {
+  try {
+    const issues = (
+      await Promise.all(
+        (['events', 'training'] as const).map(async key =>
+          (await sentIssuesOn(WEB_NEWSLETTERS[key].list))
+            .filter(
+              i =>
+                i.readers >= MIN_READERS &&
+                (i.sentAt == null || i.sentAt.slice(0, 10) >= since)
+            )
+            .map(i => ({ key, name: i.name }))
+        )
+      )
+    ).flat()
+    const keys = new Set<string>()
+    for (const { key, name } of issues) {
+      const slug = issueSlug(key, name)
+      const email = slug ? await sentEmail(key, slug) : null
+      const groups = email ? cardGroups(email) : null
+      if (!groups) {
+        console.warn(
+          `[newsletter] ${name}: no email with cards, so Newsletter ticks count as sent`
+        )
+        return null
+      }
+      for (const g of groups) for (const c of g.cards) keys.add(c.key)
+    }
+    return keys
+  } catch (err) {
+    console.warn(
+      `[newsletter] reading the sent Events and Training issues failed, so Newsletter ticks count as sent: ${err instanceof Error ? err.message : String(err)}`
+    )
+    return null
+  }
+}
+
 /** Note which Funding listings accept applications as `issue` goes out to
  *  the real list. A later wave or a second approval of the same issue keeps
  *  the first note. (An approval canceled and never sent again still moves
@@ -312,13 +417,20 @@ export async function readLineup(
 ): Promise<Lineup> {
   const since = monthBefore(today)
   const listingsSince = longDate(since)
+  const sentKeys = sentListingKeys(since)
   const [events, training, funding] = await Promise.all([
     Promise.all([
       getEvents(),
       tickedIds(EVENTS_TABLE, NEWSLETTER_FIELD.events),
+      sentKeys,
     ]).then(
-      ([listings, ticked]): LineupSection => ({
-        items: pickNewListings(listings, ticked, since),
+      ([listings, ticked, sent]): LineupSection => ({
+        items: pickNewListings(
+          listings,
+          inAnIssue(listings, ticked, sent),
+          since,
+          today
+        ),
         since: listingsSince,
       }),
       err => failed('events', err)
@@ -326,9 +438,15 @@ export async function readLineup(
     Promise.all([
       getTrainingPrograms(),
       tickedIds(TRAINING_TABLE_ID, NEWSLETTER_FIELD.training),
+      sentKeys,
     ]).then(
-      ([listings, ticked]): LineupSection => ({
-        items: pickNewListings(listings, ticked, since),
+      ([listings, ticked, sent]): LineupSection => ({
+        items: pickNewListings(
+          listings,
+          inAnIssue(listings, ticked, sent),
+          since,
+          today
+        ),
         since: listingsSince,
       }),
       err => failed('training', err)
