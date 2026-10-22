@@ -1231,7 +1231,7 @@ export default function NewsletterAdmin({
             ? '; an issue that goes out in waves gets all its remaining waves scheduled at once, a day apart'
             : ''}
           . Until a send starts you can cancel it; while it’s sending you can
-          pause or stop it under Recent sends. Use with caution.
+          pause or stop it under Recent sends.
         </div>
       )}
       {!canSend && (
