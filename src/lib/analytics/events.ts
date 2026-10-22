@@ -2269,14 +2269,15 @@ export interface NewsletterArchiveRow {
  *  with any, busiest first. Follows the count mode: unique = one view per
  *  visitor per page per day, and one click per visitor per link per day.
  *  Exported for the unit test. */
-/** When each past issues page went live (PR #685, deployed 11 October 2026
- *  at about 12:30 UTC). Before then the address was the site's 404 page,
- *  and so is a newsletter's page that isn't listed here: Funding's, until
- *  its move. Add a newsletter's time on the day its page first lists an
- *  issue (Funding's move checklist in ~/Newsletter/PLAN.md says so). */
+/** When each past issues page went live: Events and Training with PR #685,
+ *  deployed 11 October 2026 at about 12:30 UTC; Funding when its first issue
+ *  from ActiveCampaign (Issue #24) reached its readers, first listed at
+ *  about 17:16 UTC on 21 October 2026. Before then each address was the
+ *  site's 404 page, so earlier views don't count. */
 export const PAST_ISSUES_LIVE_SINCE: Readonly<Record<string, number>> = {
   events: Date.parse('2026-10-11T12:30:00Z'),
   training: Date.parse('2026-10-11T12:30:00Z'),
+  funding: Date.parse('2026-10-21T17:16:00Z'),
 }
 
 export function newsletterArchiveStats(
