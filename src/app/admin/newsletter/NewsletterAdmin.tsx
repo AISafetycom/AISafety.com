@@ -1226,7 +1226,7 @@ export default function NewsletterAdmin({
       {canSend && (
         <div className={`${adminStyles.notice} ${styles.liveWarning}`}>
           <strong>This sends real emails.</strong> Approving schedules an issue
-          to go out five minutes later (two on the test lists)
+          to go out five minutes later
           {NEWSLETTER_WARMUP
             ? '; an issue that goes out in waves gets all its remaining waves scheduled at once, a day apart'
             : ''}
