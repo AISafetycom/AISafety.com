@@ -1226,7 +1226,7 @@ export default function NewsletterAdmin({
       {canSend && (
         <div className={`${adminStyles.notice} ${styles.liveWarning}`}>
           <strong>This sends real emails.</strong> Approving schedules an issue
-          to go out five minutes later
+          to go out a minute later
           {NEWSLETTER_WARMUP
             ? '; an issue that goes out in waves gets all its remaining waves scheduled at once, a day apart'
             : ''}
@@ -2801,9 +2801,9 @@ function ConfirmSend({
           </p>
         ) : (
           <p className={styles.dialogNote}>
-            It goes out {delay} minutes after you confirm. Until then you can
-            cancel it under Recent sends; while it’s sending you can pause or
-            stop it there. Emails already delivered can’t be recalled.
+            It goes out {durationLabel(delay)} after you confirm. Until then you
+            can cancel it under Recent sends; while it’s sending you can pause
+            or stop it there. Emails already delivered can’t be recalled.
           </p>
         )}
         <div className={styles.dialogActions}>

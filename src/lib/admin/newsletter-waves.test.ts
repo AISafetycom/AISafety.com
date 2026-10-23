@@ -129,7 +129,7 @@ describe('waves on the page', () => {
     const [d] = await nl.listDrafts()
     expect(d.blocks).toEqual([])
     expect(d.alreadySent).toBeNull()
-    expect(d.sendDelayMinutes).toBe(5)
+    expect(d.sendDelayMinutes).toBe(1)
     expect(d.waves).toMatchObject({
       error: null,
       active: 2889,
@@ -308,10 +308,10 @@ describe('approving the waves (approve once)', () => {
     const r = await nl.approveAndSend('200', '6', { ...WHO, waves: waves(1) })
     // Made last wave first; sdates in the account's time (UTC−5).
     expect(created(ac)).toEqual([
-      [`${ISSUE} · wave 4/4`, WAVE_IDS[3], '2026-10-11 10:05:00'],
-      [`${ISSUE} · wave 3/4`, WAVE_IDS[2], '2026-10-10 10:05:00'],
-      [`${ISSUE} · wave 2/4`, WAVE_IDS[1], '2026-10-09 10:05:00'],
-      [`${ISSUE} · wave 1/4`, WAVE_IDS[0], '2026-10-08 10:05:00'],
+      [`${ISSUE} · wave 4/4`, WAVE_IDS[3], '2026-10-11 10:01:00'],
+      [`${ISSUE} · wave 3/4`, WAVE_IDS[2], '2026-10-10 10:01:00'],
+      [`${ISSUE} · wave 2/4`, WAVE_IDS[1], '2026-10-09 10:01:00'],
+      [`${ISSUE} · wave 1/4`, WAVE_IDS[0], '2026-10-08 10:01:00'],
     ])
     // Each made exactly as one wave was before.
     for (const c of ac.calls.filter(x => x.action === 'campaign_create')) {
@@ -331,21 +331,21 @@ describe('approving the waves (approve once)', () => {
       draftKept: true,
       activeContacts: 2889,
       override: null,
-      sendAt: '2026-10-08T15:05:00.000Z',
+      sendAt: '2026-10-08T15:01:00.000Z',
       listName: 'AISafety.com Events',
       notes: [],
     })
     // The issue's first send, which ends the hold on test copies' clicks.
     expect(kv.data.get('aisafety:newsletter:sends-from:' + ISSUE)).toBe(
-      Date.parse('2026-10-08T15:05:00.000Z')
+      Date.parse('2026-10-08T15:01:00.000Z')
     )
     expect(
       r.scheduled.map(s => [s.wave, s.campaignId, s.sendAt, s.expected])
     ).toEqual([
-      [1, '204', '2026-10-08T15:05:00.000Z', 494],
-      [2, '203', '2026-10-09T15:05:00.000Z', 986],
-      [3, '202', '2026-10-10T15:05:00.000Z', 710],
-      [4, '201', '2026-10-11T15:05:00.000Z', 699],
+      [1, '204', '2026-10-08T15:01:00.000Z', 494],
+      [2, '203', '2026-10-09T15:01:00.000Z', 986],
+      [3, '202', '2026-10-10T15:01:00.000Z', 710],
+      [4, '201', '2026-10-11T15:01:00.000Z', 699],
     ])
     // The draft stays (a canceled wave is approved again from it).
     expect(ac.camps.find(c => c.id === '200')?.status).toBe('0')
@@ -384,10 +384,10 @@ describe('approving the waves (approve once)', () => {
         w.sent?.canCancel,
       ])
     ).toEqual([
-      [1, 'scheduled', '2026-10-08T15:05:00.000Z', true],
-      [2, 'scheduled', '2026-10-09T15:05:00.000Z', true],
-      [3, 'scheduled', '2026-10-10T15:05:00.000Z', true],
-      [4, 'scheduled', '2026-10-11T15:05:00.000Z', true],
+      [1, 'scheduled', '2026-10-08T15:01:00.000Z', true],
+      [2, 'scheduled', '2026-10-09T15:01:00.000Z', true],
+      [3, 'scheduled', '2026-10-10T15:01:00.000Z', true],
+      [4, 'scheduled', '2026-10-11T15:01:00.000Z', true],
     ])
     expect(d.editable).toBe(false)
     expect(d.deletable).toBe(false)
@@ -433,7 +433,7 @@ describe('approving the waves (approve once)', () => {
     expect(r).toMatchObject({ wave: 2, expected: 986, override: null })
   })
 
-  it('…pressed once the verdict is in: from five minutes after the press', async () => {
+  it('…pressed once the verdict is in: from a minute after the press', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-10-09T09:00:00Z'))
     const ac = makeAC(waved({ extra: [sentWave(1)] }))
@@ -445,9 +445,9 @@ describe('approving the waves (approve once)', () => {
     })
     const r = await nl.approveAndSend('200', '6', { ...WHO, waves: waves(2) })
     expect(r.scheduled.map(s => [s.wave, s.sendAt])).toEqual([
-      [2, '2026-10-09T09:05:00.000Z'],
-      [3, '2026-10-10T09:05:00.000Z'],
-      [4, '2026-10-11T09:05:00.000Z'],
+      [2, '2026-10-09T09:01:00.000Z'],
+      [3, '2026-10-10T09:01:00.000Z'],
+      [4, '2026-10-11T09:01:00.000Z'],
     ])
   })
 
@@ -994,7 +994,7 @@ describe('all or nothing: a press that fails part-way takes back what it made', 
     expect(err).toBeInstanceOf(nl.MaybeScheduledError)
     expect(err.campaignId).toBe('201')
     expect(err.message).toMatch(
-      /^The approval of waves 1–4 stopped part-way\. ActiveCampaign didn’t keep the wave on the new campaign 202 .* Wave 4 \(campaign 201\) couldn’t be canceled again, so it is still scheduled: cancel it on the newsletter page \(or in ActiveCampaign\) before 11 October 2026, 15:05 UTC\. Don’t press Approve again until then\.$/
+      /^The approval of waves 1–4 stopped part-way\. ActiveCampaign didn’t keep the wave on the new campaign 202 .* Wave 4 \(campaign 201\) couldn’t be canceled again, so it is still scheduled: cancel it on the newsletter page \(or in ActiveCampaign\) before 11 October 2026, 15:01 UTC\. Don’t press Approve again until then\.$/
     )
     expect(ac.camps.some(c => c.id === '201')).toBe(true)
     expect(ac.camps.some(c => c.id === '202')).toBe(false)
@@ -1062,7 +1062,7 @@ describe('the owner’s notice', () => {
       `“${ISSUE} · wave 1/4” was approved by plex and is scheduled to send.`,
       'Wave: 1 of 4',
       'To: 494 people on AISafety.com Events (list 6)',
-      'Sends: 8 October 2026, 15:05 UTC',
+      'Sends: 8 October 2026, 15:01 UTC',
       'Approved by: plex',
       'Campaign: 204',
       'To cancel it before it sends, or pause or stop it while it’s sending: https://aisafety.com/admin/newsletter',
@@ -1187,8 +1187,8 @@ describe('stopping a send', () => {
       waves: waves(3),
     })
     expect(again.scheduled.map(s => [s.wave, s.sendAt])).toEqual([
-      [3, '2026-10-10T12:05:00.000Z'],
-      [4, '2026-10-11T12:05:00.000Z'],
+      [3, '2026-10-10T12:01:00.000Z'],
+      [4, '2026-10-11T12:01:00.000Z'],
     ])
   })
 

@@ -1056,14 +1056,14 @@ describe('waveSchedule: when each wave of one approval starts', () => {
   const times = (slots: Array<{ wave: number; startsAt: number }>) =>
     slots.map(s => [s.wave, new Date(s.startsAt).toISOString()])
 
-  it('nothing sent yet: wave 1 five minutes out, then a day apart', () => {
+  it('nothing sent yet: wave 1 a minute out, then a day apart', () => {
     expect(
       times(scheduleWaves('6', 1, 4, at('2026-10-08T21:00:00Z'), null))
     ).toEqual([
-      [1, '2026-10-08T21:05:00.000Z'],
-      [2, '2026-10-09T21:05:00.000Z'],
-      [3, '2026-10-10T21:05:00.000Z'],
-      [4, '2026-10-11T21:05:00.000Z'],
+      [1, '2026-10-08T21:01:00.000Z'],
+      [2, '2026-10-09T21:01:00.000Z'],
+      [3, '2026-10-10T21:01:00.000Z'],
+      [4, '2026-10-11T21:01:00.000Z'],
     ])
   })
 
@@ -1089,20 +1089,20 @@ describe('waveSchedule: when each wave of one approval starts', () => {
       [3, '2026-10-10T17:10:00.000Z'],
       [4, '2026-10-11T17:10:00.000Z'],
     ])
-    // Pressed later than that: five minutes from the press.
+    // Pressed later than that: a minute from the press.
     expect(
       times(scheduleWaves('6', 2, 4, at('2026-10-09T18:00:00Z'), p.startFrom))
     ).toEqual([
-      [2, '2026-10-09T18:05:00.000Z'],
-      [3, '2026-10-10T18:05:00.000Z'],
-      [4, '2026-10-11T18:05:00.000Z'],
+      [2, '2026-10-09T18:01:00.000Z'],
+      [3, '2026-10-10T18:01:00.000Z'],
+      [4, '2026-10-11T18:01:00.000Z'],
     ])
   })
 
   it('one wave left: just that one', () => {
     expect(
       times(scheduleWaves('7', 4, 4, at('2026-10-11T12:00:00Z'), null))
-    ).toEqual([[4, '2026-10-11T12:05:00.000Z']])
+    ).toEqual([[4, '2026-10-11T12:01:00.000Z']])
   })
 
   it('test lists: two minutes out, then ten minutes apart', () => {
@@ -1147,7 +1147,7 @@ describe('waveSchedule: when each wave of one approval starts', () => {
       gapMs: 18 * 3_600_000,
       leadMs: 90 * 60_000,
       judged: true,
-      delayMs: 5 * 60_000,
+      delayMs: 1 * 60_000,
       spacingMs: 24 * 3_600_000,
     })
     expect(waveTiming('8')).toEqual(waveTiming('6'))
@@ -1249,8 +1249,8 @@ describe('wavesStillToGo', () => {
 })
 
 describe('send delay', () => {
-  it('five minutes on the real lists, two on the test lists', () => {
-    for (const l of ['6', '7', '8']) expect(sendDelayMinutes(l)).toBe(5)
+  it('one minute on the real lists, two on the test lists', () => {
+    for (const l of ['6', '7', '8']) expect(sendDelayMinutes(l)).toBe(1)
     for (const l of ['4', '5']) expect(sendDelayMinutes(l)).toBe(2)
   })
 })

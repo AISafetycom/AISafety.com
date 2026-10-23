@@ -144,11 +144,13 @@ export {
 }
 
 const MARKER_RE = /<!--aisafety-issue:([0-9a-f]{16})-->/
-/** Minutes between approval and the send. On the real lists that is time to
- *  notice a mistake and cancel the send under Recent sends before anyone gets
- *  it; the test lists keep two, the practical minimum (AC rejects sdates in
- *  the past and runs its scheduler about once a minute). */
-const SEND_DELAY_MINUTES_REAL = 5
+/** Minutes between approval and the send. On the real lists that is a short
+ *  window to cancel the send under Recent sends before anyone gets it (one
+ *  since 23 Oct 2026, the owner's call; it was five). The test lists keep two
+ *  (AC rejects sdates in the past and runs its scheduler about once a
+ *  minute); a real-list time AC reads as past just sends at once
+ *  (`sendingNow`). */
+const SEND_DELAY_MINUTES_REAL = 1
 const SEND_DELAY_MINUTES_TEST = 2
 
 export function sendDelayMinutes(listId: string): number {
