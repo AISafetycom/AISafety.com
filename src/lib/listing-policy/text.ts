@@ -73,6 +73,7 @@ Each page adds its own bar, and seriousness is a separate gate: on topic isn't t
 - The event's own page needs to be finished. A placeholder page ("more info coming", a one-line description) isn't ready to list. Suggest it again once the page is done.
 - Protests: a movement's major or coordinated protests are listed, not a local chapter's own small protest.
 - A community's first meetup can be listed. Its later meetups and socials are covered by the community's own listing.
+- The same goes for a regular reading group. We list its first session only, even when a later week's reading is about x-risk.
 - We also look at the care in an event's own materials – wrong or inconsistent details count against it, and an informal event from a group we don't already list has more to prove.
 
 **/training** – fellowships, courses, bootcamps, immersive workshops.
@@ -141,5 +142,5 @@ An existing listing isn't a guarantee, and we review and remove listings often.
 - **Tell us if we misread you.** If we missed x-risk work on your site or picked the wrong page, show us where. Reply to our email or use the "Send us an email" button.
 - **Suggest a correction.** If you think another listing shouldn't be there, use "Suggest correction" on that page and say why.
 
-Last updated: 20 October 2026
+Last updated: 23 October 2026
 `
