@@ -2258,10 +2258,12 @@ export interface NewsletterArchiveRow {
   name: string
   /** Views of its past issues page. */
   views: number
-  /** Clicks on the page through to an issue, the feed, and Substack. */
+  /** Clicks on the page through to an issue, the feed, Substack, and the
+   *  resource page (/funding; since 23 October 2026). */
   issueClicks: number
   feedClicks: number
   substackClicks: number
+  resourceClicks: number
 }
 
 /** The newsletters' past issues pages (/newsletter/<key>): views from
@@ -2288,7 +2290,14 @@ export function newsletterArchiveStats(
   const rowFor = (name: string) => {
     let row = rows.get(name)
     if (!row) {
-      row = { name, views: 0, issueClicks: 0, feedClicks: 0, substackClicks: 0 }
+      row = {
+        name,
+        views: 0,
+        issueClicks: 0,
+        feedClicks: 0,
+        substackClicks: 0,
+        resourceClicks: 0,
+      }
       rows.set(name, row)
     }
     return row
@@ -2321,6 +2330,7 @@ export function newsletterArchiveStats(
       if (e.source === 'issue') row.issueClicks++
       else if (e.source === 'feed') row.feedClicks++
       else if (e.source === 'substack') row.substackClicks++
+      else if (e.source === 'resource') row.resourceClicks++
     }
   }
   return [...rows.values()].sort((a, b) => b.views - a.views)

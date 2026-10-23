@@ -2222,9 +2222,9 @@ async function readFeeds(range: DateRange): Promise<{
   }
 }
 
-/** The Newsletters tab's past issues pages (/newsletter/events, /training)
- *  and feeds: the pages' views and clicks in the range, and the feeds'
- *  readers yesterday and today. */
+/** The Newsletters tab's newsletter pages (/newsletter/events, /training,
+ *  /funding) and feeds: the pages' views and clicks in the range, and the
+ *  feeds' readers yesterday and today. */
 function PastIssuesPanel({
   rows,
   feeds,
@@ -2255,6 +2255,7 @@ function PastIssuesPanel({
       issueClicks: 0,
       feedClicks: 0,
       substackClicks: 0,
+      resourceClicks: 0,
     }
   const feedCell = (list: FeedReaders[] | undefined, name: string) =>
     list ? readers(list, name).toLocaleString() : '—'
@@ -2272,6 +2273,11 @@ function PastIssuesPanel({
             { label: 'To an issue', className: styles.numCol, sort: 'number' },
             { label: 'To the feed', className: styles.numCol, sort: 'number' },
             { label: 'To Substack', className: styles.numCol, sort: 'number' },
+            {
+              label: 'To resource page',
+              className: styles.numCol,
+              sort: 'number',
+            },
             {
               label: 'Feed readers yesterday',
               className: styles.numCol,
@@ -2291,6 +2297,7 @@ function PastIssuesPanel({
               r.issueClicks,
               r.feedClicks,
               r.substackClicks,
+              r.resourceClicks,
               feeds ? readers(feeds.yesterday, name) : null,
               feeds ? readers(feeds.today, name) : null,
             ]
@@ -2312,6 +2319,9 @@ function PastIssuesPanel({
                   {r.substackClicks.toLocaleString()}
                 </td>
                 <td className={styles.numCol}>
+                  {r.resourceClicks.toLocaleString()}
+                </td>
+                <td className={styles.numCol}>
                   {feedCell(feeds?.yesterday, name)}
                 </td>
                 <td className={styles.numCol}>
@@ -2323,16 +2333,18 @@ function PastIssuesPanel({
         </SortableTable>
       )}
       <p className={styles.caption}>
-        Each newsletter&apos;s past issues page (aisafety.com/newsletter/events,
-        /newsletter/training) lists its issues sent since the move to
-        ActiveCampaign on 8 October 2026, with an RSS feed (…/feed). Page views
-        and clicks follow the range; a click to an issue opens its web version.
-        Feed readers aren&apos;t for the range: they&apos;re the people
-        following the feed on one day (UTC). A feed service such as Feedly
-        fetches once for all its users and reports how many; a reader app
-        fetches for one person. Opening the feed in a browser, search engines,
-        AI assistants and scripts aren&apos;t counted. Recording since October
-        2026.
+        Each newsletter&apos;s page (aisafety.com/newsletter/events,
+        /newsletter/training, /newsletter/funding) lists its issues sent since
+        the move to ActiveCampaign (Events and Training 8 October 2026, Funding
+        21 October 2026), with an RSS feed (…/feed). Page views and clicks
+        follow the range; a click to an issue opens its web version, and
+        &ldquo;To resource page&rdquo; counts the link on to /events, /training,
+        or /funding (since 23 October 2026). Feed readers aren&apos;t for the
+        range: they&apos;re the people following the feed on one day (UTC). A
+        feed service such as Feedly fetches once for all its users and reports
+        how many; a reader app fetches for one person. Opening the feed in a
+        browser, search engines, AI assistants and scripts aren&apos;t counted.
+        Recording since October 2026.
       </p>
     </Panel>
   )
