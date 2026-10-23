@@ -49,14 +49,22 @@ export const NEWSLETTER_ABOUT: Record<WebKey, string> = {
 
 /** The link under each newsletter page's lead to the resource page it
  *  comes from (WEB_NEWSLETTERS' `page`), worded like /events' and
- *  /training's links to each other: "<lead> <name> →". */
+ *  /training's links to each other: "<lead> <name> →". It says "live list"
+ *  so the always-current page stands apart from the newsletter's issues
+ *  (Bryce, 23 Oct 2026). */
 export const RESOURCE_LINK: Record<WebKey, { lead: string; name: string }> = {
-  events: { lead: 'For every upcoming event go to', name: 'Events' },
+  events: {
+    lead: 'For a live list of every upcoming event go to',
+    name: 'Events',
+  },
   training: {
-    lead: 'For every upcoming training program go to',
+    lead: 'For a live list of every upcoming training program go to',
     name: 'Training programs',
   },
-  funding: { lead: 'For every source of funding go to', name: 'Funding' },
+  funding: {
+    lead: 'For a live list of every source of funding go to',
+    name: 'Funding',
+  },
 }
 
 /** Where the Substack issues are, said after the list. */

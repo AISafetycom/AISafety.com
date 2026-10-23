@@ -27,11 +27,11 @@ import styles from './page.module.css'
 // taken for the resource page itself (Bryce, 23 Oct 2026), with a link on to
 // that page – it lists every issue sent through ActiveCampaign, linking each
 // one's web version, with the feed and the Substack archive
-// (src/lib/newsletter-archive.ts). The header's "Updated" line is the newest
-// issue, and the newsletter's signup box sits beside it (its submits
-// recorded under the page's path, apart from /events' and /training's).
-// Rebuilt at most every
-// ten minutes, so a new issue shows within that of reaching its first
+// (src/lib/newsletter-archive.ts). No "Updated" line under the heading
+// (Bryce, 23 Oct 2026): the list's dates say when the last issue went out.
+// The newsletter's signup box sits beside the header (its submits recorded
+// under the page's path, apart from /events' and /training's). Rebuilt at
+// most every ten minutes, so a new issue shows within that of reaching its first
 // readers. A newsletter with no issue sent that way yet (Funding, until its
 // move) is a 404 until its first one. Open to search engines and in the
 // sitemap (Bryce, 11 Oct 2026); the issues themselves aren't, since their
@@ -89,13 +89,11 @@ export default async function NewsletterPage({ params }: Props) {
   if (issues?.length === 0) notFound()
 
   const signup = isSignupNewsletter(key) ? key : null
-  const newest = issues?.find(i => i.sentAt)?.sentAt ?? null
 
   return (
     <div className="container-default">
       <PageHeader
         title={`${nl.prefix} newsletter`}
-        lastUpdatedIso={newest}
         newsletter={signup != null}
         newsletterKey={signup ?? undefined}
         // The description above names the newsletter (Bryce, 11 Oct 2026).

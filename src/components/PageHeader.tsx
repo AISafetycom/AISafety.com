@@ -39,7 +39,12 @@ export default function PageHeader({
 }: PageHeaderProps) {
   const header = (
     <>
-      <h1 className={`${topPadding} padding-bottom-8px`} id={id}>
+      {/* Without the "Updated" line under it, the heading keeps a little
+          more room above the description. */}
+      <h1
+        className={`${topPadding} ${lastUpdatedIso ? 'padding-bottom-8px' : 'padding-bottom-24px'}`}
+        id={id}
+      >
         {title}
       </h1>
       {lastUpdatedIso && (
