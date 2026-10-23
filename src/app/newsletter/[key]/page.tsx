@@ -4,6 +4,7 @@ import { formatDate } from '@/lib/format-date'
 import { WEB_NEWSLETTERS, isWebKey } from '@/lib/newsletter-web'
 import {
   NEWSLETTER_ABOUT,
+  RESOURCE_LINK,
   SUBSTACK_ARCHIVES,
   SUBSTACK_NOTE,
   archivePath,
@@ -19,12 +20,17 @@ import { isSignupNewsletter } from '@/lib/newsletter-signup'
 import ArchiveLink from './ArchiveLink'
 import styles from './page.module.css'
 
-// /newsletter/events, /newsletter/training: every issue sent through
-// ActiveCampaign, linking each one's web version, with the feed and the
-// Substack archive (src/lib/newsletter-archive.ts), under a header like the
-// resource pages': its "Updated" line is the newest issue, and the
-// newsletter's signup box sits beside it (its submits recorded under the
-// page's path, apart from /events' and /training's). Rebuilt at most every
+// /newsletter/events, /newsletter/training, /newsletter/funding: each
+// newsletter's own page, the one to link when pointing people at the
+// newsletter (its listings on /map and /media-channels, the footer). Under a
+// header like the resource pages' – named "<Funding> newsletter" so it isn't
+// taken for the resource page itself (Bryce, 23 Oct 2026), with a link on to
+// that page – it lists every issue sent through ActiveCampaign, linking each
+// one's web version, with the feed and the Substack archive
+// (src/lib/newsletter-archive.ts). The header's "Updated" line is the newest
+// issue, and the newsletter's signup box sits beside it (its submits
+// recorded under the page's path, apart from /events' and /training's).
+// Rebuilt at most every
 // ten minutes, so a new issue shows within that of reaching its first
 // readers. A newsletter with no issue sent that way yet (Funding, until its
 // move) is a 404 until its first one. Open to search engines and in the
@@ -48,10 +54,10 @@ type Props = { params: Promise<{ key: string }> }
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { key } = await params
   if (!isWebKey(key)) return {}
-  const { sender } = WEB_NEWSLETTERS[key]
+  const { prefix, sender } = WEB_NEWSLETTERS[key]
   return {
-    title: `Past issues of ${sender} – AISafety.com`,
-    description: `Every issue of ${sender}, the AISafety.com newsletter, with its RSS feed.`,
+    title: `${prefix} newsletter – AISafety.com`,
+    description: `${sender} ${NEWSLETTER_ABOUT[key]} Sign up, read past issues, or follow its RSS feed.`,
     alternates: {
       canonical: archivePath(key),
       types: {
@@ -61,7 +67,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   }
 }
 
-export default async function PastIssuesPage({ params }: Props) {
+export default async function NewsletterPage({ params }: Props) {
   const { key } = await params
   if (!isWebKey(key)) notFound()
   const nl = WEB_NEWSLETTERS[key]
@@ -88,7 +94,7 @@ export default async function PastIssuesPage({ params }: Props) {
   return (
     <div className="container-default">
       <PageHeader
-        title="Past issues"
+        title={`${nl.prefix} newsletter`}
         lastUpdatedIso={newest}
         newsletter={signup != null}
         newsletterKey={signup ?? undefined}
@@ -101,9 +107,23 @@ export default async function PastIssuesPage({ params }: Props) {
             {NEWSLETTER_ABOUT[key]}
           </>
         }
-      />
+      >
+        <ArchiveLink
+          href={nl.page}
+          newsletter={nl.prefix}
+          target="resource"
+          className="paragraph-small color-teal-300"
+        >
+          {RESOURCE_LINK[key].lead}{' '}
+          <span className="color-white">{RESOURCE_LINK[key].name}</span>
+          &nbsp;&rarr;
+        </ArchiveLink>
+      </PageHeader>
 
       <div className="width-7-col padding-bottom-56px">
+        <h3 className="paragraph-small-bold color-teal-300 padding-bottom-16px">
+          Past issues
+        </h3>
         {issues ? (
           <ul className={`paragraph-small ${styles.issues}`}>
             {issues.map(issue => (
