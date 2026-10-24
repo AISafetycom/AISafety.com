@@ -1,5 +1,27 @@
-import type { CardProps } from '@/components/ListingCard'
+import type { CardProps, ListingCardMeta } from '@/components/ListingCard'
 import type { Advisor } from '@/lib/data/advisors'
+import { focusLabel, whoItsForLabel } from '@/lib/advisor-meta'
+
+const APPLICATIONS_ICONS: Record<string, string> = {
+  'Application required': '/images/icons/paper.svg',
+  'Accepts everyone': '/images/icons/form-check.svg',
+}
+
+// The metadata lines on an advisor's card: who it's for, focus and
+// applications, each left out when the advisor has no value for it. Shared by
+// the grid cards and the featured cards.
+export function advisorMeta(advisor: Advisor): ListingCardMeta[] {
+  const who = whoItsForLabel(advisor.whoItsFor)
+  const focus = focusLabel(advisor.focusAreas)
+  const applicationsIcon = APPLICATIONS_ICONS[advisor.applications]
+  return [
+    ...(who ? [{ icon: '/images/icons/team.svg', value: who }] : []),
+    ...(focus ? [{ icon: '/images/icons/target.svg', value: focus }] : []),
+    ...(applicationsIcon
+      ? [{ icon: applicationsIcon, value: advisor.applications }]
+      : []),
+  ]
+}
 
 // The ListingCard props for one advisor, exactly as the /advisors grid
 // renders it. Plain TS (no JSX) so the page's client component and the admin
@@ -10,8 +32,6 @@ export function advisorCardProps(advisor: Advisor): CardProps {
     name: advisor.name,
     description: advisor.description,
     logo: advisor.logo,
-    meta: advisor.focus
-      ? [{ icon: '/images/icons/target.svg', value: advisor.focus }]
-      : [],
+    meta: advisorMeta(advisor),
   }
 }
