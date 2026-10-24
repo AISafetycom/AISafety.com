@@ -2,8 +2,8 @@ import { fetchLastUpdated } from '@/lib/data/last-updated'
 import PageHeader from '@/components/PageHeader'
 import FeaturedCard from '@/components/FeaturedCard'
 import FundingClient from './FundingClient'
+import { funderMeta } from './card'
 import { getFunders } from '@/lib/data/funding'
-import { isAcceptingApplications } from '@/lib/funding-status'
 import { pageMetadata } from '@/lib/page-metadata'
 import { feedPath } from '@/lib/newsletter-archive'
 import { WEB_NEWSLETTERS } from '@/lib/newsletter-web'
@@ -53,23 +53,7 @@ export default async function FundingPage() {
             name={funder.name}
             description={funder.description}
             logo={funder.logo ?? undefined}
-            meta={[
-              ...(funder.acceptingApplications
-                ? [
-                    {
-                      icon: isAcceptingApplications(
-                        funder.acceptingApplications
-                      )
-                        ? '/images/icons/form-check.svg'
-                        : '/images/icons/form-pause.svg',
-                      value: funder.acceptingApplications,
-                    },
-                  ]
-                : []),
-              ...(funder.type
-                ? [{ icon: '/images/icons/tag.svg', value: funder.type }]
-                : []),
-            ]}
+            meta={funderMeta(funder)}
             trackingPage="Funding"
             trackingId={funder.id}
             trackingPosition={`F${funder.featured}`}
