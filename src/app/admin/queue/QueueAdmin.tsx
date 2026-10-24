@@ -6581,7 +6581,12 @@ function Fields({
   for (const [k, v] of Object.entries(d.edits)) {
     current[k] = v === 'false' ? false : v
   }
-  const missing = missingFields(item.page, current)
+  // A field the table does not have is never asked for: it could not be
+  // set (a recurring program was asked for a Start date, 24 Oct 2026).
+  const columns = new Set(schema.map(f => f.name.trim().toLowerCase()))
+  const missing = missingFields(item.page, current, item.targetTable).filter(
+    k => columns.size === 0 || columns.has(k.toLowerCase())
+  )
   const missingSet = new Set(missing)
   for (const k of missing) if (!(k in all)) all[k] = null
   const entries = Object.entries(all)
