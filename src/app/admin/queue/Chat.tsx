@@ -1031,6 +1031,29 @@ export default function Chat({
     []
   )
 
+  // Stop: the Mac kills the reply being written and keeps what it wrote,
+  // with "You stopped this reply" under it. Nothing new is coming, so it
+  // does not answer the stopped message later either (Bryce, 24 Oct 2026:
+  // "The fable chat should have a stop button"). Messages waiting to go
+  // still go – each has its own Remove.
+  const [stopping, setStopping] = useState(false)
+  useEffect(() => {
+    if (!busy && !pending) setStopping(false)
+  }, [busy, pending])
+  const stop = async () => {
+    setStopping(true)
+    let why = 'the Mac agent did not answer.'
+    try {
+      const res = await call('/chat/interrupt', { stop: true })
+      if (res.ok) return
+      why = `HTTP ${res.status}`
+    } catch {
+      // why stays: the Mac agent is down or restarting.
+    }
+    setStopping(false)
+    setError(`Could not stop Fable – ${why}`)
+  }
+
   const startOver = async () => {
     if (busy || pending) return
     try {
@@ -1202,7 +1225,9 @@ export default function Chat({
             ))}
           </div>
         )}
-        <div className={styles.chatBox}>
+        <div
+          className={`${styles.chatBox} ${busy || pending ? styles.chatBoxAnswering : ''}`}
+        >
           <textarea
             ref={inputRef}
             className={styles.chatInput}
@@ -1256,6 +1281,18 @@ export default function Chat({
           >
             <Icon src="/images/icons/paperclip.svg" size={16} />
           </button>
+          {(busy || pending) && (
+            <button
+              type="button"
+              className={styles.chatStop}
+              aria-label="Stop Fable"
+              title={stopping ? 'Stopping…' : 'Stop Fable'}
+              disabled={stopping}
+              onClick={() => void stop()}
+            >
+              <span className={styles.chatStopSquare} />
+            </button>
+          )}
         </div>
         {thread.length > 0 && (
           // Always there once a thread exists, so the panel's foot keeps
