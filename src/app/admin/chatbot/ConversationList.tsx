@@ -17,6 +17,7 @@ import {
 import { parseLog, parseNotes, stampToDate } from '@/lib/admin/annotation-log'
 import styles from '../admin.module.css'
 import { Collapse } from '../Collapse'
+import { CLOSE_MS } from '../motion'
 import motion from '../motion.module.css'
 import TranscriptMessage, {
   ClickedCardsContext,
@@ -529,6 +530,26 @@ function loadViewedIds(): string[] {
   }
 }
 
+/** Keeps a clicked row where it is on screen while the conversation open
+ *  above it folds shut. Only one is open at a time, so opening a row closes
+ *  the other, and everything below that one rises as it folds: the clicked
+ *  row with it, often off the top of the screen. Until the fold is over,
+ *  scroll the page by however far the row has moved. */
+function holdOnScreen(row: HTMLElement) {
+  const top = row.getBoundingClientRect().top
+  let end = 0
+  const step = (now: number) => {
+    if (!row.isConnected) return
+    // The fold starts on the first frame and lasts CLOSE_MS. The margin
+    // covers the closed panel's removal landing a frame or two late.
+    end ||= now + CLOSE_MS + 50
+    const drift = Math.round(row.getBoundingClientRect().top - top)
+    if (drift) window.scrollBy({ top: drift, behavior: 'instant' })
+    if (now < end) requestAnimationFrame(step)
+  }
+  requestAnimationFrame(step)
+}
+
 export default function ConversationList() {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [listings, setListings] = useState<Record<string, ListingInfo>>({})
@@ -861,9 +882,10 @@ export default function ConversationList() {
                 expanded={expandedId === c.id}
                 viewed={viewed.has(c.id)}
                 allLabels={allLabels}
-                onToggle={() => {
+                onToggle={row => {
                   const next = expandedId === c.id ? null : c.id
                   if (next) markViewed(c.id)
+                  if (next && expandedId) holdOnScreen(row)
                   setExpandedId(next)
                   syncUrl(next)
                 }}
@@ -909,7 +931,8 @@ function ConversationRow({
   expanded: boolean
   viewed: boolean
   allLabels: string[]
-  onToggle: () => void
+  /** Called with the row's header, the part that was clicked. */
+  onToggle: (row: HTMLElement) => void
   onUpdate: (c: Conversation) => void
 }) {
   const [noteDraft, setNoteDraft] = useState('')
@@ -1159,7 +1182,7 @@ function ConversationRow({
         ]
           .filter(Boolean)
           .join(' ')}
-        onClick={onToggle}
+        onClick={e => onToggle(e.currentTarget)}
         aria-expanded={expanded}
       >
         <div className={styles.convRowHeader}>
