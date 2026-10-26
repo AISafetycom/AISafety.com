@@ -17,7 +17,7 @@ import {
 import { parseLog, parseNotes, stampToDate } from '@/lib/admin/annotation-log'
 import styles from '../admin.module.css'
 import { Collapse } from '../Collapse'
-import { CLOSE_MS } from '../motion'
+import { holdOnScreen } from '../motion'
 import motion from '../motion.module.css'
 import TranscriptMessage, {
   ClickedCardsContext,
@@ -528,26 +528,6 @@ function loadViewedIds(): string[] {
     console.warn('Resetting unreadable viewed-conversations list:', err)
     return []
   }
-}
-
-/** Keeps a clicked row where it is on screen while the conversation open
- *  above it folds shut. Only one is open at a time, so opening a row closes
- *  the other, and everything below that one rises as it folds: the clicked
- *  row with it, often off the top of the screen. Until the fold is over,
- *  scroll the page by however far the row has moved. */
-function holdOnScreen(row: HTMLElement) {
-  const top = row.getBoundingClientRect().top
-  let end = 0
-  const step = (now: number) => {
-    if (!row.isConnected) return
-    // The fold starts on the first frame and lasts CLOSE_MS. The margin
-    // covers the closed panel's removal landing a frame or two late.
-    end ||= now + CLOSE_MS + 50
-    const drift = Math.round(row.getBoundingClientRect().top - top)
-    if (drift) window.scrollBy({ top: drift, behavior: 'instant' })
-    if (now < end) requestAnimationFrame(step)
-  }
-  requestAnimationFrame(step)
 }
 
 export default function ConversationList() {
