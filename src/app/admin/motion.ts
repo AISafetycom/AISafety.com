@@ -30,3 +30,25 @@ export function useClosing<T>(
   const closing = animate && !value && !!kept
   return [closing ? kept : value, closing]
 }
+
+/**
+ * Keeps a clicked element where it is on screen while a panel above it folds
+ * shut. Where only one panel is open at a time, opening one closes the
+ * other, and everything below that one rises as it folds: the clicked
+ * element with it, often off the top of the screen. Until the fold is over,
+ * scroll the page by however far the element has moved.
+ */
+export function holdOnScreen(el: HTMLElement) {
+  const top = el.getBoundingClientRect().top
+  let end = 0
+  const step = (now: number) => {
+    if (!el.isConnected) return
+    // The fold starts on the first frame and lasts CLOSE_MS. The margin
+    // covers the closed panel's removal landing a frame or two late.
+    end ||= now + CLOSE_MS + 50
+    const drift = Math.round(el.getBoundingClientRect().top - top)
+    if (drift) window.scrollBy({ top: drift, behavior: 'instant' })
+    if (now < end) requestAnimationFrame(step)
+  }
+  requestAnimationFrame(step)
+}
