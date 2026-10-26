@@ -2376,7 +2376,10 @@ const NEWSLETTER_OF_PAGE: Readonly<Record<string, string>> = {
 /** Where ActiveCampaign sends a reader once they've pressed "Confirm
  *  subscription" in the email a signup on the site triggers
  *  (src/app/subscribed), per newsletter. */
-const CONFIRM_PAGE = /^\/subscribed\/(events|training|funding)\/?$/
+/** …and, from the newsletters page's combination forms, /subscribed/
+ *  events-funding and the like: a confirmation of each newsletter named. */
+const CONFIRM_PAGE =
+  /^\/subscribed\/((?:events|training|funding)(?:-(?:training|funding))*)\/?$/
 
 /** The page views of the confirm pages that count as confirmations: every
  *  one in total mode, one per visitor per newsletter per day in unique mode
@@ -2498,9 +2501,9 @@ export function newslettersPageStats(
 
 /** Signups ActiveCampaign took on the newsletters page (/newsletter), which
  *  signs up to several newsletters at once: each success names, in
- *  `source`, the one whose confirmation email went out, the one a
- *  confirmation lands on. Follows the count mode like the boxes' successes
- *  (one per visitor per newsletter per day). */
+ *  `source`, the newsletters its confirmation email covers ('events+funding'),
+ *  the ones a confirmation lands on. Follows the count mode like the boxes'
+ *  successes (one per visitor per form per day). */
 function newslettersPageSuccesses(
   inRange: AnalyticsEvent[],
   unique: boolean
@@ -2509,7 +2512,10 @@ function newslettersPageSuccesses(
   return inRange.filter(e => {
     if (e.type !== 'newsletter_signup_success' || e.page !== '/newsletter')
       return false
-    if (!/^(events|training|funding)$/.test(e.source ?? '')) return false
+    if (
+      !/^(events|training|funding)(\+(training|funding))*$/.test(e.source ?? '')
+    )
+      return false
     if (!unique || !e.vid) return true
     const t = Date.parse(e.ts)
     const key = `${e.vid}\x00${Number.isNaN(t) ? '' : dashboardDay(t)}\x00${e.source}`
@@ -2550,13 +2556,14 @@ export function newsletterConfirmations(
     const name = NEWSLETTER_OF_PAGE[r.name]
     if (name && r.succeeded > 0) rowFor(name).signedUp += r.succeeded
   }
+  const named = (keys: string) =>
+    keys.split(/[+-]/).map(k => k[0].toUpperCase() + k.slice(1))
   for (const e of newslettersPageSuccesses(inRange, unique)) {
-    const key = e.source as string
-    rowFor(key[0].toUpperCase() + key.slice(1)).signedUp++
+    for (const name of named(e.source as string)) rowFor(name).signedUp++
   }
   for (const e of confirmLandings(inRange, unique)) {
-    const key = CONFIRM_PAGE.exec(e.page ?? '')![1]
-    rowFor(key[0].toUpperCase() + key.slice(1)).confirmed++
+    const keys = CONFIRM_PAGE.exec(e.page ?? '')![1]
+    for (const name of named(keys)) rowFor(name).confirmed++
   }
   return [...rows.values()].sort((a, b) => a.name.localeCompare(b.name))
 }

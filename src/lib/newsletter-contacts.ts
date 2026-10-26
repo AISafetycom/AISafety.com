@@ -2,9 +2,8 @@
   The few ActiveCampaign calls behind the newsletters page (/newsletter):
   find a reader's contact, read and change which newsletter lists they're
   on, and store their settings key (src/lib/newsletter-manage.ts). Used by
-  /api/newsletter/settings, the several-newsletters signup in
-  /api/subscribe and the cron that finishes those signups
-  (src/lib/newsletter-pending.ts). Server only.
+  /api/newsletter/settings and by /api/subscribe (the several-newsletters
+  signup's lookup, and every new contact's key). Server only.
 
   Only the live site changes anything: a localhost or preview copy reads
   the real account (every worktree's .env.local holds the key) but logs

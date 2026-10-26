@@ -12,9 +12,9 @@
 
   The newsletters page (/newsletter) signs up to several at once: body
   { email, newsletters: [...], hp }. One confirmation email covers them all:
-  only the first one picked that the reader doesn't get yet goes to its
-  form, and the rest are kept until that one is confirmed
-  (src/lib/newsletter-pending.ts).
+  the address goes to the form for exactly the ones picked that the reader
+  doesn't get yet (a combination has a form of its own), and its email
+  names every one of them.
 
   After a signup ActiveCampaign took, the live site also stores the new
   contact's settings key, so their first issue's "Manage subscriptions"
@@ -30,11 +30,12 @@ import { NextRequest, after } from 'next/server'
 import { getClientIp } from '@/lib/assistant/rate-limit'
 import {
   AC_FORMS,
+  COMBO_FORMS,
+  formKeyFor,
   isFormConfigured,
   isSignupNewsletter,
   normalizeEmail,
   postSignup,
-  type SignupNewsletter,
 } from '@/lib/newsletter-signup'
 import {
   ADDRESS_SENDS_PER_DAY,
@@ -54,7 +55,6 @@ import {
   type Contact,
 } from '@/lib/newsletter-contacts'
 import { NEWSLETTER_LIST, parsePicks } from '@/lib/newsletter-manage'
-import { savePending } from '@/lib/newsletter-pending'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -207,7 +207,11 @@ export async function POST(req: NextRequest) {
   return fail(502, 'upstream', MESSAGES.wrong)
 }
 
-/** The newsletters page's signup: several newsletters, one confirmation. */
+/** The newsletters page's signup: several newsletters, one confirmation.
+ *  The reader's lists are looked up first, so the form posted is the one for
+ *  exactly the newsletters they don't get yet (one newsletter's own form, or
+ *  a combination's, COMBO_FORMS): its confirmation email names them all, and
+ *  one click there confirms every one of its lists. */
 async function signUpToSeveral(
   req: NextRequest,
   b: Record<string, unknown>
@@ -224,13 +228,12 @@ async function signUpToSeveral(
   const email = normalizeEmail(b.email)
   if (!email) return fail(400, 'invalid_email', MESSAGES.invalidEmail)
 
-  // Finding out which of them the reader already gets, and keeping the
-  // rest, both need ActiveCampaign's API.
-  if (
-    picks.some(n => !isFormConfigured(AC_FORMS[n])) ||
-    !contactsConfigured()
-  ) {
-    console.warn(`${tag} not configured here; nothing sent`)
+  // Finding out which of them the reader already gets needs ActiveCampaign's
+  // API.
+  if (!contactsConfigured()) {
+    console.warn(
+      `${tag} ActiveCampaign's API isn't configured here; nothing sent`
+    )
     return fail(503, 'not_configured', MESSAGES.notOpen)
   }
 
@@ -245,7 +248,8 @@ async function signUpToSeveral(
     contact = await findContact(email)
     if (contact) statuses = await readStatuses(contact.id)
   } catch (err) {
-    // The forms still say "already subscribed" for a list the reader is on.
+    // Signed up for every one picked, then: a form still says "already
+    // subscribed" for an address confirmed on all of its lists.
     console.warn(
       `${tag} couldn't look the address up, so treating it as new: ${err instanceof Error ? err.message : String(err)}`
     )
@@ -254,6 +258,22 @@ async function signUpToSeveral(
   if (todo.length === 0) {
     console.log(`${tag} already subscribed to all of them; nothing sent`)
     return Response.json({ ok: true, already: true })
+  }
+
+  const key = formKeyFor(todo)
+  const form = isSignupNewsletter(key) ? AC_FORMS[key] : COMBO_FORMS[key]
+  if (!isFormConfigured(form)) {
+    console.warn(
+      `${tag} the form for ${key} isn't filled in (COMBO_FORMS in src/lib/newsletter-signup.ts); nothing sent`
+    )
+    return fail(503, 'not_configured', MESSAGES.notOpen)
+  }
+
+  if (!(await addressAllowed(key, email))) {
+    console.log(
+      `${tag} address already sent to ${key} ${ADDRESS_SENDS_PER_DAY} times in 24 hours; answered as usual, not sent again`
+    )
+    return succeed()
   }
 
   const today = await countSignupToday()
@@ -265,66 +285,25 @@ async function signUpToSeveral(
   }
   if (today?.alert) after(() => alertOwner(today))
 
-  // The first newsletter ActiveCampaign takes sends the one confirmation.
-  for (let i = 0; i < todo.length; i++) {
-    const first = todo[i]
-    if (!(await addressAllowed(first, email))) {
-      console.log(
-        `${tag} address already sent ${ADDRESS_SENDS_PER_DAY} times in 24 hours; answered as usual, not sent again`
-      )
-      return succeed()
-    }
-    const result = await postSignup(first, AC_FORMS[first], email)
-    if (
-      result.outcome === 'subscribed' ||
-      (result.outcome === 'failed' && result.mayHaveSent)
-    ) {
-      await recordAddressSend(first, email)
-    }
-    // The lookup missed it (or couldn't run): on to the next one.
-    if (result.outcome === 'already_subscribed') continue
-    if (result.outcome === 'invalid_email') {
-      return fail(400, 'invalid_email', MESSAGES.invalidEmail)
-    }
-    if (result.outcome === 'failed')
-      return fail(502, 'upstream', MESSAGES.wrong)
-
-    const rest = todo.slice(i + 1)
-    if (rest.length) await keepRest(tag, contact, email, first, rest)
+  const result = await postSignup(key, form, email)
+  if (
+    result.outcome === 'subscribed' ||
+    (result.outcome === 'failed' && result.mayHaveSent)
+  ) {
+    await recordAddressSend(key, email)
+  }
+  if (result.outcome === 'subscribed') {
     keepKey(email, contact)
-    // Which newsletter the confirmation email comes from, so the page can
-    // say what to look for. It tells the visitor no more than the boxes'
+    // The newsletters the confirmation email names, so the page can say
+    // what to look for. It tells the visitor no more than the boxes'
     // "already subscribed" does.
-    return Response.json({ ok: true, confirm: first })
+    return Response.json({ ok: true, confirm: todo })
   }
-  return Response.json({ ok: true, already: true })
-}
-
-/** Keep the rest of a signup until its first newsletter is confirmed. */
-async function keepRest(
-  tag: string,
-  known: Contact | null,
-  email: string,
-  first: SignupNewsletter,
-  rest: SignupNewsletter[]
-): Promise<void> {
-  try {
-    // A new reader's contact exists once the form has taken the signup.
-    const contact = known ?? (await findContact(email))
-    if (!contact) throw new Error("the new contact isn't in ActiveCampaign yet")
-    await savePending(
-      contact.id,
-      NEWSLETTER_LIST[first],
-      rest.map(n => NEWSLETTER_LIST[n])
-    )
-    console.log(
-      `${tag} ${first}'s confirmation sent; ${rest.join(', ')} kept until it's confirmed`
-    )
-  } catch (err) {
-    // The reader still gets the first one; the rest are lost, so say so
-    // loudly enough to find in the log.
-    console.error(
-      `${tag} ${first}'s confirmation sent, but ${rest.join(', ')} couldn't be kept: ${err instanceof Error ? err.message : String(err)}`
-    )
+  if (result.outcome === 'already_subscribed') {
+    return Response.json({ ok: true, already: true })
   }
+  if (result.outcome === 'invalid_email') {
+    return fail(400, 'invalid_email', MESSAGES.invalidEmail)
+  }
+  return fail(502, 'upstream', MESSAGES.wrong)
 }

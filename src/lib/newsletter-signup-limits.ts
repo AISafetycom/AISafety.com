@@ -34,7 +34,7 @@ import {
   signupAlertMail,
 } from '@/lib/admin/mail'
 import { ROOT_ADMINS } from '@/lib/admin/users'
-import type { SignupNewsletter } from '@/lib/newsletter-signup'
+import type { SignupFormKey } from '@/lib/newsletter-signup'
 
 export const IP_SIGNUPS_PER_HOUR = 30
 export const ADDRESS_SENDS_PER_DAY = 3
@@ -159,12 +159,10 @@ export async function settingsAllowed(ip: string): Promise<boolean> {
 
 // ─── Per address ────────────────────────────────────────────────────────────
 
-/** The address as its limit key: newsletter plus a hash of the lowercased
- *  address, so the database never holds the address itself. */
-export function addressKey(
-  newsletter: SignupNewsletter,
-  email: string
-): string {
+/** The address as its limit key: the form (a newsletter, or a combination
+ *  from /newsletter) plus a hash of the lowercased address, so the database
+ *  never holds the address itself. */
+export function addressKey(newsletter: SignupFormKey, email: string): string {
   const hash = createHash('sha256').update(email.toLowerCase()).digest('hex')
   return `${newsletter}:${hash.slice(0, 32)}`
 }
@@ -172,7 +170,7 @@ export function addressKey(
 /** Whether this address may be sent to ActiveCampaign again for this
  *  newsletter. Only looks; `recordAddressSend` counts a send. */
 export async function addressAllowed(
-  newsletter: SignupNewsletter,
+  newsletter: SignupFormKey,
   email: string
 ): Promise<boolean> {
   if (!storeReady() || !addressLimiter) return true
@@ -184,7 +182,7 @@ export async function addressAllowed(
 
 /** Count a send that may have mailed this address a confirmation. */
 export async function recordAddressSend(
-  newsletter: SignupNewsletter,
+  newsletter: SignupFormKey,
   email: string
 ): Promise<void> {
   if (!storeReady() || !addressLimiter) return

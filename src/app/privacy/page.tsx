@@ -112,11 +112,9 @@ export default function PrivacyPage() {
             </Link>{' '}
             so you can change which ones you get; the private code in that link
             stays out of our analytics. When you sign up for several newsletters
-            there at once, one confirmation email covers them all. Until you
-            confirm, we keep your ActiveCampaign contact number and the
-            newsletters you picked, for at most 14 days. The AISafety.com
-            Updates newsletter is hosted on Substack – when you subscribe to it,
-            Substack&apos;s own privacy policy applies.
+            there at once, one confirmation email covers them all. The
+            AISafety.com Updates newsletter is hosted on Substack – when you
+            subscribe to it, Substack&apos;s own privacy policy applies.
           </p>
 
           <h3 className="padding-bottom-16px">Services we rely on</h3>

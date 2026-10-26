@@ -23,10 +23,6 @@
     {
       "path": "/api/admin/newsletter/archive",
       "schedule": "37 6 * * *"
-    },
-    {
-      "path": "/api/newsletter/pending",
-      "schedule": "*/10 * * * *"
     }
   ]
 }

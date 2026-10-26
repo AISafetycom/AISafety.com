@@ -56,6 +56,40 @@ export const AC_FORMS: Record<SignupNewsletter, AcForm> = {
   funding: { formId: 8, orKey: 'c895d3e7-eb90-4022-a904-01f90a9fa8c0' },
 }
 
+/** Two or three newsletters at once, from the newsletters page
+ *  (/newsletter): their keys in the usual order, joined with "-". */
+export const COMBO_KEYS = [
+  'events-training',
+  'events-funding',
+  'training-funding',
+  'events-training-funding',
+] as const
+export type ComboKey = (typeof COMBO_KEYS)[number]
+/** A form: one newsletter's, or a combination's. */
+export type SignupFormKey = SignupNewsletter | ComboKey
+
+// One double opt-in form per combination (made 26 October 2026), each
+// subscribing to all of its lists, so a reader who ticks several newsletters
+// gets ONE confirmation email that names them all, and one click confirms
+// every list. Same values to copy as above; a combination left at 0 / ''
+// answers 503 for it without contacting ActiveCampaign.
+export const COMBO_FORMS: Record<ComboKey, AcForm> = {
+  'events-training': { formId: 0, orKey: '' },
+  'events-funding': { formId: 0, orKey: '' },
+  'training-funding': { formId: 0, orKey: '' },
+  'events-training-funding': { formId: 0, orKey: '' },
+}
+
+/** The form that signs up to exactly these newsletters (one or more,
+ *  known, each once). */
+export function formKeyFor(newsletters: SignupNewsletter[]): SignupFormKey {
+  const ordered = SIGNUP_NEWSLETTERS.filter(n => newsletters.includes(n))
+  if (ordered.length === 0 || ordered.length !== new Set(newsletters).size) {
+    throw new Error(`no form for ${newsletters.join(', ') || 'nothing'}`)
+  }
+  return ordered.length === 1 ? ordered[0] : (ordered.join('-') as ComboKey)
+}
+
 /** The account's form endpoint. `jsonp=true` asks for the short JavaScript
  *  answer the embedded forms get instead of a redirect to a thank-you page.
  *  It goes in the address as well as the body, so it counts whichever of the
@@ -142,9 +176,10 @@ const ERROR_CALL = new RegExp(
 const HTML_PAGE = /<(?:!doctype|html|head|body)\b/i
 /** The jump to the form's confirmation page that ActiveCampaign answers for an
  *  address already confirmed on the list:
- *  `window.top.location.href = "https://aisafety.com/subscribed/events";` */
+ *  `window.top.location.href = "https://aisafety.com/subscribed/events";`
+ *  (a combination's form: /subscribed/events-funding). */
 const ALREADY_REDIRECT =
-  /location\.href\s*=\s*["']https:\/\/(?:www\.)?aisafety\.com\/subscribed\/(?:events|training|funding)\/?["']/
+  /location\.href\s*=\s*["']https:\/\/(?:www\.)?aisafety\.com\/subscribed\/(?:events|training|funding)(?:-(?:training|funding))*\/?["']/
 const CLOUDFLARE =
   /cf-chl|challenge-platform|cf_chl_opt|cdn-cgi\/challenge|Just a moment\.\.\.|Attention Required! \| Cloudflare/i
 
@@ -252,10 +287,11 @@ export function signupFields(form: AcForm, email: string): URLSearchParams {
   })
 }
 
-/** Sign one address up through the newsletter's form. Logs what happened
- *  (the HTTP status and the start of the answer), never the address. */
+/** Sign one address up through the newsletter's form (or a combination's).
+ *  Logs what happened (the HTTP status and the start of the answer), never
+ *  the address. */
 export async function postSignup(
-  newsletter: SignupNewsletter,
+  newsletter: SignupFormKey,
   form: AcForm,
   email: string,
   {

@@ -327,18 +327,26 @@ function SignupForm({ newsletters }: { newsletters: Newsletter[] }) {
       trackNewsletterSignupError(TRACKING_PAGE, 'already_subscribed')
       return
     }
-    const confirm =
-      typeof answer.confirm === 'string' ? nameOf(answer.confirm) : null
+    // The newsletters the confirmation email names: the ones ticked that the
+    // reader didn't get yet. One newsletter's email comes from it; a
+    // combination's comes from AISafety.com.
+    const confirm = Array.isArray(answer.confirm)
+      ? SIGNUP_NEWSLETTERS.filter(n =>
+          (answer.confirm as unknown[]).includes(n)
+        )
+      : []
+    const sender =
+      confirm.length === 1
+        ? nameOf(confirm[0])
+        : confirm.length > 1
+          ? 'AISafety.com'
+          : null
     setDone(
-      `Check your inbox${confirm ? ` for an email from ${confirm}` : ''} and confirm your subscription.${
-        picks.length > 1
-          ? ' That one click signs you up to every newsletter you ticked.'
-          : ''
-      }`
+      `Check your inbox${sender ? ` for an email from ${sender}` : ''} and confirm your subscription.`
     )
     trackNewsletterSignupSuccess(
       TRACKING_PAGE,
-      typeof answer.confirm === 'string' ? answer.confirm : undefined
+      confirm.length ? confirm.join('+') : undefined
     )
   }
 

@@ -81,20 +81,27 @@ describe('newslettersPageStats', () => {
 })
 
 describe('newsletterConfirmations with the newsletters page', () => {
-  it('credits each signup to the newsletter whose confirmation went out', () => {
+  it('credits each signup and confirmation to every newsletter it covers', () => {
     const events = [
-      ev('newsletter_signup_success', 'a', DAY1, { source: 'events' }),
+      ev('newsletter_signup_success', 'a', DAY1, { source: 'events+funding' }),
       ev('newsletter_signup_success', 'b', DAY1, { source: 'funding' }),
       // a twice the same day: once in unique mode.
-      ev('newsletter_signup_success', 'a', DAY1_LATER, { source: 'events' }),
+      ev('newsletter_signup_success', 'a', DAY1_LATER, {
+        source: 'events+funding',
+      }),
       // A box's signup, the way it was always counted.
-      ev('newsletter_signup_success', 'a', DAY1, { page: 'Funding' }),
-      ev('page_view', 'a', DAY1_LATER, { page: '/subscribed/events' }),
+      ev('newsletter_signup_success', 'c', DAY1, { page: 'Training' }),
+      // a's combination confirmed, and b's one newsletter.
+      ev('page_view', 'a', DAY1_LATER, { page: '/subscribed/events-funding' }),
+      ev('page_view', 'b', DAY1_LATER, { page: '/subscribed/funding' }),
+      // Not a confirm page.
+      ev('page_view', 'b', DAY1_LATER, { page: '/subscribed/updates' }),
     ]
     const results = newsletterSignupResults(events, true)
     expect(newsletterConfirmations(events, true, results)).toEqual([
       { name: 'Events', signedUp: 1, confirmed: 1 },
-      { name: 'Funding', signedUp: 2, confirmed: 0 },
+      { name: 'Funding', signedUp: 2, confirmed: 2 },
+      { name: 'Training', signedUp: 1, confirmed: 0 },
     ])
   })
 })
