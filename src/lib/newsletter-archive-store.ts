@@ -134,6 +134,28 @@ export async function archiveIssues(key: WebKey): Promise<ArchiveIssue[]> {
   return mergeIssues(key, kept, seen)
 }
 
+/** The list for a preview-mode view of a newsletter page (an admin with
+ *  /admin/preview on, whose every page is rendered afresh): the site's
+ *  record alone, one quick read, in place of archiveIssues' ActiveCampaign
+ *  reads, which took a fresh server several seconds. Nothing on the page
+ *  comes from Airtable, so preview has nothing newer to show, and the
+ *  record holds every issue the public page lists, since its renders add
+ *  ActiveCampaign's new ones. With no store, or nothing in the record, it
+ *  is archiveIssues after all. */
+export async function previewIssues(key: WebKey): Promise<ArchiveIssue[]> {
+  if (store) {
+    try {
+      const kept = await recorded(key)
+      if (kept.length) return mergeIssues(key, kept)
+    } catch (err) {
+      console.warn(
+        `[newsletter-archive] ${key}: the record couldn't be read for a preview: ${reason(err)}`
+      )
+    }
+  }
+  return archiveIssues(key)
+}
+
 function reason(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
