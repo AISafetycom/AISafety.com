@@ -26,6 +26,7 @@ const ROUTES = [
   '/map',
   '/media',
   '/media-channels',
+  '/newsletter',
   '/privacy',
   '/self-study',
   '/training',

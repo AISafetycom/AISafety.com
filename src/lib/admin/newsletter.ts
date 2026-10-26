@@ -1813,6 +1813,9 @@ const KNOWN_TAGS = new Set([
   'UNSUBSCRIBELINK',
   'WEBCOPY',
   'SENDER-INFO-SINGLELINE',
+  // The reader's settings key in the footer's "Manage subscriptions" link
+  // (src/lib/newsletter-manage.ts).
+  'MANAGE_KEY',
 ])
 /** Words a finished issue never contains (the 28 Sept 2026 Training
  *  rehearsal went out with "TEST" and "test" typed into two cards).
@@ -3586,11 +3589,16 @@ export async function previewHtml(
   if (!msg) return null
   const html = msg.html ?? ''
   if (!MARKER_RE.test(html)) return null
-  return html
-    .replace(MARKER_RE, '')
-    .replace(/%UNSUBSCRIBELINK%/g, '#')
-    .replace(/%WEBCOPY%/g, '#')
-    .replace(/%SENDER-INFO-SINGLELINE%/g, SENDER_INFO)
+  return (
+    html
+      .replace(MARKER_RE, '')
+      .replace(/%UNSUBSCRIBELINK%/g, '#')
+      .replace(/%WEBCOPY%/g, '#')
+      .replace(/%SENDER-INFO-SINGLELINE%/g, SENDER_INFO)
+      // A preview has no reader: "Manage subscriptions" opens the plain page.
+      .replace(/#k=%MANAGE_KEY%/g, '')
+      .replace(/%MANAGE_KEY%/g, '')
+  )
 }
 
 /** AC stores sdate in the account's local time. Read the current UTC offset

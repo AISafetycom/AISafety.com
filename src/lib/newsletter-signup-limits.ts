@@ -14,7 +14,10 @@
   - per UTC day, across both newsletters: the owner gets one email once 100
     signups have gone through, and above 1,000 the boxes turn signups away
     until midnight UTC (a flood of unconfirmed contacts would otherwise eat
-    into the account's contact limit).
+    into the account's contact limit);
+  - per network on the newsletters page's settings (/api/newsletter/
+    settings): 60 loads and saves an hour, far more than a reader needs,
+    so nobody can work through keys or hammer ActiveCampaign.
 
   If Upstash isn't configured or doesn't answer, every limit is skipped (one
   log line, not one per request): a broken check must never block a person.
@@ -31,12 +34,13 @@ import {
   signupAlertMail,
 } from '@/lib/admin/mail'
 import { ROOT_ADMINS } from '@/lib/admin/users'
-import type { SignupNewsletter } from '@/lib/newsletter-signup'
+import type { SignupFormKey } from '@/lib/newsletter-signup'
 
 export const IP_SIGNUPS_PER_HOUR = 30
 export const ADDRESS_SENDS_PER_DAY = 3
 export const DAILY_ALERT_AFTER = 100
 export const DAILY_CAP = 1000
+export const IP_SETTINGS_PER_HOUR = 60
 
 /** How long an Upstash call may take before the limit is skipped. */
 const STORE_TIMEOUT_MS = 1500
@@ -71,6 +75,16 @@ const addressLimiter = redis
       limiter: Ratelimit.slidingWindow(ADDRESS_SENDS_PER_DAY, '1 d'),
       analytics: false,
       prefix: `${PREFIX}:address`,
+      timeout: 0,
+    })
+  : null
+
+const settingsLimiter = redis
+  ? new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(IP_SETTINGS_PER_HOUR, '1 h'),
+      analytics: false,
+      prefix: 'aisafety:newsletter:settings:ip',
       timeout: 0,
     })
   : null
@@ -133,14 +147,22 @@ export async function ipAllowed(ip: string): Promise<boolean> {
   return result ? result.success : true
 }
 
+/** Whether this IP may load or save newsletter settings again now. Takes
+ *  one of its hourly requests. */
+export async function settingsAllowed(ip: string): Promise<boolean> {
+  if (!storeReady() || !settingsLimiter) return true
+  const result = await guarded('settings limit', () =>
+    settingsLimiter.limit(ip)
+  )
+  return result ? result.success : true
+}
+
 // ─── Per address ────────────────────────────────────────────────────────────
 
-/** The address as its limit key: newsletter plus a hash of the lowercased
- *  address, so the database never holds the address itself. */
-export function addressKey(
-  newsletter: SignupNewsletter,
-  email: string
-): string {
+/** The address as its limit key: the form (a newsletter, or a combination
+ *  from /newsletter) plus a hash of the lowercased address, so the database
+ *  never holds the address itself. */
+export function addressKey(newsletter: SignupFormKey, email: string): string {
   const hash = createHash('sha256').update(email.toLowerCase()).digest('hex')
   return `${newsletter}:${hash.slice(0, 32)}`
 }
@@ -148,7 +170,7 @@ export function addressKey(
 /** Whether this address may be sent to ActiveCampaign again for this
  *  newsletter. Only looks; `recordAddressSend` counts a send. */
 export async function addressAllowed(
-  newsletter: SignupNewsletter,
+  newsletter: SignupFormKey,
   email: string
 ): Promise<boolean> {
   if (!storeReady() || !addressLimiter) return true
@@ -160,7 +182,7 @@ export async function addressAllowed(
 
 /** Count a send that may have mailed this address a confirmation. */
 export async function recordAddressSend(
-  newsletter: SignupNewsletter,
+  newsletter: SignupFormKey,
   email: string
 ): Promise<void> {
   if (!storeReady() || !addressLimiter) return

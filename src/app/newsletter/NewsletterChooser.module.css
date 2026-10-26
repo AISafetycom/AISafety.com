@@ -1,0 +1,29 @@
+/* The newsletters, one ruled row each, like the past issues list on each
+   newsletter's own page. Spacing, type and colours come from utility
+   classes; this is only the list reset, the rules, the link's hover and
+   the honeypot. */
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  border-top: 1px solid var(--teal-700);
+}
+
+.row:last-child {
+  border-bottom: 1px solid var(--teal-700);
+}
+
+.link:hover {
+  color: var(--bright-teal-300);
+}
+
+/* Honeypot field: moved off-screen rather than display:none so naive bots
+   still "see" and fill it (as in NewsletterSignup.module.css). */
+.trap {
+  position: absolute;
+  left: -9999px;
+}
