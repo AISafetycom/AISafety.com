@@ -13,7 +13,8 @@ import {
   issueTitle,
   type ArchiveIssue,
 } from '@/lib/newsletter-archive'
-import { archiveIssues } from '@/lib/newsletter-archive-store'
+import { archiveIssues, previewIssues } from '@/lib/newsletter-archive-store'
+import { isPreviewRequest } from '@/lib/preview'
 import { withUtm } from '@/lib/utm'
 import PageHeader from '@/components/PageHeader'
 import { isSignupNewsletter } from '@/lib/newsletter-signup'
@@ -39,7 +40,9 @@ import styles from './page.module.css'
 //
 // force-static: the reads behind the list (Upstash, ActiveCampaign) are
 // uncached fetches, which would otherwise make Next render the page on
-// every visit instead of every ten minutes.
+// every visit instead of every ten minutes. Preview mode renders it on every
+// visit regardless, so there the list is the site's record alone
+// (previewIssues): one quick read instead of ActiveCampaign's slow ones.
 
 export const dynamic = 'force-static'
 export const revalidate = 600
@@ -74,7 +77,9 @@ export default async function NewsletterPage({ params }: Props) {
 
   let issues: ArchiveIssue[] | null
   try {
-    issues = await archiveIssues(key)
+    issues = (await isPreviewRequest())
+      ? await previewIssues(key)
+      : await archiveIssues(key)
   } catch (err) {
     // Neither the record nor ActiveCampaign answered. After the build, a
     // failed rebuild keeps the last good page up: let it fail. During the
