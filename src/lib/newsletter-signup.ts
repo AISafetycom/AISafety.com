@@ -68,16 +68,36 @@ export type ComboKey = (typeof COMBO_KEYS)[number]
 /** A form: one newsletter's, or a combination's. */
 export type SignupFormKey = SignupNewsletter | ComboKey
 
-// One double opt-in form per combination (made 26 October 2026), each
-// subscribing to all of its lists, so a reader who ticks several newsletters
-// gets ONE confirmation email that names them all, and one click confirms
-// every list. Same values to copy as above; a combination left at 0 / ''
-// answers 503 for it without contacting ActiveCampaign.
+// One double opt-in form per combination (made 26 October 2026 as copies of
+// the Events and Training forms), each subscribing to all of its lists, so a
+// reader who ticks several newsletters gets ONE confirmation email that names
+// them all (its message is written by ~/Newsletter/confirm_email.py), and one
+// click confirms every list. Same values to copy as above; the hosted page
+// shows a fresh `or` on every load, and ActiveCampaign takes any of them (the
+// forms above have used one copied value since October). A combination left
+// at 0 / '' answers 503 for it without contacting ActiveCampaign.
 export const COMBO_FORMS: Record<ComboKey, AcForm> = {
-  'events-training': { formId: 0, orKey: '' },
-  'events-funding': { formId: 0, orKey: '' },
-  'training-funding': { formId: 0, orKey: '' },
-  'events-training-funding': { formId: 0, orKey: '' },
+  // Lists 6 + 7: form 12, "AI Safety Events + Training signup (aisafety.com)".
+  'events-training': {
+    formId: 12,
+    orKey: 'cd78e7f7-a353-445b-b615-220f40a6d0f4',
+  },
+  // Lists 6 + 8: form 10, "AI Safety Events + Funding signup (aisafety.com)".
+  'events-funding': {
+    formId: 10,
+    orKey: '029df6d9-9e07-4ac1-b34f-07da40035879',
+  },
+  // Lists 7 + 8: form 14, "AI Safety Training + Funding signup (aisafety.com)".
+  'training-funding': {
+    formId: 14,
+    orKey: 'f270922d-768c-4def-85c4-9413fc90ad1c',
+  },
+  // Lists 6 + 7 + 8: form 16, "AI Safety Events + Training + Funding signup
+  // (aisafety.com)".
+  'events-training-funding': {
+    formId: 16,
+    orKey: '344131d3-3de9-48c4-a91f-c5b5e18f854a',
+  },
 }
 
 /** The form that signs up to exactly these newsletters (one or more,
