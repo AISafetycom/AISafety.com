@@ -14,7 +14,10 @@
   - per UTC day, across both newsletters: the owner gets one email once 100
     signups have gone through, and above 1,000 the boxes turn signups away
     until midnight UTC (a flood of unconfirmed contacts would otherwise eat
-    into the account's contact limit).
+    into the account's contact limit);
+  - per network on the newsletters page's settings (/api/newsletter/
+    settings): 60 loads and saves an hour, far more than a reader needs,
+    so nobody can work through keys or hammer ActiveCampaign.
 
   If Upstash isn't configured or doesn't answer, every limit is skipped (one
   log line, not one per request): a broken check must never block a person.
@@ -37,6 +40,7 @@ export const IP_SIGNUPS_PER_HOUR = 30
 export const ADDRESS_SENDS_PER_DAY = 3
 export const DAILY_ALERT_AFTER = 100
 export const DAILY_CAP = 1000
+export const IP_SETTINGS_PER_HOUR = 60
 
 /** How long an Upstash call may take before the limit is skipped. */
 const STORE_TIMEOUT_MS = 1500
@@ -71,6 +75,16 @@ const addressLimiter = redis
       limiter: Ratelimit.slidingWindow(ADDRESS_SENDS_PER_DAY, '1 d'),
       analytics: false,
       prefix: `${PREFIX}:address`,
+      timeout: 0,
+    })
+  : null
+
+const settingsLimiter = redis
+  ? new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(IP_SETTINGS_PER_HOUR, '1 h'),
+      analytics: false,
+      prefix: 'aisafety:newsletter:settings:ip',
       timeout: 0,
     })
   : null
@@ -130,6 +144,16 @@ async function guarded<T>(
 export async function ipAllowed(ip: string): Promise<boolean> {
   if (!storeReady() || !ipLimiter) return true
   const result = await guarded('IP limit', () => ipLimiter.limit(ip))
+  return result ? result.success : true
+}
+
+/** Whether this IP may load or save newsletter settings again now. Takes
+ *  one of its hourly requests. */
+export async function settingsAllowed(ip: string): Promise<boolean> {
+  if (!storeReady() || !settingsLimiter) return true
+  const result = await guarded('settings limit', () =>
+    settingsLimiter.limit(ip)
+  )
   return result ? result.success : true
 }
 

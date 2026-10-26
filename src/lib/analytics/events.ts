@@ -149,6 +149,18 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   // RSS feed, 'substack' = the Substack archive), `label` the issue's
   // address on an issue click. The pages' own views are page_views.
   'newsletter_archive_click',
+  // The newsletters page (/newsletter, `page`) opened from the "Manage
+  // subscriptions" link in an issue: `source` says how it went ('ok', or
+  // the settings route's reason: 'link_invalid', 'not_found', 'upstream',
+  // …, 'network'). Never carries the key or the address.
+  'newsletter_settings_open',
+  // A save there: `label` the changes ('+funding -training'), `source`
+  // 'saved' or the reason it failed.
+  'newsletter_settings_save',
+  // A link on that page: `label` the newsletter ('events', 'updates'),
+  // `source` where it leads ('issues' = its past issues page, 'substack' =
+  // the Updates newsletter).
+  'newsletter_page_click',
   // A click on one of the footer's links ("Help us out" / "Newsletters" /
   // "For press and developers" columns) — mostly outbound, so nothing else
   // records them.
@@ -198,6 +210,7 @@ const NEWSLETTER_BOX_PAGES = [
   'Funding',
   '/newsletter/events',
   '/newsletter/training',
+  '/newsletter',
 ]
 
 /** Dashboard labels for newsletter_signup_error's reason (`source`). */
@@ -844,6 +857,9 @@ export interface DashboardData {
   /** Each newsletter's past issues page (/newsletter/<key>, from 10 October
    *  2026): its views and where its clicks went. */
   newsletterArchive: NewsletterArchiveRow[]
+  /** The newsletters page (/newsletter): its visits, its settings opened
+   *  from the emails' "Manage subscriptions" link, and what changed. */
+  newslettersPage: NewslettersPageStats
   /** Each newsletter's signups through the site beside the readers who
    *  confirmed (landed on /subscribed/<key>). */
   newsletterConfirmed: NewsletterConfirmRow[]
@@ -999,6 +1015,15 @@ const EMPTY: Omit<DashboardData, 'source'> = {
   siteNewsletterShare: null,
   newsletterResults: { byPage: [], errors: [] },
   newsletterArchive: [],
+  newslettersPage: {
+    views: 0,
+    opened: 0,
+    brokenLinks: 0,
+    openFailures: 0,
+    saves: 0,
+    saveFailures: 0,
+    rows: [],
+  },
   newsletterConfirmed: [],
   newsletterCopies: [],
   newsletterLinks: [],
@@ -1636,6 +1661,7 @@ function aggregateSite(
         newsletterResults
       ),
       newsletterCopies: newsletterCopyViews(inRange, unique),
+      newslettersPage: newslettersPageStats(inRange, unique),
       newsletterLinks: newsletterLinkClicks(inRange, unique),
       newsletterVisits: newsletterVisits(inRange),
       footerClicks,
@@ -2375,11 +2401,130 @@ export function confirmLandings(
   })
 }
 
+export interface NewslettersPageRow {
+  /** 'Events', 'Training', 'Funding', 'Updates'. */
+  name: string
+  /** Ticked on in a save of the settings, and ticked off. */
+  added: number
+  dropped: number
+  /** Clicks through to its past issues page (Updates: to Substack). */
+  clicks: number
+}
+
+export interface NewslettersPageStats {
+  /** Views of /newsletter. */
+  views: number
+  /** Settings opened from a working "Manage subscriptions" link. */
+  opened: number
+  /** Links that will never work: a missing or wrong key, a deleted contact. */
+  brokenLinks: number
+  /** Opens that failed for another reason (ActiveCampaign, the network). */
+  openFailures: number
+  saves: number
+  saveFailures: number
+  /** Per newsletter, the ones with anything. */
+  rows: NewslettersPageRow[]
+}
+
+/** The newsletters page in numbers. Follows the count mode: unique = one
+ *  view, open or save per visitor per day (and each newsletter counted once
+ *  per visitor per day in its changes and clicks). Exported for the unit
+ *  test. */
+export function newslettersPageStats(
+  inRange: AnalyticsEvent[],
+  unique: boolean
+): NewslettersPageStats {
+  const seen = new Set<string>()
+  const counts = (e: AnalyticsEvent, what: string) => {
+    if (!unique || !e.vid) return true
+    const t = Date.parse(e.ts)
+    const key = `${e.vid}\x00${Number.isNaN(t) ? '' : dashboardDay(t)}\x00${what}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  }
+  const out: NewslettersPageStats = {
+    views: 0,
+    opened: 0,
+    brokenLinks: 0,
+    openFailures: 0,
+    saves: 0,
+    saveFailures: 0,
+    rows: [],
+  }
+  const rows = new Map<string, NewslettersPageRow>()
+  const rowFor = (key: string) => {
+    const name = key[0].toUpperCase() + key.slice(1)
+    let row = rows.get(name)
+    if (!row) {
+      row = { name, added: 0, dropped: 0, clicks: 0 }
+      rows.set(name, row)
+    }
+    return row
+  }
+  for (const e of inRange) {
+    if (e.type === 'page_view') {
+      if (/^\/newsletter\/?$/.test(e.page ?? '') && counts(e, 'view'))
+        out.views++
+    } else if (e.type === 'newsletter_settings_open') {
+      if (!counts(e, `open\x00${e.source}`)) continue
+      if (e.source === 'ok') out.opened++
+      else if (e.source === 'link_invalid' || e.source === 'not_found')
+        out.brokenLinks++
+      else out.openFailures++
+    } else if (e.type === 'newsletter_settings_save') {
+      if (e.source !== 'saved') {
+        if (counts(e, `save-failed\x00${e.source}`)) out.saveFailures++
+        continue
+      }
+      if (counts(e, 'save')) out.saves++
+      for (const change of (e.label ?? '').split(' ')) {
+        const m = /^([+-])(events|training|funding)$/.exec(change)
+        if (!m || !counts(e, `change\x00${change}`)) continue
+        if (m[1] === '+') rowFor(m[2]).added++
+        else rowFor(m[2]).dropped++
+      }
+    } else if (e.type === 'newsletter_page_click') {
+      const m = /^(events|training|funding|updates)$/.exec(e.label ?? '')
+      if (m && counts(e, `click\x00${m[1]}`)) rowFor(m[1]).clicks++
+    }
+  }
+  const order = ['Events', 'Training', 'Funding', 'Updates']
+  out.rows = [...rows.values()].sort(
+    (a, b) => order.indexOf(a.name) - order.indexOf(b.name)
+  )
+  return out
+}
+
+/** Signups ActiveCampaign took on the newsletters page (/newsletter), which
+ *  signs up to several newsletters at once: each success names, in
+ *  `source`, the one whose confirmation email went out, the one a
+ *  confirmation lands on. Follows the count mode like the boxes' successes
+ *  (one per visitor per newsletter per day). */
+function newslettersPageSuccesses(
+  inRange: AnalyticsEvent[],
+  unique: boolean
+): AnalyticsEvent[] {
+  const seen = new Set<string>()
+  return inRange.filter(e => {
+    if (e.type !== 'newsletter_signup_success' || e.page !== '/newsletter')
+      return false
+    if (!/^(events|training|funding)$/.test(e.source ?? '')) return false
+    if (!unique || !e.vid) return true
+    const t = Date.parse(e.ts)
+    const key = `${e.vid}\x00${Number.isNaN(t) ? '' : dashboardDay(t)}\x00${e.source}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 export interface NewsletterConfirmRow {
   /** 'Events', 'Training', 'Funding'. */
   name: string
   /** Signups ActiveCampaign took (a link to confirm went out), from the
-   *  newsletter's boxes: its resource page and its past issues page. */
+   *  newsletter's boxes (its resource page and its past issues page) and
+   *  from the newsletters page when its confirmation was the one sent. */
   signedUp: number
   /** Readers who landed on the newsletter's confirm page. */
   confirmed: number
@@ -2404,6 +2549,10 @@ export function newsletterConfirmations(
   for (const r of results.byPage) {
     const name = NEWSLETTER_OF_PAGE[r.name]
     if (name && r.succeeded > 0) rowFor(name).signedUp += r.succeeded
+  }
+  for (const e of newslettersPageSuccesses(inRange, unique)) {
+    const key = e.source as string
+    rowFor(key[0].toUpperCase() + key.slice(1)).signedUp++
   }
   for (const e of confirmLandings(inRange, unique)) {
     const key = CONFIRM_PAGE.exec(e.page ?? '')![1]
