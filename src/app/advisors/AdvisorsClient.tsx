@@ -26,13 +26,16 @@ export default function AdvisorsClient({ advisors }: AdvisorsClientProps) {
   const [applicationsFilters, setApplicationsFilters] = useState<string[]>([])
 
   // A Focus area no advisor has yet would only lead to an empty page, so it
-  // stays out of the filter until an advisor has it.
+  // stays out of the filter until an advisor has it. A ticked one stays, so it
+  // can still be unticked if admin preview's refresh takes its last advisor.
   const focusOptions = useMemo(
     () =>
-      FOCUS_AREAS.filter(area =>
-        advisors.some(advisor => advisor.focusAreas.includes(area))
+      FOCUS_AREAS.filter(
+        area =>
+          focusFilters.includes(area) ||
+          advisors.some(advisor => advisor.focusAreas.includes(area))
       ),
-    [advisors]
+    [advisors, focusFilters]
   )
 
   // Each advisor's slot in the full page order, stamped onto a click so the
