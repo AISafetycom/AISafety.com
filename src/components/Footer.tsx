@@ -62,10 +62,18 @@ export default function Footer() {
               </div>
             </div>
 
-            {/* Third footer column */}
+            {/* Third footer column. Its heading leads to the page with every
+                newsletter on it (/newsletter), where visitors sign up to
+                several at once. */}
             <div>
-              <h4 className="paragraph-small-bold padding-bottom-16px">
-                Newsletters
+              <h4
+                className={`paragraph-small-bold padding-bottom-16px ${styles.links}`}
+              >
+                <FooterLink
+                  href="/newsletter"
+                  section="Newsletters"
+                  label="Newsletters"
+                />
               </h4>
               <div
                 className={`paragraph-small flex flex-col gap-8px opacity-80 ${styles.links}`}

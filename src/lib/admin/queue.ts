@@ -49,6 +49,7 @@ import type { ListingDates } from './queue-urgent'
 import { reviewAgainAt } from './queue-later'
 import { ruleTestOf, type RuleTest } from './queue-rule-test'
 import { alreadyRepliedOf, type AlreadyReplied } from './queue-already'
+import { replyAlsoOf } from './queue-also'
 import { reasonsText, type FlagUpdate } from './queue-flag'
 import { LEFT_OUT_KEY, leftOutOf, withLeftOut } from './queue-left-out'
 import {
@@ -179,6 +180,12 @@ export interface QueueItem {
   /** Email/Discord: who the reply draft goes to (from the proposal's
    *  `reply` block, written at intake by the Secretary). */
   replyTo: string | null
+  /** Email/Form: everyone else the decision answers – a second person
+   *  behind the same listing (the proposal's `also_reply`, written by the
+   *  Mac). Accept and Reject save each of them a draft in their own thread
+   *  (Bryce, 24 Oct 2026, Mercial Research Fellowship: a correction and the
+   *  listing's own form shared one item, and only one person got a reply). */
+  replyAlso: string[]
   /** Form: why the Mac wrote no reply draft – the form came in without an
    *  email, or its Airtable notification isn't in Gmail to reply in. From
    *  the proposal's `no_reply` (worker duty f); shown where the draft would
@@ -570,6 +577,7 @@ function rowToItem(
   let ruleTest: RuleTest | null = null
   let rulePublicPolicy = false
   let replyTo: string | null = null
+  let replyAlso: string[] = []
   let noReply: NoReply | null = null
   let alreadyReplied: AlreadyReplied | null = null
   let rejectReply: RejectReply | null = null
@@ -602,6 +610,7 @@ function rowToItem(
       const to = str(proposal.reply.to)
       const who = str(proposal.reply.name)
       replyTo = to ? (who ? `${who} <${to}>` : to) : null
+      replyAlso = replyAlsoOf(proposal.also_reply)
       rejectReply = rejectReplyOf(proposal.reply.reject, str(f[F.decidedAt]))
       alreadyReplied = alreadyRepliedOf(proposal.reply.already)
       if (proposal.reply.platform === 'discord' && who) {
@@ -705,6 +714,7 @@ function rowToItem(
     replyDraft: str(f[F.replyDraft]),
     replyStatus: str(f[F.replyStatus]),
     replyTo,
+    replyAlso,
     noReply,
     alreadyReplied,
     rejectReply,

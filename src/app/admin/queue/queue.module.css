@@ -2769,6 +2769,37 @@ select.input {
   color: var(--q-text);
 }
 
+/* Stop, beside the paperclip while Fable answers. */
+.chatBoxAnswering .chatInput {
+  padding-right: 68px;
+}
+
+.chatStop {
+  position: absolute;
+  right: 35px;
+  bottom: 5px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--q-accent);
+  cursor: pointer;
+}
+
+.chatStop:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.chatStopSquare {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--q-accent-text);
+}
+
 .chatFiles,
 .chatSent {
   display: flex;

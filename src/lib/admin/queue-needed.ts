@@ -9,7 +9,8 @@
  *  needed only in those: Location once the Mode is in person, a deadline's
  *  type once there is a deadline, coordinates once a community is Local, a
  *  Featured tagline once the record is Featured. A dated training program
- *  needs a start date, exact or approximate. Field names are Airtable's own,
+ *  needs a start date, exact or approximate; a recurring one has no dates
+ *  and needs its typical length instead. Field names are Airtable's own,
  *  matched without regard to case. */
 
 type Fields = Record<string, unknown>
@@ -170,10 +171,26 @@ const NEEDED: Record<string, Need[]> = {
 }
 NEEDED['/founder-toolkit'] = NEEDED['/founders']
 
+/** Training (recurring) shares /training with the dated programs but has no
+ *  date fields: its card shows Typical length (Bryce, 24 Oct 2026, on LASST
+ *  Summer Fellowship asking for a Start date: "Look, there's a date field"). */
+const RECURRING_TRAINING_TABLE = 'tblEEIbj6dW5oS4cX'
+const NEEDED_RECURRING: Need[] = NEEDED['/training'].map(n =>
+  typeof n !== 'string' && 'any' in n ? 'Typical length' : n
+)
+
 /** The names of the page's needed fields that the record leaves empty, in
- *  the page's order. Nothing for a page the Queue does not know. */
-export function missingFields(page: string | null, fields: Fields): string[] {
-  const needs = NEEDED[page?.trim().toLowerCase() ?? ''] ?? []
+ *  the page's order. Nothing for a page the Queue does not know. `table` is
+ *  the record's table, for a page fed by two (/training). */
+export function missingFields(
+  page: string | null,
+  fields: Fields,
+  table?: string | null
+): string[] {
+  const needs =
+    table === RECURRING_TRAINING_TABLE
+      ? NEEDED_RECURRING
+      : (NEEDED[page?.trim().toLowerCase() ?? ''] ?? [])
   const out: string[] = []
   for (const need of needs) {
     if (typeof need === 'string') {

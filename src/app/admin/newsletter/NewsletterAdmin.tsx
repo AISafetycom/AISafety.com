@@ -18,7 +18,7 @@ import Icon from '@/components/Icon'
 import { webPath } from '@/lib/newsletter-web'
 import adminStyles from '../admin.module.css'
 import { Collapse } from '../Collapse'
-import { useClosing } from '../motion'
+import { holdOnScreen, useClosing } from '../motion'
 import motion from '../motion.module.css'
 import styles from './newsletter.module.css'
 import NewsletterAlerts from './NewsletterAlerts'
@@ -1037,9 +1037,10 @@ export default function NewsletterAdmin({
     return () => window.removeEventListener('message', onMessage)
   }, [])
 
-  function togglePreview(id: string) {
+  function togglePreview(id: string, button: HTMLElement) {
     previewScroll.current = 0
     setPreviewY(0)
+    if (previewId && previewId !== id) holdOnScreen(button)
     setPreviewId(previewId === id ? null : id)
   }
 
@@ -1462,7 +1463,7 @@ export default function NewsletterAdmin({
                 <button
                   type="button"
                   className={styles.button}
-                  onClick={() => togglePreview(draft.id)}
+                  onClick={e => togglePreview(draft.id, e.currentTarget)}
                 >
                   {previewId === draft.id ? 'Hide preview' : 'Preview'}
                 </button>

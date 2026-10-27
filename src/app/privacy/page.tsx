@@ -105,9 +105,16 @@ export default function PrivacyPage() {
             unsubscribe. When you click a link in one of those emails, the click
             is counted by aisafety.com itself, anonymously – it isn&apos;t tied
             to you or your email address. Every email has an unsubscribe link at
-            the bottom. The AISafety.com Updates newsletter is hosted on
-            Substack – when you subscribe to it, Substack&apos;s own privacy
-            policy applies.
+            the bottom, and a Manage subscriptions link that opens your
+            newsletters on{' '}
+            <Link href="/newsletter" className="color-light-teal">
+              aisafety.com/newsletter
+            </Link>{' '}
+            so you can change which ones you get; the private code in that link
+            stays out of our analytics. When you sign up for several newsletters
+            there at once, one confirmation email covers them all. The
+            AISafety.com Updates newsletter is hosted on Substack – when you
+            subscribe to it, Substack&apos;s own privacy policy applies.
           </p>
 
           <h3 className="padding-bottom-16px">Services we rely on</h3>
@@ -140,7 +147,7 @@ export default function PrivacyPage() {
           </p>
 
           <p className="paragraph-small color-teal-300 padding-bottom-80px">
-            Last updated: 8 October 2026
+            Last updated: 26 October 2026
           </p>
         </div>
       </div>

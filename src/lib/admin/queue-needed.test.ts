@@ -103,6 +103,43 @@ describe('missingFields', () => {
     ).toEqual([])
   })
 
+  it('wants a typical length, never a date, for a recurring program', () => {
+    const recurring = {
+      Name: 'x',
+      URL: 'https://x.org',
+      Description: 'y',
+      Type: 'Fellowship',
+      Mode: 'Hybrid',
+      Location: 'Online & USA',
+      Focus: ['Governance'],
+      'Entry bar': 'Mid',
+      'Time commitment': 'Full-time',
+      Stipend: 'Stipend included',
+      Logo: ['https://example.com/logo.png'],
+    }
+    expect(missingFields('/training', recurring, 'tblEEIbj6dW5oS4cX')).toEqual([
+      'Typical length',
+    ])
+    expect(
+      missingFields(
+        '/training',
+        { ...recurring, 'Typical length': '2 months' },
+        'tblEEIbj6dW5oS4cX'
+      )
+    ).toEqual([])
+    expect(
+      missingFields(
+        '/training',
+        { ...recurring, Mode: 'In person', Location: '' },
+        'tblEEIbj6dW5oS4cX'
+      )
+    ).toEqual(['Typical length', 'Location'])
+    // The dated table still wants its start date.
+    expect(missingFields('/training', recurring, 'tbli1YSCpIuNY2DvL')).toEqual([
+      'Start date',
+    ])
+  })
+
   it('wants a place and coordinates only for a local community', () => {
     const community = {
       Name: 'x',

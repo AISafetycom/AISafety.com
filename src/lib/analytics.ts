@@ -263,10 +263,15 @@ export function trackNewsletterSignup(page: string): void {
 
 /**
  * Track a signup through the box that went through: ActiveCampaign took the
- * address and emailed the reader a link to confirm. The
+ * address and emailed the reader a link to confirm. On the newsletters page
+ * (/newsletter), which signs up to several at once, `newsletter` names the
+ * one whose confirmation email went out ('events'). The
  * email itself is never recorded.
  */
-export function trackNewsletterSignupSuccess(page: string): void {
+export function trackNewsletterSignupSuccess(
+  page: string,
+  newsletter?: string
+): void {
   if (typeof window === 'undefined') return
   if (isTrackingOptedOut()) return
   window._paq?.push(['trackEvent', `Newsletter - ${page}`, 'Signup success'])
@@ -274,6 +279,7 @@ export function trackNewsletterSignupSuccess(page: string): void {
     type: 'newsletter_signup_success',
     page,
     label: 'Newsletter signup success',
+    ...(newsletter && { source: newsletter }),
   })
 }
 
