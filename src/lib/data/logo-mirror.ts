@@ -114,11 +114,15 @@ export async function copyLogos(
   const deadline = Date.now() + budgetMs
   const result: CopyLogosResult = { copied: new Map(), failed: [], skipped: [] }
   const queue = [...new Set(urls)]
+  // A fetch's time limit is the budget's end, but its timer can go off a
+  // millisecond before Date.now() gets there, which would start the next logo
+  // with nothing left and count it as failed rather than skipped.
+  let outOfTime = false
 
   async function worker() {
     for (let url = queue.shift(); url !== undefined; url = queue.shift()) {
       const remaining = deadline - Date.now()
-      if (remaining <= 0) {
+      if (outOfTime || remaining <= 0) {
         result.skipped.push(url, ...queue.splice(0))
         return
       }
@@ -127,12 +131,13 @@ export async function copyLogos(
         const thumbnail = await logoThumbnail(source)
         result.copied.set(url, await upload(logoPathname(url), thumbnail))
       } catch (error) {
-        const reason =
-          error instanceof Error && error.name === 'TimeoutError'
-            ? `no answer within the ${budgetMs / 1000} s time limit`
-            : error instanceof Error
-              ? error.message
-              : String(error)
+        const timedOut = error instanceof Error && error.name === 'TimeoutError'
+        if (timedOut) outOfTime = true
+        const reason = timedOut
+          ? `no answer within the ${budgetMs / 1000} s time limit`
+          : error instanceof Error
+            ? error.message
+            : String(error)
         result.failed.push({ url, reason })
       }
     }

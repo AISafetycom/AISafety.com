@@ -94,10 +94,15 @@ export async function fetchAllCounts(): Promise<Counts> {
 
 // The public site's counts, from this deployment's own /api/counts. Built
 // from the request's host so it works on any deployment and on `next start`.
+// A force-static page (the newsletter pages) gets empty headers even in
+// preview, so there the host is this deployment's own instead: without it,
+// every preview view of those pages read Airtable live (several seconds).
 async function readPublicCounts(): Promise<Counts> {
   const requestHeaders = await headers()
   const host =
-    requestHeaders.get('x-forwarded-host') ?? requestHeaders.get('host')
+    requestHeaders.get('x-forwarded-host') ??
+    requestHeaders.get('host') ??
+    ownHost()
   if (!host) throw new Error('request has no host header')
   const proto =
     requestHeaders.get('x-forwarded-proto') ??
@@ -111,6 +116,16 @@ async function readPublicCounts(): Promise<Counts> {
     throw new Error('unexpected /api/counts response')
   }
   return body as Counts
+}
+
+/** This deployment's own host, for a request whose headers are hidden: the
+ *  production domain on the live site, the deployment's own address on a
+ *  Vercel preview, and the port `next start` or `next dev` listens on. */
+function ownHost(): string | null {
+  if (process.env.VERCEL_ENV === 'production')
+    return process.env.VERCEL_PROJECT_PRODUCTION_URL ?? null
+  if (process.env.VERCEL_URL) return process.env.VERCEL_URL
+  return process.env.PORT ? `localhost:${process.env.PORT}` : null
 }
 
 // Serialized to avoid hitting Airtable's 5 req/sec rate limit.

@@ -12,6 +12,7 @@ import {
 } from './airtable'
 import { fetchPublicData, hasAirtableCredentials } from './public-api'
 import { isApplicationStatus } from '@/lib/funding-meta'
+import { resolveAcceptingApplications } from '../funding-status'
 
 export const TABLE_ID = 'tblzMTLDZWZKqTxrq'
 const VIEW_ID = 'viwxv2w8utSEhUeiJ'
@@ -92,7 +93,13 @@ export function funderFromRecord(record: AirtableRawRecord): Funder | null {
     type: fieldText(f[FIELD.type]),
     // The Recipient type field no longer exists in Airtable.
     recipientType: '',
-    acceptingApplications: fieldText(f[FIELD.acceptingApplications]),
+    // A dated status ("Applications close 23 October 2026") whose date has
+    // passed reads "Not accepting applications" from here on, so the card,
+    // the Open/Closed filter and the chatbot never show a stale open status
+    // while the record waits for its Broom tidy-up.
+    acceptingApplications: resolveAcceptingApplications(
+      fieldText(f[FIELD.acceptingApplications])
+    ),
     applicationStatus,
     deadline: fieldDateOnly(f[FIELD.deadline]),
     whoCanApply: fieldStringArray(f[FIELD.whoCanApply]),

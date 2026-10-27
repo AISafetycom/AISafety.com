@@ -62,28 +62,37 @@ export default function Footer() {
               </div>
             </div>
 
-            {/* Third footer column */}
+            {/* Third footer column. Its heading leads to the page with every
+                newsletter on it (/newsletter), where visitors sign up to
+                several at once. */}
             <div>
-              <h4 className="paragraph-small-bold padding-bottom-16px">
-                Newsletters
+              <h4
+                className={`paragraph-small-bold padding-bottom-16px ${styles.links}`}
+              >
+                <FooterLink
+                  href="/newsletter"
+                  section="Newsletters"
+                  label="Newsletters"
+                />
               </h4>
               <div
                 className={`paragraph-small flex flex-col gap-8px opacity-80 ${styles.links}`}
               >
-                {/* Events, Training and Funding sign up through the box at
-                    the top of their pages; Updates is still on Substack. */}
+                {/* Events, Training and Funding each have a page of their
+                    own (signup box, past issues, feed: /newsletter/<key>);
+                    Updates is still on Substack. */}
                 <FooterLink
-                  href="/events"
+                  href="/newsletter/events"
                   section="Newsletters"
                   label="AI Safety Events"
                 />
                 <FooterLink
-                  href="/training"
+                  href="/newsletter/training"
                   section="Newsletters"
                   label="AI Safety Training"
                 />
                 <FooterLink
-                  href="/funding"
+                  href="/newsletter/funding"
                   section="Newsletters"
                   label="AI Safety Funding"
                 />

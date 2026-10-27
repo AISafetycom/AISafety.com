@@ -7,6 +7,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // `npm run build` runs these tests on Vercel too, where VERCEL_ENV is
+    // "production" for the live site's build. Start every test outside the
+    // live site, as on CI and locally; a test that needs it stubs it itself.
+    env: { VERCEL_ENV: '' },
   },
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },

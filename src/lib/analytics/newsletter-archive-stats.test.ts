@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { newsletterArchiveStats, type AnalyticsEvent } from './events'
 
 // The Analytics Newsletters tab's "Past issues and feeds" panel: views of
-// /newsletter/<key> and where the page's clicks went.
+// /newsletter/<key> and where the page's clicks went (an issue, the feed,
+// Substack, the resource page).
 
 const view = (page: string, vid: string | undefined, ts: string) =>
   ({ type: 'page_view', page, vid, ts }) as AnalyticsEvent
@@ -42,6 +43,9 @@ const EVENTS = [
   click('Events', 'issue', 'a', DAY1, 'week-42-2026'),
   click('Events', 'feed', 'b', DAY1),
   click('Training', 'substack', 'a', DAY1),
+  click('Events', 'resource', 'a', DAY1),
+  click('Events', 'resource', 'a', DAY1_LATER),
+  click('Training', 'resource', 'c', DAY2),
   // No visitor id: always counted.
   click('Training', 'feed', undefined, DAY1),
   click('Training', 'feed', undefined, DAY1),
@@ -56,6 +60,7 @@ describe('newsletterArchiveStats', () => {
         issueClicks: 2,
         feedClicks: 1,
         substackClicks: 0,
+        resourceClicks: 1,
       },
       {
         name: 'Training',
@@ -63,6 +68,7 @@ describe('newsletterArchiveStats', () => {
         issueClicks: 0,
         feedClicks: 2,
         substackClicks: 1,
+        resourceClicks: 1,
       },
     ])
   })
@@ -75,6 +81,7 @@ describe('newsletterArchiveStats', () => {
         issueClicks: 3,
         feedClicks: 1,
         substackClicks: 0,
+        resourceClicks: 2,
       },
       {
         name: 'Training',
@@ -82,6 +89,7 @@ describe('newsletterArchiveStats', () => {
         issueClicks: 0,
         feedClicks: 2,
         substackClicks: 1,
+        resourceClicks: 1,
       },
     ])
   })
@@ -107,6 +115,7 @@ describe('newsletterArchiveStats', () => {
         issueClicks: 0,
         feedClicks: 0,
         substackClicks: 0,
+        resourceClicks: 0,
       },
       {
         name: 'Funding',
@@ -114,6 +123,7 @@ describe('newsletterArchiveStats', () => {
         issueClicks: 0,
         feedClicks: 0,
         substackClicks: 0,
+        resourceClicks: 0,
       },
     ])
   })

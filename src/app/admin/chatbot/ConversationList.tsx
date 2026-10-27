@@ -17,6 +17,7 @@ import {
 import { parseLog, parseNotes, stampToDate } from '@/lib/admin/annotation-log'
 import styles from '../admin.module.css'
 import { Collapse } from '../Collapse'
+import { holdOnScreen } from '../motion'
 import motion from '../motion.module.css'
 import TranscriptMessage, {
   ClickedCardsContext,
@@ -861,9 +862,10 @@ export default function ConversationList() {
                 expanded={expandedId === c.id}
                 viewed={viewed.has(c.id)}
                 allLabels={allLabels}
-                onToggle={() => {
+                onToggle={row => {
                   const next = expandedId === c.id ? null : c.id
                   if (next) markViewed(c.id)
+                  if (next && expandedId) holdOnScreen(row)
                   setExpandedId(next)
                   syncUrl(next)
                 }}
@@ -909,7 +911,8 @@ function ConversationRow({
   expanded: boolean
   viewed: boolean
   allLabels: string[]
-  onToggle: () => void
+  /** Called with the row's header, the part that was clicked. */
+  onToggle: (row: HTMLElement) => void
   onUpdate: (c: Conversation) => void
 }) {
   const [noteDraft, setNoteDraft] = useState('')
@@ -1159,7 +1162,7 @@ function ConversationRow({
         ]
           .filter(Boolean)
           .join(' ')}
-        onClick={onToggle}
+        onClick={e => onToggle(e.currentTarget)}
         aria-expanded={expanded}
       >
         <div className={styles.convRowHeader}>

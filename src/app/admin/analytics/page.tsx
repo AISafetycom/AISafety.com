@@ -25,6 +25,7 @@ import {
   type NewsletterLinkRow,
   type NewsletterSignupResults,
   type NewsletterVisits,
+  type NewslettersPageStats,
   type DateRange,
   type VisitorShare,
   DASHBOARD_TZ,
@@ -1352,9 +1353,10 @@ async function AnalyticsView({
                     />
                     <p className={styles.caption}>
                       Submits of the newsletter email box on /events, /training
-                      and /funding, and on the past issues pages
+                      and /funding, on the past issues pages
                       (/newsletter/events, /newsletter/training, listed by their
-                      address) – not every submit ends in a signup (how the
+                      address), and of the several-newsletters form on
+                      /newsletter – not every submit ends in a signup (how the
                       ActiveCampaign ones ended is below). % of visitors = the
                       share of the page&apos;s visitors who submitted it; the
                       Total row divides by visitors to the pages with the box
@@ -1379,6 +1381,7 @@ async function AnalyticsView({
                     rows={data.newsletterArchive}
                     feeds={feeds}
                   />
+                  <NewslettersPagePanel stats={data.newslettersPage} />
                   <NewsletterLinksPanel
                     rows={data.newsletterLinks}
                     unique={unique}
@@ -2222,9 +2225,92 @@ async function readFeeds(range: DateRange): Promise<{
   }
 }
 
-/** The Newsletters tab's past issues pages (/newsletter/events, /training)
- *  and feeds: the pages' views and clicks in the range, and the feeds'
- *  readers yesterday and today. */
+/** The Newsletters tab's newsletter pages (/newsletter/events, /training,
+ *  /funding) and feeds: the pages' views and clicks in the range, and the
+ *  feeds' readers yesterday and today. */
+/** /newsletter: visits, the settings readers open from the "Manage
+ *  subscriptions" link in an issue, and which newsletters they added or
+ *  dropped there. Its signups are in "How the signups went" under their
+ *  own page row. */
+function NewslettersPagePanel({ stats }: { stats: NewslettersPageStats }) {
+  const summary = [
+    { name: 'Visits', count: stats.views },
+    {
+      name: 'Opened from an email’s Manage subscriptions link',
+      count: stats.opened,
+    },
+    {
+      name: 'Links that didn’t work (old or broken key)',
+      count: stats.brokenLinks,
+    },
+    {
+      name: 'Couldn’t load (ActiveCampaign or connection)',
+      count: stats.openFailures,
+    },
+    { name: 'Saved changes', count: stats.saves },
+    { name: 'Saves that failed', count: stats.saveFailures },
+  ].filter((r, i) => i < 2 || i === 4 || r.count > 0)
+  const any = summary.some(r => r.count > 0) || stats.rows.length > 0
+  return (
+    <Panel title="Newsletters page">
+      {!any ? (
+        <p className={styles.dim}>No visits to /newsletter in this range.</p>
+      ) : (
+        <>
+          <CountTable rows={summary} labelHead="What" countHead="Count" />
+          {stats.rows.length > 0 && (
+            <SortableTable
+              columns={[
+                { label: 'Newsletter', sort: 'text' },
+                {
+                  label: 'Added in settings',
+                  className: styles.numCol,
+                  sort: 'number',
+                },
+                {
+                  label: 'Dropped in settings',
+                  className: styles.numCol,
+                  sort: 'number',
+                },
+                {
+                  label: 'Clicks to its page',
+                  className: styles.numCol,
+                  sort: 'number',
+                },
+              ]}
+              values={stats.rows.map(r => [
+                r.name,
+                r.added,
+                r.dropped,
+                r.clicks,
+              ])}
+            >
+              {stats.rows.map(r => (
+                <tr key={r.name}>
+                  <td>{r.name}</td>
+                  <td className={styles.numCol}>{r.added.toLocaleString()}</td>
+                  <td className={styles.numCol}>
+                    {r.dropped.toLocaleString()}
+                  </td>
+                  <td className={styles.numCol}>{r.clicks.toLocaleString()}</td>
+                </tr>
+              ))}
+            </SortableTable>
+          )}
+        </>
+      )}
+      <p className={styles.caption}>
+        The page that lists every newsletter (/newsletter), where visitors sign
+        up to several at once (those signups are under its own row in the signup
+        results above) and readers change theirs from the Manage subscriptions
+        link at the bottom of each issue. Clicks to its page are clicks through
+        to the newsletter&apos;s past issues page (for Updates, to its
+        Substack). Recording since the page went live in October 2026.
+      </p>
+    </Panel>
+  )
+}
+
 function PastIssuesPanel({
   rows,
   feeds,
@@ -2255,6 +2341,7 @@ function PastIssuesPanel({
       issueClicks: 0,
       feedClicks: 0,
       substackClicks: 0,
+      resourceClicks: 0,
     }
   const feedCell = (list: FeedReaders[] | undefined, name: string) =>
     list ? readers(list, name).toLocaleString() : '—'
@@ -2272,6 +2359,11 @@ function PastIssuesPanel({
             { label: 'To an issue', className: styles.numCol, sort: 'number' },
             { label: 'To the feed', className: styles.numCol, sort: 'number' },
             { label: 'To Substack', className: styles.numCol, sort: 'number' },
+            {
+              label: 'To resource page',
+              className: styles.numCol,
+              sort: 'number',
+            },
             {
               label: 'Feed readers yesterday',
               className: styles.numCol,
@@ -2291,6 +2383,7 @@ function PastIssuesPanel({
               r.issueClicks,
               r.feedClicks,
               r.substackClicks,
+              r.resourceClicks,
               feeds ? readers(feeds.yesterday, name) : null,
               feeds ? readers(feeds.today, name) : null,
             ]
@@ -2312,6 +2405,9 @@ function PastIssuesPanel({
                   {r.substackClicks.toLocaleString()}
                 </td>
                 <td className={styles.numCol}>
+                  {r.resourceClicks.toLocaleString()}
+                </td>
+                <td className={styles.numCol}>
                   {feedCell(feeds?.yesterday, name)}
                 </td>
                 <td className={styles.numCol}>
@@ -2323,16 +2419,18 @@ function PastIssuesPanel({
         </SortableTable>
       )}
       <p className={styles.caption}>
-        Each newsletter&apos;s past issues page (aisafety.com/newsletter/events,
-        /newsletter/training) lists its issues sent since the move to
-        ActiveCampaign on 8 October 2026, with an RSS feed (…/feed). Page views
-        and clicks follow the range; a click to an issue opens its web version.
-        Feed readers aren&apos;t for the range: they&apos;re the people
-        following the feed on one day (UTC). A feed service such as Feedly
-        fetches once for all its users and reports how many; a reader app
-        fetches for one person. Opening the feed in a browser, search engines,
-        AI assistants and scripts aren&apos;t counted. Recording since October
-        2026.
+        Each newsletter&apos;s page (aisafety.com/newsletter/events,
+        /newsletter/training, /newsletter/funding) lists its issues sent since
+        the move to ActiveCampaign (Events and Training 8 October 2026, Funding
+        21 October 2026), with an RSS feed (…/feed). Page views and clicks
+        follow the range; a click to an issue opens its web version, and
+        &ldquo;To resource page&rdquo; counts the link on to /events, /training,
+        or /funding (since 23 October 2026). Feed readers aren&apos;t for the
+        range: they&apos;re the people following the feed on one day (UTC). A
+        feed service such as Feedly fetches once for all its users and reports
+        how many; a reader app fetches for one person. Opening the feed in a
+        browser, search engines, AI assistants and scripts aren&apos;t counted.
+        Recording since October 2026.
       </p>
     </Panel>
   )

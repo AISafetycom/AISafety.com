@@ -18,7 +18,7 @@ import Icon from '@/components/Icon'
 import { webPath } from '@/lib/newsletter-web'
 import adminStyles from '../admin.module.css'
 import { Collapse } from '../Collapse'
-import { useClosing } from '../motion'
+import { holdOnScreen, useClosing } from '../motion'
 import motion from '../motion.module.css'
 import styles from './newsletter.module.css'
 import NewsletterAlerts from './NewsletterAlerts'
@@ -1037,9 +1037,10 @@ export default function NewsletterAdmin({
     return () => window.removeEventListener('message', onMessage)
   }, [])
 
-  function togglePreview(id: string) {
+  function togglePreview(id: string, button: HTMLElement) {
     previewScroll.current = 0
     setPreviewY(0)
+    if (previewId && previewId !== id) holdOnScreen(button)
     setPreviewId(previewId === id ? null : id)
   }
 
@@ -1226,7 +1227,7 @@ export default function NewsletterAdmin({
       {canSend && (
         <div className={`${adminStyles.notice} ${styles.liveWarning}`}>
           <strong>This sends real emails.</strong> Approving schedules an issue
-          to go out five minutes later
+          to go out a minute later
           {NEWSLETTER_WARMUP
             ? '; an issue that goes out in waves gets all its remaining waves scheduled at once, a day apart'
             : ''}
@@ -1462,7 +1463,7 @@ export default function NewsletterAdmin({
                 <button
                   type="button"
                   className={styles.button}
-                  onClick={() => togglePreview(draft.id)}
+                  onClick={e => togglePreview(draft.id, e.currentTarget)}
                 >
                   {previewId === draft.id ? 'Hide preview' : 'Preview'}
                 </button>
@@ -2801,9 +2802,9 @@ function ConfirmSend({
           </p>
         ) : (
           <p className={styles.dialogNote}>
-            It goes out {delay} minutes after you confirm. Until then you can
-            cancel it under Recent sends; while it’s sending you can pause or
-            stop it there. Emails already delivered can’t be recalled.
+            It goes out {durationLabel(delay)} after you confirm. Until then you
+            can cancel it under Recent sends; while it’s sending you can pause
+            or stop it there. Emails already delivered can’t be recalled.
           </p>
         )}
         <div className={styles.dialogActions}>

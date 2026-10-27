@@ -144,11 +144,13 @@ export {
 }
 
 const MARKER_RE = /<!--aisafety-issue:([0-9a-f]{16})-->/
-/** Minutes between approval and the send. On the real lists that is time to
- *  notice a mistake and cancel the send under Recent sends before anyone gets
- *  it; the test lists keep two, the practical minimum (AC rejects sdates in
- *  the past and runs its scheduler about once a minute). */
-const SEND_DELAY_MINUTES_REAL = 5
+/** Minutes between approval and the send. On the real lists that is a short
+ *  window to cancel the send under Recent sends before anyone gets it (one
+ *  since 23 Oct 2026, the owner's call; it was five). The test lists keep two
+ *  (AC rejects sdates in the past and runs its scheduler about once a
+ *  minute); a real-list time AC reads as past just sends at once
+ *  (`sendingNow`). */
+const SEND_DELAY_MINUTES_REAL = 1
 const SEND_DELAY_MINUTES_TEST = 2
 
 export function sendDelayMinutes(listId: string): number {
@@ -1811,6 +1813,9 @@ const KNOWN_TAGS = new Set([
   'UNSUBSCRIBELINK',
   'WEBCOPY',
   'SENDER-INFO-SINGLELINE',
+  // The reader's settings key in the footer's "Manage subscriptions" link
+  // (src/lib/newsletter-manage.ts).
+  'MANAGE_KEY',
 ])
 /** Words a finished issue never contains (the 28 Sept 2026 Training
  *  rehearsal went out with "TEST" and "test" typed into two cards).
@@ -3584,11 +3589,16 @@ export async function previewHtml(
   if (!msg) return null
   const html = msg.html ?? ''
   if (!MARKER_RE.test(html)) return null
-  return html
-    .replace(MARKER_RE, '')
-    .replace(/%UNSUBSCRIBELINK%/g, '#')
-    .replace(/%WEBCOPY%/g, '#')
-    .replace(/%SENDER-INFO-SINGLELINE%/g, SENDER_INFO)
+  return (
+    html
+      .replace(MARKER_RE, '')
+      .replace(/%UNSUBSCRIBELINK%/g, '#')
+      .replace(/%WEBCOPY%/g, '#')
+      .replace(/%SENDER-INFO-SINGLELINE%/g, SENDER_INFO)
+      // A preview has no reader: "Manage subscriptions" opens the plain page.
+      .replace(/#k=%MANAGE_KEY%/g, '')
+      .replace(/%MANAGE_KEY%/g, '')
+  )
 }
 
 /** AC stores sdate in the account's local time. Read the current UTC offset
