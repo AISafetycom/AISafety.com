@@ -1,9 +1,12 @@
 /* Horizontal filter pill + its popover. */
 
-/* Fill + border come from the global .border-plus-fill class. */
+/* Fill + border come from the global .border-plus-fill class. A minimum
+   height, so a long label that wraps at large text sizes ("Application
+   status: Not currently accepting applications") grows the pill instead of
+   spilling out of it. */
 .pill {
   display: flex;
-  height: 40px;
+  min-height: 40px;
   padding: 7px 16px;
   justify-content: center;
   align-items: center;
