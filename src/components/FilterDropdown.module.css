@@ -1,50 +1,5 @@
-/* Horizontal dropdown filter pill + its popover. */
-
-/* Fill + border come from the global .border-plus-fill class. */
-.pill {
-  display: flex;
-  height: 40px;
-  padding: 7px 16px;
-  justify-content: center;
-  align-items: center;
-  gap: 4px;
-  border-radius: 100px;
-  color: var(--teal-300);
-  transition: all var(--hover-transition);
-}
-
-.pill:hover {
-  border-color: var(--teal-bright-750);
-  cursor: pointer;
-}
-
-.pill.pillActive {
-  background: var(--teal-bright-800);
-  color: var(--white);
-}
-
-/* The leading Icon and the chevron both use currentColor, so they follow the
-   pill's text color to white automatically when active — no recolor needed. */
-.chevron {
-  transition: transform var(--hover-transition);
-}
-
-.pillOpen .chevron {
-  transform: rotate(180deg);
-}
-
-/* Fill + border come from the global .border-plus-fill class; shadow from
-   the global .drop-shadow-dark class. */
-/* Hangs under the pill in the page, so it scrolls with it. The sideways nudge
-   that keeps it on screen is set inline by FilterDropdown.tsx. */
-.popover {
-  position: absolute;
-  top: calc(100% + 8px);
-  z-index: 10;
-  width: max-content;
-  border-radius: 16px;
-  padding: 20px;
-}
+/* The checkbox list inside a FilterDropdown's popover. The pill and the
+   popover itself are in FilterPopover.module.css. */
 
 /* Opt-in (maxListHeight): long lists scroll inside the popover. */
 .scrollList {

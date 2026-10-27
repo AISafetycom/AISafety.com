@@ -23,5 +23,8 @@ Initial release.
   iframe embed on the site).
 - `jobs` `logo` is a 256-pixel WebP copy on Vercel Blob instead of a link to
   80000hours.org (20 October 2026).
+- `funding` gains `applicationStatus`, `deadline`, `whoCanApply`, `grantSize`,
+  `grantMinUsd`, and `grantMaxUsd`; the existing fields are unchanged (27 October
+  2026).
 - `advisors` gains `whoItsFor`, `focusAreas`, and `applications`; the existing
-  fields are unchanged (23 October 2026).
+  fields are unchanged (27 October 2026).

@@ -3,10 +3,20 @@
 import { useState, useMemo, useRef, useLayoutEffect } from 'react'
 import FilterBar from '@/components/FilterBar'
 import FilterDropdown from '@/components/FilterDropdown'
+import FilterRange from '@/components/FilterRange'
 import ListingCard from '@/components/ListingCard'
 import ContributeButtons from '@/components/ContributeButtons'
 import { Funder } from '@/lib/data/funding'
-import { isAcceptingApplications } from '@/lib/funding-status'
+import {
+  APPLICATION_STATUSES,
+  GRANT_LABELS,
+  GRANT_TOP,
+  WHO_CAN_APPLY,
+  grantBars,
+  grantOverlaps,
+  grantRangeActive,
+  grantRangeSummary,
+} from '@/lib/funding-meta'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
 import { gridListings, placementsById } from '@/lib/placements'
 import { funderCardProps } from './card'
@@ -15,69 +25,66 @@ interface FundingClientProps {
   funders: Funder[]
 }
 
-// Were "Yes" / "No" until 6 September 2026; analytics still log those values
-// so the filter's history stays in one line (see lib/filter-tracking).
-const acceptingOptions = ['Open', 'Closed']
-const typeOptions = ['Fund', 'Grant program', 'Platform']
-
-// No search box on this page, so every funder passes the base filter.
-const allPass = () => true
+const statusOptions = [...APPLICATION_STATUSES]
+const whoOptions = [...WHO_CAN_APPLY]
 
 export default function FundingClient({ funders }: FundingClientProps) {
-  const [acceptingFilters, setAcceptingFilters] = useState<string[]>([])
-  const [typeFilters, setTypeFilters] = useState<string[]>([])
+  const [statusFilters, setStatusFilters] = useState<string[]>([])
+  const [whoFilters, setWhoFilters] = useState<string[]>([])
+  const [grantRange, setGrantRange] = useState<[number, number]>([0, GRANT_TOP])
 
   // Each funder's slot in the full (unfiltered) page order, so a click is
   // tagged with the rank Bryce set — not its position within an active filter.
   const placements = useMemo(() => placementsById(funders), [funders])
 
+  // Grant size is a range rather than a list of options, so it narrows every
+  // list and count as an always-on condition instead of one of the groups.
+  const grantActive = grantRangeActive(grantRange[0], grantRange[1])
+  const grantFilter = useMemo(
+    () => (funder: Funder) =>
+      !grantActive || grantOverlaps(funder, grantRange[0], grantRange[1]),
+    [grantActive, grantRange]
+  )
+
   const groups = useMemo(
     () => ({
-      accepting: {
-        selected: acceptingFilters,
-        // Airtable values are full sentences ("Applications on a rolling
-        // basis", "Not accepting applications"); bucket them into Open/Closed
-        // via the shared status helper.
-        matches: (funder: Funder, value: string) => {
-          const status = funder.acceptingApplications || ''
-          if (!status) return false
-          return value === 'Open'
-            ? isAcceptingApplications(status)
-            : !isAcceptingApplications(status)
-        },
-      },
-      type: {
-        selected: typeFilters,
+      status: {
+        selected: statusFilters,
         matches: (funder: Funder, value: string) =>
-          (funder.type || '')
-            .split(',')
-            .map(t => t.trim())
-            .includes(value),
+          funder.applicationStatus === value,
+      },
+      who: {
+        selected: whoFilters,
+        matches: (funder: Funder, value: string) =>
+          funder.whoCanApply.includes(value),
       },
     }),
-    [acceptingFilters, typeFilters]
+    [statusFilters, whoFilters]
   )
 
   const filteredFunders = useMemo(
-    () => filterItems(funders, allPass, groups),
-    [funders, groups]
+    () => filterItems(funders, grantFilter, groups),
+    [funders, grantFilter, groups]
   )
 
   const filterCounts = useMemo(
     () => ({
-      accepting: optionCounts(
-        filterItems(funders, allPass, groups, 'accepting'),
-        acceptingOptions,
-        groups.accepting.matches
+      status: optionCounts(
+        filterItems(funders, grantFilter, groups, 'status'),
+        statusOptions,
+        groups.status.matches
       ),
-      type: optionCounts(
-        filterItems(funders, allPass, groups, 'type'),
-        typeOptions,
-        groups.type.matches
+      who: optionCounts(
+        filterItems(funders, grantFilter, groups, 'who'),
+        whoOptions,
+        groups.who.matches
       ),
     }),
-    [funders, groups]
+    [funders, grantFilter, groups]
   )
+
+  // The bars above the slider show every funder, whatever else is ticked.
+  const bars = useMemo(() => grantBars(funders), [funders])
 
   const savedScrollY = useRef<number | null>(null)
 
@@ -94,6 +101,11 @@ export default function FundingClient({ funders }: FundingClientProps) {
     )
   }
 
+  const changeGrantRange = (range: [number, number]) => {
+    savedScrollY.current = window.scrollY
+    setGrantRange(range)
+  }
+
   useLayoutEffect(() => {
     if (savedScrollY.current !== null) {
       window.scrollTo(0, savedScrollY.current)
@@ -105,7 +117,8 @@ export default function FundingClient({ funders }: FundingClientProps) {
 
   // Featured funders show in the grid only once a filter is on; unfiltered,
   // the featured row above already has them.
-  const filtering = acceptingFilters.length > 0 || typeFilters.length > 0
+  const filtering =
+    statusFilters.length > 0 || whoFilters.length > 0 || grantActive
   const gridFunders = gridListings(filteredFunders, placements, filtering)
 
   return (
@@ -115,19 +128,29 @@ export default function FundingClient({ funders }: FundingClientProps) {
           trackingPage="Funding"
           title="Application status"
           icon="/images/icons/paper.svg"
-          options={acceptingOptions}
-          selected={acceptingFilters}
-          counts={filterCounts.accepting}
-          onToggle={v => toggleFilter(v, acceptingFilters, setAcceptingFilters)}
+          options={statusOptions}
+          selected={statusFilters}
+          counts={filterCounts.status}
+          onToggle={v => toggleFilter(v, statusFilters, setStatusFilters)}
         />
         <FilterDropdown
           trackingPage="Funding"
-          title="Type"
-          icon="/images/icons/tag.svg"
-          options={typeOptions}
-          selected={typeFilters}
-          counts={filterCounts.type}
-          onToggle={v => toggleFilter(v, typeFilters, setTypeFilters)}
+          title="Who can apply"
+          icon="/images/icons/team.svg"
+          options={whoOptions}
+          selected={whoFilters}
+          counts={filterCounts.who}
+          onToggle={v => toggleFilter(v, whoFilters, setWhoFilters)}
+        />
+        <FilterRange
+          trackingPage="Funding"
+          title="Grant size"
+          icon="/images/icons/grant-size.svg"
+          labels={GRANT_LABELS}
+          bars={bars}
+          value={grantRange}
+          summary={grantRangeSummary(grantRange[0], grantRange[1])}
+          onChange={changeGrantRange}
         />
       </FilterBar>
 
