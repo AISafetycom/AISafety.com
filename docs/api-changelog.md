@@ -26,3 +26,5 @@ Initial release.
 - `funding` gains `applicationStatus`, `deadline`, `whoCanApply`, `grantSize`,
   `grantMinUsd`, and `grantMaxUsd`; the existing fields are unchanged (27 October
   2026).
+- `advisors` gains `whoItsFor`, `focusAreas`, and `applications`; the existing
+  fields are unchanged (27 October 2026).

@@ -7,6 +7,7 @@ import ListingCard from '@/components/ListingCard'
 import { advisorCardProps } from './card'
 import ContributeButtons from '@/components/ContributeButtons'
 import { Advisor } from '@/lib/data/advisors'
+import { APPLICATIONS, FOCUS_AREAS, WHO_ITS_FOR } from '@/lib/advisor-meta'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
 import { gridListings, placementsById } from '@/lib/placements'
 
@@ -14,12 +15,28 @@ interface AdvisorsClientProps {
   advisors: Advisor[]
 }
 
-const focusOptions = ['Career/contribution', 'Other']
+const whoOptions = [...WHO_ITS_FOR]
+const applicationsOptions = [...APPLICATIONS]
 
 const allPass = () => true
 
 export default function AdvisorsClient({ advisors }: AdvisorsClientProps) {
+  const [whoFilters, setWhoFilters] = useState<string[]>([])
   const [focusFilters, setFocusFilters] = useState<string[]>([])
+  const [applicationsFilters, setApplicationsFilters] = useState<string[]>([])
+
+  // A Focus area no advisor has yet would only lead to an empty page, so it
+  // stays out of the filter until an advisor has it. A ticked one stays, so it
+  // can still be unticked if admin preview's refresh takes its last advisor.
+  const focusOptions = useMemo(
+    () =>
+      FOCUS_AREAS.filter(
+        area =>
+          focusFilters.includes(area) ||
+          advisors.some(advisor => advisor.focusAreas.includes(area))
+      ),
+    [advisors, focusFilters]
+  )
 
   // Each advisor's slot in the full page order, stamped onto a click so the
   // dashboard can tie clicks to page position even after later reordering.
@@ -27,12 +44,23 @@ export default function AdvisorsClient({ advisors }: AdvisorsClientProps) {
 
   const groups = useMemo(
     () => ({
+      who: {
+        selected: whoFilters,
+        matches: (advisor: Advisor, value: string) =>
+          advisor.whoItsFor.includes(value),
+      },
       focus: {
         selected: focusFilters,
-        matches: (advisor: Advisor, value: string) => advisor.focus === value,
+        matches: (advisor: Advisor, value: string) =>
+          advisor.focusAreas.includes(value),
+      },
+      applications: {
+        selected: applicationsFilters,
+        matches: (advisor: Advisor, value: string) =>
+          advisor.applications === value,
       },
     }),
-    [focusFilters]
+    [whoFilters, focusFilters, applicationsFilters]
   )
 
   const filteredAdvisors = useMemo(
@@ -42,13 +70,23 @@ export default function AdvisorsClient({ advisors }: AdvisorsClientProps) {
 
   const filterCounts = useMemo(
     () => ({
+      who: optionCounts(
+        filterItems(advisors, allPass, groups, 'who'),
+        whoOptions,
+        groups.who.matches
+      ),
       focus: optionCounts(
         filterItems(advisors, allPass, groups, 'focus'),
         focusOptions,
         groups.focus.matches
       ),
+      applications: optionCounts(
+        filterItems(advisors, allPass, groups, 'applications'),
+        applicationsOptions,
+        groups.applications.matches
+      ),
     }),
-    [advisors, groups]
+    [advisors, groups, focusOptions]
   )
 
   const savedScrollY = useRef<number | null>(null)
@@ -75,15 +113,24 @@ export default function AdvisorsClient({ advisors }: AdvisorsClientProps) {
 
   // Featured advisors show in the grid only once a filter is on; unfiltered,
   // the featured row above already has them.
-  const gridAdvisors = gridListings(
-    filteredAdvisors,
-    placements,
-    focusFilters.length > 0
-  )
+  const filtering =
+    whoFilters.length > 0 ||
+    focusFilters.length > 0 ||
+    applicationsFilters.length > 0
+  const gridAdvisors = gridListings(filteredAdvisors, placements, filtering)
 
   return (
     <>
       <FilterBar count={filteredAdvisors.length} noun="advisor">
+        <FilterDropdown
+          trackingPage="Advisors"
+          title="Who it's for"
+          icon="/images/icons/team.svg"
+          options={whoOptions}
+          selected={whoFilters}
+          counts={filterCounts.who}
+          onToggle={v => toggleFilter(v, whoFilters, setWhoFilters)}
+        />
         <FilterDropdown
           trackingPage="Advisors"
           title="Focus"
@@ -92,6 +139,17 @@ export default function AdvisorsClient({ advisors }: AdvisorsClientProps) {
           selected={focusFilters}
           counts={filterCounts.focus}
           onToggle={v => toggleFilter(v, focusFilters, setFocusFilters)}
+        />
+        <FilterDropdown
+          trackingPage="Advisors"
+          title="Applications"
+          icon="/images/icons/paper.svg"
+          options={applicationsOptions}
+          selected={applicationsFilters}
+          counts={filterCounts.applications}
+          onToggle={v =>
+            toggleFilter(v, applicationsFilters, setApplicationsFilters)
+          }
         />
       </FilterBar>
 
