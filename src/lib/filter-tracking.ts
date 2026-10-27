@@ -27,8 +27,14 @@ interface PageRelabels {
 const RELABELLED_FILTERS: Record<string, PageRelabels> = {
   Funding: {
     options: {
-      // Was "Yes" / "No" until 6 September 2026.
-      'Application status': { Open: 'Yes', Closed: 'No' },
+      // Was "Yes" / "No" until 6 September 2026, then "Open" / "Closed" until
+      // the October 2026 redesign split closed into two options. The old "No"
+      // carries on as "Not currently accepting applications"; "Invite only,
+      // no applications" is new and logs under its own name.
+      'Application status': {
+        'Applications open': 'Yes',
+        'Not currently accepting applications': 'No',
+      },
     },
   },
   Jobs: {

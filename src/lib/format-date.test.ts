@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { formatTimeAgo } from './format-date'
+import { formatShortDate, formatTimeAgo } from './format-date'
+
+describe('formatShortDate', () => {
+  it('writes day, short month and year', () => {
+    expect(formatShortDate(new Date('2026-10-31'))).toBe('31 Oct 2026')
+  })
+
+  it('abbreviates September as "Sep", not "Sept"', () => {
+    expect(formatShortDate(new Date('2026-09-04'))).toBe('4 Sep 2026')
+  })
+})
 
 describe('formatTimeAgo', () => {
   const now = new Date('2026-08-22T12:00:00Z')

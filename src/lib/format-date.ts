@@ -7,6 +7,16 @@ export function formatDate(date: Date): string {
   }).format(date)
 }
 
+/** "31 Oct 2026": the short form card lines use, like /events and /training.
+ *  en-US, not en-GB: en-GB abbreviates September as "Sept". */
+export function formatShortDate(date: Date): string {
+  const month = new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    timeZone: 'UTC',
+  }).format(date)
+  return `${date.getUTCDate()} ${month} ${date.getUTCFullYear()}`
+}
+
 /** Minute-level "x ago" for freshness readouts (the preview-mode banner's
  *  "site last rebuilt ..."), where formatRelativeDate's day granularity is
  *  too coarse. `now` is a parameter so the pure logic is testable. */

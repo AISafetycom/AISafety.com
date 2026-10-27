@@ -1,0 +1,157 @@
+/* A bar chart over a two-handle slider. The two range inputs sit on top of each
+   other and are invisible; only their handles take the pointer, and the
+   handles you see are drawn separately, over them. All sizes below assume the
+   24px handle, which the native thumbs and the drawn ones share. */
+
+/* The 56px of bars, a 16px gap, the 4px track, and the lower half of the
+   handles hanging below it (the handles are centred on the track). */
+.chart {
+  position: relative;
+  height: 86px;
+}
+
+/* Run from the centre of the first handle to the centre of the last (half a
+   handle in from each side), so each stop on the track falls between two
+   bars. */
+.bars {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  height: 56px;
+  margin: 0 12px;
+  /* Keeps the bars' shadows (see .shadow) inside, under every bar. */
+  isolation: isolate;
+}
+
+/* A cell is a bar's full share of the width; the 1px either side makes the
+   2px gap between bars centred on the line between two cells. */
+.cell {
+  display: flex;
+  align-items: flex-end;
+  padding: 0 1px;
+}
+
+/* The bars and the colored part of the line share one gradient, light on the
+   left to deep on the right. Each bar's slice of it is set inline. The shadow
+   on the bars in range is the global .drop-shadow-extra-dark class. */
+.bar,
+.fill {
+  background-image: linear-gradient(
+    to right,
+    var(--teal-bright-300),
+    var(--teal-bright-500)
+  );
+}
+
+.bar {
+  position: relative;
+  width: 100%;
+  min-height: 2px;
+  border-radius: 2px;
+}
+
+/* Outside the chosen range. */
+.barOff {
+  background: var(--teal-bright-750);
+}
+
+/* The shadow of a bar in range, as its own layer behind every bar: drawn on
+   the bar itself it would fall across the bar beside it and muddy the
+   gradient. The shadow is the global .drop-shadow-extra-dark class. */
+.shadow {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+}
+
+/* 16px below the bars, as wide as the bars. The colored line (.fill) is as long
+   as the whole track; its clip-path, set inline from the two handle
+   positions, cuts it down to the stretch between them. */
+.track,
+.fill {
+  position: absolute;
+  top: 72px;
+  left: 12px;
+  right: 12px;
+  height: 4px;
+  border-radius: 2px;
+}
+
+.track {
+  background: var(--teal-bright-750);
+}
+
+.handle {
+  position: absolute;
+  top: 62px;
+  left: 0;
+  width: 100%;
+  height: 24px;
+  margin: 0;
+  background: none;
+  appearance: none;
+  pointer-events: none;
+  /* The focus ring is drawn on the handle itself (see .thumb below), not
+     around the invisible full-width input. */
+  outline: none;
+}
+
+.handle::-webkit-slider-runnable-track {
+  height: 24px;
+  background: none;
+}
+
+.handle::-moz-range-track {
+  background: none;
+}
+
+.handle::-webkit-slider-thumb {
+  appearance: none;
+  pointer-events: auto;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: none;
+  cursor: grab;
+}
+
+.handle::-moz-range-thumb {
+  pointer-events: auto;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: none;
+  cursor: grab;
+}
+
+.handle:active::-webkit-slider-thumb {
+  cursor: grabbing;
+}
+
+.handle:active::-moz-range-thumb {
+  cursor: grabbing;
+}
+
+/* The handle you see. The shadow is the global .drop-shadow-extra-dark class;
+   left is set inline. */
+.thumb {
+  position: absolute;
+  top: 62px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  box-sizing: border-box;
+  border: 1px solid var(--teal-bright-750);
+  border-radius: 50%;
+  background: var(--teal-bright-800);
+  pointer-events: none;
+}
+
+/* The drawn handle follows the invisible input just before it. */
+.handle:focus-visible + .thumb {
+  outline: 2px solid var(--teal-bright-300);
+  outline-offset: 2px;
+}

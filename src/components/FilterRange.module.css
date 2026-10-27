@@ -1,0 +1,6 @@
+/* Never wider than the screen, allowing for the popover's padding and the
+   16px FilterPopover keeps clear of the screen edge. */
+.panel {
+  width: 320px;
+  max-width: calc(100vw - 72px);
+}
