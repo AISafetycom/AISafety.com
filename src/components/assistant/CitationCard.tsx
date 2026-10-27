@@ -44,7 +44,11 @@ function metaSummary(c: CitationRef): string {
     if (c.meta.workLocation) parts.push(c.meta.workLocation)
     if (c.meta.minimumExperience) parts.push(c.meta.minimumExperience)
   } else if (c.type === 'funder') {
-    if (c.meta.acceptingApplications) parts.push(c.meta.acceptingApplications)
+    // The card's status line. Chats saved before 27 October 2026 (the
+    // visitor's open tab, the admin log) carry the old wording under
+    // acceptingApplications instead.
+    const status = c.meta.applications || c.meta.acceptingApplications
+    if (status) parts.push(status)
   } else if (c.type === 'community') {
     if (c.meta.platform) parts.push(c.meta.platform)
   } else if (c.type === 'course') {

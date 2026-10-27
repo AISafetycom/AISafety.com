@@ -6,7 +6,8 @@ import {
   whoCanApplyLabel,
 } from '@/lib/funding-meta'
 
-const STATUS_ICONS: Record<string, string> = {
+// Exported for the admin Queue, which draws the same icon beside the field.
+export const STATUS_ICONS: Record<string, string> = {
   'Applications open': '/images/icons/form-check.svg',
   'Not currently accepting applications': '/images/icons/form-pause.svg',
   'Invite only, no applications': '/images/icons/paper-with-x.svg',

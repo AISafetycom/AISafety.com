@@ -172,13 +172,63 @@ describe('missingFields', () => {
       Website: 'https://x.org',
       Description: 'y',
       Logo: ['https://example.com/logo.png'],
-      Type: ['Grant'],
-      'Accepting applications?': 'Yes',
+      'Application status': 'Applications open',
+      'Who can apply': ['Individuals'],
     }
     expect(missingFields('/funding', funding)).toEqual([])
     expect(missingFields('/funding', { ...funding, Featured: '1' })).toEqual([
       'Featured tagline',
     ])
+  })
+
+  it('asks a funder for the fields its card draws, not the old ones', () => {
+    // Nondualism and AI alignment microgrants, as Comb wrote it before the
+    // October 2026 redesign: only the old status text and Type.
+    const oldShape = {
+      Name: 'x',
+      Website: 'https://x.org',
+      Description: 'y',
+      Logo: ['https://example.com/logo.png'],
+      Type: ['Grant program'],
+      'Accepting applications?': 'Applications on a rolling basis',
+    }
+    expect(missingFields('/funding', oldShape)).toEqual([
+      'Application status',
+      'Who can apply',
+    ])
+    // No Grant size or Deadline: the card hides the line, and rolling is fine.
+    expect(
+      missingFields('/funding', {
+        ...oldShape,
+        'Application status': 'Invite only, no applications',
+        'Who can apply': ['Nonprofits', 'Universities'],
+      })
+    ).toEqual([])
+  })
+
+  it('asks an advisor for who it is for, focus areas and applications', () => {
+    const advisor = {
+      Name: 'x',
+      Link: 'https://x.org',
+      Description: 'y',
+      Logo: ['https://example.com/logo.png'],
+      Focus: ['Career/contribution'],
+      Status: 'Active',
+    }
+    expect(missingFields('/advisors', advisor)).toEqual([
+      "Who it's for",
+      'Focus areas',
+      'Applications',
+    ])
+    expect(
+      missingFields('/advisors', {
+        ...advisor,
+        Focus: null,
+        "Who it's for": ['Newcomers'],
+        'Focus areas': ['Career', 'Well-being'],
+        Applications: 'Accepts everyone',
+      })
+    ).toEqual([])
   })
 
   it('counts zero as a value, for the map’s x and y', () => {

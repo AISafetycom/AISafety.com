@@ -42,6 +42,8 @@ export default function FilterRange({
   const active = lo > 0 || hi < labels.length - 1
 
   // One filter_apply once the handles stop moving, not one per step dragged.
+  // It logs the pill's own wording ("up to $100k", "$25k+"), so the
+  // dashboard's rows read the way the pill does.
   useEffect(() => {
     if (!trackingPage || !active) return
     const timer = setTimeout(() => {
@@ -49,11 +51,11 @@ export default function FilterRange({
       trackFilterApply(
         trackingPage,
         group,
-        trackedFilterValue(trackingPage, group, `${labels[lo]} – ${labels[hi]}`)
+        trackedFilterValue(trackingPage, group, summary)
       )
     }, 800)
     return () => clearTimeout(timer)
-  }, [trackingPage, title, labels, lo, hi, active])
+  }, [trackingPage, title, summary, active])
 
   return (
     <FilterPopover

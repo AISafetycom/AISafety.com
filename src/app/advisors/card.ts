@@ -2,7 +2,8 @@ import type { CardProps, ListingCardMeta } from '@/components/ListingCard'
 import type { Advisor } from '@/lib/data/advisors'
 import { focusLabel, whoItsForLabel } from '@/lib/advisor-meta'
 
-const APPLICATIONS_ICONS: Record<string, string> = {
+// Exported for the admin Queue, which draws the same icon beside the field.
+export const APPLICATIONS_ICONS: Record<string, string> = {
   'Application required': '/images/icons/paper.svg',
   'Accepts everyone': '/images/icons/form-check.svg',
 }

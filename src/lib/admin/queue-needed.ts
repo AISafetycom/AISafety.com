@@ -126,13 +126,16 @@ const NEEDED: Record<string, Need[]> = {
     'Created by',
     FEATURED_TAGLINE,
   ],
+  // Grant size (display) and Deadline are left out on purpose: an empty Grant
+  // size hides the card's line and an empty Deadline means rolling. Type and
+  // Accepting applications? are no longer on the card (27 Oct 2026).
   '/funding': [
     'Name',
     'Website',
     'Description',
     'Logo',
-    'Type',
-    'Accepting applications?',
+    'Application status',
+    'Who can apply',
     FEATURED_TAGLINE,
   ],
   '/media-channels': [
@@ -143,12 +146,15 @@ const NEEDED: Record<string, Need[]> = {
     'Type',
     FEATURED_TAGLINE,
   ],
+  // Focus areas replaced the old Focus on the card (27 Oct 2026).
   '/advisors': [
     'Name',
     'Link',
     'Description',
     'Logo',
-    'Focus',
+    "Who it's for",
+    'Focus areas',
+    'Applications',
     'Status',
     FEATURED_TAGLINE,
   ],

@@ -50,6 +50,8 @@ import type {
 import Icon from '@/components/Icon'
 import { activityIcon } from '@/app/communities/activity-icon'
 import { isAcceptingApplications } from '@/lib/funding-status'
+import { STATUS_ICONS as FUNDER_STATUS_ICONS } from '@/app/funding/card'
+import { APPLICATIONS_ICONS as ADVISOR_APPLICATIONS_ICONS } from '@/app/advisors/card'
 import { trainingTypeColor } from '@/lib/training-types'
 import { eventTypeColor } from '@/lib/event-types'
 import SitePreview, {
@@ -6132,7 +6134,14 @@ const SHARED_ICONS: Record<string, string> = {
   category: 'category',
 }
 const PAGE_ICONS: Record<string, Record<string, string>> = {
-  '/funding': { type: 'tag' },
+  // The card shows the deadline inside the open status line.
+  '/funding': {
+    type: 'tag',
+    deadline: 'form-check',
+    'who can apply': 'team',
+    'grant size (display)': 'grant-size',
+  },
+  '/advisors': { "who it's for": 'team', 'focus areas': 'target' },
   '/founders': { type: 'tag' },
   '/media-channels': { type: 'computer' },
   '/self-study': { type: 'type', 'course type': 'type' },
@@ -6172,6 +6181,12 @@ function fieldIcon(
     return isAcceptingApplications(value)
       ? '/images/icons/form-check.svg'
       : '/images/icons/form-pause.svg'
+  }
+  if (page === '/funding' && key === 'application status') {
+    return FUNDER_STATUS_ICONS[value] ?? null
+  }
+  if (page === '/advisors' && key === 'applications') {
+    return ADVISOR_APPLICATIONS_ICONS[value] ?? null
   }
   const file = PAGE_ICONS[page ?? '']?.[key] ?? SHARED_ICONS[key]
   return file ? `/images/icons/${file}.svg` : null

@@ -171,7 +171,15 @@ export const ENDPOINTS: EndpointDef[] = [
     slug: 'funding',
     title: 'Funding',
     description: 'Funders and grant programs for AI safety work.',
-    filterFields: ['type', 'recipientType', 'acceptingApplications'],
+    // recipientType is '' on every record (deprecated, see the changelog) but
+    // stays a filter until v2, so ?recipientType= keeps answering as before.
+    filterFields: [
+      'type',
+      'recipientType',
+      'acceptingApplications',
+      'applicationStatus',
+      'whoCanApply',
+    ],
     fields: [
       'id',
       'name',
@@ -217,7 +225,13 @@ export const ENDPOINTS: EndpointDef[] = [
     slug: 'advisors',
     title: 'Advisors',
     description: 'People offering AI safety career and research advice.',
-    filterFields: ['focus', 'status'],
+    filterFields: [
+      'focus',
+      'status',
+      'whoItsFor',
+      'focusAreas',
+      'applications',
+    ],
     fields: [
       'id',
       'name',

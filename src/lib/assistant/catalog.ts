@@ -1,6 +1,6 @@
 import { getJobs } from '@/lib/data/jobs'
 import { getFunders } from '@/lib/data/funding'
-import { isAcceptingApplications } from '@/lib/funding-status'
+import { applicationLabel } from '@/lib/funding-meta'
 import { getAdvisors } from '@/lib/data/advisors'
 import { getCommunities } from '@/lib/data/communities'
 import { getCourses } from '@/lib/data/self-study'
@@ -164,18 +164,25 @@ export async function buildCatalog(): Promise<Catalog> {
       lastModified: f.lastModified ?? undefined,
       meta: compact({
         type: f.type,
-        recipientType: f.recipientType,
-        acceptingApplications: f.acceptingApplications,
-        // The open and closed display wordings share substrings ("Not
-        // accepting applications" contains "accepting applications";
-        // "applications" appears in every state), so a substring filter
-        // on the field above can't separate open from closed — filter on
-        // this token instead.
-        applicationStatus: f.acceptingApplications
-          ? isAcceptingApplications(f.acceptingApplications)
+        // The card's status line, word for word ("Applications close 31 Oct
+        // 2026", "Invite only, no applications").
+        applications: applicationLabel(f.applicationStatus, f.deadline),
+        // The status lines share words ("Not currently accepting
+        // applications" contains "accepting applications"), so a substring
+        // filter on the line above can't separate open from closed: filter
+        // on this token instead. Both closed statuses are "Closed"; the line
+        // above says which. A passed Deadline already reads as closed here
+        // (getFunders resolves it).
+        applicationStatus: f.applicationStatus
+          ? f.applicationStatus === 'Applications open'
             ? 'Open'
             : 'Closed'
           : null,
+        // The closing day (YYYY-MM-DD) of an open funder; none means rolling.
+        deadline:
+          f.applicationStatus === 'Applications open' ? f.deadline : null,
+        whoCanApply: f.whoCanApply.join(', '),
+        grantSize: f.grantSize,
       }),
       featured: isFeatured(f),
     })
@@ -193,7 +200,9 @@ export async function buildCatalog(): Promise<Catalog> {
       dateAdded: a.dateAdded ?? undefined,
       lastModified: a.lastModified ?? undefined,
       meta: compact({
-        focus: a.focus,
+        whoItsFor: a.whoItsFor.join(', '),
+        focusAreas: a.focusAreas.join(', '),
+        applications: a.applications,
         status: a.status,
       }),
       featured: isFeatured(a),

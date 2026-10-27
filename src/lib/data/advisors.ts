@@ -59,19 +59,6 @@ export interface Advisor {
 // entirely rather than surfaced behind a status filter.
 const isActiveAdvisor = (a: Advisor) => a.status === 'Active'
 
-// The live Data API serves who-it's-for, focus areas and applications only once
-// this change has deployed. Until then, contributor mode (and CI, which builds
-// that way) fills them in empty so the page still renders. Delete this and its
-// use in getAdvisors() once /api/v1/advisors returns them.
-const NOT_YET_IN_PUBLIC_API: Pick<
-  Advisor,
-  'whoItsFor' | 'focusAreas' | 'applications'
-> = {
-  whoItsFor: [],
-  focusAreas: [],
-  applications: '',
-}
-
 // Advisors already warned about for missing the new fields, so the many
 // getAdvisors() calls in one build log each name once.
 const warnedIncomplete = new Set<string>()
@@ -132,9 +119,7 @@ export function advisorFromRecord(record: AirtableRawRecord): Advisor | null {
 export async function getAdvisors(): Promise<Advisor[]> {
   if (!hasAirtableCredentials()) {
     const advisors = await fetchPublicData<Advisor>('advisors')
-    return advisors
-      .map(a => ({ ...NOT_YET_IN_PUBLIC_API, ...a }))
-      .filter(isActiveAdvisor)
+    return advisors.filter(isActiveAdvisor)
   }
   const raw = await fetchAirtableRecords({
     tableId: TABLE_ID,
