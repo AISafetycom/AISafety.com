@@ -351,15 +351,17 @@ function verdictRank(v: QueueItem['verdict']): number {
   }
 }
 
-/** Sizes a text box to what is typed in it, on open and on every keystroke,
- *  so a long description is never hidden behind a scrollbar. */
-/** Cmd+Enter (Ctrl+Enter elsewhere) finishes a text box the way clicking
- *  away does: the words are kept and the box closes (Bryce, 17 Sept 2026:
- *  "CMD ENTER should exit the box (saving)"). */
+/** Enter finishes a text box the way clicking away does: the words are kept
+ *  and the box closes. Shift+Enter starts a new line, as in the chat box
+ *  (Bryce, 27 Oct 2026: "make ENTER save the field, no CMD necessary";
+ *  Cmd+Enter, the 17 Sept 2026 key, still works). Enter that confirms an
+ *  accented letter or a word being composed is left to the keyboard. */
 function isDoneKey(e: React.KeyboardEvent): boolean {
-  return e.key === 'Enter' && (e.metaKey || e.ctrlKey)
+  return e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing
 }
 
+/** Sizes a text box to what is typed in it, on open and on every keystroke,
+ *  so a long description is never hidden behind a scrollbar. */
 function fitToText(el: HTMLTextAreaElement | null) {
   if (!el) return
   el.style.height = 'auto'
@@ -4407,9 +4409,13 @@ export default function QueueAdmin({
               </dt>
               <dd>put back the change that was just undone</dd>
               <dt>
-                <kbd>⌘</kbd> <kbd>Enter</kbd>
+                <kbd>Enter</kbd>
               </dt>
               <dd>finish a text box, keeping what you typed</dd>
+              <dt>
+                <kbd>⇧</kbd> <kbd>Enter</kbd>
+              </dt>
+              <dd>a new line in a text box</dd>
               <dt>
                 <kbd>Esc</kbd>
               </dt>
