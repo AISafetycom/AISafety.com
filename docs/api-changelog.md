@@ -35,4 +35,4 @@ Initial release.
   record since its Airtable field was retired in July 2026, so filtering on it
   matches nothing. Use `whoCanApply` (`Individuals`, `Nonprofits`,
   `For-profits`, or `Universities`) instead. `recipientType` stays in v1
-  responses and filters and is removed in v2 (27 October 2026).
+  responses and filters until v2 drops it (deprecated 27 October 2026).
