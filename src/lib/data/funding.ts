@@ -97,7 +97,8 @@ export function funderFromRecord(record: AirtableRawRecord): Funder | null {
     description: fieldString(f[FIELD.description]) || '',
     logo: fieldAttachmentUrl(f[FIELD.logo]),
     type: fieldText(f[FIELD.type]),
-    // The Recipient type field no longer exists in Airtable.
+    // The Recipient type field no longer exists in Airtable (July 2026). It
+    // stays '' only so Data API v1 keeps the key; Who can apply replaces it.
     recipientType: '',
     // A dated status ("Applications close 23 October 2026") whose date has
     // passed reads "Not accepting applications" from here on, so the card,
@@ -128,35 +129,9 @@ export function funderFromRecord(record: AirtableRawRecord): Funder | null {
 // getFunders() calls in one build log each name once.
 const warnedNoStatus = new Set<string>()
 
-// The live Data API serves the status, who-can-apply and grant-size fields only
-// once this change has deployed. Until then, contributor mode (and CI, which
-// builds that way) fills them in empty so the page still renders. Delete this
-// and its use in getFunders() once /api/v1/funding returns them.
-const NOT_YET_IN_PUBLIC_API: Pick<
-  Funder,
-  | 'applicationStatus'
-  | 'deadline'
-  | 'whoCanApply'
-  | 'grantSize'
-  | 'grantMinUsd'
-  | 'grantMaxUsd'
-> = {
-  applicationStatus: '',
-  deadline: null,
-  whoCanApply: [],
-  grantSize: '',
-  grantMinUsd: null,
-  grantMaxUsd: null,
-}
-
 export async function getFunders(): Promise<Funder[]> {
   if (!hasAirtableCredentials()) {
-    const funders = await fetchPublicData<Funder>('funding')
-    // The live Data API serves the status, who-can-apply and grant-size fields
-    // only once this change has deployed. Until then, fill them in empty so
-    // contributor mode (and CI, which builds that way) still renders. Delete
-    // this once /api/v1/funding returns them.
-    return funders.map(f => ({ ...NOT_YET_IN_PUBLIC_API, ...f }))
+    return fetchPublicData<Funder>('funding')
   }
   const raw = await fetchAirtableRecords({
     tableId: TABLE_ID,

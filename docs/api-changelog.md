@@ -28,3 +28,11 @@ Initial release.
   2026).
 - `advisors` gains `whoItsFor`, `focusAreas`, and `applications`; the existing
   fields are unchanged (27 October 2026).
+- `funding` can be filtered by `applicationStatus` and `whoCanApply`, and
+  `advisors` by `whoItsFor`, `focusAreas`, and `applications` (27 October
+  2026).
+- Deprecated: `funding`'s `recipientType` has been an empty string on every
+  record since its Airtable field was retired in July 2026, so filtering on it
+  matches nothing. Use `whoCanApply` (`Individuals`, `Nonprofits`,
+  `For-profits`, or `Universities`) instead. `recipientType` stays in v1
+  responses and filters and is removed in v2 (27 October 2026).
