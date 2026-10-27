@@ -19,9 +19,9 @@ describe('applicationLabel', () => {
     )
   })
 
-  it('writes the deadline out in full for open funders with one', () => {
+  it('gives the deadline as day, short month and year for open funders with one', () => {
     expect(applicationLabel('Applications open', '2026-10-31')).toBe(
-      'Applications close 31 October 2026'
+      'Applications close 31 Oct 2026'
     )
   })
 
@@ -80,8 +80,8 @@ describe('resolveApplicationStatus', () => {
 
 describe('card lines', () => {
   it('lists who can apply in lowercase, in the order given', () => {
-    expect(whoCanApplyLabel(['Universities', 'Nonprofits'])).toBe(
-      'Who can apply: universities, nonprofits'
+    expect(whoCanApplyLabel(['Nonprofits', 'Universities'])).toBe(
+      'Who can apply: nonprofits, universities'
     )
     expect(whoCanApplyLabel([])).toBeNull()
   })

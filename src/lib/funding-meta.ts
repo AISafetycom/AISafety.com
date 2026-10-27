@@ -1,4 +1,4 @@
-import { formatDate } from './format-date'
+import { formatShortDate } from './format-date'
 
 // What the Funding page shows for each funder: the card's status, who-can-apply
 // and grant-size lines, and the stops behind the Grant size slider. Pure, so the
@@ -53,13 +53,14 @@ export function applicationLabel(
 ): string | null {
   if (status === 'Applications open') {
     return deadline
-      ? `Applications close ${formatDate(new Date(deadline))}`
+      ? `Applications close ${formatShortDate(new Date(deadline))}`
       : 'Applications on a rolling basis'
   }
   return isApplicationStatus(status) ? status : null
 }
 
-/** "Who can apply: individuals, nonprofits" — lowercase, in Airtable order. */
+/** "Who can apply: individuals, nonprofits" — lowercase, in the order given
+ *  (funderFromRecord puts them in WHO_CAN_APPLY order). */
 export function whoCanApplyLabel(who: string[]): string | null {
   return who.length > 0
     ? `Who can apply: ${who.map(w => w.toLowerCase()).join(', ')}`

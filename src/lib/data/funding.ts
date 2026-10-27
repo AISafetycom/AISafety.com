@@ -12,10 +12,12 @@ import {
 } from './airtable'
 import { fetchPublicData, hasAirtableCredentials } from './public-api'
 import {
+  WHO_CAN_APPLY,
   isApplicationStatus,
   resolveApplicationStatus,
 } from '@/lib/funding-meta'
 import { resolveAcceptingApplications } from '../funding-status'
+import { inOptionOrder } from '../option-order'
 
 export const TABLE_ID = 'tblzMTLDZWZKqTxrq'
 const VIEW_ID = 'viwxv2w8utSEhUeiJ'
@@ -109,7 +111,10 @@ export function funderFromRecord(record: AirtableRawRecord): Funder | null {
     // Application status filter and in the Data API.
     applicationStatus: resolveApplicationStatus(storedStatus, deadline),
     deadline,
-    whoCanApply: fieldStringArray(f[FIELD.whoCanApply]),
+    whoCanApply: inOptionOrder(
+      fieldStringArray(f[FIELD.whoCanApply]),
+      WHO_CAN_APPLY
+    ),
     grantSize: fieldString(f[FIELD.grantSize]) || '',
     grantMinUsd: fieldNumber(f[FIELD.grantMin]),
     grantMaxUsd: fieldNumber(f[FIELD.grantMax]),
