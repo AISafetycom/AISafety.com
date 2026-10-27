@@ -15,13 +15,31 @@ export const APPLICATION_STATUSES = [
 /** The Who can apply options in Airtable, in filter order. */
 export const WHO_CAN_APPLY = [
   'Individuals',
-  'Non-profits',
+  'Nonprofits',
   'For-profits',
   'Universities',
 ] as const
 
 export function isApplicationStatus(value: string): boolean {
   return (APPLICATION_STATUSES as readonly string[]).includes(value)
+}
+
+/**
+ * The Application status as the site shows it. Nobody edits a record the day
+ * its Deadline passes, so — like the old status text (funding-status.ts) and
+ * /training's Deadline — an open funder whose Deadline is behind `today`
+ * (YYYY-MM-DD; the closing day itself still counts as open) reads "Not
+ * currently accepting applications" everywhere: card, filter, Data API. Every
+ * other status passes through unchanged.
+ */
+export function resolveApplicationStatus(
+  status: string,
+  deadline: string | null,
+  today: string = new Date().toISOString().slice(0, 10)
+): string {
+  return status === 'Applications open' && deadline && deadline < today
+    ? 'Not currently accepting applications'
+    : status
 }
 
 /**
@@ -41,7 +59,7 @@ export function applicationLabel(
   return isApplicationStatus(status) ? status : null
 }
 
-/** "Who can apply: individuals, non-profits" — lowercase, in Airtable order. */
+/** "Who can apply: individuals, nonprofits" — lowercase, in Airtable order. */
 export function whoCanApplyLabel(who: string[]): string | null {
   return who.length > 0
     ? `Who can apply: ${who.map(w => w.toLowerCase()).join(', ')}`
@@ -87,13 +105,14 @@ function positionValue(position: number): number {
 }
 
 /**
- * Whether the funder's grants reach into the selected range (positions lo to
- * hi, both ends included). A missing minimum counts as $0 and a missing
- * maximum as no limit; a funder with neither has no stated size and never
- * matches.
+ * Whether the funder stays listed for the selected range (positions lo to hi,
+ * both ends included): its grants reach into the range. A missing minimum
+ * counts as $0 and a missing maximum as no limit; a funder with neither has no
+ * stated size and always stays, so nobody misses a funder just because it
+ * doesn't publish a grant size.
  */
 export function grantOverlaps(funder: Grant, lo: number, hi: number): boolean {
-  if (funder.grantMinUsd === null && funder.grantMaxUsd === null) return false
+  if (funder.grantMinUsd === null && funder.grantMaxUsd === null) return true
   const min = funder.grantMinUsd ?? 0
   const max = funder.grantMaxUsd ?? Infinity
   return min <= positionValue(hi) && max >= positionValue(lo)

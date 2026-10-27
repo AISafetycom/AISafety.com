@@ -11,7 +11,10 @@ import {
   type AirtableRawRecord,
 } from './airtable'
 import { fetchPublicData, hasAirtableCredentials } from './public-api'
-import { isApplicationStatus } from '@/lib/funding-meta'
+import {
+  isApplicationStatus,
+  resolveApplicationStatus,
+} from '@/lib/funding-meta'
 import { resolveAcceptingApplications } from '../funding-status'
 
 export const TABLE_ID = 'tblzMTLDZWZKqTxrq'
@@ -76,12 +79,13 @@ export function funderFromRecord(record: AirtableRawRecord): Funder | null {
   const name = fieldString(f[FIELD.name])
   if (!name) return null
 
-  const applicationStatus = fieldText(f[FIELD.applicationStatus])
-  if (applicationStatus && !isApplicationStatus(applicationStatus)) {
+  const storedStatus = fieldText(f[FIELD.applicationStatus])
+  if (storedStatus && !isApplicationStatus(storedStatus)) {
     console.warn(
-      `[funding] "${name}" has an unknown Application status "${applicationStatus}"; its card shows no status line and the Application status filter skips it.`
+      `[funding] "${name}" has an unknown Application status "${storedStatus}"; its card shows no status line and the Application status filter skips it.`
     )
   }
+  const deadline = fieldDateOnly(f[FIELD.deadline])
 
   return {
     id: record.id,
@@ -100,8 +104,11 @@ export function funderFromRecord(record: AirtableRawRecord): Funder | null {
     acceptingApplications: resolveAcceptingApplications(
       fieldText(f[FIELD.acceptingApplications])
     ),
-    applicationStatus,
-    deadline: fieldDateOnly(f[FIELD.deadline]),
+    // Same rule for the new fields: an open funder whose Deadline has passed
+    // reads "Not currently accepting applications" on its card, in the
+    // Application status filter and in the Data API.
+    applicationStatus: resolveApplicationStatus(storedStatus, deadline),
+    deadline,
     whoCanApply: fieldStringArray(f[FIELD.whoCanApply]),
     grantSize: fieldString(f[FIELD.grantSize]) || '',
     grantMinUsd: fieldNumber(f[FIELD.grantMin]),

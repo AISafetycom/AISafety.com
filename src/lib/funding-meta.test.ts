@@ -8,6 +8,7 @@ import {
   grantRangeActive,
   grantRangeSummary,
   grantSizeLabel,
+  resolveApplicationStatus,
   whoCanApplyLabel,
 } from './funding-meta'
 
@@ -39,10 +40,48 @@ describe('applicationLabel', () => {
   })
 })
 
+describe('resolveApplicationStatus', () => {
+  const open = 'Applications open'
+  const closed = 'Not currently accepting applications'
+
+  it('closes an open funder the day after its Deadline', () => {
+    expect(resolveApplicationStatus(open, '2026-10-31', '2026-11-01')).toBe(
+      closed
+    )
+    expect(
+      applicationLabel(
+        resolveApplicationStatus(open, '2026-10-31', '2026-11-01'),
+        '2026-10-31'
+      )
+    ).toBe(closed)
+  })
+
+  it('keeps it open up to and including the closing day', () => {
+    expect(resolveApplicationStatus(open, '2026-10-31', '2026-10-30')).toBe(
+      open
+    )
+    expect(resolveApplicationStatus(open, '2026-10-31', '2026-10-31')).toBe(
+      open
+    )
+  })
+
+  it('leaves rolling funders and the other statuses alone', () => {
+    expect(resolveApplicationStatus(open, null, '2030-01-01')).toBe(open)
+    expect(
+      resolveApplicationStatus(
+        'Invite only, no applications',
+        '2026-10-31',
+        '2026-11-01'
+      )
+    ).toBe('Invite only, no applications')
+    expect(resolveApplicationStatus('', '2026-10-31', '2026-11-01')).toBe('')
+  })
+})
+
 describe('card lines', () => {
   it('lists who can apply in lowercase, in the order given', () => {
-    expect(whoCanApplyLabel(['Universities', 'Non-profits'])).toBe(
-      'Who can apply: universities, non-profits'
+    expect(whoCanApplyLabel(['Universities', 'Nonprofits'])).toBe(
+      'Who can apply: universities, nonprofits'
     )
     expect(whoCanApplyLabel([])).toBeNull()
   })
@@ -85,9 +124,11 @@ describe('grant size slider', () => {
     ).toBe(true)
   })
 
-  it('never matches a funder with no stated size', () => {
+  it('keeps a funder with no stated size listed, but out of the bars', () => {
     const none = { grantMinUsd: null, grantMaxUsd: null }
-    expect(grantOverlaps(none, 0, GRANT_TOP)).toBe(false)
+    expect(grantOverlaps(none, 0, GRANT_TOP)).toBe(true)
+    expect(grantOverlaps(none, 6, GRANT_TOP)).toBe(true)
+    expect(grantOverlaps(none, 0, 1)).toBe(true)
     expect(grantBars([none]).every(count => count === 0)).toBe(true)
   })
 
