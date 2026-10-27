@@ -26,7 +26,7 @@ describe('focusLabel', () => {
     expect(focusLabel(['Career', 'Volunteering', 'Donating'])).toBe(
       'Focus: career, volunteering, donating'
     )
-    expect(focusLabel(['Wellbeing'])).toBe('Focus: wellbeing')
+    expect(focusLabel(['Well-being'])).toBe('Focus: well-being')
   })
 
   it('has nothing to show when the advisor has none', () => {

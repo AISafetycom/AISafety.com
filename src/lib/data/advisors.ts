@@ -10,7 +10,8 @@ import {
   type AirtableRawRecord,
 } from './airtable'
 import { fetchPublicData, hasAirtableCredentials } from './public-api'
-import { isApplications } from '@/lib/advisor-meta'
+import { FOCUS_AREAS, WHO_ITS_FOR, isApplications } from '@/lib/advisor-meta'
+import { inOptionOrder } from '../option-order'
 
 export const TABLE_ID = 'tblf3KKYnmgcjVGhD'
 const VIEW_ID = 'viwIdRmaCar2Y6gPi'
@@ -115,8 +116,11 @@ export function advisorFromRecord(record: AirtableRawRecord): Advisor | null {
     description: fieldString(f[FIELD.description]) || '',
     logo: fieldAttachmentUrl(f[FIELD.logo]),
     focus: fieldText(f[FIELD.focus]),
-    whoItsFor: fieldStringArray(f[FIELD.whoItsFor]),
-    focusAreas: fieldStringArray(f[FIELD.focusAreas]),
+    whoItsFor: inOptionOrder(fieldStringArray(f[FIELD.whoItsFor]), WHO_ITS_FOR),
+    focusAreas: inOptionOrder(
+      fieldStringArray(f[FIELD.focusAreas]),
+      FOCUS_AREAS
+    ),
     applications,
     status: fieldText(f[FIELD.status]),
     url: fieldString(f[FIELD.link]) || '#',

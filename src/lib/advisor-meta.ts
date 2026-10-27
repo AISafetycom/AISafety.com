@@ -14,7 +14,7 @@ export const FOCUS_AREAS = [
   'Founding',
   'Volunteering',
   'Donating',
-  'Wellbeing',
+  'Well-being',
   'Operations',
   'Legal',
   'Visas',
@@ -30,14 +30,16 @@ export function isApplications(value: string): boolean {
   return (APPLICATIONS as readonly string[]).includes(value)
 }
 
-/** "For: newcomers, existing field members" — lowercase, in Airtable order. */
+/** "For: newcomers, existing field members" — lowercase, in the order given
+ *  (advisorFromRecord puts them in WHO_ITS_FOR order). */
 export function whoItsForLabel(who: string[]): string | null {
   return who.length > 0
     ? `For: ${who.map(w => w.toLowerCase()).join(', ')}`
     : null
 }
 
-/** "Focus: career, volunteering" — lowercase, in Airtable order. */
+/** "Focus: career, volunteering" — lowercase, in the order given
+ *  (advisorFromRecord puts them in FOCUS_AREAS order). */
 export function focusLabel(areas: string[]): string | null {
   return areas.length > 0
     ? `Focus: ${areas.map(a => a.toLowerCase()).join(', ')}`

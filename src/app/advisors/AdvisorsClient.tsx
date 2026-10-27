@@ -16,7 +16,6 @@ interface AdvisorsClientProps {
 }
 
 const whoOptions = [...WHO_ITS_FOR]
-const focusOptions = [...FOCUS_AREAS]
 const applicationsOptions = [...APPLICATIONS]
 
 const allPass = () => true
@@ -25,6 +24,16 @@ export default function AdvisorsClient({ advisors }: AdvisorsClientProps) {
   const [whoFilters, setWhoFilters] = useState<string[]>([])
   const [focusFilters, setFocusFilters] = useState<string[]>([])
   const [applicationsFilters, setApplicationsFilters] = useState<string[]>([])
+
+  // A Focus area no advisor has yet would only lead to an empty page, so it
+  // stays out of the filter until an advisor has it.
+  const focusOptions = useMemo(
+    () =>
+      FOCUS_AREAS.filter(area =>
+        advisors.some(advisor => advisor.focusAreas.includes(area))
+      ),
+    [advisors]
+  )
 
   // Each advisor's slot in the full page order, stamped onto a click so the
   // dashboard can tie clicks to page position even after later reordering.
@@ -74,7 +83,7 @@ export default function AdvisorsClient({ advisors }: AdvisorsClientProps) {
         groups.applications.matches
       ),
     }),
-    [advisors, groups]
+    [advisors, groups, focusOptions]
   )
 
   const savedScrollY = useRef<number | null>(null)
