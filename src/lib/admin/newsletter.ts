@@ -2517,6 +2517,11 @@ export interface CardInfo {
    *  email shows it (title, lines under it, description, rows at the
    *  bottom). Empty for drafts built before 25 Sept 2026. */
   fields: CardField[]
+  /** The manifest says the site's own card code drew this card: Funding
+   *  cards since 28 Oct 2026, unless PEN_CARDS switched them back to Pen's
+   *  wording. Events and Training cards never carry the flag (it would
+   *  change their emails); theirs come from the site since 2 Oct 2026. */
+  site: boolean
 }
 
 export interface CardField {
@@ -2553,6 +2558,9 @@ interface ManifestCard {
   logo?: string | null
   /** Funding cards: Pen's "Consider applying if" HTML ('' when none). */
   fit?: string
+  /** Funding cards drawn by the site's funderCardProps (render.py, since
+   *  28 Oct 2026); absent on Pen-worded cards. */
+  site?: boolean
   /** Text as built, per field, recorded on the field's first edit. */
   o?: Record<string, string>
 }
@@ -2619,6 +2627,7 @@ export function cardGroups(html: string): CardGroup[] | null {
       title: string
       logo: string | null
       fit: string | null
+      site: boolean
       o: Record<string, string>
     }
   >()
@@ -2628,6 +2637,7 @@ export function cardGroups(html: string): CardGroup[] | null {
         title: c.title,
         logo: typeof c.logo === 'string' && c.logo ? c.logo : null,
         fit: typeof c.fit === 'string' ? c.fit : null,
+        site: c.site === true,
         o: c.o && typeof c.o === 'object' ? c.o : {},
       })
   const groups = new Map<string, CardGroup>(
@@ -2646,6 +2656,7 @@ export function cardGroups(html: string): CardGroup[] | null {
       fit: fit ? stripHtml(fit[1]) : pipelineFit != null ? '' : null,
       pipelineFit: pipelineFit != null ? stripHtml(pipelineFit) : null,
       fields: cardFields(b.raw, meta?.o ?? {}, meta?.fit != null),
+      site: meta?.site ?? false,
     })
   }
   const out = [...groups.values()].filter(g => g.cards.length > 0)
@@ -2769,8 +2780,9 @@ function rebuildText(
 
 /* ─── "Consider applying if" on funding cards ────────────────────────── */
 
-// Exactly what render.py funding_card() writes under the description, and
-// the matching plain-text line — change both sides together.
+// Exactly what render.py writes under the description (fit_div(), on the
+// site's funder cards and on Pen-worded ones alike), and the matching
+// plain-text line — change both sides together.
 const FIT_HTML_RE =
   /<div style="margin-top:12px;"><span style="font-weight:600;">Consider applying if<\/span>: ([\s\S]*?)<\/div>/
 const FIT_TEXT_PREFIX = '  Consider applying if: '
@@ -2908,14 +2920,21 @@ const ICON_LABELS: Record<string, string> = {
   'entry-high': 'Entry bar',
   paper: 'Applications',
   'paper-closed': 'Applications',
+  // A funder's status row (funding/card.ts STATUS_ICONS). All three keep the
+  // one label, which DATE_FIELD_LABELS checks for a passed deadline.
   'form-check': 'Accepting applications',
   'form-pause': 'Accepting applications',
+  'paper-with-x': 'Accepting applications',
+  team: 'Who can apply',
+  'grant-size': 'Grant size',
   target: 'Detail',
 }
 
 function fieldLabel(name: string, icon: string | undefined, funding: boolean) {
   if (name === 'title') return 'Title'
   if (name === 'desc') return 'Description'
+  // Funding drafts built before 28 Oct 2026 have a Type row; the site's
+  // funder card, and Pen's fallback since (PEN_CARDS), have none.
   if (icon === 'tag') return funding ? 'Type' : 'Cost'
   // A timer line under an event's title is its time of day ("18:00 – 20:30",
   // events/card.ts); a training program's timer rows sit at the bottom (b…).
