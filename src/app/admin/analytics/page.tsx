@@ -1153,7 +1153,7 @@ async function AnalyticsView({
               unit: 'confirmed',
               metric: data.trends.newsletterConfirmed,
               since: SITE_SIGNUPS_SINCE,
-              what: `Confirmed = readers who pressed the link in that email and landed on aisafety.com/subscribed/events, /subscribed/training or /subscribed/funding, ${unique ? 'once per visitor per newsletter per day (the Unique count)' : 'every landing (the Total count)'}, as Signups through the site counts them.`,
+              what: `Confirmed = readers who pressed the link in that email and landed on aisafety.com/subscribed/events, /subscribed/training or /subscribed/funding, ${unique ? 'once per visitor, and not again when the same link opens a second time within two minutes (the Unique count)' : 'every landing (the Total count)'}, as Signups through the site counts them.`,
             },
             {
               key: 'newsletter-visits',
@@ -2811,10 +2811,14 @@ function SignupResultsPanel({
         message instead. Confirmed = readers who pressed the link in that email:
         ActiveCampaign then sends them to aisafety.com/subscribed/events,
         /subscribed/training or /subscribed/funding, and their view of that page
-        is counted, once per visitor per newsletter per day in the Unique count.
-        A confirmation can come days after its signup, so near the range&apos;s
-        edges the two don&apos;t pair up exactly, and a reader whose browser
-        blocks the site&apos;s tracking isn&apos;t counted.
+        is counted. In the Unique count that&apos;s once per visitor, and not
+        again when the same link opens a second time within two minutes in
+        another browser (an email app&apos;s own browser and then the
+        phone&apos;s, or a mail scanner checking the link). Anyone else who
+        opens one of those pages counts too, tests included. A confirmation can
+        come days after its signup, so near the range&apos;s edges the two
+        don&apos;t pair up exactly, and a reader whose browser blocks the
+        site&apos;s tracking isn&apos;t counted.
       </p>
     </Panel>
   )
