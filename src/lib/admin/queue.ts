@@ -44,7 +44,14 @@ import {
 import { sealToken } from './session'
 import { parseRejectDrafts } from './queue-decline'
 import { isExpiredAttachment } from './attachment-url'
-import { roomFor, SORT_FIELD, type Placed } from './queue-place'
+import {
+  keepsOrder,
+  NO_PLACE,
+  roomFor,
+  SORT_FIELD,
+  sortValue,
+  type Placed,
+} from './queue-place'
 import type { ListingDates } from './queue-urgent'
 import { reviewAgainAt } from './queue-later'
 import { ruleTestOf, type RuleTest } from './queue-rule-test'
@@ -1054,9 +1061,7 @@ export async function getTargetFields(
 export async function getPageOrder(table: string): Promise<Placed[] | null> {
   if (!TABLE_ID_RE.test(table)) return null
   const schema = await getTableSchema(table)
-  if (!schema.some(f => f.name === SORT_FIELD && f.type === 'number')) {
-    return null
-  }
+  if (!keepsOrder(schema)) return null
   const name = primaryNames.get(table) ?? 'Name'
   const featured = schema.some(f => f.name === 'Featured')
   const params = new URLSearchParams({
@@ -1083,6 +1088,24 @@ export async function getPageOrder(table: string): Promise<Placed[] | null> {
       typeof r.fields[SORT_FIELD] === 'number' ? r.fields[SORT_FIELD] : null,
     featured: Boolean(str(r.fields.Featured)),
   }))
+}
+
+/** Refuses to publish an addition with no place on a page kept in a
+ *  manual order (the page's Accept guard, checked again here): the
+ *  edits' Sort if they hold one (an emptied one counts as none), else the
+ *  record's (Bryce, 28 Oct 2026: "make it impossible to accept a Queue
+ *  suggestion if no sort is picked"). */
+async function requirePlace(
+  table: string,
+  record: string,
+  edits: Record<string, unknown>
+): Promise<void> {
+  if (!keepsOrder(await getTableSchema(table))) return
+  const sort =
+    SORT_FIELD in edits
+      ? edits[SORT_FIELD]
+      : (await currentValues(table, record, [SORT_FIELD]))[SORT_FIELD]
+  if (sortValue(sort) === null) throw new QueueError(NO_PLACE, 409)
 }
 
 /** Frees a Sort value for the addition being published: the listing that
@@ -1903,6 +1926,14 @@ export async function acceptItem(
       : null
   const draftFields: Record<string, unknown> =
     draft !== null && draft !== item.replyDraft ? { [F.replyDraft]: draft } : {}
+  // Before the try: an addition with no place stays open, not Failed.
+  if (
+    item.type === 'Add' &&
+    item.targetTable &&
+    isRecordId(item.targetRecord ?? '')
+  ) {
+    await requirePlace(item.targetTable, item.targetRecord as string, edits)
+  }
   try {
     if (item.type === 'Add') {
       const t = target(item)
