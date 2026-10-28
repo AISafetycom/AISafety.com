@@ -409,11 +409,20 @@ function hashId(): string | null {
  *  "posted 15 September 2026"): the day is what places it. */
 function foundLabel(text: string): string {
   return text
+    .split('\n')[0]
     .replace(
       /(\d{1,2} [A-Z][a-z]+ \d{4}) \d{1,2}:\d{2}(?: UTC[+\-\u2212]\d{2}:\d{2})?/,
       '$1'
     )
     .trim()
+}
+
+/** The post Comb found the listing in, which the Queue keeps on the line
+ *  under the Source line when Comb's comment names it (Bryce, 28 Oct 2026:
+ *  "Let's make the source clickable"). */
+function foundLink(text: string): string | null {
+  const link = text.split('\n')[1]?.trim()
+  return link && /^https?:\/\//.test(link) ? link : null
 }
 
 function ago(iso: string | null): string {
@@ -5433,6 +5442,22 @@ function Detail({
     item.source === 'Comb' && item.sourceExcerpt
       ? foundLabel(item.sourceExcerpt)
       : null
+  const foundHref =
+    item.source === 'Comb' && item.sourceExcerpt
+      ? foundLink(item.sourceExcerpt)
+      : null
+  const foundText = foundHref ? (
+    <a
+      className={styles.foundLink}
+      href={foundHref}
+      target="_blank"
+      rel="noreferrer"
+    >
+      {found}
+    </a>
+  ) : (
+    found
+  )
 
   return (
     <div
@@ -5489,7 +5514,7 @@ function Detail({
               with no panel it sits here instead. */}
           {found && !showAside && (
             <p className={styles.found}>
-              <span className={styles.foundLabel}>Source</span> {found}
+              <span className={styles.foundLabel}>Source</span> {foundText}
             </p>
           )}
           {/* With a card on show the heading only repeats what Broom found
@@ -5852,7 +5877,7 @@ function Detail({
           {found && (
             <div className={styles.asideFound}>
               <span className={styles.verdictKicker}>Source</span>
-              <span>{found}</span>
+              <span>{foundText}</span>
             </div>
           )}
           {item.verdict && (
