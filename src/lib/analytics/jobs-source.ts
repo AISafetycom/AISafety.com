@@ -66,6 +66,8 @@ export interface DayRow {
   clicks: number
   people: number
   pageVisitors: number
+  /** Browsers that opened any page of AISafety.com that day. */
+  siteVisitors: number
 }
 
 /** One job's clicks from one place on one UTC day. */
@@ -119,6 +121,8 @@ export interface JobsSourceStats {
   /** Browsers that opened /jobs, and those of them that clicked a job there. */
   pageVisitors: number
   pageClickers: number
+  /** Browsers that opened any page of AISafety.com. */
+  siteVisitors: number
   /** Most clicked first. */
   rows: JobRow[]
   employers: EmployerRow[]
@@ -126,6 +130,8 @@ export interface JobsSourceStats {
   filters: FilterRow[]
   series: { start: string; count: number; days?: number }[]
   seriesUnit: 'day' | 'week'
+  /** Site visitors per bucket of `series`, each counted once a bucket. */
+  visitorSeries: { start: string; count: number; days?: number }[]
   /** For the data file, oldest first. */
   daily: DayRow[]
   jobDays: JobDayRow[]
@@ -267,14 +273,24 @@ export function jobsSourceStats(
   const allPeople = new Set<string>()
   const byDay = new Map<
     string,
-    { clicks: number; people: Set<string>; visitors: Set<string> }
+    {
+      clicks: number
+      people: Set<string>
+      visitors: Set<string>
+      site: Set<string>
+    }
   >()
   const dayOf = (date: string) => {
     let d = byDay.get(date)
     if (!d)
       byDay.set(
         date,
-        (d = { clicks: 0, people: new Set(), visitors: new Set() })
+        (d = {
+          clicks: 0,
+          people: new Set(),
+          visitors: new Set(),
+          site: new Set(),
+        })
       )
     return d
   }
@@ -426,14 +442,21 @@ export function jobsSourceStats(
         listedKeys.add(j.id)
   for (const key of clicksByKey.keys()) listedKeys.add(key)
 
-  // /jobs visitors, and those of them who clicked a job on it.
+  // Site visitors, /jobs visitors, and those of them who clicked a job on
+  // it. A visitor is a browser that opened a page, as on the dashboard.
+  const siteVisitors = new Set<string>()
   const visitors = new Set<string>()
   const pageClickers = new Set<string>()
-  for (const e of events)
-    if (e.type === 'page_view' && e.page === JOBS_PATH && e.vid) {
+  for (const e of events) {
+    if (e.type !== 'page_view' || !e.vid) continue
+    const day = dayOf(utcDay(Date.parse(e.ts)))
+    siteVisitors.add(e.vid)
+    day.site.add(e.vid)
+    if (e.page === JOBS_PATH) {
       visitors.add(e.vid)
-      dayOf(utcDay(Date.parse(e.ts))).visitors.add(e.vid)
+      day.visitors.add(e.vid)
     }
+  }
   for (const { e } of clicks)
     if (jobClickSource(e) === 'jobsPage' && e.vid && visitors.has(e.vid))
       pageClickers.add(e.vid)
@@ -472,6 +495,42 @@ export function jobsSourceStats(
     now,
     oldest
   )
+  // Site visitors on the same columns: each browser once a column.
+  const columnOf = (day: string) => {
+    if (unit === 'day') return day
+    const t = Date.parse(`${day}T00:00:00Z`)
+    return utcDay(t - ((new Date(t).getUTCDay() + 6) % 7) * 86_400_000)
+  }
+  const siteByColumn = new Map<string, Set<string>>()
+  for (const [date, d] of byDay) {
+    const col = columnOf(date)
+    let set = siteByColumn.get(col)
+    if (!set) siteByColumn.set(col, (set = new Set()))
+    for (const v of d.site) set.add(v)
+  }
+  // Page views were first recorded on 15 July 2026, so the columns start
+  // at the first day with a visitor, and a week that day cuts short is
+  // drawn lighter like any other partial week.
+  const firstSeen = [...byDay.entries()]
+    .filter(([, d]) => d.site.size > 0)
+    .map(([date]) => date)
+    .sort()[0]
+  const visitorSeries = firstSeen
+    ? series
+        .filter(p => p.start >= columnOf(firstSeen))
+        .map(p => {
+          const lost =
+            p.start < firstSeen
+              ? (Date.parse(firstSeen) - Date.parse(p.start)) / 86_400_000
+              : 0
+          const days = lost ? Math.min(p.days ?? 7, 7 - lost) : p.days
+          return {
+            start: p.start,
+            count: siteByColumn.get(p.start)?.size ?? 0,
+            ...(days != null && { days }),
+          }
+        })
+    : []
 
   return {
     listed: listedKeys.size,
@@ -489,12 +548,15 @@ export function jobsSourceStats(
     filters,
     series,
     seriesUnit: unit,
+    siteVisitors: siteVisitors.size,
+    visitorSeries,
     daily: [...byDay.entries()]
       .map(([date, d]) => ({
         date,
         clicks: d.clicks,
         people: d.people.size,
         pageVisitors: d.visitors.size,
+        siteVisitors: d.site.size,
       }))
       .sort((a, b) => a.date.localeCompare(b.date)),
     jobDays: [...jobDayClicks.values()].sort(
@@ -525,8 +587,9 @@ export function jobsDataFile(
         ? `summary.jobsListed counts every job on the page at some point in these dates: the site has noted every job listed, hourly, since ${s.listedSince}.`
         : `summary.jobsListed is a floor (jobsListedExact is false): the site has only noted every job listed since ${s.listedSince ?? 'late October 2026'}, so a job that came and went before then without a click isn’t known.`,
       'jobs has every job clicked in these dates, most clicked first, then every job listed in them that nobody clicked (clicks 0), as far as the site noted them. firstListed and lastListed are the first and last days a job was on the page, when noted; firstClick and lastClick fall within these dates. datePublished is the day the board published it, when known. An id starting with "url:" is a job only ever clicked from the site search after it left the Jobs page.',
-      'daily has a row for each day with any click or Jobs page visitor; a missing day had neither. Its people count each day on its own, so they don’t add up to summary.people.',
-      'Clicks are counted from 1 July 2026, Jobs page visitors from 15 July 2026, and filters from 29 July 2026.',
+      'siteVisitors counts browsers that opened any page of AISafety.com, and jobsPageVisitors those that opened the Jobs page, as the site’s own dashboard counts visitors.',
+      'daily has a row for each day with any click or visitor; a missing day had neither. Its people and visitors count each day on its own, so they don’t add up to the summary’s.',
+      'Clicks are counted from 1 July 2026, visitors from 15 July 2026, and filters from 29 July 2026.',
       'Since 24 August 2026, links from the Jobs page reach the posting tagged utm_source=aisafety.com.',
       'For other dates, fetch the same address with ?from=YYYY-MM-DD&to=YYYY-MM-DD (UTC days, inclusive).',
     ],
@@ -539,6 +602,7 @@ export function jobsDataFile(
       clicks: s.clicks,
       people: s.people,
       clicksBySource: s.bySource,
+      siteVisitors: s.siteVisitors,
       jobsPageVisitors: s.pageVisitors,
       jobsPageVisitorsWhoClickedAJob: s.pageClickers,
     },
@@ -590,6 +654,7 @@ export function jobsDataFile(
       date: d.date,
       clicks: d.clicks,
       people: d.people,
+      siteVisitors: d.siteVisitors,
       jobsPageVisitors: d.pageVisitors,
     })),
     clicksByJobAndDay: s.jobDays.map(d => ({

@@ -111,6 +111,12 @@ describe('jobsSourceStats', () => {
       ts: day('2026-08-02'),
     },
     click('recA', 'Research Engineer – Org A', 'v2', day('2026-08-02')),
+    {
+      type: 'page_view',
+      page: '/funding',
+      vid: 'v5',
+      ts: day('2026-08-02', 9),
+    },
     click('recGone', 'Gone Job – Org B', 'v1', day('2026-08-01', 13)),
     { type: 'page_view', page: '/jobs', vid: 'v1', ts: day('2026-08-01', 11) },
     { type: 'page_view', page: '/jobs', vid: 'v9', ts: day('2026-08-01', 10) },
@@ -205,13 +211,60 @@ describe('jobsSourceStats', () => {
     ])
   })
 
+  it('counts site visitors on every page, from the first day recorded', () => {
+    expect(s.siteVisitors).toBe(3)
+    // Page views start on Saturday 1 August here, so the first column is
+    // that week, with 2 of its days counted; earlier weeks aren't drawn.
+    expect(s.visitorSeries[0]).toEqual({
+      start: '2026-07-27',
+      count: 3,
+      days: 2,
+    })
+    expect(s.visitorSeries.at(-1)).toEqual({
+      start: '2026-09-28',
+      count: 0,
+      days: 3,
+    })
+    expect(s.visitorSeries).toHaveLength(10)
+  })
+
   it('counts each day, oldest first', () => {
     expect(s.daily).toEqual([
-      { date: '2026-07-02', clicks: 1, people: 1, pageVisitors: 0 },
-      { date: '2026-08-01', clicks: 2, people: 1, pageVisitors: 2 },
-      { date: '2026-08-02', clicks: 1, people: 1, pageVisitors: 0 },
-      { date: '2026-09-10', clicks: 1, people: 1, pageVisitors: 0 },
-      { date: '2026-09-20', clicks: 1, people: 1, pageVisitors: 0 },
+      {
+        date: '2026-07-02',
+        clicks: 1,
+        people: 1,
+        pageVisitors: 0,
+        siteVisitors: 0,
+      },
+      {
+        date: '2026-08-01',
+        clicks: 2,
+        people: 1,
+        pageVisitors: 2,
+        siteVisitors: 2,
+      },
+      {
+        date: '2026-08-02',
+        clicks: 1,
+        people: 1,
+        pageVisitors: 0,
+        siteVisitors: 1,
+      },
+      {
+        date: '2026-09-10',
+        clicks: 1,
+        people: 1,
+        pageVisitors: 0,
+        siteVisitors: 0,
+      },
+      {
+        date: '2026-09-20',
+        clicks: 1,
+        people: 1,
+        pageVisitors: 0,
+        siteVisitors: 0,
+      },
     ])
     expect(s.jobDays).toEqual([
       { date: '2026-07-02', key: 'recA', source: 'jobsPage', clicks: 1 },

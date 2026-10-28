@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { chartDateLabels, scaleTop } from '@/lib/analytics/chart-dates'
 import styles from './analytics.module.css'
 
-/** A small one-series column chart: clicks per day (or week). Each column is
+/** A small one-series column chart: clicks (or `noun`) per day (or week). Each column is
  *  its own hover and focus target and shows its date and count; the same
  *  numbers are in the table underneath (unless `table` is false, for a page
  *  that gives them another way), so nothing hides behind a hover. A
@@ -14,10 +14,13 @@ export default function ClicksChart({
   points,
   unit,
   table = true,
+  noun = CLICKS,
 }: {
   points: { start: string; count: number; days?: number }[]
   unit: 'day' | 'week'
   table?: boolean
+  /** What the columns count, when it isn't clicks. */
+  noun?: { one: string; many: string }
 }) {
   const [active, setActive] = useState<number | null>(null)
   if (points.length === 0) return null
@@ -39,7 +42,7 @@ export default function ClicksChart({
       <div className={styles.chartReadout} aria-live="polite">
         {shown ? (
           <>
-            <strong>{clicksLabel(shown.count)}</strong>{' '}
+            <strong>{countLabel(shown.count, noun)}</strong>{' '}
             <span>{when(shown)}</span>
           </>
         ) : (
@@ -72,7 +75,7 @@ export default function ClicksChart({
               onPointerEnter={() => setActive(i)}
               onFocus={() => setActive(i)}
               onBlur={() => setActive(null)}
-              aria-label={`${when(p)}, ${clicksLabel(p.count)}`}
+              aria-label={`${when(p)}, ${countLabel(p.count, noun)}`}
             >
               {p.count > 0 && (
                 <span
@@ -119,7 +122,9 @@ export default function ClicksChart({
             <thead>
               <tr>
                 <th>{unit === 'week' ? 'Week of' : 'Day'}</th>
-                <th className={styles.numCol}>Clicks</th>
+                <th className={styles.numCol}>
+                  {noun.many[0].toUpperCase() + noun.many.slice(1)}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -137,8 +142,10 @@ export default function ClicksChart({
   )
 }
 
-function clicksLabel(n: number): string {
-  return `${n.toLocaleString()} ${n === 1 ? 'click' : 'clicks'}`
+const CLICKS = { one: 'click', many: 'clicks' }
+
+function countLabel(n: number, noun: { one: string; many: string }): string {
+  return `${n.toLocaleString()} ${n === 1 ? noun.one : noun.many}`
 }
 
 /** 'YYYY-MM-DD' (a UTC day) as "3 October 2026". */
