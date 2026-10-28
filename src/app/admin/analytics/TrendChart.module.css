@@ -54,7 +54,10 @@
   color: var(--teal-300);
 }
 
+/* Pushed down to the tile's foot, so the figures stay in a line when one
+   label runs to two lines. */
 .tileValue {
+  margin-top: auto;
   font-size: 24px;
   font-weight: 600;
   line-height: 1.15;

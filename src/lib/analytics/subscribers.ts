@@ -7,8 +7,8 @@
 const DAY_MS = 86_400_000
 
 /** The newsletters, their ActiveCampaign lists, the day each moved there
- *  (null while it's still on Substack) and the Substack publication its
- *  export comes from. */
+ *  (null for one still on Substack) and the Substack publication its export
+ *  comes from. */
 export const NEWSLETTERS = [
   {
     key: 'events',
@@ -24,14 +24,12 @@ export const NEWSLETTERS = [
     movedOn: '2026-10-08',
     substack: 'aisafetyeventsandtraining',
   },
-  // Still on Substack: Issue #23 announces the move and the issue after it
-  // makes it. On move day, set movedOn (list 8 holds only test addresses
-  // until then).
+  // Moved with Issue #24.
   {
     key: 'funding',
     label: 'Funding',
     list: '8',
-    movedOn: null,
+    movedOn: '2026-10-21',
     substack: 'aisafetyfunding',
   },
 ] as const
