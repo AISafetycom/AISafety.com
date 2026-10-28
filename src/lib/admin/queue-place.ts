@@ -20,6 +20,30 @@ export interface Placed {
 /** The field every one of those tables keeps its order in. */
 export const SORT_FIELD = 'Sort'
 
+/** Whether a table keeps its page in a manual order: it has a number
+ *  field called Sort. */
+export function keepsOrder(
+  schema: readonly { name: string; type: string }[]
+): boolean {
+  return schema.some(f => f.name === SORT_FIELD && f.type === 'number')
+}
+
+/** Whether an addition still needs a place before it can be published:
+ *  its page keeps a manual order and `sort` (the edit, else the record's
+ *  value) is empty. Accept waits for one, because with no Sort the listing
+ *  would show at the very top (Tracks @ XLab did, until 28 Oct 2026). */
+export function needsPlace(
+  type: string,
+  schema: readonly { name: string; type: string }[],
+  sort: unknown
+): boolean {
+  return type === 'Add' && keepsOrder(schema) && sortValue(sort) === null
+}
+
+/** What Accept says when an addition has no place yet. */
+export const NO_PLACE =
+  'Pick its position on the page first: with no Sort it would show at the very top.'
+
 /** The slot (0 = top) a listing with this Sort takes among `order`: after
  *  every listing with a lower Sort and every one with none (Airtable puts
  *  those first), before the rest. A tie goes first, because accepting moves

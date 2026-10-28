@@ -298,6 +298,99 @@ describe('asAttachmentWrite', () => {
   })
 })
 
+// Publishing an addition to a page kept in a manual order needs its place
+// on the page, so it never lands at the very top with no Sort (Tracks @
+// XLab on /self-study, 28 Oct 2026).
+describe('an addition needs its place on an ordered page', () => {
+  const SELF_STUDY = 'tblRNYJ0m1cmJXKKk'
+  let patches: { path: string; fields: Record<string, unknown> }[]
+  let stored: Record<string, unknown>
+
+  beforeEach(() => {
+    patches = []
+    stored = { Name: 'Tracks @ XLab' }
+    process.env.AIRTABLE_TOKEN = 'test-token'
+    process.env.AIRTABLE_BASE_ID = 'appTest'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          tables: [
+            {
+              id: SELF_STUDY,
+              fields: [
+                { id: 'fldName', name: 'Name', type: 'singleLineText' },
+                { id: 'fldSort', name: 'Sort', type: 'number' },
+              ],
+            },
+            {
+              id: EVENTS,
+              fields: [
+                { id: 'fldName', name: 'Name', type: 'singleLineText' },
+                { id: 'fldLogo', name: 'Logo', type: 'multipleAttachments' },
+                { id: 'fldHost', name: 'Host name', type: 'singleLineText' },
+              ],
+            },
+          ],
+        })
+      )
+    )
+    mocks.listAll.mockReset()
+    mocks.listAll.mockResolvedValue([])
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(
+      async (path: string, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          const body = JSON.parse(String(init.body)) as {
+            fields: Record<string, unknown>
+          }
+          patches.push({ path, fields: body.fields })
+          return new Response('{}', { status: 200 })
+        }
+        return Response.json({ id: rid('live'), fields: stored })
+      }
+    )
+  })
+
+  const addition = (over: Partial<QueueItem> = {}) =>
+    item({ page: '/self-study', targetTable: SELF_STUDY, ...over })
+  const published = () =>
+    patches.find(p => p.path.startsWith(`${SELF_STUDY}/`))?.fields
+
+  it('refuses one with no Sort picked or stored, and leaves the row open', async () => {
+    await expect(acceptItem(addition(), {})).rejects.toThrow(
+      'Pick its position on the page first'
+    )
+    expect(patches).toEqual([])
+  })
+
+  it('refuses one whose picked Sort was emptied', async () => {
+    stored = { Name: 'Tracks @ XLab', Sort: 300 }
+    await expect(acceptItem(addition(), { Sort: null })).rejects.toThrow(
+      'Pick its position on the page first'
+    )
+    expect(patches).toEqual([])
+  })
+
+  it('publishes one with a picked Sort', async () => {
+    await acceptItem(addition(), { Sort: 175 })
+    expect(published()).toMatchObject({ Sort: 175, 'Publish?': true })
+  })
+
+  it('publishes one whose record already has a Sort', async () => {
+    stored = { Name: 'Tracks @ XLab', Sort: 300 }
+    await acceptItem(addition(), {})
+    expect(published()).toMatchObject({ 'Publish?': true })
+  })
+
+  it('leaves pages that order themselves alone', async () => {
+    await acceptItem(item({}), {})
+    expect(
+      patches.find(p => p.path.startsWith(`${EVENTS}/`))?.fields
+    ).toMatchObject({ 'Publish?': true })
+  })
+})
+
 // Applying and undoing a change to a picture field, against a stand-in
 // for Airtable: the base's schema (one meta read) and a patch log.
 describe('picture fields on Apply and Undo', () => {
