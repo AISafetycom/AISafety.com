@@ -1705,8 +1705,8 @@ function fitToText(el: HTMLTextAreaElement | null) {
 }
 
 /** A text box that is always as tall as its text, while typing too (Bryce,
- *  7 Oct 2026). It refits when the text is set from outside (Pen's text),
- *  when its width changes, and once the web font has loaded. */
+ *  7 Oct 2026). It refits when the text is set from outside (As built,
+ *  Pen's text), when its width changes, and once the web font has loaded. */
 function GrowingTextarea(
   props: Omit<React.TextareaHTMLAttributes<HTMLTextAreaElement>, 'rows'>
 ) {
@@ -2326,7 +2326,7 @@ function ReorderPanel({
                                     }))
                                   }
                                 >
-                                  Pen’s text
+                                  As built
                                 </button>
                               </div>
                             )}

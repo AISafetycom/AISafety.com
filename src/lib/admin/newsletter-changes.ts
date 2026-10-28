@@ -17,21 +17,28 @@
 
   Events and Training cards are drawn by the site's own card builders
   (~/Newsletter/sitecards.py runs eventCardProps / trainingCardProps on the
-  public Data API), so the same builders run here on the listing read fresh
+  public Data API), and so are Funding cards since 28 October 2026
+  (funderCardProps), so the same builders run here on the listing read fresh
   from Airtable give the text the card should carry: `title` = name, `m0…` =
   the lines under the title, `desc` = description, `b0…` = the bottom rows,
   empty rows dropped before numbering (render.py meta_rows). A card whose
   rows changed shape (a row added or gone, another icon: "Applications
-  closed") can't be rewritten field by field – the page says so and a
-  rebuild from Pen fixes it. Funding cards are Pen's wording, so only their
-  open Broom items show.
+  closed", "Not currently accepting applications") can't be rewritten field
+  by field – the page says so and a rebuild from Pen fixes it. A Funding
+  card is compared only when its manifest entry says the site drew it
+  (`site`): a Pen-worded one (older drafts, or the PEN_CARDS fallback) has
+  Pen's wording, so only its open Broom items show. Pen's "Consider
+  applying if" line sits outside the card's fields and is never compared.
 */
 
 import type { CardProps } from '@/components/ListingCard'
 import { eventCardProps } from '@/app/events/card'
+import { funderCardProps } from '@/app/funding/card'
 import { trainingCardProps } from '@/app/training/card'
 import type { EventListing } from '@/lib/data/events'
 import { TABLE_ID as EVENTS_TABLE } from '@/lib/data/events'
+import type { Funder } from '@/lib/data/funding'
+import { TABLE_ID as FUNDING_TABLE } from '@/lib/data/funding'
 import type { TrainingProgram } from '@/lib/data/training'
 import { TRAINING_TABLE_ID } from '@/lib/data/training'
 import { airtableRequest, isRecordId } from './airtable'
@@ -96,6 +103,11 @@ export interface ListingAlert {
 }
 
 const OPEN = new Set(['Pending', 'Failed', 'Revising'])
+
+/** A card the site drew whose listing the site no longer maps to a card
+ *  (the record was deleted, or has no name in Airtable). */
+const NO_SITE_CARD_NOTE =
+  'The site has no card for this funder now (deleted, or no name in Airtable), so the email card can’t be compared.'
 
 /** Whitespace collapsed, as the email's text is (sitecards.py `tidy`). */
 export function tidy(s: string | null | undefined): string {
@@ -203,12 +215,30 @@ function propsOf(preview: PreviewListing | null): CardProps | null {
     return eventCardProps(preview.listing as EventListing)
   if (preview.kind === 'training')
     return trainingCardProps(preview.listing as TrainingProgram)
+  if (preview.kind === 'funder')
+    return funderCardProps(preview.listing as Funder)
   return null
 }
 
+/** The site's card for the card's listing now, or null when there is none
+ *  to compare with: Events and Training tried for every card (a key is in
+ *  one of them), Funding only for a card the site drew. */
+function siteProps(
+  card: CardInfo,
+  previews: Record<string, PreviewListing | null>
+): CardProps | null {
+  return (
+    propsOf(previews[`${EVENTS_TABLE}/${card.key}`] ?? null) ??
+    propsOf(previews[`${TRAINING_TABLE_ID}/${card.key}`] ?? null) ??
+    (card.site
+      ? propsOf(previews[`${FUNDING_TABLE}/${card.key}`] ?? null)
+      : null)
+  )
+}
+
 /** Pure: the alerts for one draft, from its cards, the open Queue rows and
- *  each listing as the site would map it now (keyed "table/record", both
- *  tables tried: a key is in one of them, or neither for a funding card). */
+ *  each listing as the site would map it now (keyed "table/record"; see
+ *  siteProps for the tables tried). */
 export function listingAlerts(
   groups: CardGroup[],
   queue: QueueItem[],
@@ -223,15 +253,14 @@ export function listingAlerts(
     for (const card of g.cards) {
       if (!isRecordId(card.key)) continue
       const mine = broom.filter(i => i.targetRecord === card.key)
-      const props =
-        propsOf(previews[`${EVENTS_TABLE}/${card.key}`] ?? null) ??
-        propsOf(previews[`${TRAINING_TABLE_ID}/${card.key}`] ?? null)
+      const props = siteProps(card, previews)
       const cmp =
         props && card.fields.length > 0
           ? compareCard(card, siteFields(props))
           : { changes: [], updatable: false, note: null }
       // A shape change with no text change is still news (a deadline row
-      // appeared); a funding card has no site card to compare with.
+      // appeared); a Pen-worded funding card has no site card to compare
+      // with.
       if (mine.length === 0 && cmp.changes.length === 0 && !cmp.note) continue
       out.push({
         key: card.key,
@@ -243,7 +272,9 @@ export function listingAlerts(
         note:
           cmp.note ??
           (!props && mine.length > 0
-            ? 'This card’s text comes from Pen: after Fix, edit it in the preview or ask Pen to rebuild.'
+            ? card.site
+              ? NO_SITE_CARD_NOTE
+              : 'This card’s text comes from Pen: after Fix, edit it in the preview or ask Pen to rebuild.'
             : null),
       })
     }
@@ -252,23 +283,27 @@ export function listingAlerts(
 }
 
 /** Each listing in the draft as the site would map it now: one list read
- *  per table (Events, Training), uncached, so an edit a moment ago counts. */
+ *  per table, uncached, so an edit a moment ago counts. Events and Training
+ *  for every listing card; Funding only for the cards the site drew, the
+ *  only ones compared with it (siteProps). */
 async function previewsFor(
-  keys: string[]
+  cards: CardInfo[]
 ): Promise<Record<string, PreviewListing | null>> {
-  if (keys.length === 0) return {}
-  return getPreviewListings(
-    keys.flatMap(record => [
+  const listed = cards.filter(c => isRecordId(c.key))
+  if (listed.length === 0) return {}
+  const keys = [...new Set(listed.map(c => c.key))]
+  const funding = [...new Set(listed.filter(c => c.site).map(c => c.key))]
+  return getPreviewListings([
+    ...keys.flatMap(record => [
       { table: EVENTS_TABLE, record, edits: {} },
       { table: TRAINING_TABLE_ID, record, edits: {} },
-    ])
-  )
+    ]),
+    ...funding.map(record => ({ table: FUNDING_TABLE, record, edits: {} })),
+  ])
 }
 
-function recordKeys(groups: CardGroup[]): string[] {
-  return [
-    ...new Set(groups.flatMap(g => g.cards.map(c => c.key)).filter(isRecordId)),
-  ]
+function allCards(groups: CardGroup[]): CardInfo[] {
+  return groups.flatMap(g => g.cards)
 }
 
 /** The alerts for a draft, read now: its cards from ActiveCampaign, the
@@ -278,10 +313,12 @@ export async function draftListingAlerts(
   messageId?: string
 ): Promise<ListingAlert[]> {
   const groups = await draftCardGroups(draftId, messageId)
-  const keys = recordKeys(groups)
+  const cards = allCards(groups)
   const [queue, previews] = await Promise.all([
-    keys.length ? listQueue() : Promise.resolve([] as QueueItem[]),
-    previewsFor(keys),
+    cards.some(c => isRecordId(c.key))
+      ? listQueue()
+      : Promise.resolve([] as QueueItem[]),
+    previewsFor(cards),
   ])
   return listingAlerts(groups, queue, previews)
 }
@@ -358,11 +395,8 @@ export async function fixListing(
     if (item.leftOut?.length)
       note = `${note ? `${note} ` : ''}Left ${item.leftOut.join(', ')} as it is: you left it out in the Queue.`
   }
-  const previews = await previewsFor([key])
   const card = group.cards.find(c => c.key === key) as CardInfo
-  const props =
-    propsOf(previews[`${EVENTS_TABLE}/${key}`] ?? null) ??
-    propsOf(previews[`${TRAINING_TABLE_ID}/${key}`] ?? null)
+  const props = siteProps(card, await previewsFor([card]))
   let cardUpdated = false
   if (props && card.fields.length > 0) {
     const cmp = compareCard(card, siteFields(props))
@@ -394,12 +428,14 @@ export async function fixListing(
     } else if (!cmp.updatable) {
       note = [note, cmp.note].filter(Boolean).join(' ')
     }
+  } else if (!props && card.site) {
+    note = [note, NO_SITE_CARD_NOTE].filter(Boolean).join(' ')
   }
   const queue = await listQueue()
   const alerts = listingAlerts(
     groups,
     queue,
-    await previewsFor(recordKeys(groups))
+    await previewsFor(allCards(groups))
   )
   return { cards: groups, alerts, applied, cardUpdated, note }
 }

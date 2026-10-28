@@ -10,13 +10,17 @@
     numbers should reflect exactly how many would go into an issue if Pen
     created an issue right now").
   - Funding, new: on the site and accepting applications now, and not
-    accepting (or not listed) when the last Funding issue went out. Pen keeps that
-    baseline in a file on Bryce's Mac, which the site can't read, so the site
-    keeps its own copy: saveFundingBaseline() runs when a Funding issue is
-    approved for the real list, first for Issue #23 (14 Oct 2026). Without
-    a noted baseline (a laptop has no store) Funding isn't counted.
-  - Funding, closing soon (step 3): accepting, with "Applications close
-    DATE" in the next two weeks. A funder appears once in an issue, so one
+    accepting (or not listed) when the last Funding issue went out.
+    Accepting is the Application status "Applications open" with no
+    Deadline or one not passed yet (fundingAccepting; Pen reads the same
+    fields since 28 Oct 2026, no longer the "Accepting applications?"
+    text). Pen keeps that baseline in a file on Bryce's Mac, which the site
+    can't read, so the site keeps its own copy: saveFundingBaseline() runs
+    when a Funding issue is approved for the real list, first for Issue #23
+    (14 Oct 2026). Without a noted baseline (a laptop has no store) Funding
+    isn't counted.
+  - Funding, closing soon (step 3): accepting, with its Deadline in the
+    next two weeks. A funder appears once in an issue, so one
     already counted as new isn't counted again here. Nor is one an issue
     has already reminded readers of (Bryce, 20 Oct 2026: the panel shows
     what goes out next): it was under "Closing in the next two weeks" in a
@@ -34,7 +38,7 @@ import { fetchAirtableRecords } from '@/lib/data/airtable'
 import { getEvents, TABLE_ID as EVENTS_TABLE } from '@/lib/data/events'
 import { getFunders } from '@/lib/data/funding'
 import { getTrainingPrograms, TRAINING_TABLE_ID } from '@/lib/data/training'
-import { isAcceptingApplications } from '@/lib/funding-status'
+import { resolveApplicationStatus } from '@/lib/funding-meta'
 import { MIN_READERS, issueSlug } from '@/lib/newsletter-archive'
 import { WEB_NEWSLETTERS } from '@/lib/newsletter-web'
 import { sentEmail } from '@/lib/newsletter-web-copy'
@@ -175,53 +179,48 @@ export function pickNewListings(
     .map(({ id, name }) => ({ id, name }))
 }
 
-/** Pure: a Funding status counts as accepting when it is filled in and
- *  isn't one of the closed wordings. */
-export function fundingAccepting(status: string): boolean {
-  return status.trim() !== '' && isAcceptingApplications(status.trim())
+interface FunderStatus {
+  id: string
+  name: string
+  /** As getFunders() gives it: one of APPLICATION_STATUSES, or ''. */
+  applicationStatus: string
+  /** YYYY-MM-DD; null means rolling. */
+  deadline: string | null
+}
+
+/** Pure: the funder is accepting applications on `today` (YYYY-MM-DD,
+ *  UTC): Application status "Applications open" with no Deadline, or one
+ *  on or after `today` (the closing day still counts). "Not currently
+ *  accepting applications", "Invite only, no applications" and a blank
+ *  status are not. getFunders() resolves a passed Deadline already, but
+ *  from its own clock and cache, so the rule runs again for `today`. */
+export function fundingAccepting(
+  funder: Pick<FunderStatus, 'applicationStatus' | 'deadline'>,
+  today: string
+): boolean {
+  return (
+    resolveApplicationStatus(
+      funder.applicationStatus,
+      funder.deadline,
+      today
+    ) === 'Applications open'
+  )
 }
 
 /** Pure: the funders Pen would take as new opportunities — accepting now,
  *  not accepting (or not listed) at the baseline. */
 export function pickNewFunders(
-  funders: Array<{ id: string; name: string; acceptingApplications: string }>,
-  baseline: ReadonlySet<string>
+  funders: FunderStatus[],
+  baseline: ReadonlySet<string>,
+  today: string
 ): LineupItem[] {
   return funders
-    .filter(
-      f => fundingAccepting(f.acceptingApplications) && !baseline.has(f.id)
-    )
+    .filter(f => fundingAccepting(f, today) && !baseline.has(f.id))
     .map(({ id, name }) => ({ id, name }))
 }
 
 /** Funding's "Closing in the next two weeks" section. */
 const CLOSING_DAYS = 14
-
-const MONTHS = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-]
-
-/** Pure: the closing day in "Applications close 31 October 2026" as
- *  YYYY-MM-DD; null for any other wording. */
-export function closingDay(status: string): string | null {
-  const m = /^Applications close (\d{1,2}) ([A-Z][a-z]+) (\d{4})\b/.exec(
-    status.trim()
-  )
-  const month = m ? MONTHS.indexOf(m[2]) + 1 : 0
-  if (!m || month === 0) return null
-  return `${m[3]}-${String(month).padStart(2, '0')}-${m[1].padStart(2, '0')}`
-}
 
 /** Pure: the YYYY-MM-DD day `n` days after `day`. */
 export function addDays(day: string, n: number): string {
@@ -230,20 +229,23 @@ export function addDays(day: string, n: number): string {
   return d.toISOString().slice(0, 10)
 }
 
-/** Pure: the funders whose applications close from `today` to two weeks on,
- *  leaving out `skip` (already counted as new opportunities, or already
- *  reminded of). */
+/** Pure: the funders accepting applications whose Deadline is from `today`
+ *  to two weeks on, leaving out `skip` (already counted as new
+ *  opportunities, or already reminded of). */
 export function pickClosingFunders(
-  funders: Array<{ id: string; name: string; acceptingApplications: string }>,
+  funders: FunderStatus[],
   today: string,
   skip: ReadonlySet<string>
 ): LineupItem[] {
   const last = addDays(today, CLOSING_DAYS)
   return funders
-    .filter(f => {
-      const day = closingDay(f.acceptingApplications)
-      return day != null && day >= today && day <= last && !skip.has(f.id)
-    })
+    .filter(
+      f =>
+        fundingAccepting(f, today) &&
+        f.deadline != null &&
+        f.deadline <= last &&
+        !skip.has(f.id)
+    )
     .map(({ id, name }) => ({ id, name }))
 }
 
@@ -394,17 +396,20 @@ async function sentListingKeys(since: string): Promise<Set<string> | null> {
 /** Note which Funding listings accept applications as `issue` goes out to
  *  the real list. A later wave or a second approval of the same issue keeps
  *  the first note. (An approval canceled and never sent again still moves
- *  the baseline; the next issue's approval puts it right.) */
+ *  the baseline; the next issue's approval puts it right.) The note is the
+ *  same record ids as before the switch to Application status (28 Oct
+ *  2026), so one taken under the old text still counts from. */
 export async function saveFundingBaseline(issue: string): Promise<void> {
   if (!store) return
   const current = await store.get<FundingBaseline>(FUNDING_BASELINE_KEY)
   if (current?.issue === issue) return
   const funders = await getFunders()
+  const takenAt = new Date().toISOString()
   const baseline: FundingBaseline = {
     issue,
-    takenAt: new Date().toISOString(),
+    takenAt,
     accepting: funders
-      .filter(f => fundingAccepting(f.acceptingApplications))
+      .filter(f => fundingAccepting(f, takenAt.slice(0, 10)))
       .map(f => f.id),
   }
   await store.set(FUNDING_BASELINE_KEY, baseline)
@@ -457,7 +462,11 @@ export async function readLineup(
       remindedFunders(today),
     ]).then(
       ([funders, baseline, reminded]): LineupSection => {
-        const items = pickNewFunders(funders, new Set(baseline.accepting))
+        const items = pickNewFunders(
+          funders,
+          new Set(baseline.accepting),
+          today
+        )
         return {
           items,
           since: issueLabel(baseline.issue),

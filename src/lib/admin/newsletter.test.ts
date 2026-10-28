@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   cardGroups,
+  contentChecks,
   contentDigest,
   DraftProblemError,
   FieldError,
@@ -128,6 +129,7 @@ describe('cardGroups', () => {
             fit: null,
             pipelineFit: null,
             fields: [],
+            site: false,
           },
           {
             key: 'b',
@@ -136,6 +138,7 @@ describe('cardGroups', () => {
             fit: null,
             pipelineFit: null,
             fields: [],
+            site: false,
           },
           {
             key: 'c',
@@ -144,6 +147,7 @@ describe('cardGroups', () => {
             fit: null,
             pipelineFit: null,
             fields: [],
+            site: false,
           },
         ],
       },
@@ -645,6 +649,133 @@ describe('card text fields on site cards', () => {
     expect(program.fields.find(f => f.name === 'b1')!.label).toBe(
       'Time commitment'
     )
+  })
+
+  it('never flags Events and Training cards as site-drawn Funding cards', () => {
+    for (const c of [training, events])
+      expect(cardGroups(c.input)![0].cards.every(k => !k.site)).toBe(true)
+  })
+})
+
+/* ─── Funding cards drawn by the site (funderCardProps, 28 Oct 2026) ──── */
+
+describe('funding cards drawn by the site', () => {
+  const { funding } = siteCardEdit
+  const CORRIGIBILITY = 'recMjI8b5pKstyGHP'
+  const LIGHTCONE = 'recgJ8r2zWoOkmZbe'
+
+  it('labels the status, Who can apply and Grant size rows', () => {
+    const [closing, open] = cardGroups(funding.input)!
+    expect(closing.cards[0].fields.map(f => [f.name, f.label])).toEqual([
+      ['title', 'Title'],
+      ['desc', 'Description'],
+      ['b0', 'Accepting applications'],
+      ['b1', 'Who can apply'],
+      ['b2', 'Grant size'],
+    ])
+    // No grant size: the rows close up, as on the site.
+    expect(open.cards[0].fields.map(f => [f.name, f.icon])).toEqual([
+      ['title', null],
+      ['desc', null],
+      ['b0', 'form-check'],
+      ['b1', 'team'],
+    ])
+  })
+
+  it('labels an invite-only status row like the other two', () => {
+    const html = funding.input.replace(
+      '<!--f:b0:form-check-->Applications close 31 Oct 2026',
+      '<!--f:b0:paper-with-x-->Invite only, no applications'
+    )
+    const card = cardGroups(html)![0].cards[0]
+    expect(card.fields.find(f => f.name === 'b0')).toMatchObject({
+      label: 'Accepting applications',
+      icon: 'paper-with-x',
+      value: 'Invite only, no applications',
+    })
+  })
+
+  it('reads the site flag and Pen’s “Consider applying if” from the manifest', () => {
+    const cards = cardGroups(funding.input)!.flatMap(g => g.cards)
+    expect(cards.map(c => [c.key, c.site, c.fit === c.pipelineFit])).toEqual([
+      [CORRIGIBILITY, true, true],
+      [LIGHTCONE, true, true],
+    ])
+    expect(cards[0].fit).toMatch(/^you need around \$5k–\$35k/)
+    // Lightcone has no line yet, but can be given one.
+    expect(cards[1].fit).toBe('')
+    // A Pen-worded funding card (no flag) is not one the site drew.
+    expect(
+      cardGroups(fundingIssue([{ key: 'a', fit: 'x' }]))![0].cards[0].site
+    ).toBe(false)
+  })
+
+  it('gives byte-identical output to the pipeline for a text edit', () => {
+    const out = setFieldsHtml(
+      funding.input,
+      funding.group,
+      funding.key,
+      funding.values
+    )
+    expect(createHash('sha256').update(out.html, 'utf8').digest('hex')).toBe(
+      funding.expectedHtmlSha256
+    )
+    expect(out.text).toBe(funding.expectedText)
+    // The edit keeps Pen's line and the flag.
+    const card = cardGroups(out.html)![0].cards[0]
+    expect(card.site).toBe(true)
+    expect(card.fit).toBe(card.pipelineFit)
+  })
+
+  it('gives byte-identical output to the pipeline for “Consider applying if”', () => {
+    expect(funding.fit.map(c => c.key)).toEqual([CORRIGIBILITY, LIGHTCONE])
+    // Each case's `fit` is the plain text the page sends; setFitHtml escapes
+    // it itself.
+    for (const c of funding.fit) {
+      const out = setFitHtml(funding.input, c.group, c.key, c.fit)
+      expect(createHash('sha256').update(out.html, 'utf8').digest('hex')).toBe(
+        c.expectedHtmlSha256
+      )
+      expect(out.text).toBe(c.expectedText)
+      const card = cardGroups(out.html)!
+        .flatMap(g => g.cards)
+        .find(k => k.key === c.key)!
+      expect(card.fit).toBe(c.fit)
+    }
+  })
+
+  it('refuses a “Consider applying if” line on a card with no description', () => {
+    // A funder whose Airtable Description is empty: the site card has no
+    // description block for the line to sit in.
+    const start = funding.input.indexOf(`<!--card:g1:${LIGHTCONE}-->`)
+    const end = funding.input.indexOf('<!--/card-->', start)
+    const card = funding.input
+      .slice(start, end)
+      .replace(
+        /<div class="pb"[^>]*><!--f:desc-->[\s\S]*?<!--\/f--><\/div>/,
+        ''
+      )
+    expect(card).not.toContain('<!--f:desc-->')
+    const html = funding.input.slice(0, start) + card + funding.input.slice(end)
+    expect(() => setFitHtml(html, 'g1', LIGHTCONE, 'x')).toThrow(FitError)
+  })
+
+  it('still warns about a status row whose deadline has passed', () => {
+    const checks = contentChecks({
+      name: 'Funding · Issue #24, 2026',
+      listId: '8',
+      subject: 'Issue #24, 2026',
+      html: funding.input,
+      text: funding.expectedText,
+      fromEmail: 'funding@news.aisafety.com',
+      replyTo: null,
+      now: new Date('2026-11-02T09:00:00Z'),
+    })
+    expect(
+      checks.warnings.filter(w => w.kind === 'date').map(w => w.text)
+    ).toEqual([
+      '“Corrigibility Research Fund” – Accepting applications: “Applications close 31 Oct 2026” (31 October 2026 has passed)',
+    ])
   })
 })
 
