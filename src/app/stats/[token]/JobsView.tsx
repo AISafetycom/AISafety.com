@@ -435,6 +435,7 @@ export function JobsView({
 
       <Panel
         title={`Visitors to AISafety.com · per ${s.seriesUnit === 'week' ? 'week' : 'day'}`}
+        tone="blue"
       >
         {s.visitorSeries.length === 0 ? (
           <p className={analytics.dim}>No visitors recorded in these dates.</p>
