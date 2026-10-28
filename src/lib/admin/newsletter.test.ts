@@ -663,10 +663,6 @@ describe('funding cards drawn by the site', () => {
   const { funding } = siteCardEdit
   const CORRIGIBILITY = 'recMjI8b5pKstyGHP'
   const LIGHTCONE = 'recgJ8r2zWoOkmZbe'
-  /** The fixture's fit cases are HTML (render.set_fit); the page sends plain
-   *  text. */
-  const plain = (html: string) =>
-    html.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
 
   it('labels the status, Who can apply and Grant size rows', () => {
     const [closing, open] = cardGroups(funding.input)!
@@ -733,8 +729,10 @@ describe('funding cards drawn by the site', () => {
 
   it('gives byte-identical output to the pipeline for “Consider applying if”', () => {
     expect(funding.fit.map(c => c.key)).toEqual([CORRIGIBILITY, LIGHTCONE])
+    // Each case's `fit` is the plain text the page sends; setFitHtml escapes
+    // it itself.
     for (const c of funding.fit) {
-      const out = setFitHtml(funding.input, c.group, c.key, plain(c.fitHtml))
+      const out = setFitHtml(funding.input, c.group, c.key, c.fit)
       expect(createHash('sha256').update(out.html, 'utf8').digest('hex')).toBe(
         c.expectedHtmlSha256
       )
@@ -742,8 +740,24 @@ describe('funding cards drawn by the site', () => {
       const card = cardGroups(out.html)!
         .flatMap(g => g.cards)
         .find(k => k.key === c.key)!
-      expect(card.fit).toBe(plain(c.fitHtml))
+      expect(card.fit).toBe(c.fit)
     }
+  })
+
+  it('refuses a “Consider applying if” line on a card with no description', () => {
+    // A funder whose Airtable Description is empty: the site card has no
+    // description block for the line to sit in.
+    const start = funding.input.indexOf(`<!--card:g1:${LIGHTCONE}-->`)
+    const end = funding.input.indexOf('<!--/card-->', start)
+    const card = funding.input
+      .slice(start, end)
+      .replace(
+        /<div class="pb"[^>]*><!--f:desc-->[\s\S]*?<!--\/f--><\/div>/,
+        ''
+      )
+    expect(card).not.toContain('<!--f:desc-->')
+    const html = funding.input.slice(0, start) + card + funding.input.slice(end)
+    expect(() => setFitHtml(html, 'g1', LIGHTCONE, 'x')).toThrow(FitError)
   })
 
   it('still warns about a status row whose deadline has passed', () => {

@@ -517,5 +517,18 @@ describe('listingAlerts', () => {
       expect(out[0].changes).toEqual([])
       expect(out[0].note).toContain('Pen')
     })
+
+    it('says why a card the site drew can’t be compared once the site has no card for it', () => {
+      // The Funding record was deleted, or lost its name: no preview.
+      const fix = broomRow({
+        targetTable: FUNDING,
+        targetRecord: CORRIGIBILITY,
+      })
+      const out = listingAlerts(fundingGroups(), [fix], {})
+      expect(out).toHaveLength(1)
+      expect(out[0].changes).toEqual([])
+      expect(out[0].note).toContain('The site has no card for this funder now')
+      expect(out[0].note).not.toContain('Pen')
+    })
   })
 })

@@ -104,6 +104,11 @@ export interface ListingAlert {
 
 const OPEN = new Set(['Pending', 'Failed', 'Revising'])
 
+/** A card the site drew whose listing the site no longer maps to a card
+ *  (the record was deleted, or has no name in Airtable). */
+const NO_SITE_CARD_NOTE =
+  'The site has no card for this funder now (deleted, or no name in Airtable), so the email card can’t be compared.'
+
 /** Whitespace collapsed, as the email's text is (sitecards.py `tidy`). */
 export function tidy(s: string | null | undefined): string {
   return (s ?? '').replace(/\s+/g, ' ').trim()
@@ -266,8 +271,10 @@ export function listingAlerts(
         updatable: cmp.updatable,
         note:
           cmp.note ??
-          (!props && !card.site && mine.length > 0
-            ? 'This card’s text comes from Pen: after Fix, edit it in the preview or ask Pen to rebuild.'
+          (!props && mine.length > 0
+            ? card.site
+              ? NO_SITE_CARD_NOTE
+              : 'This card’s text comes from Pen: after Fix, edit it in the preview or ask Pen to rebuild.'
             : null),
       })
     }
@@ -421,6 +428,8 @@ export async function fixListing(
     } else if (!cmp.updatable) {
       note = [note, cmp.note].filter(Boolean).join(' ')
     }
+  } else if (!props && card.site) {
+    note = [note, NO_SITE_CARD_NOTE].filter(Boolean).join(' ')
   }
   const queue = await listQueue()
   const alerts = listingAlerts(
