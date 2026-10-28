@@ -44,7 +44,14 @@ import {
 import { sealToken } from './session'
 import { parseRejectDrafts } from './queue-decline'
 import { isExpiredAttachment } from './attachment-url'
-import { roomFor, SORT_FIELD, type Placed } from './queue-place'
+import {
+  keepsOrder,
+  NO_PLACE,
+  roomFor,
+  SORT_FIELD,
+  sortValue,
+  type Placed,
+} from './queue-place'
 import type { ListingDates } from './queue-urgent'
 import { reviewAgainAt } from './queue-later'
 import { ruleTestOf, type RuleTest } from './queue-rule-test'
@@ -52,6 +59,13 @@ import { alreadyRepliedOf, type AlreadyReplied } from './queue-already'
 import { replyAlsoOf } from './queue-also'
 import { reasonsText, type FlagUpdate } from './queue-flag'
 import { LEFT_OUT_KEY, leftOutOf, withLeftOut } from './queue-left-out'
+import {
+  GONE_KEY,
+  goneFields,
+  goneNote,
+  goneOf,
+  isRetired,
+} from './queue-retired'
 import {
   declinedBeforeOf,
   pushbackOf,
@@ -222,6 +236,9 @@ export interface QueueItem {
    *  (queue-left-out.ts) – a draft while the item is open; once applied,
    *  the fields Accept did not write, which Undo leaves alone too. */
   leftOut?: string[] | null
+  /** Applied: the proposed fields Apply left out because their column was
+   *  no longer in Airtable (queue-retired.ts); Undo leaves them too. */
+  gone?: string[] | null
   decidedAt: string | null
   appliedAt: string | null
   error: string | null
@@ -654,14 +671,18 @@ function rowToItem(
   let before: Record<string, unknown> | null = null
   let keptByFable: string[] | null = null
   let leftOut: string[] | null = null
+  let gone: string[] | null = null
   if (isRecord(saved)) {
     const {
       [BEFORE_KEY]: was,
       [KEPT_KEY]: kept,
       [LEFT_OUT_KEY]: left,
+      [GONE_KEY]: deleted,
       ...rest
     } = saved
     edits = rest
+    const goneNames = goneOf(deleted)
+    gone = goneNames.length ? goneNames : null
     before = isRecord(was) ? was : null
     keptByFable = Array.isArray(kept)
       ? kept.filter((k): k is string => typeof k === 'string')
@@ -726,6 +747,7 @@ function rowToItem(
     before,
     keptByFable,
     leftOut,
+    gone,
     decidedAt: str(f[F.decidedAt]),
     appliedAt: str(f[F.appliedAt]),
     error: str(f[F.error]),
@@ -873,14 +895,21 @@ const SCHEMA_TTL_MS = 10 * 60 * 1000
 /** Each table's name column (Projects calls it "Project Name"), filled
  *  with the schema. */
 const primaryNames = new Map<string, string>()
+/** Each table's formula fields and the fields each one is built from,
+ *  filled with the schema (see mapPreview). */
+const formulaInputs = new Map<string, { id: string; inputs: string[] }[]>()
 
 /** Every field of a resource table, in Airtable's column order, so the page
  *  can list what is EMPTY on a record (a missing logo, an empty location)
- *  and not only what is filled. Read from the base's metadata, cached. */
-export async function getTableSchema(table: string): Promise<FieldInfo[]> {
+ *  and not only what is filled. Read from the base's metadata, cached for
+ *  `maxAgeMs` (ten minutes unless asked for fresher). */
+export async function getTableSchema(
+  table: string,
+  maxAgeMs: number = SCHEMA_TTL_MS
+): Promise<FieldInfo[]> {
   if (!TABLE_ID_RE.test(table)) return []
   const hit = schemaCache.get(table)
-  if (hit && Date.now() - hit.at < SCHEMA_TTL_MS) return hit.fields
+  if (hit && Date.now() - hit.at < maxAgeMs) return hit.fields
   const token = process.env.AIRTABLE_TOKEN
   const base = process.env.AIRTABLE_BASE_ID
   if (!token || !base) return []
@@ -900,13 +929,22 @@ export async function getTableSchema(table: string): Promise<FieldInfo[]> {
         id: string
         name: string
         type: string
-        options?: { choices?: { name: string }[] }
+        options?: {
+          choices?: { name: string }[]
+          referencedFieldIds?: string[]
+        }
       }[]
     }[]
   }
   for (const t of data.tables) {
     const primary = t.fields.find(f => f.id === t.primaryFieldId)
     if (primary) primaryNames.set(t.id, primary.name)
+    formulaInputs.set(
+      t.id,
+      t.fields
+        .filter(f => f.type === 'formula')
+        .map(f => ({ id: f.id, inputs: f.options?.referencedFieldIds ?? [] }))
+    )
     schemaCache.set(t.id, {
       at: Date.now(),
       fields: t.fields
@@ -1023,9 +1061,7 @@ export async function getTargetFields(
 export async function getPageOrder(table: string): Promise<Placed[] | null> {
   if (!TABLE_ID_RE.test(table)) return null
   const schema = await getTableSchema(table)
-  if (!schema.some(f => f.name === SORT_FIELD && f.type === 'number')) {
-    return null
-  }
+  if (!keepsOrder(schema)) return null
   const name = primaryNames.get(table) ?? 'Name'
   const featured = schema.some(f => f.name === 'Featured')
   const params = new URLSearchParams({
@@ -1052,6 +1088,24 @@ export async function getPageOrder(table: string): Promise<Placed[] | null> {
       typeof r.fields[SORT_FIELD] === 'number' ? r.fields[SORT_FIELD] : null,
     featured: Boolean(str(r.fields.Featured)),
   }))
+}
+
+/** Refuses to publish an addition with no place on a page kept in a
+ *  manual order (the page's Accept guard, checked again here): the
+ *  edits' Sort if they hold one (an emptied one counts as none), else the
+ *  record's (Bryce, 28 Oct 2026: "make it impossible to accept a Queue
+ *  suggestion if no sort is picked"). */
+async function requirePlace(
+  table: string,
+  record: string,
+  edits: Record<string, unknown>
+): Promise<void> {
+  if (!keepsOrder(await getTableSchema(table))) return
+  const sort =
+    SORT_FIELD in edits
+      ? edits[SORT_FIELD]
+      : (await currentValues(table, record, [SORT_FIELD]))[SORT_FIELD]
+  if (sortValue(sort) === null) throw new QueueError(NO_PLACE, 409)
 }
 
 /** Frees a Sort value for the addition being published: the listing that
@@ -1244,11 +1298,22 @@ function mapPreview(
   schema: FieldInfo[]
 ): PreviewListing | null {
   const byName = new Map(schema.map(f => [f.name, f]))
+  const edited = new Set<string>()
   for (const [name, value] of Object.entries(edits)) {
     const f = byName.get(name)
     if (!f) continue
     raw.fields[f.id] =
       f.type === 'multipleAttachments' ? asAttachmentPreview(value) : value
+    edited.add(f.id)
+  }
+  // A formula built from an edited field still holds Airtable's old answer
+  // until Accept saves the edit, and a card that reads it first kept showing
+  // the old value (Bryce, 28 Oct 2026: a /map Category edit left the card on
+  // "Research support, Resource" – the card reads Category (text), as
+  // /communities reads Platform wrangled). Dropping the formula makes the
+  // card fall back to the field itself, which carries the edit.
+  for (const f of formulaInputs.get(table) ?? []) {
+    if (f.inputs.some(id => edited.has(id))) delete raw.fields[f.id]
   }
   const rec = raw as unknown as AirtableRawRecord
   const wrap = (kind: PreviewKind, listing: unknown): PreviewListing | null =>
@@ -1571,20 +1636,42 @@ export function asAttachmentWrite(v: unknown): unknown[] | null {
   return out
 }
 
+/** The retired columns (queue-retired.ts) among these fields that the
+ *  table no longer has. Only a write that names one reads the schema
+ *  afresh, so a column deleted in the last few minutes already counts.
+ *  The newsletter's Fix reads it too, so such a field is not taken for one
+ *  someone changed by hand (it reads as empty once the column is gone). */
+export async function deletedColumns(
+  table: string,
+  fields: string[]
+): Promise<string[]> {
+  if (!fields.some(f => isRetired(table, f))) return []
+  return goneFields(table, fields, await getTableSchema(table, 0))
+}
+
 /** The fields of one write, with every attachment field of the table put
- *  in the shape Airtable takes (asAttachmentWrite). Other fields pass
- *  through, and so does everything when the table's schema cannot be read.
- *  A value that is not a picture either stops the write (`throw`, for an
- *  Apply the admin is watching) or leaves that one field as it is (`skip`,
- *  for an Undo that should still put the other fields back). */
+ *  in the shape Airtable takes (asAttachmentWrite), and without any retired
+ *  column the table no longer has (`gone`): Airtable would refuse the whole
+ *  write over it. Other fields pass through, and so does everything when
+ *  the table's schema cannot be read. A value that is not a picture either
+ *  stops the write (`throw`, for an Apply the admin is watching) or leaves
+ *  that one field as it is (`skip`, for an Undo that should still put the
+ *  other fields back). */
 async function withAttachmentShapes(
   table: string,
   fields: Record<string, unknown>,
   onText: 'throw' | 'skip'
-): Promise<Record<string, unknown>> {
+): Promise<{ fields: Record<string, unknown>; gone: string[] }> {
+  const gone = await deletedColumns(table, Object.keys(fields))
   const schema = await getTableSchema(table)
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(fields)) {
+    if (gone.includes(k)) {
+      console.warn(
+        `[admin-queue] ${table}: left "${k}" out – the column is no longer in Airtable`
+      )
+      continue
+    }
     if (schema.find(f => f.name === k)?.type !== 'multipleAttachments') {
       out[k] = v
       continue
@@ -1603,7 +1690,7 @@ async function withAttachmentShapes(
     }
     console.warn(`[admin-queue] ${table}: left "${k}" alone – "${shown}"`)
   }
-  return out
+  return { fields: out, gone }
 }
 
 export function sanitiseEdits(input: unknown): Record<string, unknown> {
@@ -1770,7 +1857,8 @@ export function extraEdits(
       proposed.has(k) ||
       k === BEFORE_KEY ||
       k === KEPT_KEY ||
-      k === LEFT_OUT_KEY
+      k === LEFT_OUT_KEY ||
+      k === GONE_KEY
     ) {
       continue
     }
@@ -1807,12 +1895,15 @@ async function currentValues(
   return out
 }
 
+/** Carries out an Accept. Answers with the proposed or edited fields it
+ *  left out because their column is no longer in Airtable (GONE_KEY), so a
+ *  caller can say so; the row keeps them too. */
 export async function acceptItem(
   item: QueueItem,
   pageEdits: Record<string, unknown>,
   replyDraft: string | null = null,
   keep: string[] = []
-): Promise<void> {
+): Promise<string[]> {
   requireOpen(item)
   const stamp = now()
   // The proposed fields left out with the cross come with the page's edits
@@ -1835,10 +1926,25 @@ export async function acceptItem(
       : null
   const draftFields: Record<string, unknown> =
     draft !== null && draft !== item.replyDraft ? { [F.replyDraft]: draft } : {}
+  // Before the try: an addition with no place stays open, not Failed.
+  if (
+    item.type === 'Add' &&
+    item.targetTable &&
+    isRecordId(item.targetRecord ?? '')
+  ) {
+    await requirePlace(item.targetTable, item.targetRecord as string, edits)
+  }
   try {
     if (item.type === 'Add') {
       const t = target(item)
-      const fields = await withAttachmentShapes(t.table, edits, 'throw')
+      const { fields, gone } = await withAttachmentShapes(
+        t.table,
+        edits,
+        'throw'
+      )
+      // An edit to a column no longer in Airtable did not go out.
+      for (const k of gone) delete saved[k]
+      if (gone.length > 0) saved[GONE_KEY] = gone
       // A place picked on the page whose Sort a listing already holds:
       // that one and the run after it move down one first.
       const sort = fields[SORT_FIELD]
@@ -1898,11 +2004,23 @@ export async function acceptItem(
       }
       if (Object.keys(fields).length > 0) {
         const to = t ?? target(item) // fields but no listing: the usual error
-        await patchRecord(
-          to.table,
-          to.record,
-          await withAttachmentShapes(to.table, fields, 'throw')
-        )
+        // A field whose column is no longer in Airtable (an old row's
+        // proposal, queue-retired.ts) is left out and the rest still land;
+        // the row keeps which, for the Done view and for Undo.
+        const shaped = await withAttachmentShapes(to.table, fields, 'throw')
+        if (shaped.gone.length > 0) {
+          for (const k of shaped.gone) delete saved[k]
+          if (isRecord(saved[BEFORE_KEY])) {
+            const was = { ...saved[BEFORE_KEY] }
+            for (const k of shaped.gone) delete was[k]
+            if (Object.keys(was).length > 0) saved[BEFORE_KEY] = was
+            else delete saved[BEFORE_KEY]
+          }
+          saved[GONE_KEY] = shaped.gone
+        }
+        if (Object.keys(shaped.fields).length > 0) {
+          await patchRecord(to.table, to.record, shaped.fields)
+        }
       }
       // The Broom flag row goes either way: an applied fix clears it, and
       // so does accepting a flag with nothing to apply – the flag was right
@@ -1921,7 +2039,7 @@ export async function acceptItem(
         [F.decidedAt]: stamp,
         [F.error]: null,
       })
-      return
+      return []
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
@@ -1940,6 +2058,7 @@ export async function acceptItem(
     [F.error]: null,
   })
   refreshCache()
+  return goneOf(saved[GONE_KEY])
 }
 
 // ─── The local agent on the owner's Mac ─────────────────────────────────────
@@ -2188,6 +2307,16 @@ export async function fixItem(
     throw new QueueError('A field is left out only before the decision.', 400)
   }
   const t = target(item)
+  // The write as Airtable takes it, worked out before anything is written:
+  // a column no longer in Airtable (an old row's field, queue-retired.ts)
+  // cannot take a fix, and the admin is told so.
+  const shaped = await withAttachmentShapes(t.table, edits, 'throw')
+  if (shaped.gone.length > 0) {
+    throw new QueueError(
+      `${goneNote(t.table, shaped.gone)} Nothing was saved.`,
+      409
+    )
+  }
   const raw = parseJson((await rawQueueFields(item.id))[F.edits])
   const saved: Record<string, unknown> = isRecord(raw) ? { ...raw } : {}
   if (item.type === 'Change') {
@@ -2215,11 +2344,7 @@ export async function fixItem(
     const sort = edits[SORT_FIELD]
     if (typeof sort === 'number') await makeRoom(t.table, t.record, sort)
   }
-  await patchRecord(
-    t.table,
-    t.record,
-    await withAttachmentShapes(t.table, edits, 'throw')
-  )
+  await patchRecord(t.table, t.record, shaped.fields)
   await patchQueueRow(item.id, {
     [F.edits]: JSON.stringify({ ...saved, ...edits }),
   })
@@ -2319,11 +2444,12 @@ export async function undoItem(item: QueueItem): Promise<void> {
     const t = target(item)
     const fields: Record<string, unknown> = {}
     for (const c of item.changes) {
-      // Accept did not write it (Fable had changed it, or it was left
-      // out), so it stays.
+      // Accept did not write it (Fable had changed it, it was left out,
+      // or its column was no longer in Airtable), so it stays.
       if (
         item.keptByFable?.includes(c.field) ||
-        item.leftOut?.includes(c.field)
+        item.leftOut?.includes(c.field) ||
+        item.gone?.includes(c.field)
       ) {
         continue
       }
@@ -2336,11 +2462,13 @@ export async function undoItem(item: QueueItem): Promise<void> {
       if (PROTECTED_FIELDS.has(k) || k in fields) continue
       fields[k] = v
     }
-    const back = await withAttachmentShapes(t.table, fields, 'skip')
+    // A column deleted since Accept wrote it cannot be put back; the other
+    // fields still are.
+    const back = (await withAttachmentShapes(t.table, fields, 'skip')).fields
     if (Object.keys(back).length) await patchRecord(t.table, t.record, back)
     // The edits stay as the page's draft, the fields left out too; what
-    // they replaced is spent.
-    if (item.before || item.keptByFable) {
+    // they replaced is spent, and so is the list of deleted columns.
+    if (item.before || item.keptByFable || item.gone) {
       const kept = withLeftOut(item.edits ?? {}, item.leftOut ?? [])
       reopen[F.edits] = Object.keys(kept).length ? JSON.stringify(kept) : null
     }

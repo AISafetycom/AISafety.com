@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   addDays,
-  closingDay,
   fundingAccepting,
   hasStarted,
   inAnIssue,
@@ -99,14 +98,35 @@ describe('pickNewListings', () => {
 })
 
 describe('fundingAccepting', () => {
-  it('counts the open wordings', () => {
-    expect(fundingAccepting('Applications close 31 October 2026')).toBe(true)
-    expect(fundingAccepting('Applications on a rolling basis')).toBe(true)
+  const open = 'Applications open'
+  it('counts an open funder, rolling or with a Deadline still to come', () => {
+    expect(
+      fundingAccepting(
+        { applicationStatus: open, deadline: null },
+        '2026-10-28'
+      )
+    ).toBe(true)
+    expect(
+      fundingAccepting(
+        { applicationStatus: open, deadline: '2026-11-30' },
+        '2026-10-28'
+      )
+    ).toBe(true)
   })
-  it('leaves out the closed wordings and an empty status', () => {
-    expect(fundingAccepting('Not accepting applications')).toBe(false)
-    expect(fundingAccepting('Not currently accepting applications')).toBe(false)
-    expect(fundingAccepting('  ')).toBe(false)
+  it('still counts the closing day itself, not the day after', () => {
+    const f = { applicationStatus: open, deadline: '2026-10-31' }
+    expect(fundingAccepting(f, '2026-10-31')).toBe(true)
+    expect(fundingAccepting(f, '2026-11-01')).toBe(false)
+  })
+  it('leaves out the two closed statuses and a blank one', () => {
+    for (const applicationStatus of [
+      'Not currently accepting applications',
+      'Invite only, no applications',
+      '',
+    ])
+      expect(
+        fundingAccepting({ applicationStatus, deadline: null }, '2026-10-28')
+      ).toBe(false)
   })
 })
 
@@ -115,22 +135,39 @@ describe('pickNewFunders', () => {
     {
       id: 'recStill',
       name: 'Still open',
-      acceptingApplications: 'Applications on a rolling basis',
+      applicationStatus: 'Applications open',
+      deadline: null,
     },
     {
       id: 'recReopened',
       name: 'Reopened',
-      acceptingApplications: 'Applications close 1 December 2026',
+      applicationStatus: 'Applications open',
+      deadline: '2026-12-01',
     },
     {
       id: 'recClosed',
       name: 'Closed',
-      acceptingApplications: 'Not accepting applications',
+      applicationStatus: 'Not currently accepting applications',
+      deadline: null,
+    },
+    {
+      id: 'recInvite',
+      name: 'Invite only',
+      applicationStatus: 'Invite only, no applications',
+      deadline: null,
+    },
+    {
+      id: 'recPassed',
+      name: 'Deadline passed since the cache',
+      applicationStatus: 'Applications open',
+      deadline: '2026-10-27',
     },
   ]
   it('takes funders accepting now that were not accepting at the baseline', () => {
     expect(
-      pickNewFunders(funders, new Set(['recStill'])).map(f => f.id)
+      pickNewFunders(funders, new Set(['recStill']), '2026-10-28').map(
+        f => f.id
+      )
     ).toEqual(['recReopened'])
   })
 })
@@ -173,18 +210,6 @@ describe('issueLabel', () => {
   })
 })
 
-describe('closingDay', () => {
-  it('reads the date of the "Applications close" wording', () => {
-    expect(closingDay('Applications close 31 October 2026')).toBe('2026-10-31')
-    expect(closingDay('Applications close 2 March 2027')).toBe('2027-03-02')
-  })
-  it('is null for every other wording', () => {
-    expect(closingDay('Applications on a rolling basis')).toBeNull()
-    expect(closingDay('Not accepting applications')).toBeNull()
-    expect(closingDay('Applications close 31 Octobre 2026')).toBeNull()
-  })
-})
-
 describe('addDays', () => {
   it('crosses months and years', () => {
     expect(addDays('2026-10-08', 14)).toBe('2026-10-22')
@@ -193,36 +218,23 @@ describe('addDays', () => {
 })
 
 describe('pickClosingFunders', () => {
+  const open = (id: string, deadline: string | null) => ({
+    id,
+    name: id.slice(3),
+    applicationStatus: 'Applications open',
+    deadline,
+  })
   const funders = [
+    open('recToday', '2026-10-08'),
+    open('recEdge', '2026-10-22'),
+    open('recLater', '2026-10-23'),
+    open('recPast', '2026-10-07'),
+    open('recNew', '2026-10-10'),
+    open('recRolling', null),
+    // A Deadline left on a funder that isn't open doesn't make it closing.
     {
-      id: 'recToday',
-      name: 'Today',
-      acceptingApplications: 'Applications close 8 October 2026',
-    },
-    {
-      id: 'recEdge',
-      name: 'Edge',
-      acceptingApplications: 'Applications close 22 October 2026',
-    },
-    {
-      id: 'recLater',
-      name: 'Later',
-      acceptingApplications: 'Applications close 23 October 2026',
-    },
-    {
-      id: 'recPast',
-      name: 'Past',
-      acceptingApplications: 'Applications close 7 October 2026',
-    },
-    {
-      id: 'recNew',
-      name: 'New',
-      acceptingApplications: 'Applications close 10 October 2026',
-    },
-    {
-      id: 'recRolling',
-      name: 'Rolling',
-      acceptingApplications: 'Applications on a rolling basis',
+      ...open('recPaused', '2026-10-15'),
+      applicationStatus: 'Not currently accepting applications',
     },
   ]
   it('takes deadlines from today to two weeks on, not the new ones', () => {

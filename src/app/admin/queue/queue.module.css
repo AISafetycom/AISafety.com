@@ -906,6 +906,19 @@ p.tabDoneTitle {
   font-weight: 600;
 }
 
+/* The Source line links to the post itself when Comb kept its address;
+   underlined so it reads as a link in the verdict's colored panel. */
+.queue .foundLink {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 50%, transparent);
+  text-underline-offset: 2px;
+}
+
+.queue .foundLink:hover {
+  text-decoration-color: currentColor;
+}
+
 .title {
   margin: 0;
   font-size: 22px;

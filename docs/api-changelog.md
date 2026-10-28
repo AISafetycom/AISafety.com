@@ -36,3 +36,17 @@ Initial release.
   matches nothing. Use `whoCanApply` (`Individuals`, `Nonprofits`,
   `For-profits`, or `Universities`) instead. `recipientType` stays in v1
   responses and filters until v2 drops it (deprecated 27 October 2026).
+- `funding`'s `acceptingApplications` is now worked out from `applicationStatus`
+  and `deadline`, and `advisors`' `focus` from `focusAreas`, because the
+  Airtable fields they used to come from are being retired. The wording is the
+  same as before, except that every closed funder now reads "Not accepting
+  applications" (one funder read "Not currently accepting applications" until
+  now). `acceptingApplications` is "Applications close D Month YYYY"
+  (for example "Applications close 31 October 2026"; "Not accepting
+  applications" once that day has passed), "Applications on a rolling basis", or
+  "Not accepting applications", and `focus` is "Career/contribution" or "Other"
+  (each an empty string for a record with no status or no focus areas, as
+  before). Both stay in v1 responses and filters, and `?acceptingApplications=`
+  and `?focus=` work as before. Deprecated: new code should use
+  `applicationStatus` and `deadline` instead of `acceptingApplications`, and
+  `focusAreas` instead of `focus` (28 October 2026).

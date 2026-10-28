@@ -50,6 +50,7 @@ import type {
 import Icon from '@/components/Icon'
 import { activityIcon } from '@/app/communities/activity-icon'
 import { isAcceptingApplications } from '@/lib/funding-status'
+import { goneFields, goneNote } from '@/lib/admin/queue-retired'
 import { STATUS_ICONS as FUNDER_STATUS_ICONS } from '@/app/funding/card'
 import { APPLICATIONS_ICONS as ADVISOR_APPLICATIONS_ICONS } from '@/app/advisors/card'
 import { trainingTypeColor } from '@/lib/training-types'
@@ -64,7 +65,13 @@ import FieldPicker from './FieldPicker'
 import type { FableChange } from '@/lib/admin/queue-fable'
 import Position, { forgetOrder } from './Position'
 import Fireworks from './Fireworks'
-import { SORT_FIELD, sortValue } from '@/lib/admin/queue-place'
+import {
+  keepsOrder,
+  needsPlace,
+  NO_PLACE,
+  SORT_FIELD,
+  sortValue,
+} from '@/lib/admin/queue-place'
 import {
   byUrgency,
   urgencyOf,
@@ -408,11 +415,20 @@ function hashId(): string | null {
  *  "posted 15 September 2026"): the day is what places it. */
 function foundLabel(text: string): string {
   return text
+    .split('\n')[0]
     .replace(
       /(\d{1,2} [A-Z][a-z]+ \d{4}) \d{1,2}:\d{2}(?: UTC[+\-\u2212]\d{2}:\d{2})?/,
       '$1'
     )
     .trim()
+}
+
+/** The post Comb found the listing in, which the Queue keeps on the line
+ *  under the Source line when Comb's comment names it (Bryce, 28 Oct 2026:
+ *  "Let's make the source clickable"). */
+function foundLink(text: string): string | null {
+  const link = text.split('\n')[1]?.trim()
+  return link && /^https?:\/\//.test(link) ? link : null
 }
 
 function ago(iso: string | null): string {
@@ -859,6 +875,23 @@ function activeEdits(d: Draft): Record<string, string> {
     : d.edits
 }
 
+/** Whether an addition still needs its position picked before Accept: its
+ *  page keeps a manual order and neither the edits nor the record give it
+ *  a Sort (Bryce, 28 Oct 2026). */
+function unplacedAdd(
+  item: QueueItem,
+  live: { fields: Record<string, unknown>; schema: FieldInfo[] } | null,
+  edits: Record<string, string>
+): boolean {
+  return needsPlace(
+    item.type,
+    live?.schema ?? [],
+    SORT_FIELD in edits
+      ? edits[SORT_FIELD]
+      : (live?.fields ?? item.fields ?? {})[SORT_FIELD]
+  )
+}
+
 function sameEdits(
   a: Record<string, string>,
   b: Record<string, string>
@@ -1172,7 +1205,9 @@ function doneLabel(item: QueueItem): string {
   if (item.status === 'Accepted') return 'Accepted'
   if (item.type === 'Add') return 'Published'
   if (item.type === 'Change') {
-    const n = item.changes.filter(c => !item.leftOut?.includes(c.field)).length
+    const n = item.changes.filter(
+      c => !item.leftOut?.includes(c.field) && !item.gone?.includes(c.field)
+    ).length
     if (n === 0) return item.source === 'Broom' ? 'Flag cleared' : 'Done'
     return `Changed ${n} field${n === 1 ? '' : 's'}`
   }
@@ -3403,6 +3438,12 @@ export default function QueueAdmin({
             !d.busy
           ) {
             e.preventDefault()
+            // An addition with no place yet opens the Position list
+            // instead: Accept waits for one.
+            if (unplacedAdd(item, live[item.id] ?? null, activeEdits(d))) {
+              setPlaceFocus(n => n + 1)
+              break
+            }
             void act(item, 'accept', {
               keep: fableFieldsRef.current[item.id] ?? [],
               edits: withLeftOut(
@@ -4860,6 +4901,19 @@ function Detail({
     : item.status === 'Applied'
       ? (item.leftOut ?? [])
       : []
+  // Proposed fields whose column is no longer in Airtable (an old row's,
+  // queue-retired.ts): Apply leaves them out and writes the rest. An
+  // applied item shows the ones it left out.
+  const gone =
+    item.status === 'Applied'
+      ? (item.gone ?? [])
+      : item.type === 'Change' && isOpen(item)
+        ? goneFields(
+            item.targetTable ?? '',
+            item.changes.map(c => c.field),
+            live?.schema ?? []
+          )
+        : []
   // The proposal's fields can be edited or left out only while it waits;
   // once applied, they are fixed straight on the listing (canFix).
   const canChange = draftable && !revising
@@ -4994,10 +5048,9 @@ function Detail({
 
   // An addition to a page kept in a manual order gets the Position
   // picker, which stands in for its Sort field.
-  const placeable =
-    item.type === 'Add' &&
-    (live?.schema ?? []).some(f => f.name === SORT_FIELD && f.type === 'number')
+  const placeable = item.type === 'Add' && keepsOrder(live?.schema ?? [])
   const sortWas = shownFields[SORT_FIELD]
+  const unplaced = unplacedAdd(item, live, activeEdits(d))
 
   const hasCard =
     item.type === 'Change' && Boolean(item.targetTable && item.targetRecord)
@@ -5417,6 +5470,22 @@ function Detail({
     item.source === 'Comb' && item.sourceExcerpt
       ? foundLabel(item.sourceExcerpt)
       : null
+  const foundHref =
+    item.source === 'Comb' && item.sourceExcerpt
+      ? foundLink(item.sourceExcerpt)
+      : null
+  const foundText = foundHref ? (
+    <a
+      className={styles.foundLink}
+      href={foundHref}
+      target="_blank"
+      rel="noreferrer"
+    >
+      {found}
+    </a>
+  ) : (
+    found
+  )
 
   return (
     <div
@@ -5473,7 +5542,7 @@ function Detail({
               with no panel it sits here instead. */}
           {found && !showAside && (
             <p className={styles.found}>
-              <span className={styles.foundLabel}>Source</span> {found}
+              <span className={styles.foundLabel}>Source</span> {foundText}
             </p>
           )}
           {/* With a card on show the heading only repeats what Broom found
@@ -5629,6 +5698,20 @@ function Detail({
                 if (fableFields.has(c.field)) {
                   return fableRow(fableFields.get(c.field)!)
                 }
+                if (gone.includes(c.field)) {
+                  return (
+                    <LeftOutRow
+                      key={c.field}
+                      change={c}
+                      edit={undefined}
+                      page={item.page}
+                      live={undefined}
+                      open={false}
+                      onPutBack={null}
+                      mark="column deleted"
+                    />
+                  )
+                }
                 if (leftOut.includes(c.field)) {
                   return (
                     <LeftOutRow
@@ -5778,6 +5861,16 @@ function Detail({
             </div>
           ))}
 
+        {gone.length > 0 && (
+          <p className={styles.note}>
+            {item.status === 'Applied'
+              ? goneNote(item.targetTable ?? '', gone)
+              : `Apply leaves ${gone.join(', ')} out: ${
+                  gone.length === 1 ? 'that column is' : 'those columns are'
+                } no longer in Airtable.`}
+          </p>
+        )}
+
         {/* A correction no listing matched has no fields to pick from. */}
         {item.type === 'Change' && Boolean(item.targetRecord) && (
           <FieldPicker
@@ -5812,7 +5905,7 @@ function Detail({
           {found && (
             <div className={styles.asideFound}>
               <span className={styles.verdictKicker}>Source</span>
-              <span>{found}</span>
+              <span>{foundText}</span>
             </div>
           )}
           {item.verdict && (
@@ -6013,7 +6106,8 @@ function Detail({
           <div className={styles.buttons}>
             <button
               className={`${styles.button} ${styles.primary}`}
-              disabled={d.busy}
+              disabled={d.busy || unplaced}
+              title={unplaced ? NO_PLACE : undefined}
               onClick={() =>
                 act('accept', {
                   edits: withLeftOut(editsToSave(), d.leftOut),
@@ -6047,6 +6141,11 @@ function Detail({
               <Icon src={ICON.clock} size={12} />
               Review again in a week <kbd>W</kbd>
             </button>
+            {unplaced && !d.busy && (
+              <span className={styles.note}>
+                Pick its position on the page first <kbd>P</kbd>
+              </span>
+            )}
             {(editCount > 0 || leftCount > 0) && (
               <span className={styles.note}>
                 {[
@@ -6343,7 +6442,9 @@ function FableChangeRow({
 /** A proposed field left out with the cross (Bryce, 15 Oct 2026: "I want
  *  to be able to delete a suggested field change"): what the listing keeps
  *  reads as it is, the proposal is crossed out, and Put back brings it back
- *  while the item is open. Accept does not write it. */
+ *  while the item is open. Accept does not write it. A field whose column
+ *  is no longer in Airtable reads the same way, marked "column deleted",
+ *  with nothing to put back. */
 function LeftOutRow({
   change,
   edit,
@@ -6351,6 +6452,7 @@ function LeftOutRow({
   live,
   open,
   onPutBack,
+  mark = 'left out',
 }: {
   change: ProposedChange
   /** The page's edit to the proposed value, kept for Put back. */
@@ -6362,6 +6464,8 @@ function LeftOutRow({
   /** Null when it cannot come back: view only. On an applied change it
    *  writes the proposed value onto the listing now. */
   onPutBack: (() => void) | null
+  /** Why it is not written, beside the crossed-out value. */
+  mark?: string
 }) {
   const pictureField = touchesPicture(change)
   const from = pictureOf(change.from, live, { pictureField, open })
@@ -6392,7 +6496,7 @@ function LeftOutRow({
         <span className={styles.leftOutValue}>
           {to ? <Picture key={to.url ?? ''} {...to} /> : friendly(show(value))}
         </span>
-        <em className={styles.leftOutMark}>left out</em>
+        <em className={styles.leftOutMark}>{mark}</em>
         {onPutBack && (
           <button type="button" className={styles.putBack} onClick={onPutBack}>
             {open ? 'Put back' : 'Apply now'}

@@ -256,7 +256,7 @@ export function feedTile(
     value: shown.v,
     from,
     note: [
-      'Feed readers = people following the newsletters’ RSS feeds (aisafety.com/newsletter/events/feed and /training/feed) on each day (UTC), every feed together: a feed service such as Feedly reports how many of its users follow the feed, and each reader app fetching for one person counts once.',
+      'Feed readers = people following the newsletters’ RSS feeds (aisafety.com/newsletter/events/feed, /training/feed, and /funding/feed) on each day (UTC), every feed together: a feed service such as Feedly reports how many of its users follow the feed, and each reader app fetching for one person counts once.',
       shown.part
         ? 'The figure is today so far.'
         : `The figure is ${dayWords(shown.t)}, the range’s last full day.`,
@@ -277,7 +277,8 @@ export function feedTile(
  *  (at the range's end, for a range in the past), where it stood when the
  *  range began, and the line between: its Substack issues before the move,
  *  its ActiveCampaign list's size at the end of each day since. A newsletter
- *  with nothing to draw (Funding, until its export is added) gets no tile. */
+ *  with nothing to draw (no export, and its list not read yet) gets no
+ *  tile. */
 export function subscriberTiles(
   subs: NewsletterSubscribers,
   range: DateRange

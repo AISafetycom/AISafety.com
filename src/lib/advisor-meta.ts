@@ -20,6 +20,20 @@ export const FOCUS_AREAS = [
   'Visas',
 ] as const
 
+/**
+ * The old Focus value for an advisor's Focus areas: "Career/contribution"
+ * when they include Career or Founding, else "Other"; '' with no Focus areas,
+ * as an empty field gave. The Advisors table's old Focus field was kept in
+ * step this way until it was deleted (28 October 2026), and Data API v1
+ * still serves the value as `focus`.
+ */
+export function legacyFocus(areas: readonly string[]): string {
+  if (areas.length === 0) return ''
+  return areas.includes('Career') || areas.includes('Founding')
+    ? 'Career/contribution'
+    : 'Other'
+}
+
 /** The Applications options in Airtable, in filter order. */
 export const APPLICATIONS = [
   'Application required',

@@ -10,7 +10,12 @@ import {
   type AirtableRawRecord,
 } from './airtable'
 import { fetchPublicData, hasAirtableCredentials } from './public-api'
-import { FOCUS_AREAS, WHO_ITS_FOR, isApplications } from '@/lib/advisor-meta'
+import {
+  FOCUS_AREAS,
+  WHO_ITS_FOR,
+  isApplications,
+  legacyFocus,
+} from '@/lib/advisor-meta'
 import { inOptionOrder } from '../option-order'
 
 export const TABLE_ID = 'tblf3KKYnmgcjVGhD'
@@ -22,7 +27,6 @@ const FIELD = {
   name: 'fldDCHQmcF8HLOz5S', // Name
   description: 'fldKAGrIoU5VBZJ85', // Description
   logo: 'fldlN4rEUvhZBt8Bk', // Logo
-  focus: 'fldJw9XfXOInZ7mCq', // Focus
   whoItsFor: 'fldV0iU04GFzGMypK', // Who it's for
   focusAreas: 'fldKAVyL9lBOFy8Ht', // Focus areas
   applications: 'fldb32mL5jiHvtN9J', // Applications
@@ -43,7 +47,9 @@ export interface Advisor {
   name: string
   description: string
   logo: string | null
-  /** The old Focus field; Focus areas replaces it on the page. */
+  /** The old Focus value ("Career/contribution" or "Other"), worked out
+   *  from Focus areas since its Airtable field was deleted; Data API v1
+   *  keeps serving it. Focus areas replaces it on the page. */
   focus: string
   whoItsFor: string[]
   focusAreas: string[]
@@ -95,6 +101,11 @@ export function advisorFromRecord(record: AirtableRawRecord): Advisor | null {
     )
   }
 
+  const focusAreas = inOptionOrder(
+    fieldStringArray(f[FIELD.focusAreas]),
+    FOCUS_AREAS
+  )
+
   return {
     id: record.id,
     dateAdded: record.createdTime?.slice(0, 10) ?? null,
@@ -102,12 +113,10 @@ export function advisorFromRecord(record: AirtableRawRecord): Advisor | null {
     name,
     description: fieldString(f[FIELD.description]) || '',
     logo: fieldAttachmentUrl(f[FIELD.logo]),
-    focus: fieldText(f[FIELD.focus]),
+    // Data API v1's old Focus value, now worked out from Focus areas.
+    focus: legacyFocus(focusAreas),
     whoItsFor: inOptionOrder(fieldStringArray(f[FIELD.whoItsFor]), WHO_ITS_FOR),
-    focusAreas: inOptionOrder(
-      fieldStringArray(f[FIELD.focusAreas]),
-      FOCUS_AREAS
-    ),
+    focusAreas,
     applications,
     status: fieldText(f[FIELD.status]),
     url: fieldString(f[FIELD.link]) || '#',
