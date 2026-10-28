@@ -1186,6 +1186,15 @@
   background-color: var(--white);
 }
 
+/* A chart of something else (site visitors beside job clicks). */
+.chartBlue .chartBar {
+  background-color: var(--blue);
+}
+
+.chartBlue .chartColActive .chartBar {
+  background-color: var(--white);
+}
+
 /* A week only partly inside the range: lighter, so its shorter count isn't
    read as a dip. */
 .chartBarPartial {

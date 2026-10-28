@@ -320,32 +320,6 @@ export function JobsView({
         </Panel>
       </div>
 
-      <Panel
-        title={`Visitors to AISafety.com · per ${s.seriesUnit === 'week' ? 'week' : 'day'}`}
-      >
-        {s.visitorSeries.length === 0 ? (
-          <p className={analytics.dim}>No visitors recorded in these dates.</p>
-        ) : (
-          <ClicksChart
-            points={s.visitorSeries}
-            unit={s.seriesUnit}
-            table={false}
-            noun={{ one: 'visitor', many: 'visitors' }}
-          />
-        )}
-        <p className={analytics.caption}>
-          Browsers that opened any page of AISafety.com, each counted once{' '}
-          {s.seriesUnit === 'week'
-            ? 'a week, with weeks starting on Monday'
-            : 'a day'}
-          . Over these dates, {s.siteVisitors.toLocaleString()} in all.
-          {s.seriesUnit === 'week'
-            ? ' A lighter column is a week only partly inside these dates.'
-            : ''}{' '}
-          Visitors are counted from 15 July 2026, and days are UTC.
-        </p>
-      </Panel>
-
       <Panel title="Jobs">
         {s.rows.length === 0 ? (
           <p className={analytics.dim}>No job was clicked in these dates.</p>
@@ -458,6 +432,33 @@ export function JobsView({
           </p>
         </Panel>
       </div>
+
+      <Panel
+        title={`Visitors to AISafety.com · per ${s.seriesUnit === 'week' ? 'week' : 'day'}`}
+      >
+        {s.visitorSeries.length === 0 ? (
+          <p className={analytics.dim}>No visitors recorded in these dates.</p>
+        ) : (
+          <ClicksChart
+            points={s.visitorSeries}
+            unit={s.seriesUnit}
+            table={false}
+            noun={{ one: 'visitor', many: 'visitors' }}
+            tone="blue"
+          />
+        )}
+        <p className={analytics.caption}>
+          Browsers that opened any page of AISafety.com, each counted once{' '}
+          {s.seriesUnit === 'week'
+            ? 'a week, with weeks starting on Monday'
+            : 'a day'}
+          . Over these dates, {s.siteVisitors.toLocaleString()} in all.
+          {s.seriesUnit === 'week'
+            ? ' A lighter column is a week only partly inside these dates.'
+            : ''}{' '}
+          Visitors are counted from 15 July 2026, and days are UTC.
+        </p>
+      </Panel>
     </>
   )
 }
