@@ -16,7 +16,10 @@ import {
   isApplicationStatus,
   resolveApplicationStatus,
 } from '@/lib/funding-meta'
-import { resolveAcceptingApplications } from '../funding-status'
+import {
+  acceptingApplicationsText,
+  resolveAcceptingApplications,
+} from '../funding-status'
 import { inOptionOrder } from '../option-order'
 
 export const TABLE_ID = 'tblzMTLDZWZKqTxrq'
@@ -29,7 +32,6 @@ const FIELD = {
   description: 'fldBm7ZehvD2anFg8', // Description
   logo: 'fldVVx7c5jJRvKxDB', // Logo
   type: 'fldu44vSLT2tH4fqh', // Type
-  acceptingApplications: 'fld398tQjtRGz0Pk1', // Accepting applications?
   website: 'fldpc3AO5j2k3PU3b', // Website
   featured: 'fldS0WL2vXJ0h2HQs', // Featured
   featuredTagline: 'fldNevMnRCmCzv4Jt', // Featured tagline
@@ -54,6 +56,10 @@ export interface Funder {
   logo: string | null
   type: string
   recipientType: string
+  /** The old status text ("Applications close 31 October 2026",
+   *  "Applications on a rolling basis", "Not accepting applications"),
+   *  worked out from Application status and Deadline since its Airtable
+   *  field was deleted; Data API v1 keeps serving it. */
   acceptingApplications: string
   /** One of APPLICATION_STATUSES; '' when the record has none yet. */
   applicationStatus: string
@@ -100,12 +106,12 @@ export function funderFromRecord(record: AirtableRawRecord): Funder | null {
     // The Recipient type field no longer exists in Airtable (July 2026). It
     // stays '' only so Data API v1 keeps the key; Who can apply replaces it.
     recipientType: '',
-    // A dated status ("Applications close 23 October 2026") whose date has
-    // passed reads "Not accepting applications" from here on, so the card,
-    // the Open/Closed filter and the chatbot never show a stale open status
-    // while the record waits for its Broom tidy-up.
+    // Data API v1's old status text, worked out from the new fields the way
+    // the bots kept the "Accepting applications?" field in step until it was
+    // deleted (28 Oct 2026). A dated one whose date has passed reads "Not
+    // accepting applications", as it always did.
     acceptingApplications: resolveAcceptingApplications(
-      fieldText(f[FIELD.acceptingApplications])
+      acceptingApplicationsText(storedStatus, deadline)
     ),
     // Same rule for the new fields: an open funder whose Deadline has passed
     // reads "Not currently accepting applications" on its card, in the

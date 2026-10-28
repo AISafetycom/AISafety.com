@@ -59,6 +59,21 @@ Every collection endpoint returns a wrapped envelope:
 
 Whitelisted filter fields per endpoint live in `src/lib/api/registry.ts`.
 
+## Deprecated fields
+
+These stay in v1 responses and filters, with the same kind of values, until v2
+drops them. New code should use the newer fields instead.
+
+| Endpoint   | Field                   | Use instead                        | Since           |
+| ---------- | ----------------------- | ---------------------------------- | --------------- |
+| `funding`  | `recipientType`         | `whoCanApply`                      | 27 October 2026 |
+| `funding`  | `acceptingApplications` | `applicationStatus` and `deadline` | 28 October 2026 |
+| `advisors` | `focus`                 | `focusAreas`                       | 28 October 2026 |
+
+`recipientType` is an empty string on every record. `acceptingApplications` is
+worked out from `applicationStatus` and `deadline`, and `focus` from
+`focusAreas`; see `docs/api-changelog.md`.
+
 ## Endpoints
 
 `communities`, `organizations`, `events`, `training`, `jobs`, `funding`,

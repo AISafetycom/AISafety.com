@@ -51,6 +51,7 @@ import {
 } from './newsletter'
 import {
   acceptItem,
+  deletedColumns,
   getPreviewListings,
   getQueueItem,
   listQueue,
@@ -60,6 +61,7 @@ import {
   type QueueItem,
 } from './queue'
 import { withLeftOut } from './queue-left-out'
+import { goneNote } from './queue-retired'
 
 /** A line of the card the site would draw: the email's field name, its icon
  *  (null for the title and the description) and the text. */
@@ -325,15 +327,23 @@ export async function draftListingAlerts(
 
 /** Proposed fields someone already changed on the listing since Broom
  *  flagged it (the value is neither Broom's "from" nor its "to"): Apply
- *  leaves those alone, as the Queue does for Fable's chat changes. */
+ *  leaves those alone, as the Queue does for Fable's chat changes. A field
+ *  whose column has since been deleted from Airtable (queue-retired.ts)
+ *  reads as empty, which is no one's change: it is left to Apply, which
+ *  leaves it out and says why. */
 async function alreadyChanged(item: QueueItem): Promise<string[]> {
   if (!item.targetTable || !item.targetRecord) return []
   const res = await airtableRequest(`${item.targetTable}/${item.targetRecord}`)
   if (!res.ok) return []
   const fields = ((await res.json()) as { fields?: Record<string, unknown> })
     .fields
+  const gone = await deletedColumns(
+    item.targetTable,
+    item.changes.map(c => c.field)
+  )
   const same = (a: unknown, b: unknown) => display(a) === display(b)
   return item.changes
+    .filter(c => !gone.includes(c.field))
     .filter(c => {
       const now = fields?.[c.field] ?? null
       return !same(now, c.from) && !same(now, c.to)
@@ -383,7 +393,7 @@ export async function fixListing(
     const keep = await alreadyChanged(item)
     // The page's edits as the Queue saved them, and the fields left out
     // there, which Apply does not write from here either.
-    await acceptItem(
+    const gone = await acceptItem(
       item,
       sanitiseEdits(withLeftOut(item.edits ?? {}, item.leftOut ?? [])),
       null,
@@ -394,6 +404,9 @@ export async function fixListing(
       note = `Left ${keep.join(', ')} as it is: someone changed it on the listing after Broom’s check.`
     if (item.leftOut?.length)
       note = `${note ? `${note} ` : ''}Left ${item.leftOut.join(', ')} as it is: you left it out in the Queue.`
+    // An old flag's field whose column has since been deleted from Airtable.
+    if (gone.length && item.targetTable)
+      note = `${note ? `${note} ` : ''}${goneNote(item.targetTable, gone)}`
   }
   const card = group.cards.find(c => c.key === key) as CardInfo
   const props = siteProps(card, await previewsFor([card]))

@@ -28,6 +28,7 @@ import {
   asAttachmentWrite,
   closeHandledRows,
   extraEdits,
+  fixItem,
   flagItem,
   getQueueItem,
   handledOutside,
@@ -43,6 +44,7 @@ import {
   type QueueItem,
 } from './queue'
 import { LEFT_OUT_KEY } from './queue-left-out'
+import { GONE_KEY } from './queue-retired'
 
 const QUEUE = 'tblonlKwIFJ7Aa8QN'
 const EVENTS = 'tblXbN9swwldwq8f7'
@@ -1298,5 +1300,313 @@ describe('proposed fields left out', () => {
         []
       )
     ).toEqual({ Host: 'Rob Miles' })
+  })
+})
+
+// The Funding table's "Accepting applications?" column was retired on 28
+// October 2026, with Application status and Deadline in its place. Queue
+// rows written before then still propose it, and Airtable refuses a whole
+// write that names a column it no longer has – so Apply leaves it out and
+// writes the rest, and says so; while the column is there it is written as
+// before.
+describe('a proposed field whose column was deleted', () => {
+  const ID = rid('oldrow')
+  const LISTING = `${FUNDING}/${rid('fund')}`
+  const OLD = 'Accepting applications?'
+  const FLD = {
+    type: 'fldBc9YIDhjmu58f3',
+    proposal: 'fldgl9Ny2jnu8T0Da',
+    edits: 'fldzCgKQbopgcbrwq',
+    targetTable: 'fld45SUjstUZROuXl',
+    targetRecord: 'fldszXtLdUijgFG4l',
+  }
+  const NEW_COLUMNS = [
+    { id: 'fldsFpgVduYnNuYkN', name: 'Name', type: 'singleLineText' },
+    {
+      id: 'fldD8GVcdVy4Vonaa',
+      name: 'Application status',
+      type: 'singleSelect',
+    },
+    { id: 'fldv6IKA9WMDJNTbT', name: 'Deadline', type: 'date' },
+  ]
+  const OLD_COLUMN = {
+    id: 'fld398tQjtRGz0Pk1',
+    name: OLD,
+    type: 'singleLineText',
+  }
+  let columns: typeof NEW_COLUMNS
+  let row: Record<string, unknown>
+  let writes: { path: string; fields: Record<string, unknown> }[]
+
+  beforeEach(() => {
+    columns = NEW_COLUMNS
+    row = {
+      [FLD.type]: 'Change',
+      [STATUS]: 'Pending',
+      [FLD.proposal]: JSON.stringify({
+        kind: 'change',
+        table: FUNDING,
+        record: rid('fund'),
+        page: '/funding',
+        changes: [
+          {
+            field: OLD,
+            from: 'Applications on a rolling basis',
+            to: 'Not accepting applications',
+          },
+          {
+            field: 'Application status',
+            from: 'Applications open',
+            to: 'Not currently accepting applications',
+          },
+        ],
+      }),
+      [FLD.targetTable]: FUNDING,
+      [FLD.targetRecord]: rid('fund'),
+    }
+    writes = []
+    process.env.AIRTABLE_TOKEN = 'test-token'
+    process.env.AIRTABLE_BASE_ID = 'appTest'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({ tables: [{ id: FUNDING, fields: columns }] })
+      )
+    )
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(
+      async (path: string, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          const { fields } = JSON.parse(String(init.body)) as {
+            fields: Record<string, unknown>
+          }
+          if (path.startsWith(`${QUEUE}/${ID}`)) {
+            for (const [k, v] of Object.entries(fields)) {
+              if (v === null) delete row[k]
+              else row[k] = v
+            }
+            return new Response('{}', { status: 200 })
+          }
+          // Airtable itself: a field it does not have fails the whole write.
+          const unknown = Object.keys(fields).find(
+            k =>
+              !['Publish?', 'Hide?'].includes(k) &&
+              !columns.some(c => c.name === k)
+          )
+          if (unknown) {
+            return Response.json(
+              {
+                error: {
+                  type: 'UNKNOWN_FIELD_NAME',
+                  message: `Unknown field name: "${unknown}"`,
+                },
+              },
+              { status: 422 }
+            )
+          }
+          writes.push({ path, fields })
+          return new Response('{}', { status: 200 })
+        }
+        if (path.startsWith(`${QUEUE}/${ID}`)) {
+          return Response.json({
+            id: ID,
+            createdTime: '2026-10-20T00:00:00.000Z',
+            fields: row,
+          })
+        }
+        // the listing as it is now
+        return Response.json({
+          id: rid('fund'),
+          fields: { Name: 'A fund', 'Application status': 'Applications open' },
+        })
+      }
+    )
+  })
+
+  const current = async () => {
+    const i = await getQueueItem(ID)
+    if (!i) throw new Error('row gone')
+    return i
+  }
+  const saved = () => JSON.parse(String(row[FLD.edits])) as unknown
+
+  it('is written as before while the column is still in Airtable', async () => {
+    columns = [...NEW_COLUMNS, OLD_COLUMN]
+    expect(await acceptItem(await current(), {})).toEqual([])
+    expect(writes).toEqual([
+      {
+        path: LISTING,
+        fields: {
+          [OLD]: 'Not accepting applications',
+          'Application status': 'Not currently accepting applications',
+        },
+      },
+    ])
+    const applied = await current()
+    expect(applied.status).toBe('Applied')
+    expect(applied.gone).toBeNull()
+  })
+
+  it('is left out once the column is gone, and the rest still land', async () => {
+    expect(await acceptItem(await current(), {})).toEqual([OLD])
+    expect(writes).toEqual([
+      {
+        path: LISTING,
+        fields: {
+          'Application status': 'Not currently accepting applications',
+        },
+      },
+    ])
+    const applied = await current()
+    expect(applied.status).toBe('Applied')
+    expect(applied.error).toBeNull()
+    expect(applied.gone).toEqual([OLD])
+    // The list rides on the row's saved edits, never as an edit itself.
+    expect(saved()).toEqual({ [GONE_KEY]: [OLD] })
+    expect(applied.edits).toEqual({})
+  })
+
+  it('counts a column deleted since the schema was last read', async () => {
+    columns = [...NEW_COLUMNS, OLD_COLUMN]
+    await acceptItem(await current(), {})
+    expect(Object.keys(writes[0].fields)).toContain(OLD)
+    row[STATUS] = 'Pending'
+    delete row[FLD.edits]
+    writes = []
+    columns = NEW_COLUMNS
+    expect(await acceptItem(await current(), {})).toEqual([OLD])
+    expect(writes[0].fields).toEqual({
+      'Application status': 'Not currently accepting applications',
+    })
+  })
+
+  it('leaves out an edit to it too, and marks the change done when nothing else is proposed', async () => {
+    row[FLD.proposal] = JSON.stringify({
+      kind: 'change',
+      table: FUNDING,
+      record: rid('fund'),
+      page: '/funding',
+      changes: [
+        { field: OLD, from: null, to: 'Applications on a rolling basis' },
+      ],
+    })
+    await acceptItem(await current(), { [OLD]: 'Not accepting applications' })
+    expect(writes).toEqual([])
+    const applied = await current()
+    expect(applied.status).toBe('Applied')
+    expect(saved()).toEqual({ [GONE_KEY]: [OLD] })
+  })
+
+  it('leaves it out of an addition’s edits, and still publishes', async () => {
+    row[FLD.type] = 'Add'
+    row[FLD.proposal] = JSON.stringify({
+      kind: 'add',
+      table: FUNDING,
+      record: rid('fund'),
+      page: '/funding',
+      fields: { Name: 'A fund' },
+    })
+    await acceptItem(await current(), {
+      [OLD]: 'Applications on a rolling basis',
+      'Application status': 'Applications open',
+    })
+    expect(writes).toEqual([
+      {
+        path: LISTING,
+        fields: { 'Application status': 'Applications open', 'Publish?': true },
+      },
+    ])
+    expect(saved()).toEqual({
+      'Application status': 'Applications open',
+      [GONE_KEY]: [OLD],
+    })
+  })
+
+  it('leaves the Advisors table’s old Focus out of an addition, and still publishes', async () => {
+    const ADVISORS = 'tblf3KKYnmgcjVGhD'
+    columns = [
+      { id: 'fldNameAdvisor001', name: 'Name', type: 'singleLineText' },
+      {
+        id: 'fldKAVyL9lBOFy8Ht',
+        name: 'Focus areas',
+        type: 'multipleSelects',
+      },
+    ]
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({ tables: [{ id: ADVISORS, fields: columns }] })
+      )
+    )
+    row[FLD.type] = 'Add'
+    row[FLD.targetTable] = ADVISORS
+    row[FLD.targetRecord] = rid('adv')
+    row[FLD.proposal] = JSON.stringify({
+      kind: 'add',
+      table: ADVISORS,
+      record: rid('adv'),
+      page: '/advisors',
+      fields: { Name: 'An advisor' },
+    })
+    expect(
+      await acceptItem(await current(), {
+        Focus: ['Other'],
+        'Focus areas': ['Well-being'],
+      })
+    ).toEqual(['Focus'])
+    expect(writes).toEqual([
+      {
+        path: `${ADVISORS}/${rid('adv')}`,
+        fields: { 'Focus areas': ['Well-being'], 'Publish?': true },
+      },
+    ])
+    expect((await current()).status).toBe('Applied')
+    expect(saved()).toEqual({
+      'Focus areas': ['Well-being'],
+      [GONE_KEY]: ['Focus'],
+    })
+  })
+
+  it('on Undo, puts the other fields back and clears the note', async () => {
+    await acceptItem(await current(), {})
+    writes = []
+    await undoItem(await current())
+    expect(writes).toEqual([
+      { path: LISTING, fields: { 'Application status': 'Applications open' } },
+    ])
+    const reopened = await current()
+    expect(reopened.status).toBe('Pending')
+    expect(reopened.gone).toBeNull()
+    expect(row[FLD.edits]).toBeUndefined()
+  })
+
+  it('on Undo of one applied before the deletion, still puts the rest back', async () => {
+    columns = [...NEW_COLUMNS, OLD_COLUMN]
+    await acceptItem(await current(), {})
+    columns = NEW_COLUMNS
+    writes = []
+    await undoItem(await current())
+    expect(writes).toEqual([
+      { path: LISTING, fields: { 'Application status': 'Applications open' } },
+    ])
+    expect((await current()).status).toBe('Pending')
+  })
+
+  it('refuses a fix to it after the decision, in plain words, writing nothing', async () => {
+    await acceptItem(await current(), {})
+    writes = []
+    await expect(
+      fixItem(await current(), { [OLD]: 'Applications on a rolling basis' })
+    ).rejects.toThrow(
+      'Accepting applications? was left out: that column is no longer in Airtable. Use Application status and Deadline instead. Nothing was saved.'
+    )
+    expect(writes).toEqual([])
+    expect(saved()).toEqual({ [GONE_KEY]: [OLD] })
+  })
+
+  it('is never written as a field beyond the proposal', async () => {
+    expect(
+      extraEdits(await current(), { [GONE_KEY]: [OLD], Name: 'New name' }, [])
+    ).toEqual({ Name: 'New name' })
   })
 })
