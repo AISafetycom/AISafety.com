@@ -14,10 +14,3 @@
   margin-bottom: 16px;
   font-size: 12px;
 }
-
-/* The jobs table's Download as CSV, above it on the right. */
-.tableTools {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 12px;
-}

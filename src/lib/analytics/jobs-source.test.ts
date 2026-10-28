@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import type { AnalyticsEvent } from './events'
 import {
   jobClickSource,
-  jobRowsCsv,
   jobsDataFile,
   jobsSourceStats,
   postingFavicon,
@@ -386,32 +385,6 @@ describe('postingFavicon', () => {
       'https://www.usajobs.gov/job/1',
     ])
       expect(postingFavicon(url)).toBeUndefined()
-  })
-})
-
-describe('jobRowsCsv', () => {
-  it('quotes cells that need it', () => {
-    expect(
-      jobRowsCsv([
-        {
-          key: 'r',
-          title: 'Engineer, "Safety"',
-          employer: 'Org',
-          url: 'https://x',
-          datePublished: null,
-          clicks: 3,
-          people: 2,
-          bySource: { jobsPage: 3, search: 0, chatbot: 0 },
-          firstClick: '2026-08-01',
-          lastClick: '2026-08-02',
-          firstListed: null,
-          lastListed: null,
-          listedNow: false,
-        },
-      ])
-    ).toBe(
-      'Job,Employer,Posting,Clicks,People,Listed now\n"Engineer, ""Safety""",Org,https://x,3,2,No\n'
-    )
   })
 })
 

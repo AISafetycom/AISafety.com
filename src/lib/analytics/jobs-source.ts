@@ -601,26 +601,6 @@ export function jobsDataFile(
   }
 }
 
-/** Pure: the jobs table as a CSV file's text, every row. */
-export function jobRowsCsv(rows: JobRow[]): string {
-  const cell = (v: string | number) => {
-    const s = String(v)
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-  }
-  const lines = [
-    ['Job', 'Employer', 'Posting', 'Clicks', 'People', 'Listed now'],
-    ...rows.map(r => [
-      r.title,
-      r.employer,
-      r.url ?? '',
-      r.clicks,
-      r.people,
-      r.listedNow ? 'Yes' : 'No',
-    ]),
-  ]
-  return lines.map(l => l.map(cell).join(',')).join('\n') + '\n'
-}
-
 /** The first quarter with job clicks recorded: counting began on 1 July
  *  2026 (the June days before it were lost, see events.ts). */
 const FIRST_QUARTER = { year: 2026, q: 3 }

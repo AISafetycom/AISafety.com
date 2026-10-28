@@ -7,7 +7,6 @@ import { Fragment, type ReactNode } from 'react'
 import Link from 'next/link'
 import { formatDate } from '@/lib/format-date'
 import {
-  jobRowsCsv,
   jobsFilterNote,
   type EmployerRow,
   type FilterRow,
@@ -31,7 +30,6 @@ import {
 } from '../../admin/analytics/parts'
 import type { ResolvedRange } from '../../admin/analytics/range'
 import analytics from '../../admin/analytics/analytics.module.css'
-import CsvDownload from './CsvDownload'
 import DataLink from './DataLink'
 import styles from './page.module.css'
 
@@ -326,13 +324,6 @@ export function JobsView({
           <p className={analytics.dim}>No job was clicked in these dates.</p>
         ) : (
           <>
-            <div className={styles.tableTools}>
-              <CsvDownload
-                csv={jobRowsCsv(s.rows)}
-                filename={`aisafety-com-jobs-${fileDates}.csv`}
-                label="Download as CSV"
-              />
-            </div>
             <Table
               rows={rows}
               columns={jobColumns}
@@ -346,9 +337,8 @@ export function JobsView({
           </>
         )}
         <p className={analytics.caption}>
-          Every job clicked in these dates, most clicked first. A faded job is
-          no longer listed on AISafety.com. The CSV has every row, with each
-          posting&apos;s address.
+          Every job clicked in these dates. A faded job is no longer listed on
+          AISafety.com.
         </p>
       </Panel>
 
