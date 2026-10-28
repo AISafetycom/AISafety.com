@@ -109,7 +109,8 @@ function QuarterLinks({
           <Link
             key={q.label}
             href={`?from=${q.from}&to=${q.to}`}
-            className={`${analytics.copyBtn}${active ? ` ${styles.quarterActive}` : ''}`}
+            scroll={false}
+            className={`${analytics.presetBtn}${active ? ` ${analytics.presetBtnActive}` : ''}`}
             aria-current={active ? 'true' : undefined}
           >
             {q.current ? `${q.label} so far` : q.label}

@@ -4,7 +4,8 @@
   overflow-wrap: break-word;
 }
 
-/* The job board's page: quarter buttons under the date boxes. */
+/* The job board's page: quarter buttons under the date boxes, styled like
+   the date buttons (.presetBtn). */
 .quarters {
   display: flex;
   flex-wrap: wrap;
@@ -12,11 +13,6 @@
   gap: 8px;
   margin-bottom: 16px;
   font-size: 12px;
-}
-
-.quarterActive {
-  color: var(--teal-100);
-  border-color: var(--teal-300);
 }
 
 /* The jobs table's Download as CSV, above it on the right. */
