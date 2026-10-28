@@ -3,3 +3,25 @@
 .title {
   overflow-wrap: break-word;
 }
+
+/* The job board's page: quarter buttons under the date boxes. */
+.quarters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  font-size: 12px;
+}
+
+.quarterActive {
+  color: var(--teal-100);
+  border-color: var(--teal-300);
+}
+
+/* The jobs table's Download as CSV, above it on the right. */
+.tableTools {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}

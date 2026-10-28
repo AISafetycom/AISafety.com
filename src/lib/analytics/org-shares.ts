@@ -5,6 +5,11 @@
 // link works until it's switched off on the same tab, which deletes it at
 // once.
 //
+// A second kind of link, 'jobs', shows the job board's own page instead: how
+// the jobs on /jobs did, every one of them from the 80,000 Hours Job Board
+// (jobs-source.ts). It's made on the dashboard's Jobs tab, has no search, and
+// there's only ever one.
+//
 // One link per search (compared by its words, normText), so sharing the same
 // search again keeps the address and only updates what's left out. The token
 // is the only key: 16 random bytes, so links can't be guessed or listed, and
@@ -21,7 +26,10 @@ import { MAX_LEFT_OUT, MAX_QUERY, normText, parseLeftOut } from './org-lookup'
 
 export interface OrgShare {
   token: string
-  /** The Org lookup search the page shows, as it was typed. */
+  /** 'jobs' for the job board's page; absent for an org's. */
+  kind?: 'jobs'
+  /** The Org lookup search the page shows, as it was typed ('' on the job
+   *  board's page). */
   query: string
   /** Row hashes left out of it, as in the tab's ?x=. */
   leftOut: string[]
@@ -86,6 +94,7 @@ export function parseShare(token: string, raw: unknown): OrgShare | null {
     return null
   return {
     token,
+    ...(s.kind === 'jobs' && { kind: 'jobs' as const }),
     query: s.query,
     leftOut: [...parseLeftOut(s.leftOut.join(','))],
     orgName: s.orgName,
@@ -102,13 +111,28 @@ export function sameLeftOut(a: string[], b: string[]): boolean {
   return sa.size === sb.size && [...sa].every(h => sb.has(h))
 }
 
-/** Pure: a new link's input, checked. Null when it isn't usable: a search
- *  must have at least two letters or digits, like the tab's own. */
-export function checkShareInput(body: Record<string, unknown>): {
+/** A new link's input, as checkShareInput passes it on. */
+export interface ShareInput {
+  kind?: 'jobs'
   query: string
   leftOut: string[]
   orgName: string
-} | null {
+}
+
+/** Pure: a new link's input, checked. Null when it isn't usable: a search
+ *  must have at least two letters or digits, like the tab's own. The job
+ *  board's link ({ kind: 'jobs', orgName }) needs only its name. */
+export function checkShareInput(
+  body: Record<string, unknown>
+): ShareInput | null {
+  if (body.kind === 'jobs') {
+    const orgName =
+      typeof body.orgName === 'string'
+        ? body.orgName.trim().slice(0, MAX_ORG_NAME)
+        : ''
+    return orgName ? { kind: 'jobs', query: '', leftOut: [], orgName } : null
+  }
+  if (body.kind !== undefined) return null
   const query =
     typeof body.query === 'string' ? body.query.trim().slice(0, MAX_QUERY) : ''
   const orgName =
@@ -220,21 +244,31 @@ export function shareForQuery<T extends OrgShare>(
   query: string
 ): T | undefined {
   const norm = normText(query)
-  return shares.find(s => normText(s.query) === norm)
+  return shares.find(s => !s.kind && normText(s.query) === norm)
+}
+
+/** The job board's link, if there is one. */
+export function jobsShareOf<T extends OrgShare>(shares: T[]): T | undefined {
+  return shares.find(s => s.kind === 'jobs')
 }
 
 /** Makes the search's link, or updates what it leaves out when it already
  *  has one (the address stays the same). */
 export async function saveShare(
-  input: { query: string; leftOut: string[]; orgName: string },
+  input: ShareInput,
   by: string
 ): Promise<OrgShare> {
   const now = new Date().toISOString()
-  const existing = shareForQuery(await listShares(), input.query)
+  const shares = await listShares()
+  const existing =
+    input.kind === 'jobs'
+      ? jobsShareOf(shares)
+      : shareForQuery(shares, input.query)
   // Only the link's own fields: the listing's view counts live apart.
   const share: OrgShare = existing
     ? {
         token: existing.token,
+        ...(existing.kind && { kind: existing.kind }),
         query: existing.query,
         leftOut: input.leftOut,
         orgName: input.orgName,

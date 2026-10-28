@@ -79,8 +79,9 @@ import { issueName } from '@/lib/newsletter-web'
 import { MAX_QUERY, normText, parseLeftOut } from '@/lib/analytics/org-lookup'
 import { readIssueClicks } from '@/lib/analytics/org-newsletter'
 import {
-  listShares,
   sameLeftOut,
+  jobsShareOf,
+  listShares,
   shareForQuery,
 } from '@/lib/analytics/org-shares'
 import { canEdit } from '@/lib/admin/access'
@@ -672,8 +673,9 @@ async function AnalyticsView({
     // (Upstash, live site only). Never rejects.
     orgSearch ? readIssueClicks(range) : null,
     // The org pages already made, for the Org lookup's share box and its
-    // list of them. 'failed' = couldn't read them; the box says so.
-    tabReq === 'orgs' && canShare
+    // list of them, and the Jobs tab's box for the job board's page.
+    // 'failed' = couldn't read them; the box says so.
+    (tabReq === 'orgs' || tabReq === 'Jobs') && canShare
       ? listShares().catch(err => {
           console.warn(
             `[analytics] org pages unavailable: ${err instanceof Error ? err.message : String(err)}`
@@ -704,6 +706,34 @@ async function AnalyticsView({
             opened: openedWords(shared.views, shared.lastViewedAt),
           }
         : null
+  // The Jobs tab's box: the job board's page, if it has one.
+  const jobsShared =
+    shares && shares !== 'failed' ? jobsShareOf(shares) : undefined
+  const jobsShareBox =
+    tabReq === 'Jobs' && shares != null ? (
+      <ShareOrgLink
+        kind="jobs"
+        query=""
+        orgName={jobsShared?.orgName ?? '80,000 Hours'}
+        leftOut={[]}
+        origin={shareOrigin}
+        share={
+          shares === 'failed'
+            ? 'unknown'
+            : jobsShared
+              ? {
+                  token: jobsShared.token,
+                  orgName: jobsShared.orgName,
+                  leftOutDiffers: false,
+                  opened: openedWords(
+                    jobsShared.views,
+                    jobsShared.lastViewedAt
+                  ),
+                }
+              : null
+        }
+      />
+    ) : null
   const shareBox: OrgAdmin['shareBox'] =
     shares == null
       ? null
@@ -730,6 +760,16 @@ async function AnalyticsView({
     if (leftOut.length) q.set('x', leftOut.join(','))
     return `?${q.toString()}`
   }
+  // The job board's page opens the Jobs tab, in the current dates and
+  // count mode.
+  const jobsTabHref = () => {
+    const q = new URLSearchParams()
+    for (const [k, v] of Object.entries(sp))
+      if (k !== 'q' && k !== 'x' && k !== 'tab' && typeof v === 'string')
+        q.set(k, v)
+    q.set('tab', 'Jobs')
+    return `?${q.toString()}`
+  }
   // Leave out and Put back keep this search's shared page in step, for
   // someone who may change it.
   const shareSync: ShareSync | null = shared
@@ -746,8 +786,9 @@ async function AnalyticsView({
         origin={shareOrigin}
         pages={shares.map(s => ({
           token: s.token,
-          orgName: s.orgName,
-          lookupHref: lookupHref(s.query, s.leftOut),
+          orgName: s.kind === 'jobs' ? `${s.orgName} (jobs)` : s.orgName,
+          lookupHref:
+            s.kind === 'jobs' ? jobsTabHref() : lookupHref(s.query, s.leftOut),
           note: `${openedWords(s.views, s.lastViewedAt)} · made by ${s.createdBy}`,
         }))}
       />
@@ -1504,6 +1545,7 @@ async function AnalyticsView({
 
           {onResourceView && (
             <div className={styles.pageSection}>
+              {jobsShareBox}
               <Panel title="Over time">
                 <TrendChart
                   tiles={pageTiles}
