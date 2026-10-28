@@ -6,15 +6,18 @@ import styles from './analytics.module.css'
 
 /** A small one-series column chart: clicks per day (or week). Each column is
  *  its own hover and focus target and shows its date and count; the same
- *  numbers are in the table underneath, so nothing hides behind a hover. A
+ *  numbers are in the table underneath (unless `table` is false, for a page
+ *  that gives them another way), so nothing hides behind a hover. A
  *  week only partly inside the range (`days` set) is drawn lighter and says
  *  how many of its days count, so a short week doesn't read as a dip. */
 export default function ClicksChart({
   points,
   unit,
+  table = true,
 }: {
   points: { start: string; count: number; days?: number }[]
   unit: 'day' | 'week'
+  table?: boolean
 }) {
   const [active, setActive] = useState<number | null>(null)
   if (points.length === 0) return null
@@ -109,25 +112,27 @@ export default function ClicksChart({
           </span>
         ))}
       </div>
-      <details className={styles.chartTable}>
-        <summary>Show as a table</summary>
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>{unit === 'week' ? 'Week of' : 'Day'}</th>
-              <th className={styles.numCol}>Clicks</th>
-            </tr>
-          </thead>
-          <tbody>
-            {points.map(p => (
-              <tr key={p.start}>
-                <td>{unit === 'week' ? weekOf(p) : longDay(p.start)}</td>
-                <td className={styles.numCol}>{p.count.toLocaleString()}</td>
+      {table && (
+        <details className={styles.chartTable}>
+          <summary>Show as a table</summary>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>{unit === 'week' ? 'Week of' : 'Day'}</th>
+                <th className={styles.numCol}>Clicks</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </details>
+            </thead>
+            <tbody>
+              {points.map(p => (
+                <tr key={p.start}>
+                  <td>{unit === 'week' ? weekOf(p) : longDay(p.start)}</td>
+                  <td className={styles.numCol}>{p.count.toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
     </div>
   )
 }

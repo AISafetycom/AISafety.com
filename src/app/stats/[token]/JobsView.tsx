@@ -307,7 +307,8 @@ export function JobsView({
           {s.clicks === 0 ? (
             <p className={analytics.dim}>No clicks in these dates.</p>
           ) : (
-            <ClicksChart points={s.series} unit={s.seriesUnit} />
+            // The data file has every day's figure, so no table here.
+            <ClicksChart points={s.series} unit={s.seriesUnit} table={false} />
           )}
           <p className={analytics.caption}>
             Every click counted above, by UTC day
