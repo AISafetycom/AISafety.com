@@ -888,6 +888,9 @@ const SCHEMA_TTL_MS = 10 * 60 * 1000
 /** Each table's name column (Projects calls it "Project Name"), filled
  *  with the schema. */
 const primaryNames = new Map<string, string>()
+/** Each table's formula fields and the fields each one is built from,
+ *  filled with the schema (see mapPreview). */
+const formulaInputs = new Map<string, { id: string; inputs: string[] }[]>()
 
 /** Every field of a resource table, in Airtable's column order, so the page
  *  can list what is EMPTY on a record (a missing logo, an empty location)
@@ -919,13 +922,22 @@ export async function getTableSchema(
         id: string
         name: string
         type: string
-        options?: { choices?: { name: string }[] }
+        options?: {
+          choices?: { name: string }[]
+          referencedFieldIds?: string[]
+        }
       }[]
     }[]
   }
   for (const t of data.tables) {
     const primary = t.fields.find(f => f.id === t.primaryFieldId)
     if (primary) primaryNames.set(t.id, primary.name)
+    formulaInputs.set(
+      t.id,
+      t.fields
+        .filter(f => f.type === 'formula')
+        .map(f => ({ id: f.id, inputs: f.options?.referencedFieldIds ?? [] }))
+    )
     schemaCache.set(t.id, {
       at: Date.now(),
       fields: t.fields
@@ -1263,11 +1275,22 @@ function mapPreview(
   schema: FieldInfo[]
 ): PreviewListing | null {
   const byName = new Map(schema.map(f => [f.name, f]))
+  const edited = new Set<string>()
   for (const [name, value] of Object.entries(edits)) {
     const f = byName.get(name)
     if (!f) continue
     raw.fields[f.id] =
       f.type === 'multipleAttachments' ? asAttachmentPreview(value) : value
+    edited.add(f.id)
+  }
+  // A formula built from an edited field still holds Airtable's old answer
+  // until Accept saves the edit, and a card that reads it first kept showing
+  // the old value (Bryce, 28 Oct 2026: a /map Category edit left the card on
+  // "Research support, Resource" – the card reads Category (text), as
+  // /communities reads Platform wrangled). Dropping the formula makes the
+  // card fall back to the field itself, which carries the edit.
+  for (const f of formulaInputs.get(table) ?? []) {
+    if (f.inputs.some(id => edited.has(id))) delete raw.fields[f.id]
   }
   const rec = raw as unknown as AirtableRawRecord
   const wrap = (kind: PreviewKind, listing: unknown): PreviewListing | null =>
