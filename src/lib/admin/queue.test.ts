@@ -1522,6 +1522,51 @@ describe('a proposed field whose column was deleted', () => {
     })
   })
 
+  it('leaves the Advisors table’s old Focus out of an addition, and still publishes', async () => {
+    const ADVISORS = 'tblf3KKYnmgcjVGhD'
+    columns = [
+      { id: 'fldNameAdvisor001', name: 'Name', type: 'singleLineText' },
+      {
+        id: 'fldKAVyL9lBOFy8Ht',
+        name: 'Focus areas',
+        type: 'multipleSelects',
+      },
+    ]
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({ tables: [{ id: ADVISORS, fields: columns }] })
+      )
+    )
+    row[FLD.type] = 'Add'
+    row[FLD.targetTable] = ADVISORS
+    row[FLD.targetRecord] = rid('adv')
+    row[FLD.proposal] = JSON.stringify({
+      kind: 'add',
+      table: ADVISORS,
+      record: rid('adv'),
+      page: '/advisors',
+      fields: { Name: 'An advisor' },
+    })
+    expect(
+      await acceptItem(await current(), {
+        Focus: ['Other'],
+        'Focus areas': ['Well-being'],
+      })
+    ).toEqual(['Focus'])
+    expect(writes).toEqual([
+      {
+        path: `${ADVISORS}/${rid('adv')}`,
+        fields: { 'Focus areas': ['Well-being'], 'Publish?': true },
+      },
+    ])
+    expect((await current()).status).toBe('Applied')
+    expect(saved()).toEqual({
+      'Focus areas': ['Well-being'],
+      [GONE_KEY]: ['Focus'],
+    })
+  })
+
   it('on Undo, puts the other fields back and clears the note', async () => {
     await acceptItem(await current(), {})
     writes = []

@@ -1592,8 +1592,10 @@ export function asAttachmentWrite(v: unknown): unknown[] | null {
 
 /** The retired columns (queue-retired.ts) among these fields that the
  *  table no longer has. Only a write that names one reads the schema
- *  afresh, so a column deleted in the last few minutes already counts. */
-async function deletedColumns(
+ *  afresh, so a column deleted in the last few minutes already counts.
+ *  The newsletter's Fix reads it too, so such a field is not taken for one
+ *  someone changed by hand (it reads as empty once the column is gone). */
+export async function deletedColumns(
   table: string,
   fields: string[]
 ): Promise<string[]> {

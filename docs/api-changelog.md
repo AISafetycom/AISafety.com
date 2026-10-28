@@ -38,8 +38,10 @@ Initial release.
   responses and filters until v2 drops it (deprecated 27 October 2026).
 - `funding`'s `acceptingApplications` is now worked out from `applicationStatus`
   and `deadline`, and `advisors`' `focus` from `focusAreas`, because the
-  Airtable fields they used to come from are being retired. The values are the
-  same as before: `acceptingApplications` is "Applications close D Month YYYY"
+  Airtable fields they used to come from are being retired. The wording is the
+  same as before, except that every closed funder now reads "Not accepting
+  applications" (one funder read "Not currently accepting applications" until
+  now). `acceptingApplications` is "Applications close D Month YYYY"
   (for example "Applications close 31 October 2026"; "Not accepting
   applications" once that day has passed), "Applications on a rolling basis", or
   "Not accepting applications", and `focus` is "Career/contribution" or "Other"

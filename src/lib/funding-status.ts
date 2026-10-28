@@ -95,8 +95,9 @@ export function acceptingApplicationsText(
  *  day it passes, so — like /training's Deadline field — the site works the
  *  closure out itself: once the closing date is behind `today` (YYYY-MM-DD;
  *  the closing day itself still counts as open), the listing reads "Not
- *  accepting applications" everywhere — Data API, chatbot. Every other
- *  wording passes through unchanged. */
+ *  accepting applications" in the Data API, its only reader since the
+ *  chatbot moved to the new fields. Every other wording passes through
+ *  unchanged. */
 export function resolveAcceptingApplications(
   status: string,
   today: string = new Date().toISOString().slice(0, 10)

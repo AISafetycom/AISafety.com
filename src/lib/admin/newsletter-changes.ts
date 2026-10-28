@@ -51,6 +51,7 @@ import {
 } from './newsletter'
 import {
   acceptItem,
+  deletedColumns,
   getPreviewListings,
   getQueueItem,
   listQueue,
@@ -326,15 +327,23 @@ export async function draftListingAlerts(
 
 /** Proposed fields someone already changed on the listing since Broom
  *  flagged it (the value is neither Broom's "from" nor its "to"): Apply
- *  leaves those alone, as the Queue does for Fable's chat changes. */
+ *  leaves those alone, as the Queue does for Fable's chat changes. A field
+ *  whose column has since been deleted from Airtable (queue-retired.ts)
+ *  reads as empty, which is no one's change: it is left to Apply, which
+ *  leaves it out and says why. */
 async function alreadyChanged(item: QueueItem): Promise<string[]> {
   if (!item.targetTable || !item.targetRecord) return []
   const res = await airtableRequest(`${item.targetTable}/${item.targetRecord}`)
   if (!res.ok) return []
   const fields = ((await res.json()) as { fields?: Record<string, unknown> })
     .fields
+  const gone = await deletedColumns(
+    item.targetTable,
+    item.changes.map(c => c.field)
+  )
   const same = (a: unknown, b: unknown) => display(a) === display(b)
   return item.changes
+    .filter(c => !gone.includes(c.field))
     .filter(c => {
       const now = fields?.[c.field] ?? null
       return !same(now, c.from) && !same(now, c.to)
