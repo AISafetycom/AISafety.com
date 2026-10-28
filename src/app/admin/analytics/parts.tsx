@@ -10,12 +10,17 @@ import styles from './analytics.module.css'
 export function Panel({
   title,
   children,
+  tone = 'teal',
 }: {
   title: string
   children: React.ReactNode
+  /** Blue sets a panel about something else apart from the rest. */
+  tone?: 'teal' | 'blue'
 }) {
   return (
-    <section className={styles.panel}>
+    <section
+      className={`${styles.panel}${tone === 'blue' ? ` ${styles.panelBlue}` : ''}`}
+    >
       <h2 className={styles.panelTitle}>{title}</h2>
       {children}
     </section>

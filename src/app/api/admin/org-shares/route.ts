@@ -5,6 +5,7 @@
   as well as the Analytics tab; anyone else gets 401.
 
   POST   /api/admin/org-shares  body { query, leftOut, orgName } → { share }
+                                 or { kind: 'jobs', orgName } (the Jobs tab)
   DELETE /api/admin/org-shares  body { token }                    → 204
 
   POST makes the search's link, or updates what an existing one leaves out
@@ -65,7 +66,7 @@ export async function POST(req: NextRequest) {
   try {
     const share = await saveShare(input, me?.name ?? me?.email ?? 'unknown')
     console.info(
-      `[org-shares] ${me?.email ?? 'unknown'} shared "${share.query}" (${share.token.slice(0, 4)}…)`
+      `[org-shares] ${me?.email ?? 'unknown'} shared ${share.kind === 'jobs' ? 'the job board page' : `"${share.query}"`} (${share.token.slice(0, 4)}…)`
     )
     return json({ share: { token: share.token, leftOut: share.leftOut } })
   } catch (err) {

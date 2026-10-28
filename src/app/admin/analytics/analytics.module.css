@@ -111,6 +111,12 @@
   margin-bottom: 20px;
 }
 
+/* A panel about something else (site visitors beside job clicks). */
+.panelBlue {
+  background-color: color-mix(in srgb, var(--blue) 7%, var(--teal-850));
+  border-color: color-mix(in srgb, var(--blue) 30%, var(--teal-800));
+}
+
 .panelTitle {
   font-size: 14px;
   font-weight: 600;

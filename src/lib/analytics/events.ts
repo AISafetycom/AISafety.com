@@ -3296,7 +3296,7 @@ export function orgLookup(
   const oldest = inRange.length
     ? Date.parse(inRange[inRange.length - 1].ts)
     : NaN
-  const { series, unit } = orgSeries(counted, range, now, oldest)
+  const { series, unit } = clicksSeries(counted, range, now, oldest)
   return {
     ...base,
     visitors: visitorIds.size + anonClicks,
@@ -3331,8 +3331,9 @@ function hostPart(cleaned: string): string {
  *  bucket from the range's start to the earlier of its end and now. The
  *  start never goes back before the oldest event read (`oldest`), so an
  *  open range, or a typed date far in the past, draws only days there's
- *  data for. Empty when there's nothing to draw. */
-function orgSeries(
+ *  data for. Empty when there's nothing to draw. Shared by the Org lookup
+ *  and the job board's page (jobs-source.ts). */
+export function clicksSeries(
   clicks: AnalyticsEvent[],
   { startMs, endMs }: DateRange,
   now: number,
@@ -4338,6 +4339,27 @@ async function loadSiteView(
       firstSeenBackfilled: backfilled === 1,
     },
   }
+}
+
+/** Every event in the range, newest first, through the month cache, for a
+ *  page that does its own counting (the job board's page, jobs-source.ts).
+ *  Throws when the store can't be read. */
+export async function readEventsInRange(
+  range: DateRange
+): Promise<AnalyticsEvent[]> {
+  const inside = within(range)
+  if (store) {
+    const byMonth = await storedMonths(store)
+    const wanted = monthsInRange(
+      byMonth.map(b => b.month),
+      range
+    )
+      .map(m => byMonth.find(b => b.month === m)!)
+      .reverse() // newest first
+    const parts = await readMonthsCached(bulkStore ?? store, wanted)
+    return parts.flat().filter(e => !fromTestCopy(e.ref) && inside(e.ts))
+  }
+  return (await readDevEvents()).filter(e => inside(e.ts))
 }
 
 export async function readDashboard(
