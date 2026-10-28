@@ -30,6 +30,7 @@ import {
   extraEdits,
   fixItem,
   flagItem,
+  getPreviewListing,
   getQueueItem,
   handledOutside,
   mergeEdits,
@@ -1608,5 +1609,68 @@ describe('a proposed field whose column was deleted', () => {
     expect(
       extraEdits(await current(), { [GONE_KEY]: [OLD], Name: 'New name' }, [])
     ).toEqual({ Name: 'New name' })
+  })
+})
+
+// A card that reads a formula built from an edited field (/map's Category
+// (text), /communities' Platform wrangled) shows the edit, not Airtable's
+// old answer (28 Oct 2026: a Category edit left the /map card unchanged).
+describe('card preview with a formula built from an edited field', () => {
+  const MAP = 'tblvzbGL9q9dOO9Nc'
+  const CATEGORY = 'fldhofDtTtJqWXLuf'
+  const CATEGORY_TEXT = 'fldddK6whfSl9DWNd'
+
+  beforeEach(() => {
+    process.env.AIRTABLE_TOKEN = 'test-token'
+    process.env.AIRTABLE_BASE_ID = 'appTest'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          tables: [
+            {
+              id: MAP,
+              primaryFieldId: 'fldqYJa5li27kVOUW',
+              fields: [
+                { id: CATEGORY, name: 'Category', type: 'multipleSelects' },
+                {
+                  id: CATEGORY_TEXT,
+                  name: 'Category (text)',
+                  type: 'formula',
+                  options: { referencedFieldIds: [CATEGORY] },
+                },
+              ],
+            },
+          ],
+        })
+      )
+    )
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(async () =>
+      Response.json({
+        id: rid('m1'),
+        createdTime: '2026-10-20T00:00:00.000Z',
+        fields: {
+          fldPEouzOZbCIZr7p: 'Alignment Journal',
+          fldUZfd5kQQP0DoOS: 'Publishes analyses of AI systems.',
+          [CATEGORY]: ['Research support', 'Resource'],
+          [CATEGORY_TEXT]: 'Research support, Resource',
+        },
+      })
+    )
+  })
+
+  it('shows the edited Category', async () => {
+    const preview = await getPreviewListing(MAP, rid('m1'), {
+      Category: ['Resource'],
+    })
+    expect(preview?.listing).toMatchObject({ category: 'Resource' })
+  })
+
+  it('keeps the formula when nothing it is built from was edited', async () => {
+    const preview = await getPreviewListing(MAP, rid('m1'), {})
+    expect(preview?.listing).toMatchObject({
+      category: 'Research support, Resource',
+    })
   })
 })
