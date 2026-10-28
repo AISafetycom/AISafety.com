@@ -15,15 +15,12 @@ export default function ClicksChart({
   unit,
   table = true,
   noun = CLICKS,
-  tone = 'teal',
 }: {
   points: { start: string; count: number; days?: number }[]
   unit: 'day' | 'week'
   table?: boolean
   /** What the columns count, when it isn't clicks. */
   noun?: { one: string; many: string }
-  /** Blue sets a chart of something else apart from the teal ones near it. */
-  tone?: 'teal' | 'blue'
 }) {
   const [active, setActive] = useState<number | null>(null)
   if (points.length === 0) return null
@@ -41,9 +38,7 @@ export default function ClicksChart({
   const shown = active == null ? null : points[active]
 
   return (
-    <div
-      className={`${styles.chart}${tone === 'blue' ? ` ${styles.chartBlue}` : ''}`}
-    >
+    <div className={styles.chart}>
       <div className={styles.chartReadout} aria-live="polite">
         {shown ? (
           <>

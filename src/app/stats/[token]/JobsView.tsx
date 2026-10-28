@@ -445,7 +445,6 @@ export function JobsView({
             unit={s.seriesUnit}
             table={false}
             noun={{ one: 'visitor', many: 'visitors' }}
-            tone="blue"
           />
         )}
         <p className={analytics.caption}>
