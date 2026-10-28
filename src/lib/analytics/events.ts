@@ -2381,27 +2381,47 @@ const NEWSLETTER_OF_PAGE: Readonly<Record<string, string>> = {
 const CONFIRM_PAGE =
   /^\/subscribed\/((?:events|training|funding)(?:-(?:training|funding))*)\/?$/
 
+/** A confirm page loaded again this soon after the last load of the same
+ *  page, in another browser, is the same email's link opened twice: in
+ *  October 2026 one confirmation in ten came with a twin from a second
+ *  browser 1 to 61 seconds later (an email app's own browser, then the
+ *  phone's, or a mail scanner checking the link), never with a signup of its
+ *  own. */
+const CONFIRM_DOUBLE_OPEN_MS = 2 * 60 * 1000
+
 /** The page views of the confirm pages that count as confirmations: every
- *  one in total mode, one per visitor per newsletter per day in unique mode
- *  (a reader who clicks the link twice). Events without a visitor id each
- *  count. Expects a newest-first list, like the rest. Exported for the unit
- *  test. */
+ *  one in total mode; in unique mode one per visitor per confirm page in the
+ *  range (a reader who presses the link again, that day or later), and none
+ *  for a load within CONFIRM_DOUBLE_OPEN_MS of the page's previous load.
+ *  Events without a visitor id each count, the double-open rule aside.
+ *  Expects a newest-first list, like the rest, and keeps that order.
+ *  Exported for the unit test. */
 export function confirmLandings(
   views: AnalyticsEvent[],
   unique: boolean
 ): AnalyticsEvent[] {
+  const landings = views.filter(
+    e => e.type === 'page_view' && CONFIRM_PAGE.test(e.page ?? '')
+  )
+  if (!unique) return landings
   const seen = new Set<string>()
-  return views.filter(e => {
-    if (e.type !== 'page_view') return false
-    const m = CONFIRM_PAGE.exec(e.page ?? '')
-    if (!m) return false
-    if (!unique || !e.vid) return true
+  const lastLoad = new Map<string, number>()
+  const kept: AnalyticsEvent[] = []
+  for (let i = landings.length - 1; i >= 0; i--) {
+    const e = landings[i]
+    const page = CONFIRM_PAGE.exec(e.page ?? '')![1]
     const t = Date.parse(e.ts)
-    const key = `${e.vid}\x00${Number.isNaN(t) ? '' : dashboardDay(t)}\x00${m[1]}`
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
+    const last = lastLoad.get(page)
+    if (!Number.isNaN(t)) lastLoad.set(page, t)
+    if (last != null && t - last < CONFIRM_DOUBLE_OPEN_MS) continue
+    if (e.vid) {
+      const key = `${e.vid}\x00${page}`
+      if (seen.has(key)) continue
+      seen.add(key)
+    }
+    kept.push(e)
+  }
+  return kept.reverse()
 }
 
 export interface NewslettersPageRow {
