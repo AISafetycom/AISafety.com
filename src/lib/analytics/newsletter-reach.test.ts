@@ -31,20 +31,31 @@ const view = (
 describe('confirmations (/subscribed/<key>)', () => {
   const EVENTS = newestFirst([
     view('/subscribed/events', 'a', '2026-10-12T10:00:00Z'),
-    // The same reader pressing the link again that day.
+    // The same reader pressing the link again, that day and the next.
     view('/subscribed/events', 'a', '2026-10-12T10:05:00Z'),
     view('/subscribed/events/', 'a', '2026-10-13T09:00:00Z'),
     view('/subscribed/training', 'b', '2026-10-12T11:00:00Z'),
-    view('/subscribed/training', undefined, '2026-10-12T11:00:00Z'),
+    // b's link opening again seconds later in a second browser (an email
+    // app's own browser, then the phone's): the same confirmation.
+    view('/subscribed/training', 'e', '2026-10-12T11:00:20Z'),
+    // Another reader confirming a few minutes on.
+    view('/subscribed/training', 'f', '2026-10-12T11:03:00Z'),
+    view('/subscribed/training', undefined, '2026-10-12T15:00:00Z'),
     // Funding's box signs people up on the site since its move too.
     view('/subscribed/funding', 'd', '2026-10-21T12:00:00Z'),
     view('/events', 'a', '2026-10-12T10:06:00Z'),
     view('/subscribed/updates', 'c', '2026-10-12T10:06:00Z'),
   ])
 
-  it('counts a reader once per newsletter per day by default, every landing in total mode', () => {
-    expect(confirmLandings(EVENTS, true)).toHaveLength(5)
-    expect(confirmLandings(EVENTS, false)).toHaveLength(6)
+  it('counts a reader once and a link opened twice once by default, every landing in total mode', () => {
+    expect(confirmLandings(EVENTS, true).map(e => e.vid)).toEqual([
+      'd',
+      undefined,
+      'f',
+      'b',
+      'a',
+    ])
+    expect(confirmLandings(EVENTS, false)).toHaveLength(8)
   })
 
   it('sets them beside the signups each newsletter’s boxes made', () => {
@@ -58,9 +69,9 @@ describe('confirmations (/subscribed/<key>)', () => {
       errors: [],
     }
     expect(newsletterConfirmations(EVENTS, true, results)).toEqual([
-      { name: 'Events', signedUp: 4, confirmed: 2 },
+      { name: 'Events', signedUp: 4, confirmed: 1 },
       { name: 'Funding', signedUp: 2, confirmed: 1 },
-      { name: 'Training', signedUp: 4, confirmed: 2 },
+      { name: 'Training', signedUp: 4, confirmed: 3 },
     ])
     expect(
       newsletterConfirmations([], true, { byPage: [], errors: [] })
