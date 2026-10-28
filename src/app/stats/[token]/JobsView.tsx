@@ -248,6 +248,20 @@ export function JobsView({
         </p>
       </Panel>
 
+      <Panel title="All the data">
+        <p className={analytics.caption}>
+          Everything on this page for these dates, plus each job&apos;s clicks
+          by day, in one file that explains itself. Give it to an AI assistant
+          like Claude to explore, or open it in any tool that reads JSON. An
+          assistant that can read web pages can also fetch it from this address,
+          for any dates.
+        </p>
+        <DataLink
+          url={dataUrl}
+          filename={`aisafety-com-jobs-${fileDates}.json`}
+        />
+      </Panel>
+
       <div className={analytics.grid}>
         <Panel title="Where the clicks came from">
           <Table
@@ -427,20 +441,6 @@ export function JobsView({
           </p>
         </Panel>
       </div>
-
-      <Panel title="All the data">
-        <p className={analytics.caption}>
-          Everything on this page for these dates, plus each job&apos;s clicks
-          by day, in one file that explains itself. Give it to an AI assistant
-          like Claude to explore, or open it in any tool that reads JSON. An
-          assistant that can read web pages can also fetch it from this address,
-          for any dates.
-        </p>
-        <DataLink
-          url={dataUrl}
-          filename={`aisafety-com-jobs-${fileDates}.json`}
-        />
-      </Panel>
     </>
   )
 }
