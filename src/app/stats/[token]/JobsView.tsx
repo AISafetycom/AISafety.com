@@ -5,8 +5,10 @@
 
 import { Fragment, type ReactNode } from 'react'
 import Link from 'next/link'
+import { formatDate } from '@/lib/format-date'
 import {
   jobRowsCsv,
+  jobsFilterNote,
   type EmployerRow,
   type FilterRow,
   type JobRow,
@@ -14,6 +16,7 @@ import {
   type Quarter,
 } from '@/lib/analytics/jobs-source'
 import ClicksChart from '../../admin/analytics/ClicksChart'
+import Logo from '../../admin/analytics/Logo'
 import SortableTable, {
   type SortColumn,
   type SortValue,
@@ -29,6 +32,7 @@ import {
 import type { ResolvedRange } from '../../admin/analytics/range'
 import analytics from '../../admin/analytics/analytics.module.css'
 import CsvDownload from './CsvDownload'
+import DataLink from './DataLink'
 import styles from './page.module.css'
 
 /** One column of a table: heading, sort value, cell, and Total cell, kept
@@ -126,12 +130,15 @@ export function JobsView({
   boardName,
   range,
   quarters,
+  dataUrl,
 }: {
   stats: JobsSourceStats
   /** The board's name, as the link was made with ('80,000 Hours'). */
   boardName: string
   range: ResolvedRange
   quarters: Quarter[]
+  /** The data file for these dates (data.json/route.ts), in full. */
+  dataUrl: string
 }) {
   const s = stats
   const fromWhere = [
@@ -152,25 +159,21 @@ export function JobsView({
       head: {
         label: 'Job',
         sort: 'text',
-        hint: 'The job as it appears on AISafety.com, linking to its posting. “No longer listed” means it has since come off the page.',
+        hint: 'The job as it appears on AISafety.com, linking to its posting. A faded job has since come off the page.',
       },
       value: r => r.title,
       cell: r => {
         const href = safeHref(r.url)
         return (
           <td className={analytics.nameCell}>
-            <span className={analytics.orgName}>
-              {href ? (
-                <a href={href} target="_blank" rel="noopener noreferrer">
-                  {r.title}
-                </a>
-              ) : (
-                <span>{r.title}</span>
-              )}
-              {!r.listedNow && (
-                <span className={analytics.orgNotes}>No longer listed</span>
-              )}
-            </span>
+            <Logo src={r.logo} />
+            {href ? (
+              <a href={href} target="_blank" rel="noopener noreferrer">
+                {r.title}
+              </a>
+            ) : (
+              <span>{r.title}</span>
+            )}
           </td>
         )
       },
@@ -217,16 +220,29 @@ export function JobsView({
             value={pct1(s.pageClickers, s.pageVisitors)}
           />
         </div>
+        <p className={analytics.caption}>{jobsFilterNote(boardName)}</p>
         <p className={analytics.caption}>
-          Every job on aisafety.com/jobs comes from the {boardName} Job Board:
-          its vacancies in AI safety and policy. Jobs listed counts the jobs on
-          the page at some point in these dates: those still listed that you
-          published before the dates ended, plus every other job someone
-          clicked. A job that came and went without a single click isn&apos;t
-          known, so the true number is a little higher.{' '}
-          {s.clickedJobs.toLocaleString()} jobs got at least one click. People
-          are browsers, each counted once, so one person on two devices counts
-          twice. Since 24 August 2026, links from the Jobs page reach the
+          {s.listedExact ? (
+            <>
+              Jobs listed counts every job on the page at some point in these
+              dates, and {s.clickedJobs.toLocaleString()} of them got at least
+              one click.
+            </>
+          ) : (
+            <>
+              Jobs listed counts every job known to have been on the page at
+              some point in these dates, and {s.clickedJobs.toLocaleString()} of
+              them got at least one click. The site has noted every job listed
+              only since{' '}
+              {s.listedSince
+                ? formatDate(new Date(`${s.listedSince}T12:00:00Z`))
+                : 'late October 2026'}
+              , so a job that came and went before then without a click
+              isn&apos;t known, and the true number is a little higher.
+            </>
+          )}{' '}
+          People are browsers, each counted once, so one person on two devices
+          counts twice. Since 24 August 2026, links from the Jobs page reach the
           posting tagged utm_source=aisafety.com. Clicks are counted from 1 July
           2026, and Jobs page visitors from 15 July 2026. Days are UTC.
         </p>
@@ -316,8 +332,9 @@ export function JobsView({
           </>
         )}
         <p className={analytics.caption}>
-          Every job clicked in these dates, most clicked first. The CSV has
-          every row, with each posting&apos;s address.
+          Every job clicked in these dates, most clicked first. A faded job is
+          no longer listed on AISafety.com. The CSV has every row, with each
+          posting&apos;s address.
         </p>
       </Panel>
 
@@ -334,7 +351,12 @@ export function JobsView({
                 {
                   head: { label: 'Employer', sort: 'text' },
                   value: r => r.name,
-                  cell: r => <td className={analytics.nameCell}>{r.name}</td>,
+                  cell: r => (
+                    <td className={analytics.nameCell}>
+                      <Logo src={r.logo} />
+                      <span>{r.name}</span>
+                    </td>
+                  ),
                   foot: <td />,
                 },
                 countColumn<EmployerRow>(
@@ -405,6 +427,20 @@ export function JobsView({
           </p>
         </Panel>
       </div>
+
+      <Panel title="All the data">
+        <p className={analytics.caption}>
+          Everything on this page for these dates, plus each job&apos;s clicks
+          by day, in one file that explains itself. Give it to an AI assistant
+          like Claude to explore, or open it in any tool that reads JSON. An
+          assistant that can read web pages can also fetch it from this address,
+          for any dates.
+        </p>
+        <DataLink
+          url={dataUrl}
+          filename={`aisafety-com-jobs-${fileDates}.json`}
+        />
+      </Panel>
     </>
   )
 }

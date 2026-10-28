@@ -70,7 +70,7 @@ function useShareRequest() {
   return { busy: sending || refreshing, error, send }
 }
 
-function CopyLinkButton({ url }: { url: string }) {
+export function CopyLinkButton({ url }: { url: string }) {
   const [copy, setCopy] = useState<'idle' | 'copied' | 'failed'>('idle')
   const copyLink = async () => {
     try {

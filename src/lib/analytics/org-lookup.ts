@@ -324,7 +324,7 @@ const TENANT_PLATFORM_HOSTS = new Set([
 ])
 
 /** Is a website one many unrelated groups share? */
-function isSharedHost(h: string): boolean {
+export function isSharedHost(h: string): boolean {
   return onHosts(h, PATH_SHARED_HOSTS) || TENANT_PLATFORM_HOSTS.has(h)
 }
 

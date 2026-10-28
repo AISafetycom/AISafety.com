@@ -12,8 +12,7 @@ import { headers } from 'next/headers'
 import { after } from 'next/server'
 import { cache } from 'react'
 import { isAdmin } from '@/lib/admin/auth'
-import { readDashboard, readEventsInRange } from '@/lib/analytics/events'
-import { jobsSourceStats, quartersSoFar } from '@/lib/analytics/jobs-source'
+import { readDashboard } from '@/lib/analytics/events'
 import { readIssueClicks } from '@/lib/analytics/org-newsletter'
 import {
   countShareView,
@@ -21,7 +20,6 @@ import {
   isShareToken,
   type OrgShare,
 } from '@/lib/analytics/org-shares'
-import { getJobs } from '@/lib/data/jobs'
 import DateRangePicker from '../../admin/analytics/DateRangePicker'
 import { OrgView, orgNewsletterPanel } from '../../admin/analytics/OrgView'
 import { orgSearchSpec } from '../../admin/analytics/org-search'
@@ -29,6 +27,7 @@ import { PAGE_NAV } from '../../admin/analytics/page-nav'
 import { resolveRange, type SearchParams } from '../../admin/analytics/range'
 import analytics from '../../admin/analytics/analytics.module.css'
 import { JobsView } from './JobsView'
+import { jobsPageRange, loadJobsStats } from './jobs-data'
 import styles from './page.module.css'
 
 // Live figures, and a switched-off link must stop at once.
@@ -42,6 +41,15 @@ function titleOf(share: OrgShare): string {
   return share.kind === 'jobs'
     ? `${share.orgName} jobs on AISafety.com`
     : `${share.orgName} on AISafety.com`
+}
+
+/** This site's address, as the browser reached it, for a link to copy. */
+function siteOrigin(h: Pick<Headers, 'get'>): string {
+  const host = h.get('x-forwarded-host') ?? h.get('host') ?? 'www.aisafety.com'
+  const proto =
+    h.get('x-forwarded-proto') ??
+    (/^(localhost|127\.0\.0\.1)(:|$)/.test(host) ? 'http' : 'https')
+  return `${proto}://${host}`
 }
 
 /** One store read per request, shared by the metadata and the page. A
@@ -81,7 +89,14 @@ export default async function OrgStatsPage({
     after(() => countShareView(token))
 
   if (share.kind === 'jobs')
-    return <JobsPage share={share} searchParams={await searchParams} />
+    return (
+      <JobsPage
+        share={share}
+        token={token}
+        origin={siteOrigin(h)}
+        searchParams={await searchParams}
+      />
+    )
 
   // Only the dates come from the address; the search and what it leaves out
   // are the link's own.
@@ -137,27 +152,30 @@ export default async function OrgStatsPage({
  *  report on; the quarter buttons and the date boxes pick any other. */
 async function JobsPage({
   share,
+  token,
+  origin,
   searchParams: sp,
 }: {
   share: OrgShare
+  token: string
+  origin: string
   searchParams: SearchParams
 }) {
   // eslint-disable-next-line react-hooks/purity -- a server component renders once per request; this stamps that request
   const now = Date.now()
-  const quarters = quartersSoFar(now)
-  const lastWhole = quarters.filter(q => !q.current).at(-1) ?? quarters.at(-1)
-  const chosen = sp.from || sp.to || sp.range
-  const range = resolveRange(
-    chosen || !lastWhole ? sp : { from: lastWhole.from, to: lastWhole.to },
-    DEFAULT_RANGE
-  )
+  const { range, quarters } = jobsPageRange(sp, now)
+  // The data file for the same dates (data.json/route.ts).
+  const dates =
+    range.from || range.to
+      ? new URLSearchParams({
+          ...(range.from && { from: range.from }),
+          ...(range.to && { to: range.to }),
+        })
+      : new URLSearchParams({ range: range.key })
+  const dataUrl = `${origin}/stats/${token}/data.json?${dates}`
   let stats = null
   try {
-    const [events, jobs] = await Promise.all([
-      readEventsInRange(range),
-      getJobs(),
-    ])
-    stats = jobsSourceStats(events, jobs, range, now)
+    stats = await loadJobsStats(range, now)
   } catch (err) {
     console.warn(
       `[stats] job board figures unavailable: ${err instanceof Error ? err.message : String(err)}`
@@ -189,6 +207,7 @@ async function JobsPage({
             boardName={share.orgName}
             range={range}
             quarters={quarters}
+            dataUrl={dataUrl}
           />
         ) : (
           <div className={analytics.empty}>
