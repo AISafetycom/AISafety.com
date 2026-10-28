@@ -65,7 +65,13 @@ import FieldPicker from './FieldPicker'
 import type { FableChange } from '@/lib/admin/queue-fable'
 import Position, { forgetOrder } from './Position'
 import Fireworks from './Fireworks'
-import { SORT_FIELD, sortValue } from '@/lib/admin/queue-place'
+import {
+  keepsOrder,
+  needsPlace,
+  NO_PLACE,
+  SORT_FIELD,
+  sortValue,
+} from '@/lib/admin/queue-place'
 import {
   byUrgency,
   urgencyOf,
@@ -867,6 +873,23 @@ function activeEdits(d: Draft): Record<string, string> {
         Object.entries(d.edits).filter(([k]) => !d.leftOut.includes(k))
       )
     : d.edits
+}
+
+/** Whether an addition still needs its position picked before Accept: its
+ *  page keeps a manual order and neither the edits nor the record give it
+ *  a Sort (Bryce, 28 Oct 2026). */
+function unplacedAdd(
+  item: QueueItem,
+  live: { fields: Record<string, unknown>; schema: FieldInfo[] } | null,
+  edits: Record<string, string>
+): boolean {
+  return needsPlace(
+    item.type,
+    live?.schema ?? [],
+    SORT_FIELD in edits
+      ? edits[SORT_FIELD]
+      : (live?.fields ?? item.fields ?? {})[SORT_FIELD]
+  )
 }
 
 function sameEdits(
@@ -3415,6 +3438,12 @@ export default function QueueAdmin({
             !d.busy
           ) {
             e.preventDefault()
+            // An addition with no place yet opens the Position list
+            // instead: Accept waits for one.
+            if (unplacedAdd(item, live[item.id] ?? null, activeEdits(d))) {
+              setPlaceFocus(n => n + 1)
+              break
+            }
             void act(item, 'accept', {
               keep: fableFieldsRef.current[item.id] ?? [],
               edits: withLeftOut(
@@ -5019,10 +5048,9 @@ function Detail({
 
   // An addition to a page kept in a manual order gets the Position
   // picker, which stands in for its Sort field.
-  const placeable =
-    item.type === 'Add' &&
-    (live?.schema ?? []).some(f => f.name === SORT_FIELD && f.type === 'number')
+  const placeable = item.type === 'Add' && keepsOrder(live?.schema ?? [])
   const sortWas = shownFields[SORT_FIELD]
+  const unplaced = unplacedAdd(item, live, activeEdits(d))
 
   const hasCard =
     item.type === 'Change' && Boolean(item.targetTable && item.targetRecord)
@@ -6078,7 +6106,8 @@ function Detail({
           <div className={styles.buttons}>
             <button
               className={`${styles.button} ${styles.primary}`}
-              disabled={d.busy}
+              disabled={d.busy || unplaced}
+              title={unplaced ? NO_PLACE : undefined}
               onClick={() =>
                 act('accept', {
                   edits: withLeftOut(editsToSave(), d.leftOut),
@@ -6112,6 +6141,11 @@ function Detail({
               <Icon src={ICON.clock} size={12} />
               Review again in a week <kbd>W</kbd>
             </button>
+            {unplaced && !d.busy && (
+              <span className={styles.note}>
+                Pick its position on the page first <kbd>P</kbd>
+              </span>
+            )}
             {(editCount > 0 || leftCount > 0) && (
               <span className={styles.note}>
                 {[
