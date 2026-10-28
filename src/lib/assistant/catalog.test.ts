@@ -50,8 +50,6 @@ const records = vi.hoisted(() => {
       funder('recInvite', {
         fldD8GVcdVy4Vonaa: 'Invite only, no applications',
         fldubjbVV9Df9MXbk: ['For-profits'],
-        // The old status text, still kept in step by the bots.
-        fld398tQjtRGz0Pk1: 'Not accepting applications',
       }),
     ] as AirtableRawRecord[],
     advisors: [
@@ -59,7 +57,6 @@ const records = vi.hoisted(() => {
         fldV0iU04GFzGMypK: ['Existing field members', 'Newcomers'], // Who it's for
         fldKAVyL9lBOFy8Ht: ['Well-being', 'Career'], // Focus areas
         fldb32mL5jiHvtN9J: 'Accepts everyone', // Applications
-        fldJw9XfXOInZ7mCq: ['Career/contribution'], // Focus (old)
       }),
     ] as AirtableRawRecord[],
   }

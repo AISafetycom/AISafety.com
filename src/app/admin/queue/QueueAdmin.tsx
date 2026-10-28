@@ -50,6 +50,7 @@ import type {
 import Icon from '@/components/Icon'
 import { activityIcon } from '@/app/communities/activity-icon'
 import { isAcceptingApplications } from '@/lib/funding-status'
+import { goneFields, goneNote } from '@/lib/admin/queue-retired'
 import { STATUS_ICONS as FUNDER_STATUS_ICONS } from '@/app/funding/card'
 import { APPLICATIONS_ICONS as ADVISOR_APPLICATIONS_ICONS } from '@/app/advisors/card'
 import { trainingTypeColor } from '@/lib/training-types'
@@ -1172,7 +1173,9 @@ function doneLabel(item: QueueItem): string {
   if (item.status === 'Accepted') return 'Accepted'
   if (item.type === 'Add') return 'Published'
   if (item.type === 'Change') {
-    const n = item.changes.filter(c => !item.leftOut?.includes(c.field)).length
+    const n = item.changes.filter(
+      c => !item.leftOut?.includes(c.field) && !item.gone?.includes(c.field)
+    ).length
     if (n === 0) return item.source === 'Broom' ? 'Flag cleared' : 'Done'
     return `Changed ${n} field${n === 1 ? '' : 's'}`
   }
@@ -4860,6 +4863,19 @@ function Detail({
     : item.status === 'Applied'
       ? (item.leftOut ?? [])
       : []
+  // Proposed fields whose column is no longer in Airtable (an old row's,
+  // queue-retired.ts): Apply leaves them out and writes the rest. An
+  // applied item shows the ones it left out.
+  const gone =
+    item.status === 'Applied'
+      ? (item.gone ?? [])
+      : item.type === 'Change' && isOpen(item)
+        ? goneFields(
+            item.targetTable ?? '',
+            item.changes.map(c => c.field),
+            live?.schema ?? []
+          )
+        : []
   // The proposal's fields can be edited or left out only while it waits;
   // once applied, they are fixed straight on the listing (canFix).
   const canChange = draftable && !revising
@@ -5629,6 +5645,20 @@ function Detail({
                 if (fableFields.has(c.field)) {
                   return fableRow(fableFields.get(c.field)!)
                 }
+                if (gone.includes(c.field)) {
+                  return (
+                    <LeftOutRow
+                      key={c.field}
+                      change={c}
+                      edit={undefined}
+                      page={item.page}
+                      live={undefined}
+                      open={false}
+                      onPutBack={null}
+                      mark="column deleted"
+                    />
+                  )
+                }
                 if (leftOut.includes(c.field)) {
                   return (
                     <LeftOutRow
@@ -5777,6 +5807,16 @@ function Detail({
               ))}
             </div>
           ))}
+
+        {gone.length > 0 && (
+          <p className={styles.note}>
+            {item.status === 'Applied'
+              ? goneNote(item.targetTable ?? '', gone)
+              : `Apply leaves ${gone.join(', ')} out: ${
+                  gone.length === 1 ? 'that column is' : 'those columns are'
+                } no longer in Airtable.`}
+          </p>
+        )}
 
         {/* A correction no listing matched has no fields to pick from. */}
         {item.type === 'Change' && Boolean(item.targetRecord) && (
@@ -6343,7 +6383,9 @@ function FableChangeRow({
 /** A proposed field left out with the cross (Bryce, 15 Oct 2026: "I want
  *  to be able to delete a suggested field change"): what the listing keeps
  *  reads as it is, the proposal is crossed out, and Put back brings it back
- *  while the item is open. Accept does not write it. */
+ *  while the item is open. Accept does not write it. A field whose column
+ *  is no longer in Airtable reads the same way, marked "column deleted",
+ *  with nothing to put back. */
 function LeftOutRow({
   change,
   edit,
@@ -6351,6 +6393,7 @@ function LeftOutRow({
   live,
   open,
   onPutBack,
+  mark = 'left out',
 }: {
   change: ProposedChange
   /** The page's edit to the proposed value, kept for Put back. */
@@ -6362,6 +6405,8 @@ function LeftOutRow({
   /** Null when it cannot come back: view only. On an applied change it
    *  writes the proposed value onto the listing now. */
   onPutBack: (() => void) | null
+  /** Why it is not written, beside the crossed-out value. */
+  mark?: string
 }) {
   const pictureField = touchesPicture(change)
   const from = pictureOf(change.from, live, { pictureField, open })
@@ -6392,7 +6437,7 @@ function LeftOutRow({
         <span className={styles.leftOutValue}>
           {to ? <Picture key={to.url ?? ''} {...to} /> : friendly(show(value))}
         </span>
-        <em className={styles.leftOutMark}>left out</em>
+        <em className={styles.leftOutMark}>{mark}</em>
         {onPutBack && (
           <button type="button" className={styles.putBack} onClick={onPutBack}>
             {open ? 'Put back' : 'Apply now'}
