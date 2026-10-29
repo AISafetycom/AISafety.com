@@ -14,6 +14,7 @@ import type {
   RejectReply,
 } from '@/lib/admin/queue'
 import { missingFields } from '@/lib/admin/queue-needed'
+import { SITE_PAGES } from '@/lib/site-pages'
 import { replyWho } from '@/lib/admin/queue-also'
 import { backSince, laterSince, laterUntil } from '@/lib/admin/queue-later'
 import { LEFT_OUT_KEY, withLeftOut } from '@/lib/admin/queue-left-out'
@@ -1062,6 +1063,14 @@ function pageLabel(item: QueueItem): string | null {
   return item.targetTable === RECURRING_TABLE
     ? `${item.page} (recurring)`
     : item.page
+}
+
+/** The item's page as the site's nav names and draws it, for its tag at
+ *  the top of the item; null for a page the site does not list. */
+function navPage(item: QueueItem): { title: string; icon: string } | null {
+  const path = item.page?.trim().toLowerCase()
+  const site = path === '/founder-toolkit' ? '/founders' : path
+  return Object.values(SITE_PAGES).find(p => p.path === site) ?? null
 }
 
 /** What search looks through for one item. */
@@ -5499,6 +5508,8 @@ function Detail({
     found
   )
 
+  const nav = navPage(item)
+
   return (
     <div
       className={`${styles.detailInner} ${showAside ? styles.detailTwoCol : ''}`}
@@ -5514,7 +5525,7 @@ function Detail({
         )}
         <div className={styles.detailHead}>
           <div className={styles.pills}>
-            <span className={styles.pill}>
+            <span className={styles.source}>
               <Icon src={sourceIcon(item)} size={12} />
               {item.source}
             </span>
@@ -5525,14 +5536,33 @@ function Detail({
               // carries its record id as an anchor) so the change can be
               // checked on the site.
               <a
-                className={styles.pageTag}
+                className={nav ? styles.pageNav : styles.pageTag}
                 href={livePageUrl(item)}
                 target="_blank"
                 rel="noreferrer"
                 title="Opens the live card and copies the listing's name (D)"
                 onClick={() => copyListingName(item)}
               >
-                {pageLabel(item)}
+                {nav ? (
+                  // A small copy of the page's item in the site's nav
+                  // (Bryce, 29 Oct 2026), with "recurring" where the nav
+                  // shows its count.
+                  <>
+                    <span className={styles.pageTagIcon}>
+                      <Icon
+                        className="color-teal-bright-800"
+                        src={`/images/icons/${nav.icon}`}
+                        size={12}
+                      />
+                    </span>
+                    {nav.title}
+                    {item.targetTable === RECURRING_TABLE && (
+                      <span className={styles.pageTagNote}>recurring</span>
+                    )}
+                  </>
+                ) : (
+                  pageLabel(item)
+                )}
               </a>
             )}
             <span className={styles.when}>{ago(item.createdAt)}</span>
