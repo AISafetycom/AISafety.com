@@ -113,8 +113,12 @@
 
 /* A panel about something else (site visitors beside job clicks). */
 .panelBlue {
-  background-color: color-mix(in srgb, var(--blue) 7%, var(--teal-grey-850));
-  border-color: color-mix(in srgb, var(--blue) 30%, var(--teal-grey-800));
+  background-color: color-mix(
+    in srgb,
+    var(--blue-300) 7%,
+    var(--teal-grey-850)
+  );
+  border-color: color-mix(in srgb, var(--blue-300) 30%, var(--teal-grey-800));
 }
 
 .panelTitle {

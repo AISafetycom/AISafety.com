@@ -228,15 +228,15 @@
 }
 
 .dotEvents {
-  background: var(--blue);
+  background: var(--blue-300);
 }
 
 .dotTraining {
-  background: var(--purple);
+  background: var(--purple-300);
 }
 
 .dotFunding {
-  background: var(--orange);
+  background: var(--orange-300);
 }
 
 .newsletterName {

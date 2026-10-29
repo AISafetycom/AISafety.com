@@ -346,7 +346,7 @@ export default function DetailsForm() {
           {busy ? 'Submitting…' : 'Submit'}
         </button>
         {error && (
-          <p className="paragraph-small color-orange margin-top-16px">
+          <p className="paragraph-small color-orange-300 margin-top-16px">
             {error}
           </p>
         )}

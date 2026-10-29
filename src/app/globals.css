@@ -50,17 +50,32 @@
   --teal-850: #04292a;
   --teal-900: var(--teal-grey-900); /* same color as --teal-grey-900 */
 
-  /* Accent Colors */
-  /* Retired as the site's highlight on 19 July 2026 (PR #474): highlights are
-     --teal-300 again. Still used on purpose by the event/training type
-     colour classes (.color-bright-green / .bg-bright-green) and a few older
-     admin styles; don't reach for it in new work. */
-  --bright-green: #7affb2;
-  --orange: #ffb580;
-  --pink: #ff80fd;
-  --blue: #75e3ff;
-  --purple: #b390ff;
-  --yellow: #ffff99;
+  /* Accent Colors
+     Each hue sits at step 300, about 75% lightness, the same tier as --teal-300.
+     Steps 700 and 800 are see-through washes of the 300 color, at 30% and 12%.
+     Over the page background they land where the teal 700 and 800 steps do. */
+  --orange-300: #ffb580;
+  --orange-700: color-mix(in srgb, var(--orange-300) 30%, transparent);
+  --orange-800: color-mix(in srgb, var(--orange-300) 12%, transparent);
+  --pink-300: #ff80fd;
+  --pink-700: color-mix(in srgb, var(--pink-300) 30%, transparent);
+  --pink-800: color-mix(in srgb, var(--pink-300) 12%, transparent);
+  --blue-300: #75e3ff;
+  --blue-700: color-mix(in srgb, var(--blue-300) 30%, transparent);
+  --blue-800: color-mix(in srgb, var(--blue-300) 12%, transparent);
+  --purple-300: #b390ff;
+  --purple-700: color-mix(in srgb, var(--purple-300) 30%, transparent);
+  --purple-800: color-mix(in srgb, var(--purple-300) 12%, transparent);
+  --yellow-300: #ffff99;
+  --yellow-700: color-mix(in srgb, var(--yellow-300) 30%, transparent);
+  --yellow-800: color-mix(in srgb, var(--yellow-300) 12%, transparent);
+  /* Green was retired as the site's highlight on 19 July 2026 (PR #474):
+     highlights are --teal-300 again. Still used on purpose by the event and
+     training type colour classes (.color-green-300 / .bg-green-300) and a few
+     older admin styles; don't reach for it in new work. */
+  --green-300: #7affb2;
+  --green-700: color-mix(in srgb, var(--green-300) 30%, transparent);
+  --green-800: color-mix(in srgb, var(--green-300) 12%, transparent);
   --white: white;
   --off-white: #f3f3f3;
 
@@ -312,43 +327,43 @@ label {
 }
 
 /* Accent text colors */
-.color-orange {
-  color: var(--orange);
+.color-orange-300 {
+  color: var(--orange-300);
 }
-.color-pink {
-  color: var(--pink);
+.color-pink-300 {
+  color: var(--pink-300);
 }
-.color-blue {
-  color: var(--blue);
+.color-blue-300 {
+  color: var(--blue-300);
 }
-.color-purple {
-  color: var(--purple);
+.color-purple-300 {
+  color: var(--purple-300);
 }
-.color-yellow {
-  color: var(--yellow);
+.color-yellow-300 {
+  color: var(--yellow-300);
 }
-.color-bright-green {
-  color: var(--bright-green);
+.color-green-300 {
+  color: var(--green-300);
 }
 
 /* Accent background colors */
-.bg-orange {
-  background-color: var(--orange);
+.bg-orange-300 {
+  background-color: var(--orange-300);
 }
-.bg-pink {
-  background-color: var(--pink);
+.bg-pink-300 {
+  background-color: var(--pink-300);
 }
-.bg-blue {
-  background-color: var(--blue);
+.bg-blue-300 {
+  background-color: var(--blue-300);
 }
-.bg-purple {
-  background-color: var(--purple);
+.bg-purple-300 {
+  background-color: var(--purple-300);
 }
-.bg-yellow {
-  background-color: var(--yellow);
+.bg-yellow-300 {
+  background-color: var(--yellow-300);
 }
-.bg-bright-green {
-  background-color: var(--bright-green);
+.bg-green-300 {
+  background-color: var(--green-300);
 }
 
 .underline {

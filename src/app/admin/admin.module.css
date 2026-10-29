@@ -377,7 +377,7 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background-color: var(--bright-green);
+  background-color: var(--green-300);
   box-shadow: 0 0 6px rgba(122, 255, 178, 0.5);
 }
 
@@ -1438,7 +1438,7 @@
 }
 
 .convRowReviewGood {
-  color: var(--bright-green);
+  color: var(--green-300);
 }
 
 .convRowReviewBad {
@@ -1485,8 +1485,8 @@
 
 .convRateGood.convRateActive {
   background-color: rgba(122, 255, 178, 0.12);
-  border-color: var(--bright-green);
-  color: var(--bright-green);
+  border-color: var(--green-300);
+  color: var(--green-300);
 }
 
 .convRateBad.convRateActive {

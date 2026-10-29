@@ -6412,7 +6412,7 @@ function typePills(
   return (
     <span className={styles.typePills}>
       {types.map(t => (
-        // The site's colour class names its variable: color-orange → --orange.
+        // The site's colour class names its variable: color-orange-300 → --orange-300.
         <span
           key={t}
           className={styles.typePill}
