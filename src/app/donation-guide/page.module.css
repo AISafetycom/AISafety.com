@@ -29,12 +29,13 @@
 
 .tabLink:hover {
   background-color: var(--teal-grey-850);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--black) 15%, transparent);
 }
 
 .tabLinkActive {
   background-color: var(--teal-grey-850);
-  box-shadow: 0 12px 24px rgba(0, 25, 27, 0.5);
+  box-shadow: 0 12px 24px
+    color-mix(in srgb, var(--teal-grey-900) 50%, transparent);
 }
 
 .tabContent {

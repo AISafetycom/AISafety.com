@@ -44,7 +44,7 @@
   position: fixed;
   inset: 0;
   z-index: 96;
-  background-color: rgba(0, 25, 27, 0.55);
+  background-color: color-mix(in srgb, var(--teal-grey-900) 55%, transparent);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.18s ease-out;
@@ -70,7 +70,8 @@
   background-color: var(--teal-grey-850);
   border: 1px solid var(--teal-grey-700);
   border-radius: 20px;
-  box-shadow: 0 24px 48px rgba(0, 25, 27, 0.55);
+  box-shadow: 0 24px 48px
+    color-mix(in srgb, var(--teal-grey-900) 55%, transparent);
   transform: translateY(12px) scale(0.98);
   transform-origin: bottom right;
   opacity: 0;

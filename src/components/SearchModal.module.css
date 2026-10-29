@@ -6,7 +6,7 @@
   inset: 0;
   z-index: 2147483647;
   /* Kept in sync with mobile-menu backdrop in Navigation.module.css. */
-  background-color: rgba(5, 24, 26, 0.8);
+  background-color: color-mix(in srgb, var(--teal-grey-900) 80%, transparent);
   overflow-y: auto;
   /* 88px clears the fixed nav. */
   padding: 88px 24px 24px;
@@ -308,10 +308,10 @@
     width: 28px;
     height: 28px;
     padding: 0;
-    border-color: rgba(255, 255, 255, 0.4);
+    border-color: color-mix(in srgb, var(--white) 40%, transparent);
     /* Same colour as the border so the X reads as part of the box,
        not as a bright primary action. */
-    color: rgba(255, 255, 255, 0.4);
+    color: color-mix(in srgb, var(--white) 40%, transparent);
   }
   .shortcut-hint-esc {
     display: none;

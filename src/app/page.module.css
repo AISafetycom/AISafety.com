@@ -21,7 +21,11 @@
   padding: 56px 56px 0 56px;
   overflow: hidden;
   background-image:
-    linear-gradient(to right, rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0) 75%),
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--black) 50%, transparent),
+      transparent 75%
+    ),
     url('/images/events-san-francisco.webp');
   background-position:
     0 0,
@@ -37,7 +41,7 @@
   width: 436px;
   margin: -40px -40px 16px 0;
   padding: 40px;
-  background-color: rgba(5, 24, 26, 0.5);
+  background-color: color-mix(in srgb, var(--teal-grey-900) 50%, transparent);
   backdrop-filter: blur(16px);
   border-radius: 8px;
   isolation: isolate;
@@ -52,7 +56,11 @@
   height: auto;
   min-height: 375px;
   background-image:
-    linear-gradient(to right, rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0) 75%),
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--black) 50%, transparent),
+      transparent 75%
+    ),
     url('/images/training.webp');
   background-position:
     0 0,
@@ -85,7 +93,7 @@
   min-width: 460px;
   height: 100%;
   padding: 56px;
-  background-color: rgba(5, 24, 26, 0.6);
+  background-color: color-mix(in srgb, var(--teal-grey-900) 60%, transparent);
   backdrop-filter: blur(16px);
   border-radius: 16px 0 0 16px;
 }
@@ -113,7 +121,7 @@
   max-width: 436px;
   margin: -40px -40px 16px 0;
   padding: 40px;
-  background-color: rgba(5, 24, 26, 0.2);
+  background-color: color-mix(in srgb, var(--teal-grey-900) 20%, transparent);
   backdrop-filter: blur(16px);
   border-radius: 8px;
   isolation: isolate;
@@ -188,7 +196,7 @@
   left: 16px;
   right: 16px;
   padding: 40px;
-  background-color: rgba(5, 24, 26, 0.4);
+  background-color: color-mix(in srgb, var(--teal-grey-900) 40%, transparent);
   border-radius: 8px;
   backdrop-filter: blur(16px);
   isolation: isolate;
@@ -200,7 +208,7 @@
   left: 16px;
   right: 16px;
   padding: 40px;
-  background-color: rgba(5, 24, 26, 0.2);
+  background-color: color-mix(in srgb, var(--teal-grey-900) 20%, transparent);
   border-radius: 8px;
   isolation: isolate;
 }
@@ -256,7 +264,7 @@
   left: 16px;
   right: 16px;
   padding: 32px 32px 34px;
-  background-color: rgba(5, 24, 26, 0.2);
+  background-color: color-mix(in srgb, var(--teal-grey-900) 20%, transparent);
   border-radius: 8px;
   isolation: isolate;
 }
@@ -437,9 +445,9 @@
     height: 70px;
     background-image: radial-gradient(
       ellipse 210px 42px at 100% 23px,
-      rgba(0, 0, 0, 0.3),
-      rgba(0, 0, 0, 0.27) 55%,
-      rgba(0, 0, 0, 0) 100%
+      color-mix(in srgb, var(--black) 30%, transparent),
+      color-mix(in srgb, var(--black) 27%, transparent) 55%,
+      transparent 100%
     );
     pointer-events: none;
   }

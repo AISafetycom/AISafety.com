@@ -28,7 +28,8 @@
   left: 16px;
   bottom: 16px;
   z-index: 10;
-  box-shadow: 0 12px 24px rgba(0, 25, 27, 0.5);
+  box-shadow: 0 12px 24px
+    color-mix(in srgb, var(--teal-grey-900) 50%, transparent);
 }
 
 .mapLoading {
@@ -46,7 +47,8 @@
   border: 1px solid var(--teal-grey-700);
   border-radius: 12px;
   color: var(--teal-grey-300);
-  box-shadow: 0 12px 24px rgba(0, 25, 27, 0.5);
+  box-shadow: 0 12px 24px
+    color-mix(in srgb, var(--teal-grey-900) 50%, transparent);
   pointer-events: none;
 }
 
@@ -93,7 +95,8 @@
   max-width: 300px;
   max-height: 98%;
   overflow: auto;
-  box-shadow: 0 12px 24px rgba(0, 25, 27, 0.5);
+  box-shadow: 0 12px 24px
+    color-mix(in srgb, var(--teal-grey-900) 50%, transparent);
   z-index: 9999;
   text-align: left;
 }
