@@ -11,8 +11,12 @@ import {
   liveCampaignsNamed,
   previewText,
   RemoveCardError,
+  PutBackError,
+  removalCopy,
   removeCardHtml,
+  removedCards,
   ReorderError,
+  restoreCardHtml,
   reorderHtml,
   sendTestCopy,
   setFieldsHtml,
@@ -40,6 +44,7 @@ import {
 import { createHash } from 'node:crypto'
 import cardEdit from './__fixtures__/newsletter-card-edit.json'
 import cardRemove from './__fixtures__/newsletter-card-remove.json'
+import cardPutBack from './__fixtures__/newsletter-card-put-back.json'
 import siteCardEdit from './__fixtures__/newsletter-site-card-edit.json'
 
 // Fixtures generated with the pipeline's own function
@@ -241,8 +246,22 @@ describe('removeCardHtml (mirrors ~/Newsletter/render.py remove_card)', () => {
     const twice = removeCardHtml(once.html, 'g1', 'x')
     expect(removedList(html)).toBeUndefined()
     expect(removedList(twice.html)).toEqual([
-      { g: 'g0', key: 'b', title: 'Title b' },
-      { g: 'g1', key: 'x', title: 'Title x' },
+      {
+        g: 'g0',
+        key: 'b',
+        title: 'Title b',
+        p: 1,
+        d: 1,
+        b: removalCopy(html, 'g0', 'b').b,
+      },
+      {
+        g: 'g1',
+        key: 'x',
+        title: 'Title x',
+        p: 0,
+        d: 0,
+        b: removalCopy(once.html, 'g1', 'x').b,
+      },
     ])
   })
   it('refuses the last card of a section, an unknown card and an email without a manifest', () => {
@@ -259,6 +278,143 @@ describe('removeCardHtml (mirrors ~/Newsletter/render.py remove_card)', () => {
       cardRemove.expectedHtmlSha256
     )
     expect(out.text).toBe(cardRemove.expectedText)
+  })
+})
+
+describe('restoreCardHtml (mirrors ~/Newsletter/render.py restore_card)', () => {
+  const html = issue([
+    { id: 'g0', label: 'Closing soon', keys: ['a', 'b', 'c', 'd', 'e'] },
+    { id: 'g1', label: 'New', keys: ['x', 'y'] },
+  ])
+  const sha = (s: string) =>
+    createHash('sha256').update(s, 'utf8').digest('hex')
+  /** The copy as Put back reads it back from the Blob store. */
+  const copyOf = (email: string, gid: string, key: string) =>
+    JSON.parse(removalCopy(email, gid, key).body)
+  const textOf = (email: string) =>
+    JSON.parse(
+      Buffer.from(
+        /<!--aisafety-cards:([A-Za-z0-9+/=]+)-->/.exec(email)![1],
+        'base64'
+      ).toString('utf8')
+    )
+      .text.map((s: { t: string }) => s.t)
+      .join('')
+  it('names the copy by its content and keeps what goes in it', () => {
+    const c = removalCopy(html, 'g0', 'b')
+    expect(c.b).toBe(sha(c.body).slice(0, 16))
+    expect(c.path).toBe(`newsletter/removed/${c.b}.json`)
+    expect(JSON.parse(c.body)).toEqual({
+      v: 1,
+      g: 'g0',
+      key: 'b',
+      block: '<!--card:g0:b--><div>b</div><!--/card-->',
+      card: { key: 'b', title: 'Title b' },
+      text: '* b\n',
+    })
+  })
+  it('undoes a removal byte for byte', () => {
+    for (const key of ['a', 'c', 'e']) {
+      const out = removeCardHtml(html, 'g0', key)
+      const back = restoreCardHtml(out.html, copyOf(html, 'g0', key))
+      expect(back.html).toBe(html)
+      expect(back.text).toBe(textOf(html))
+      expect(removedCards(back.html)).toEqual([])
+    }
+  })
+  it('puts cards back where they were, in any order', () => {
+    for (const gone of [
+      ['b', 'c'],
+      ['c', 'b'],
+      ['b', 'd'],
+      ['e', 'a', 'c'],
+    ]) {
+      let email = html
+      const copies: Record<string, ReturnType<typeof copyOf>> = {}
+      for (const key of gone) {
+        copies[key] = copyOf(email, 'g0', key)
+        email = removeCardHtml(email, 'g0', key).html
+      }
+      expect(removedCards(email).map(r => r.key)).toEqual(gone)
+      for (const order of [gone, [...gone].reverse()]) {
+        let out = email
+        for (const key of order) out = restoreCardHtml(out, copies[key]).html
+        expect(out).toBe(html)
+      }
+    }
+  })
+  it('keeps Pen’s order in the manifest when the cards moved meanwhile', () => {
+    const moved = reorderHtml(html, { g0: ['c', 'b', 'a', 'd', 'e'] }).html
+    const copy = copyOf(moved, 'g0', 'b')
+    const out = reorderHtml(removeCardHtml(moved, 'g0', 'b').html, {
+      g0: ['a', 'c', 'd', 'e'],
+    })
+    const back = restoreCardHtml(out.html, copy)
+    expect(cardGroups(back.html)?.[0].cards.map(c => c.key)).toEqual([
+      'a',
+      'b',
+      'c',
+      'd',
+      'e',
+    ])
+    expect(back.text).toBe(
+      'HEAD\n== Closing soon ==\n* a\n* b\n* c\n* d\n* e\n== New ==\n* x\n* y\nTAIL\n'
+    )
+  })
+  it('says which removed cards can be put back', () => {
+    const out = removeCardHtml(html, 'g1', 'x')
+    expect(removedCards(out.html)).toEqual([
+      { group: 'g1', key: 'x', title: 'Title x', canPutBack: true },
+    ])
+    expect(removedCards(html)).toEqual([])
+  })
+  it('refuses what it can’t bring back', () => {
+    const copy = copyOf(html, 'g0', 'b')
+    const out = removeCardHtml(html, 'g0', 'b').html
+    // Removed before Put back existed: no place or copy recorded.
+    const manifest = JSON.parse(
+      Buffer.from(
+        /<!--aisafety-cards:([A-Za-z0-9+/=]+)-->/.exec(out)![1],
+        'base64'
+      ).toString('utf8')
+    )
+    manifest.removed = [{ g: 'g0', key: 'b', title: 'Title b' }]
+    const old = out.replace(
+      /<!--aisafety-cards:[A-Za-z0-9+/=]+-->/,
+      `<!--aisafety-cards:${Buffer.from(JSON.stringify(manifest)).toString('base64')}-->`
+    )
+    expect(removedCards(old)[0].canPutBack).toBe(false)
+    for (const [email, c] of [
+      [html, copy], // not removed
+      [old, copy],
+      [out, { ...copy, block: '<!--card:g0:a--><div>a</div><!--/card-->' }],
+      [out, { ...copy, block: copy.block + copy.block }],
+      ['<p>x</p>', copy],
+    ] as const)
+      expect(() => restoreCardHtml(email, c)).toThrow(PutBackError)
+    const back = restoreCardHtml(out, copy).html
+    expect(() => restoreCardHtml(back, copy)).toThrow(PutBackError)
+  })
+  it('gives byte-identical output to the pipeline (render.py restore_card)', () => {
+    let email = reorderHtml(cardEdit.input, cardPutBack.order).html
+    const copies: Record<string, string> = {}
+    for (const step of cardPutBack.steps) {
+      const copy = removalCopy(email, cardPutBack.group, step.remove)
+      expect(copy.b).toBe(step.b)
+      expect(sha(copy.body)).toBe(step.copySha256)
+      copies[step.remove] = copy.body
+      const out = removeCardHtml(email, cardPutBack.group, step.remove)
+      expect(sha(out.html)).toBe(step.htmlSha256)
+      expect(out.text).toBe(step.text)
+      email = out.html
+    }
+    email = reorderHtml(email, cardPutBack.orderAfter).html
+    for (const step of cardPutBack.steps) {
+      const out = restoreCardHtml(email, JSON.parse(copies[step.remove]))
+      expect(sha(out.html)).toBe(step.putBack.htmlSha256)
+      expect(out.text).toBe(step.putBack.text)
+      email = out.html
+    }
   })
 })
 

@@ -138,6 +138,10 @@ import {
   type SearchParams,
 } from './range'
 import admin from '../admin.module.css'
+import {
+  type CardEditCounts,
+  readCardEdits,
+} from '@/lib/admin/newsletter-edit-counts'
 import styles from './analytics.module.css'
 import { displayFilterGroup, displayFilterValue } from '@/lib/filter-tracking'
 
@@ -632,6 +636,7 @@ async function AnalyticsView({
     feeds,
     issueClicks,
     shares,
+    cardEdits,
   ] = await Promise.all([
     saved
       ? saved.data
@@ -683,6 +688,9 @@ async function AnalyticsView({
           return 'failed' as const
         })
       : null,
+    // Remove and Put back on /admin/newsletter (Upstash; null = couldn't
+    // read them).
+    tabReq === 'newsletters' ? readCardEdits(range) : null,
   ])
 
   // Which of those newsletter links are the searched org's.
@@ -1428,6 +1436,7 @@ async function AnalyticsView({
                     rows={data.newsletterLinks}
                     unique={unique}
                   />
+                  <CardEditsPanel counts={cardEdits} />
                 </>
               }
             />
@@ -2348,6 +2357,41 @@ function NewslettersPagePanel({ stats }: { stats: NewslettersPageStats }) {
         link at the bottom of each issue. Clicks to its page are clicks through
         to the newsletter&apos;s past issues page (for Updates, to its
         Substack). Recording since the page went live in October 2026.
+      </p>
+    </Panel>
+  )
+}
+
+/** The Newsletters tab's count of cards taken out of drafts on
+ *  /admin/newsletter, and put back. */
+function CardEditsPanel({ counts }: { counts: CardEditCounts | null }) {
+  return (
+    <Panel title="Cards removed from drafts">
+      {counts === null ? (
+        <p className={styles.dim}>
+          Couldn&apos;t read the counts just now — try refreshing in a moment.
+        </p>
+      ) : (
+        <CountTable
+          rows={[
+            { name: 'Removed', count: counts.remove },
+            {
+              name: 'Put back with Undo, right after removing',
+              count: counts['put-back-undo'],
+            },
+            {
+              name: 'Put back later, from the list of removed cards',
+              count: counts['put-back'],
+            },
+          ]}
+          labelHead="What"
+          countHead="Count"
+        />
+      )}
+      <p className={styles.caption}>
+        Cards taken out of a newsletter draft with the trash button on
+        /admin/newsletter, and how many were put back, test lists included.
+        Counted per day (UTC), since Put back arrived on 29 October 2026.
       </p>
     </Panel>
   )
