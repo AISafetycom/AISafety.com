@@ -19,7 +19,7 @@ function renderInlines(
     if (inline.bold) {
       node =
         bold === 'highlight' ? (
-          <span className="color-light-teal">{node}</span>
+          <span className="color-teal-300">{node}</span>
         ) : (
           <strong>{node}</strong>
         )
@@ -30,7 +30,7 @@ function renderInlines(
         <Link
           href={external ? withUtm(inline.href, UTM_PAGE) : inline.href}
           target={external ? '_blank' : undefined}
-          className="display-inline color-teal"
+          className="display-inline color-teal-400"
         >
           {node}
         </Link>

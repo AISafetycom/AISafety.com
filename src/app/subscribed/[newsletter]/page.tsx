@@ -94,7 +94,7 @@ export default async function SubscribedPage({
             Thanks for confirming.{' '}
             {listOf(
               picked.map(n => (
-                <span key={n.name} className="color-light-teal">
+                <span key={n.name} className="color-teal-300">
                   {n.name}
                 </span>
               ))
@@ -112,7 +112,7 @@ export default async function SubscribedPage({
               picked.map(n => (
                 <Fragment key={n.page}>
                   {n.what} on{' '}
-                  <Link href={n.page} className="color-light-teal">
+                  <Link href={n.page} className="color-teal-300">
                     AISafety.com{n.page}
                   </Link>
                 </Fragment>

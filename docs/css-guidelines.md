@@ -67,7 +67,7 @@ Assign text colors using these utility classes.
 ```tsx
 // Good
 <p className="color-teal-grey-300">Muted text</p>
-<span className="color-light-teal">Accent text</span>
+<span className="color-teal-300">Accent text</span>
 
 // Bad
 .new-class {

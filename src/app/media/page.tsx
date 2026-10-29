@@ -148,7 +148,7 @@ export default async function MediaPage() {
 
       <h2 className="width-9-col-narrow padding-bottom-56px">
         AISafety.com is a{' '}
-        <span className="color-light-teal">nonprofit resource hub</span> for AI
+        <span className="color-teal-300">nonprofit resource hub</span> for AI
         existential safety. This page has what you need to write about us, and
         what you need to write about the field.
       </h2>

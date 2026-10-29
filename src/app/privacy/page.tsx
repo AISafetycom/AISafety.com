@@ -17,17 +17,16 @@ export default function PrivacyPage() {
 
           <h2 className="padding-bottom-56px">
             We collect{' '}
-            <span className="color-light-teal">as little as we can</span>, and
-            we don&apos;t use any of it for advertising or sell it to anyone.
-            This page explains what we do collect, why, and the choices you
-            have.
+            <span className="color-teal-300">as little as we can</span>, and we
+            don&apos;t use any of it for advertising or sell it to anyone. This
+            page explains what we do collect, why, and the choices you have.
           </h2>
 
           <h3 className="padding-bottom-16px">Who we are</h3>
           <p className="color-teal-grey-300 padding-bottom-40px">
             AISafety.com is run by a small nonprofit team – you can meet us on
             the{' '}
-            <Link href="/about" className="color-light-teal">
+            <Link href="/about" className="color-teal-300">
               about page
             </Link>
             . Bryce Robertson, the site&apos;s project manager, is responsible
@@ -36,7 +35,7 @@ export default function PrivacyPage() {
               href="https://airtable.com/appF8XfZUGXtfi40E/pagUmmzVb8OnVvTZS/form"
               target="_blank"
               rel="noopener noreferrer"
-              className="color-light-teal"
+              className="color-teal-300"
             >
               send us a message
             </a>
@@ -107,7 +106,7 @@ export default function PrivacyPage() {
             to you or your email address. Every email has an unsubscribe link at
             the bottom, and a Manage subscriptions link that opens your
             newsletters on{' '}
-            <Link href="/newsletter" className="color-light-teal">
+            <Link href="/newsletter" className="color-teal-300">
               aisafety.com/newsletter
             </Link>{' '}
             so you can change which ones you get; the private code in that link
@@ -135,7 +134,7 @@ export default function PrivacyPage() {
               href="https://airtable.com/appF8XfZUGXtfi40E/pagUmmzVb8OnVvTZS/form"
               target="_blank"
               rel="noopener noreferrer"
-              className="color-light-teal"
+              className="color-teal-300"
             >
               sending us a message
             </a>

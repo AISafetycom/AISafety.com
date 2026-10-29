@@ -234,12 +234,6 @@ label {
 .color-teal-grey-500 {
   color: var(--teal-grey-500);
 }
-.color-teal {
-  color: var(--teal-400);
-}
-.color-light-teal {
-  color: var(--teal-300);
-}
 .color-white {
   color: var(--white);
 }

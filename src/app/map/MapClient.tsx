@@ -253,7 +253,7 @@ export default function MapClient({
         )}
         <h2 className="width-7-col padding-bottom-56px">
           An overview of the key{' '}
-          <span className="color-light-teal">
+          <span className="color-teal-300">
             organizations, programs, and other resources
           </span>{' '}
           in the AI safety space.

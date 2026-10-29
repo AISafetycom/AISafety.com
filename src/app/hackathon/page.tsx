@@ -33,7 +33,7 @@ export default function HackathonPage() {
 
           <h2 className="padding-bottom-40px">
             A four-day, in-person hackathon to{' '}
-            <span className="color-light-teal">
+            <span className="color-teal-300">
               improve the AI safety resource hub
             </span>
             .
@@ -51,7 +51,7 @@ export default function HackathonPage() {
               href="https://www.ceealar.org"
               target="_blank"
               rel="noopener noreferrer"
-              className="color-light-teal"
+              className="color-teal-300"
             >
               CEEALAR
             </a>{' '}
@@ -140,7 +140,7 @@ export default function HackathonPage() {
               href="https://app.notion.com/p/15aaef8c3f9640018d6b256d39b4ee8a?pvs=21"
               target="_blank"
               rel="noopener noreferrer"
-              className="color-light-teal"
+              className="color-teal-300"
             >
               project
             </a>
@@ -175,14 +175,14 @@ export default function HackathonPage() {
               href="https://discord.gg/WQG8FAGqun"
               target="_blank"
               rel="noopener noreferrer"
-              className="color-light-teal"
+              className="color-teal-300"
             >
               AISafety.com Discord server
             </a>{' '}
             at @bryceerobertson, or email{' '}
             <a
               href="mailto:bryceerobertson@gmail.com"
-              className="color-light-teal"
+              className="color-teal-300"
             >
               bryceerobertson@gmail.com
             </a>

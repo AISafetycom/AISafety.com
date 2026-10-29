@@ -162,7 +162,7 @@ export default async function NewsletterPage({ params }: Props) {
             href={withUtm(SUBSTACK_ARCHIVES[key], 'Newsletter')}
             newsletter={nl.prefix}
             target="substack"
-            className="color-light-teal"
+            className="color-teal-300"
           >
             Substack
           </ArchiveLink>
@@ -174,7 +174,7 @@ export default async function NewsletterPage({ params }: Props) {
             href={feedPath(key)}
             newsletter={nl.prefix}
             target="feed"
-            className="color-light-teal"
+            className="color-teal-300"
           >
             RSS feed
           </ArchiveLink>

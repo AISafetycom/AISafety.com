@@ -21,7 +21,7 @@ export default function HackathonDetailsPage() {
 
           <h2 className="padding-bottom-40px">
             You&apos;re in! We just need{' '}
-            <span className="color-light-teal">a few more details</span>.
+            <span className="color-teal-300">a few more details</span>.
           </h2>
 
           <p className="color-teal-grey-300 padding-bottom-16px">
@@ -30,7 +30,7 @@ export default function HackathonDetailsPage() {
               href="https://www.ceealar.org"
               target="_blank"
               rel="noopener noreferrer"
-              className="color-light-teal"
+              className="color-teal-300"
             >
               CEEALAR
             </a>{' '}
@@ -52,14 +52,14 @@ export default function HackathonDetailsPage() {
               href="https://discord.gg/WQG8FAGqun"
               target="_blank"
               rel="noopener noreferrer"
-              className="color-light-teal"
+              className="color-teal-300"
             >
               AISafety.com Discord server
             </a>{' '}
             at @bryceerobertson, or email{' '}
             <a
               href="mailto:bryceerobertson@gmail.com"
-              className="color-light-teal"
+              className="color-teal-300"
             >
               bryceerobertson@gmail.com
             </a>

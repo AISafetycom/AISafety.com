@@ -27,7 +27,7 @@ function Text({ children }: { children: string }) {
             href={m[2]}
             target="_blank"
             rel="noopener noreferrer"
-            className="color-light-teal"
+            className="color-teal-300"
           >
             {m[1]}
           </a>

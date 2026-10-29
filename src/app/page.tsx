@@ -637,7 +637,7 @@ export default async function Home() {
 
       <div className={styles['aisafety-info']}>
         <div className="width-6-col">
-          <p className="color-teal paragraph-small-bold padding-bottom-12px">
+          <p className="color-teal-400 paragraph-small-bold padding-bottom-12px">
             Visit AISafety.info
           </p>
           <h2 className="shadow-text">

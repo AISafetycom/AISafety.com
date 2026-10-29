@@ -18,7 +18,7 @@ export default function AboutPage() {
       <h2 className="width-9-col-narrow padding-bottom-56px">
         We&apos;re a small nonprofit driven by 1.25 salaried employees and lots
         of volunteers. We aim to multiply global AI safety efforts through a{' '}
-        <span className="color-light-teal">
+        <span className="color-teal-300">
           centralized, comprehensive, and up-to-date resource hub
         </span>
         .
@@ -72,7 +72,7 @@ export default function AboutPage() {
           </div>
           <p className="color-teal-grey-300 padding-top-24px paragraph-small">
             Journalist? Boilerplate, logos and a press contact are on the{' '}
-            <Link href="/media" className="color-light-teal">
+            <Link href="/media" className="color-teal-300">
               press and media page
             </Link>
             .
@@ -201,7 +201,7 @@ export default function AboutPage() {
                 href="https://aisafety.info"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="color-light-teal"
+                className="color-teal-300"
               >
                 AISafety.info
               </a>{' '}

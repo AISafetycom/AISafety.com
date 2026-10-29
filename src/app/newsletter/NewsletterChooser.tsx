@@ -255,7 +255,7 @@ function NewsletterRows({
             <p className="paragraph-small padding-top-8px">
               <a
                 href={n.archive}
-                className={`color-light-teal ${styles.link}`}
+                className={`color-teal-300 ${styles.link}`}
                 onClick={() =>
                   trackEvent('newsletter_page_click', {
                     page: TRACKING_PAGE,
@@ -406,7 +406,7 @@ function SignupForm({ newsletters }: { newsletters: Newsletter[] }) {
         aria-live="polite"
         className={
           state === 'done'
-            ? 'color-light-teal padding-top-32px'
+            ? 'color-teal-300 padding-top-32px'
             : error
               ? 'paragraph-xs color-orange padding-top-8px'
               : ''
@@ -537,7 +537,7 @@ function ManageForm({
         className={
           status
             ? status.ok
-              ? 'color-light-teal padding-top-24px'
+              ? 'color-teal-300 padding-top-24px'
               : 'paragraph-small color-orange padding-top-24px'
             : ''
         }
@@ -557,7 +557,7 @@ function UpdatesNote({ updates }: { updates: Updates }) {
         href={updates.url}
         target="_blank"
         rel="noopener noreferrer"
-        className={`color-light-teal ${styles.link}`}
+        className={`color-teal-300 ${styles.link}`}
         onClick={() =>
           trackEvent('newsletter_page_click', {
             page: TRACKING_PAGE,
