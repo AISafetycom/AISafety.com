@@ -868,25 +868,67 @@ p.tabDoneTitle {
   flex-wrap: wrap;
 }
 
-.pill {
+/* Where the item came from (Comb, Broom, a form…): plain icon and text. */
+.source {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 2px 9px;
-  border-radius: 999px;
   font-size: 12px;
   font-weight: 500;
   color: var(--q-text-2);
-  border: 1px solid var(--q-border-strong);
 }
 
-/* The page, in the top row: the same small caps as the section headings. */
+/* The page, in the top row: the same small caps as the section headings.
+   Kept for a page the site does not list. */
 .pageTag {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--q-muted);
+}
+
+/* A page the site lists: a smaller copy of its item in the site's nav
+   (Navigation.module.css .nav-item and .nav-item-icon, scaled from 40px to
+   28px tall), without the count (Bryce, 29 Oct 2026). Named with its a,
+   so it outweighs the Queue's teal, underlined links. */
+a.pageNav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px 0 2px;
+  border: 1px solid color-mix(in srgb, var(--bright-teal-300) 30%, transparent);
+  border-radius: 14px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  color: var(--white);
+  text-decoration: none;
+  transition: all var(--hover-transition);
+}
+
+a.pageNav:hover {
+  background-color: var(--teal-850);
+  box-shadow: var(--shadow-dark);
+  text-decoration: none;
+}
+
+.pageTagIcon {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 22px;
+  height: 22px;
+  background-color: var(--white);
+  border-radius: 11px;
+  box-shadow: var(--shadow-dark);
+}
+
+/* Where the nav shows its count: "recurring" for Training (recurring). */
+.pageTagNote {
+  font-weight: 400;
+  color: var(--teal-300);
 }
 
 .when {
