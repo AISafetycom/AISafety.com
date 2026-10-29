@@ -39,17 +39,11 @@
 
   /* Bright Teal Scale (more saturated parallel to the Teal Scale above) */
   --teal-bright-100: #f1faf9;
-  --teal-bright-150: #e1f2f1;
   --teal-bright-200: #d0eceb;
-  --teal-bright-250: #b8e1e0;
   --teal-bright-300: #a6dad9;
-  --teal-bright-350: #88ccc9;
   --teal-bright-400: #6cbdbb;
-  --teal-bright-450: #5fb3b0;
   --teal-bright-500: #4da9a7;
-  --teal-bright-550: #3f9d9b;
   --teal-bright-600: #2d9292;
-  --teal-bright-650: #237c7d;
   --teal-bright-700: #176c6c;
   --teal-bright-750: #0f5858;
   --teal-bright-800: #094141;
@@ -259,38 +253,20 @@ label {
 .color-teal-bright-100 {
   color: var(--teal-bright-100);
 }
-.color-teal-bright-150 {
-  color: var(--teal-bright-150);
-}
 .color-teal-bright-200 {
   color: var(--teal-bright-200);
-}
-.color-teal-bright-250 {
-  color: var(--teal-bright-250);
 }
 .color-teal-bright-300 {
   color: var(--teal-bright-300);
 }
-.color-teal-bright-350 {
-  color: var(--teal-bright-350);
-}
 .color-teal-bright-400 {
   color: var(--teal-bright-400);
-}
-.color-teal-bright-450 {
-  color: var(--teal-bright-450);
 }
 .color-teal-bright-500 {
   color: var(--teal-bright-500);
 }
-.color-teal-bright-550 {
-  color: var(--teal-bright-550);
-}
 .color-teal-bright-600 {
   color: var(--teal-bright-600);
-}
-.color-teal-bright-650 {
-  color: var(--teal-bright-650);
 }
 .color-teal-bright-700 {
   color: var(--teal-bright-700);
@@ -312,38 +288,20 @@ label {
 .bg-teal-bright-100 {
   background-color: var(--teal-bright-100);
 }
-.bg-teal-bright-150 {
-  background-color: var(--teal-bright-150);
-}
 .bg-teal-bright-200 {
   background-color: var(--teal-bright-200);
-}
-.bg-teal-bright-250 {
-  background-color: var(--teal-bright-250);
 }
 .bg-teal-bright-300 {
   background-color: var(--teal-bright-300);
 }
-.bg-teal-bright-350 {
-  background-color: var(--teal-bright-350);
-}
 .bg-teal-bright-400 {
   background-color: var(--teal-bright-400);
-}
-.bg-teal-bright-450 {
-  background-color: var(--teal-bright-450);
 }
 .bg-teal-bright-500 {
   background-color: var(--teal-bright-500);
 }
-.bg-teal-bright-550 {
-  background-color: var(--teal-bright-550);
-}
 .bg-teal-bright-600 {
   background-color: var(--teal-bright-600);
-}
-.bg-teal-bright-650 {
-  background-color: var(--teal-bright-650);
 }
 .bg-teal-bright-700 {
   background-color: var(--teal-bright-700);
