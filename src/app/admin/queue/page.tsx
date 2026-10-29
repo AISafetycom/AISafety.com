@@ -11,11 +11,5 @@ export default async function QueueAdminPage() {
   await requireAccess('queue')
   // View-only sessions get the same page without the deciding parts; the
   // API refuses their writes regardless.
-  // The base id lets Q open the shown listing's record in Airtable.
-  return (
-    <QueueAdmin
-      canEdit={await canReviewQueue()}
-      airtableBase={process.env.AIRTABLE_BASE_ID ?? null}
-    />
-  )
+  return <QueueAdmin canEdit={await canReviewQueue()} />
 }

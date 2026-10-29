@@ -431,6 +431,21 @@ function foundLink(text: string): string | null {
   return link && /^https?:\/\//.test(link) ? link : null
 }
 
+/** Where the item came from, for Q (Bryce, 29 Oct 2026: "make Q open the
+ *  source instead of Airtable"): the post Comb found the listing in, or
+ *  the email or Discord message a request arrived in. A link to Airtable
+ *  is not a source, so a Broom flag, or a Comb find with no post link,
+ *  has none. */
+function sourceHref(item: QueueItem): string | null {
+  const found =
+    item.source === 'Comb' && item.sourceExcerpt
+      ? foundLink(item.sourceExcerpt)
+      : null
+  if (found) return found
+  const link = item.sourceLink
+  return link && hostOf(link) && !onHost(link, 'airtable.com') ? link : null
+}
+
 function ago(iso: string | null): string {
   if (!iso) return ''
   const ms = Date.now() - new Date(iso).getTime()
@@ -1453,13 +1468,10 @@ type Action = Decision | 'undo' | 'reopen'
 
 export default function QueueAdmin({
   canEdit,
-  airtableBase,
 }: {
   /** False for a view-only grant: the same queue with nothing to click that
    *  would decide anything. The API refuses those writes regardless. */
   canEdit: boolean
-  /** The base the listings live in, for Q's link to a record. */
-  airtableBase: string | null
 }) {
   const [items, setItems] = useState<QueueItem[] | null>(null)
   // The list as it is now, for callbacks that must not go stale.
@@ -3584,18 +3596,16 @@ export default function QueueAdmin({
           }
           break
         }
-        case 'q':
-          // The listing's record in Airtable, in a new tab (Bryce, 5 Oct
-          // 2026: "make Q open the listing in airtable").
-          if (airtableBase && item?.targetTable && item.targetRecord) {
+        case 'q': {
+          // Where the item came from, in a new tab (Bryce, 29 Oct 2026;
+          // until then Q opened the listing in Airtable).
+          const href = item ? sourceHref(item) : null
+          if (href) {
             e.preventDefault()
-            window.open(
-              `https://airtable.com/${airtableBase}/${item.targetTable}/${item.targetRecord}`,
-              '_blank',
-              'noopener'
-            )
+            window.open(href, '_blank', 'noopener')
           }
           break
+        }
         case 'd':
           // The page tag's link: the live page at this record's card, the
           // name copied on the way, as a click on the tag does (Bryce, 19
@@ -3672,7 +3682,6 @@ export default function QueueAdmin({
     select,
     searching,
     clearSearch,
-    airtableBase,
     ordered.done,
   ])
 
@@ -4416,7 +4425,10 @@ export default function QueueAdmin({
               <dt>
                 <kbd>Q</kbd>
               </dt>
-              <dd>open the listing in Airtable</dd>
+              <dd>
+                open where it came from: the post Comb found it in, or the email
+                or Discord message
+              </dd>
               <dt>
                 <kbd>D</kbd>
               </dt>
