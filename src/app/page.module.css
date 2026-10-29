@@ -142,7 +142,7 @@
   padding: 56px;
   background-image:
     url('/images/handshake.webp'),
-    radial-gradient(circle at 20% 0, var(--teal-800), #073536);
+    radial-gradient(circle at 20% 0, var(--teal-800), var(--teal-850));
   background-position:
     50% 82%,
     0 0;
@@ -159,7 +159,7 @@
   padding: 56px;
   background-image:
     url('/images/phone-podcast.webp'),
-    radial-gradient(circle at 20% 0, var(--teal-800), #073536);
+    radial-gradient(circle at 20% 0, var(--teal-800), var(--teal-850));
   background-position:
     50% 100%,
     0 0;
@@ -241,7 +241,7 @@
   padding: 40px;
   background-image:
     url('/images/open-hands.webp'),
-    radial-gradient(circle at 20% 0, var(--teal-800), #073536);
+    radial-gradient(circle at 20% 0, var(--teal-800), var(--teal-850));
   background-position:
     100% 89%,
     0 0;
