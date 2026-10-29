@@ -16,7 +16,7 @@
   z-index: 1;
   width: 16px;
   height: 16px;
-  background-color: var(--teal-400);
+  background-color: var(--teal-grey-400);
   -webkit-mask: url('/images/icons/pin.svg') no-repeat center / contain;
   mask: url('/images/icons/pin.svg') no-repeat center / contain;
 }
@@ -66,7 +66,7 @@
   padding: 0;
   border: none;
   background-color: transparent;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   cursor: pointer;
 }
 
@@ -85,12 +85,12 @@
   justify-content: center;
   border: none;
   background-color: transparent;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   cursor: pointer;
 }
 
 .nearMeInput::placeholder {
-  color: var(--teal-500);
+  color: var(--teal-grey-500);
 }
 
 .cityList {
@@ -129,12 +129,12 @@
   flex: none;
   width: 16px;
   height: 16px;
-  background-color: var(--teal-400);
+  background-color: var(--teal-grey-400);
   -webkit-mask: url('/images/icons/pin.svg') no-repeat center / contain;
   mask: url('/images/icons/pin.svg') no-repeat center / contain;
 }
 
 .cityEmpty {
   padding: 12px 16px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }

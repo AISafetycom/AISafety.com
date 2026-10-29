@@ -93,7 +93,7 @@ function TimeSection({
   return (
     <div className={`${styles.timeRow} ${last ? styles.timeRowLast : ''}`}>
       <div className="width-3-col">
-        <p className="color-teal-300 paragraph-small">If you have</p>
+        <p className="color-teal-grey-300 paragraph-small">If you have</p>
         <p className="paragraph-default-bold">{time}</p>
       </div>
       <div className="width-6-col">{children}</div>

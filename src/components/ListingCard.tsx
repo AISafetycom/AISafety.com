@@ -59,7 +59,7 @@ function MetaRows({ rows }: { rows: ListingCardMeta[] }) {
   return (
     <div className="flex flex-col gap-4px">
       {rows.map((field, i) => (
-        <div key={i} className="flex items-center gap-8px color-teal-300">
+        <div key={i} className="flex items-center gap-8px color-teal-grey-300">
           <Icon src={field.icon} />
           <p className="paragraph-xs">{field.value}</p>
         </div>
@@ -141,7 +141,7 @@ export default function ListingCard({
       <MetaRows rows={meta} />
 
       {footnote && (
-        <p className="paragraph-xs color-teal-500 padding-top-16px">
+        <p className="paragraph-xs color-teal-grey-500 padding-top-16px">
           {footnote}
         </p>
       )}

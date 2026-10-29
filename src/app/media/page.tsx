@@ -158,7 +158,7 @@ export default async function MediaPage() {
           <p className="color-white paragraph-default-bold">
             Writing about AISafety.com?
           </p>
-          <p className="paragraph-small color-teal-300">
+          <p className="paragraph-small color-teal-grey-300">
             Boilerplate, team bios, key numbers and logos are below. Press
             contact:{' '}
             <PressLink
@@ -184,7 +184,7 @@ export default async function MediaPage() {
           <p className="color-white paragraph-default-bold">
             Writing about AI risk?
           </p>
-          <p className="paragraph-small color-teal-300">
+          <p className="paragraph-small color-teal-grey-300">
             Skip to the reporter resources: the field map, plain-language
             explainers, open data, and the organizations we recommend for
             questions about AI risk itself.
@@ -323,7 +323,7 @@ export default async function MediaPage() {
                   <p className="paragraph-default-bold padding-bottom-4px">
                     {person.name}
                   </p>
-                  <p className="paragraph-small color-teal-300">
+                  <p className="paragraph-small color-teal-grey-300">
                     {person.role}
                   </p>
                 </div>
@@ -567,7 +567,9 @@ export default async function MediaPage() {
                   unoptimized
                 />
               </PressLink>
-              <span className="paragraph-xs color-teal-300">{shot.label}</span>
+              <span className="paragraph-xs color-teal-grey-300">
+                {shot.label}
+              </span>
             </div>
           ))}
         </div>
@@ -582,7 +584,7 @@ export default async function MediaPage() {
             Download everything (zip
             {kit ? `, ${(kit.zipBytes / 1_000_000).toFixed(1)} MB` : ''})
           </PressLink>
-          <span className="paragraph-xs color-teal-300">
+          <span className="paragraph-xs color-teal-grey-300">
             All logos and screenshots above, in one file.
           </span>
         </div>
@@ -630,7 +632,7 @@ export default async function MediaPage() {
             >
               {PRESS_EMAIL}
             </PressLink>
-            <p className="paragraph-small color-teal-300">
+            <p className="paragraph-small color-teal-grey-300">
               We are a small team, so please include your deadline in the
               subject line. We aim to reply within two working days.
             </p>

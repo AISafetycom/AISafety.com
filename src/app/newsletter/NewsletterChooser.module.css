@@ -10,11 +10,11 @@
 }
 
 .row {
-  border-top: 1px solid var(--teal-700);
+  border-top: 1px solid var(--teal-grey-700);
 }
 
 .row:last-child {
-  border-bottom: 1px solid var(--teal-700);
+  border-bottom: 1px solid var(--teal-grey-700);
 }
 
 .link:hover {

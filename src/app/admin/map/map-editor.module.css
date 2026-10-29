@@ -9,8 +9,8 @@
 
 .toolbar {
   padding: 10px 12px;
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 8px;
 }
 
@@ -26,7 +26,7 @@
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   cursor: pointer;
   user-select: none;
 }
@@ -118,8 +118,8 @@
   position: relative;
   overflow: hidden;
   border-radius: 8px;
-  border: 1px solid var(--teal-800);
-  background-color: var(--teal-900);
+  border: 1px solid var(--teal-grey-800);
+  background-color: var(--teal-grey-900);
 }
 
 .canvas svg {
@@ -153,8 +153,8 @@
 .tooltip {
   position: fixed;
   pointer-events: none;
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-700);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 8px;
   padding: 12px 16px;
   max-width: 300px;
@@ -179,7 +179,7 @@
   font-weight: 300;
   line-height: 167.5%;
   letter-spacing: -0.2px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .canvasLoading {
@@ -200,8 +200,8 @@
   z-index: 50;
   padding: 4px 8px;
   border-radius: 6px;
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-700);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-700);
   color: var(--white);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -216,15 +216,15 @@
   flex-direction: column;
   height: var(--editor-height);
   min-height: 480px;
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 8px;
   overflow: hidden;
 }
 
 .tabs {
   display: flex;
-  border-bottom: 1px solid var(--teal-800);
+  border-bottom: 1px solid var(--teal-grey-800);
 }
 
 .tab {
@@ -233,7 +233,7 @@
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   font-size: 12px;
   font-weight: 500;
   font-family: inherit;
@@ -268,7 +268,7 @@
 .searchBar {
   position: relative;
   padding: 12px;
-  border-bottom: 1px solid var(--teal-800);
+  border-bottom: 1px solid var(--teal-grey-800);
   flex-shrink: 0;
 }
 
@@ -285,12 +285,12 @@
   top: 50%;
   transform: translateY(-50%);
   padding: 1px 6px;
-  border: 1px solid var(--teal-700);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 4px;
   font-family: inherit;
   font-size: 11px;
   line-height: 1.4;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   pointer-events: none;
 }
 
@@ -315,8 +315,8 @@
   align-items: center;
   padding: 8px;
   border-radius: 6px;
-  border: 1px solid var(--teal-800);
-  background-color: var(--teal-900);
+  border: 1px solid var(--teal-grey-800);
+  background-color: var(--teal-grey-900);
 }
 
 .rowPlacing {
@@ -335,7 +335,7 @@
    previews, it does not move the cursor. (These come after .row on purpose:
    same specificity, later wins.) */
 .rowResult:hover {
-  border-color: var(--teal-500);
+  border-color: var(--teal-grey-500);
 }
 
 .rowActive,
@@ -367,7 +367,7 @@
 .rowCoords {
   font-size: 11px;
   line-height: 1.4;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
@@ -423,7 +423,7 @@
 .rowMeta {
   font-size: 11px;
   line-height: 1.4;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   overflow-wrap: anywhere;
 }
 
@@ -455,8 +455,8 @@
 }
 
 .badgeWarn {
-  color: var(--teal-300);
-  border-color: var(--teal-700);
+  color: var(--teal-grey-300);
+  border-color: var(--teal-grey-700);
 }
 
 .detail {
@@ -481,7 +481,7 @@
 }
 
 .dl dt {
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .dl dd {
@@ -514,7 +514,7 @@
   flex-direction: column;
   gap: 4px;
   font-size: 11px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .coords input {

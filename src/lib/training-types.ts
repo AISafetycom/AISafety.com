@@ -13,7 +13,7 @@ const TRAINING_TYPE_COLOR: Record<string, string> = {
   Bootcamp: 'color-pink',
   Course: 'color-bright-green',
   'Immersive workshop': 'color-blue',
-  Other: 'color-teal-300',
+  Other: 'color-teal-grey-300',
 }
 
 export function trainingTypeColor(type: string): string {

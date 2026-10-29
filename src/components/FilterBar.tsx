@@ -28,7 +28,7 @@ export default function FilterBar({
       <div className={`flex items-center gap-8px ${styles.pills}`}>
         {children}
       </div>
-      <p className={`paragraph-small color-teal-300 ${styles.count}`}>
+      <p className={`paragraph-small color-teal-grey-300 ${styles.count}`}>
         {label ?? `${count} ${noun}${count === 1 ? '' : 's'}`}
       </p>
     </div>

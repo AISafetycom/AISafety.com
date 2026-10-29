@@ -196,13 +196,13 @@
 }
 
 .nav-dropdown-item:hover {
-  background-color: var(--teal-850);
+  background-color: var(--teal-grey-850);
   box-shadow: var(--shadow-dark);
 }
 
 .nav-item:hover,
 .nav-item-last:hover {
-  background-color: var(--teal-850);
+  background-color: var(--teal-grey-850);
   box-shadow: var(--shadow-dark);
   cursor: pointer;
 }
@@ -214,7 +214,7 @@
 .nav-item[aria-current='page'],
 .nav-dropdown-item[aria-current='page'] {
   border-color: var(--bright-teal-300);
-  background-color: var(--teal-850);
+  background-color: var(--teal-grey-850);
 }
 
 /* The active pill is already filled, so hover lifts it with the site's
@@ -222,7 +222,11 @@
    dropdown item, whose fill blends into the teal-850 dropdown panel. */
 .nav-item[aria-current='page']:hover,
 .nav-dropdown-item[aria-current='page']:hover {
-  background-color: color-mix(in srgb, var(--teal-850) 60%, var(--teal-800));
+  background-color: color-mix(
+    in srgb,
+    var(--teal-grey-850) 60%,
+    var(--teal-grey-800)
+  );
 }
 
 /* Ring-only hint on the +N pill when the current page's link is hidden
@@ -243,7 +247,7 @@
 }
 
 .nav-search-button:hover {
-  background-color: var(--teal-850);
+  background-color: var(--teal-grey-850);
 }
 
 .nav-item-icon {

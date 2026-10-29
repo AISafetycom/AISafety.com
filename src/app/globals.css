@@ -24,18 +24,18 @@
    =============================== */
 
 :root {
-  /* Teal Scale */
-  --teal-100: #e3e5e6;
-  --teal-200: #c6cccc;
-  --teal-300: #aab2b3;
-  --teal-400: #8e999a;
-  --teal-500: #717f80;
-  --teal-600: #556667;
-  --teal-700: #394c4e;
-  --teal-750: #2a3f41;
-  --teal-800: #1c3334;
-  --teal-850: #0e2628;
-  --teal-900: #00191b;
+  /* Teal Grey Scale */
+  --teal-grey-100: #e3e5e6;
+  --teal-grey-200: #c6cccc;
+  --teal-grey-300: #aab2b3;
+  --teal-grey-400: #8e999a;
+  --teal-grey-500: #717f80;
+  --teal-grey-600: #556667;
+  --teal-grey-700: #394c4e;
+  --teal-grey-750: #2a3f41;
+  --teal-grey-800: #1c3334;
+  --teal-grey-850: #0e2628;
+  --teal-grey-900: #00191b;
 
   /* Bright Teal Scale (more saturated parallel to the Teal Scale above) */
   --teal-bright-100: #f1faf9;
@@ -126,7 +126,7 @@ a {
    =============================== */
 
 body {
-  background-color: var(--teal-900);
+  background-color: var(--teal-grey-900);
   background-image: url('/images/bg.svg');
   background-position: top center;
   background-repeat: no-repeat;
@@ -227,14 +227,14 @@ label {
    =============================== */
 
 /* Text colors */
-.color-teal-300 {
-  color: var(--teal-300);
+.color-teal-grey-300 {
+  color: var(--teal-grey-300);
 }
-.color-teal-400 {
-  color: var(--teal-400);
+.color-teal-grey-400 {
+  color: var(--teal-grey-400);
 }
-.color-teal-500 {
-  color: var(--teal-500);
+.color-teal-grey-500 {
+  color: var(--teal-grey-500);
 }
 .color-teal {
   color: var(--bright-teal-500);
@@ -892,7 +892,7 @@ label {
 /* Divider */
 .divider {
   height: 1px;
-  background-color: var(--teal-700);
+  background-color: var(--teal-grey-700);
 }
 
 /* Cursor */
@@ -965,7 +965,7 @@ label {
   height: 48px;
   padding: 0 18px;
   background-color: var(--white);
-  color: var(--teal-900);
+  color: var(--teal-grey-900);
   border: none;
   border-radius: 24px;
   font-size: 15px;
@@ -1008,21 +1008,21 @@ label {
   width: 100%;
   height: 56px;
   padding: 0 16px;
-  background-color: var(--teal-900);
-  border: 1px solid var(--teal-600);
+  background-color: var(--teal-grey-900);
+  border: 1px solid var(--teal-grey-600);
   border-radius: 16px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   /* Type (size/tracking/etc.) inherits the default body text style. */
 }
 
 .text-field:hover,
 .text-field:focus {
-  border-color: var(--teal-400);
+  border-color: var(--teal-grey-400);
   outline: none;
 }
 
 .text-field::placeholder {
-  color: var(--teal-600);
+  color: var(--teal-grey-600);
 }
 
 /* Native <select> arrows sit flush against the edge and ignore padding, so

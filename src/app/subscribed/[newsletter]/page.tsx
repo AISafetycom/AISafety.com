@@ -101,12 +101,12 @@ export default async function SubscribedPage({
             )}{' '}
             will arrive in your inbox{one ? ` ${one.when}` : ''}.
           </h2>
-          <p className="color-teal-300 padding-bottom-16px">
+          <p className="color-teal-grey-300 padding-bottom-16px">
             {one
               ? 'If it lands in spam or Promotions, move it to your inbox and it will stay there.'
               : 'If any of them lands in spam or Promotions, move it to your inbox and its next issues will stay there.'}
           </p>
-          <p className="color-teal-300">
+          <p className="color-teal-grey-300">
             In the meantime, see all{' '}
             {listOf(
               picked.map(n => (

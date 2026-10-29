@@ -86,7 +86,7 @@ export default function SearchBar({
       {showClear ? (
         <button
           type="button"
-          className={`${styles.clearButton} flex items-center justify-center cursor-pointer color-teal-400${clearButtonClassName ? ` ${clearButtonClassName}` : ''}`}
+          className={`${styles.clearButton} flex items-center justify-center cursor-pointer color-teal-grey-400${clearButtonClassName ? ` ${clearButtonClassName}` : ''}`}
           aria-label="Clear search"
           onMouseDown={event => event.preventDefault()}
           onClick={clearSearch}

@@ -46,7 +46,7 @@ export default function DonationGuideClient({
         <h1 className="padding-top-56px padding-bottom-8px">Donation guide</h1>
         <RelativeDate
           iso={lastUpdated}
-          className="padding-bottom-40px paragraph-small color-teal-300"
+          className="padding-bottom-40px paragraph-small color-teal-grey-300"
         />
         <IntroHeading intro={guide.intro} />
         <p className="padding-bottom-32px">Choose a donation amount:</p>

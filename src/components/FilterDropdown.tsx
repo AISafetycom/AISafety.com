@@ -79,7 +79,7 @@ export default function FilterDropdown({
         style={maxListHeight ? { maxHeight: maxListHeight } : undefined}
       >
         {searchable && visibleOptions.length === 0 && (
-          <p className="paragraph-small color-teal-300">Nothing found.</p>
+          <p className="paragraph-small color-teal-grey-300">Nothing found.</p>
         )}
         {visibleOptions.map(option => (
           <label
@@ -104,7 +104,7 @@ export default function FilterDropdown({
             />
             <span className="paragraph-small color-white">
               {option}
-              <span className="paragraph-xs color-teal-300 margin-left-4px">
+              <span className="paragraph-xs color-teal-grey-300 margin-left-4px">
                 {' '}
                 ({counts[option] || 0})
               </span>

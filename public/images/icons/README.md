@@ -8,7 +8,7 @@ on an active pill. **Never bake more than one color into an icon.**
 
 ```tsx
 import Icon from '@/components/Icon'
-;<Icon src="/images/icons/globe.svg" className="color-teal-300" /> // size defaults to 16
+;<Icon src="/images/icons/globe.svg" className="color-teal-grey-300" /> // size defaults to 16
 ```
 
 ## Designing a new icon

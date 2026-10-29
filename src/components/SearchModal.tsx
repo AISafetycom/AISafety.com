@@ -277,7 +277,7 @@ export default function SearchModal({
           <button
             type="button"
             onClick={onClose}
-            className={`${styles['shortcut-hint']} paragraph-xs color-teal-400`}
+            className={`${styles['shortcut-hint']} paragraph-xs color-teal-grey-400`}
             aria-label="Close search"
           >
             <span className={styles['shortcut-hint-esc']}>esc</span>
@@ -295,7 +295,7 @@ export default function SearchModal({
             <div
               className={`${styles.empty} flex flex-col items-center gap-16px padding-top-32px padding-bottom-32px padding-left-24px padding-right-24px`}
             >
-              <p className="paragraph-small color-teal-400">
+              <p className="paragraph-small color-teal-grey-400">
                 Search is temporarily unavailable.
               </p>
               <button
@@ -359,7 +359,7 @@ export default function SearchModal({
                   <Icon
                     src="/images/icons/heart.svg"
                     size={16}
-                    className="color-teal-300"
+                    className="color-teal-grey-300"
                   />
                 </div>
                 <span
@@ -375,7 +375,7 @@ export default function SearchModal({
             <div
               className={`${styles.empty} padding-top-32px padding-bottom-32px padding-left-24px padding-right-24px`}
             >
-              <p className="paragraph-small color-teal-400">
+              <p className="paragraph-small color-teal-grey-400">
                 {activeType
                   ? `No ${TYPE_LABEL[activeType].toLowerCase()} match “${query}”.`
                   : `No results for “${query}”.`}
@@ -445,7 +445,7 @@ export default function SearchModal({
                       )}
                       {entry.description && (
                         <p
-                          className={`${styles['result-description']} paragraph-xs color-teal-300 margin-top-4px`}
+                          className={`${styles['result-description']} paragraph-xs color-teal-grey-300 margin-top-4px`}
                         >
                           {entry.description}
                         </p>
@@ -521,7 +521,7 @@ function SearchIcon() {
     <Icon
       src="/images/icons/search.svg"
       size={16}
-      className={`${styles['input-icon']} color-teal-400`}
+      className={`${styles['input-icon']} color-teal-grey-400`}
     />
   )
 }

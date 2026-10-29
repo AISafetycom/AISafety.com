@@ -180,7 +180,7 @@ export default function NewsletterChooser({
   return (
     <>
       {view.kind === 'loading' && (
-        <p className="color-teal-300" role="status">
+        <p className="color-teal-grey-300" role="status">
           Loading your newsletters
         </p>
       )}
@@ -250,7 +250,7 @@ function NewsletterRows({
           <div>
             <label htmlFor={`${id}-${n.key}`} className="cursor-pointer">
               <span className="color-white">{n.name}</span>{' '}
-              <span className="color-teal-300">{n.about}</span>
+              <span className="color-teal-grey-300">{n.about}</span>
             </label>
             <p className="paragraph-small padding-top-8px">
               <a
@@ -426,7 +426,7 @@ function SignupForm({ newsletters }: { newsletters: Newsletter[] }) {
           onChange={e => setHp(e.target.value)}
         />
       </div>
-      <p className="paragraph-small color-teal-300 padding-top-40px">
+      <p className="paragraph-small color-teal-grey-300 padding-top-40px">
         Already getting one? To change which newsletters you get, or to stop
         them all, use the Manage subscriptions link at the bottom of any of
         their emails.
@@ -504,7 +504,7 @@ function ManageForm({
       aria-busy={busy}
     >
       <h3 className="padding-bottom-8px">Your newsletters</h3>
-      <p className="color-teal-300 padding-bottom-16px">
+      <p className="color-teal-grey-300 padding-bottom-16px">
         For {email}. Tick the ones you want to get, then save.
       </p>
       <NewsletterRows
@@ -551,7 +551,7 @@ function ManageForm({
 /** The Updates newsletter, still on Substack: a link, not a box to tick. */
 function UpdatesNote({ updates }: { updates: Updates }) {
   return (
-    <p className="paragraph-small color-teal-300 padding-top-24px">
+    <p className="paragraph-small color-teal-grey-300 padding-top-24px">
       <span className="color-white">{updates.name}</span> {updates.about}{' '}
       <a
         href={updates.url}

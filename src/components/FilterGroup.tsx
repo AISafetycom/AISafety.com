@@ -52,9 +52,9 @@ export default function FilterGroup({
               }}
               className="checkbox"
             />
-            <span className="paragraph-small color-teal-300">
+            <span className="paragraph-small color-teal-grey-300">
               {labels?.[option] ?? option}
-              <span className="paragraph-xs color-teal-300 margin-left-4px">
+              <span className="paragraph-xs color-teal-grey-300 margin-left-4px">
                 {' '}
                 ({counts[option] || 0})
               </span>

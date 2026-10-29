@@ -10,7 +10,7 @@ Always use a pre-defined variable for colors. Never hardcode hex values. Never a
 
 ```css
 /* Good */
-background-color: var(--teal-800);
+background-color: var(--teal-grey-800);
 color: var(--bright-teal-300);
 
 /* Bad */
@@ -59,7 +59,7 @@ Assign text colors using these utility classes.
 
 ```tsx
 // Good
-<p className="color-teal-300">Muted text</p>
+<p className="color-teal-grey-300">Muted text</p>
 <span className="color-light-teal">Accent text</span>
 
 // Bad

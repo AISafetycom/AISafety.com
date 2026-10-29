@@ -17,7 +17,7 @@ const D3PosterMap = dynamic(() => import('./D3PosterMap'), {
         justifyContent: 'center',
       }}
     >
-      <p className="paragraph-small color-teal-300">Loading map...</p>
+      <p className="paragraph-small color-teal-grey-300">Loading map...</p>
     </div>
   ),
 })

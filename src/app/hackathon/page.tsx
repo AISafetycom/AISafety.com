@@ -69,7 +69,7 @@ export default function HackathonPage() {
             applications from very strong candidates.
           </p>
 
-          <p className="color-teal-300 padding-bottom-40px">
+          <p className="color-teal-grey-300 padding-bottom-40px">
             Once a year, the core AISafety.com team gets together with a group
             of amazing volunteers and spends an extended weekend getting a bunch
             of stuff done to improve the site. We also do some relaxed fun
@@ -77,7 +77,7 @@ export default function HackathonPage() {
           </p>
           <h3 className="padding-bottom-16px">Who we&apos;re looking for</h3>
           <ul
-            className={`color-teal-300 padding-bottom-40px ${styles.bullets}`}
+            className={`color-teal-grey-300 padding-bottom-40px ${styles.bullets}`}
           >
             <li>
               <strong>Product managers and designers</strong>
@@ -133,7 +133,7 @@ export default function HackathonPage() {
             </li>
           </ul>
 
-          <p className="color-teal-300 padding-bottom-40px">
+          <p className="color-teal-grey-300 padding-bottom-40px">
             On the first day of the hackathon we will divide everyone into small
             teams by{' '}
             <a
@@ -151,7 +151,7 @@ export default function HackathonPage() {
 
           <h3 className="padding-bottom-16px">Why it&apos;s worth it</h3>
           <ul
-            className={`color-teal-300 padding-bottom-40px ${styles.bullets}`}
+            className={`color-teal-grey-300 padding-bottom-40px ${styles.bullets}`}
           >
             <li>
               <strong>
@@ -169,7 +169,7 @@ export default function HackathonPage() {
             </li>
           </ul>
 
-          <p className="color-teal-300 padding-bottom-40px">
+          <p className="color-teal-grey-300 padding-bottom-40px">
             If you have any questions, please message Bryce on the{' '}
             <a
               href="https://discord.gg/WQG8FAGqun"

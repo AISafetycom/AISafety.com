@@ -45,7 +45,7 @@ function MetaRows({ rows }: { rows: FeaturedCardMeta[] }) {
   return (
     <div className="flex flex-col gap-4px">
       {rows.map((field, i) => (
-        <div key={i} className="flex items-center gap-8px color-teal-300">
+        <div key={i} className="flex items-center gap-8px color-teal-grey-300">
           <Icon src={field.icon} />
           <p className="paragraph-xs">{field.value}</p>
         </div>
@@ -103,7 +103,7 @@ export default function FeaturedCard({
       )}
 
       <span
-        className={`${styles.pill} ${accentClass ? styles.pillAccent : ''} paragraph-xs-bold ${accentClass ?? 'color-teal-300'} inline-flex items-center gap-8px padding-left-8px padding-right-8px`}
+        className={`${styles.pill} ${accentClass ? styles.pillAccent : ''} paragraph-xs-bold ${accentClass ?? 'color-teal-grey-300'} inline-flex items-center gap-8px padding-left-8px padding-right-8px`}
       >
         <span
           className={`${styles.dot} ${accentClass ? styles.dotAccent : ''}`}

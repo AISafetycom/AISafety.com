@@ -17,7 +17,7 @@ const EVENT_TYPE_COLOR: Record<string, string> = {
   Meetup: 'color-blue',
   Hackathon: 'color-purple',
   Competition: 'color-yellow',
-  Other: 'color-teal-300',
+  Other: 'color-teal-grey-300',
 }
 
 export function eventTypeColor(type: string): string {

@@ -12,7 +12,7 @@
   align-items: center;
   gap: 4px;
   border-radius: 100px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   transition: all var(--hover-transition);
 }
 

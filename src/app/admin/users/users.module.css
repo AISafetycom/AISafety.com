@@ -8,8 +8,8 @@
 
 .card {
   padding: 14px 16px;
-  background-color: var(--teal-900);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-900);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 8px;
   display: grid;
   gap: 10px;
@@ -37,17 +37,17 @@
 }
 
 .cardEmail {
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .cardPending {
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   font-style: italic;
 }
 
 .cardMeta {
   font-size: 12px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   display: flex;
   gap: 16px;
   flex-wrap: wrap;
@@ -56,15 +56,15 @@
 .badge {
   display: inline-block;
   padding: 1px 7px;
-  border: 1px solid var(--teal-700);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 999px;
   font-size: 11px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .badgeYou {
   border-color: transparent;
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
   color: var(--bright-teal-300);
 }
 
@@ -79,10 +79,10 @@
 .pick {
   display: inline-flex;
   align-items: stretch;
-  border: 1px solid var(--teal-800);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 999px;
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   user-select: none;
 }
 
@@ -110,14 +110,14 @@
 /* Amber, like the "this edits the live site" boxes on the pages it unlocks. */
 .pickEdit {
   padding: 5px 10px 5px 8px;
-  border-left: 1px solid var(--teal-800);
+  border-left: 1px solid var(--teal-grey-800);
   font-size: 11px;
   color: #f5b942;
   opacity: 0.6;
 }
 
 .pickOn .pickEdit {
-  border-left-color: var(--teal-700);
+  border-left-color: var(--teal-grey-700);
   opacity: 0.85;
 }
 
@@ -166,7 +166,7 @@
   background: none;
   border: none;
   padding: 0;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   font-size: 12px;
   font-family: inherit;
   cursor: pointer;
@@ -208,7 +208,7 @@
 
 .fieldLabel {
   font-size: 11px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .formActions {
@@ -219,7 +219,7 @@
 
 .notice {
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .noticeError {

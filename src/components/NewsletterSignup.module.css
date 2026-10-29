@@ -46,7 +46,7 @@
 }
 
 .input::placeholder {
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .input:-webkit-autofill,

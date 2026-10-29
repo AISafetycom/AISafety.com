@@ -364,7 +364,7 @@ export default function Navigation({
                 </div>
                 <p className="paragraph-small-bold">{item.label}</p>
                 {counts[item.href] && (
-                  <p className="paragraph-xs color-teal-300">
+                  <p className="paragraph-xs color-teal-grey-300">
                     {counts[item.href]}
                   </p>
                 )}
@@ -417,7 +417,7 @@ export default function Navigation({
                       </div>
                       <p className="paragraph-small-bold">{item.label}</p>
                       {counts[item.href] && (
-                        <p className="paragraph-xs color-teal-300">
+                        <p className="paragraph-xs color-teal-grey-300">
                           {counts[item.href]}
                         </p>
                       )}
@@ -491,7 +491,7 @@ export default function Navigation({
               </div>
               <p className="paragraph-default-bold">{item.label}</p>
               {counts[item.href] && (
-                <p className="paragraph-small color-teal-300">
+                <p className="paragraph-small color-teal-grey-300">
                   {counts[item.href]}
                 </p>
               )}

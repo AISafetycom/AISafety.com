@@ -115,7 +115,7 @@ export default async function NewsletterPage({ params }: Props) {
           href={nl.page}
           newsletter={nl.prefix}
           target="resource"
-          className="paragraph-small color-teal-300"
+          className="paragraph-small color-teal-grey-300"
         >
           {RESOURCE_LINK[key].lead}{' '}
           <span className="color-white">{RESOURCE_LINK[key].name}</span>
@@ -124,7 +124,7 @@ export default async function NewsletterPage({ params }: Props) {
       </PageHeader>
 
       <div className="width-7-col padding-bottom-56px">
-        <h3 className="paragraph-small-bold color-teal-300 padding-bottom-16px">
+        <h3 className="paragraph-small-bold color-teal-grey-300 padding-bottom-16px">
           Past issues
         </h3>
         {issues ? (
@@ -134,7 +134,7 @@ export default async function NewsletterPage({ params }: Props) {
                 key={issue.slug}
                 className={`${styles.issue} gap-16px padding-top-12px padding-bottom-12px`}
               >
-                <span className="color-teal-400">
+                <span className="color-teal-grey-400">
                   {issue.sentAt ? formatDate(new Date(issue.sentAt)) : ''}
                 </span>
                 <ArchiveLink
@@ -150,13 +150,13 @@ export default async function NewsletterPage({ params }: Props) {
             ))}
           </ul>
         ) : (
-          <p className="color-teal-300">
+          <p className="color-teal-grey-300">
             The list of past issues couldn&apos;t be loaded just now. Please try
             again in a few minutes.
           </p>
         )}
 
-        <p className="paragraph-small color-teal-300 padding-top-24px">
+        <p className="paragraph-small color-teal-grey-300 padding-top-24px">
           {SUBSTACK_NOTE[key]}{' '}
           <ArchiveLink
             href={withUtm(SUBSTACK_ARCHIVES[key], 'Newsletter')}
@@ -168,7 +168,7 @@ export default async function NewsletterPage({ params }: Props) {
           </ArchiveLink>
           .
         </p>
-        <p className="paragraph-small color-teal-300 padding-top-16px">
+        <p className="paragraph-small color-teal-grey-300 padding-top-16px">
           To follow new issues in a feed reader, use the{' '}
           <ArchiveLink
             href={feedPath(key)}

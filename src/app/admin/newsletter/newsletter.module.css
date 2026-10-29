@@ -6,7 +6,7 @@
   flex-wrap: wrap;
   gap: 6px 18px;
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   margin: 0;
 }
 
@@ -50,19 +50,19 @@
 }
 
 .button {
-  border: 1px solid var(--teal-700);
-  background: var(--teal-900);
+  border: 1px solid var(--teal-grey-700);
+  background: var(--teal-grey-900);
   color: var(--white);
 }
 
 .button:hover:not(:disabled) {
-  background: var(--teal-800);
+  background: var(--teal-grey-800);
 }
 
 .buttonPrimary {
   border: 1px solid var(--bright-teal-300);
   background: var(--bright-teal-300);
-  color: var(--teal-900);
+  color: var(--teal-grey-900);
 }
 
 .buttonPrimary:hover:not(:disabled) {
@@ -77,7 +77,7 @@
 
 .notice {
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .noticeError {
@@ -135,9 +135,9 @@
   min-width: 0;
   width: 100%;
   height: 820px;
-  border: 1px solid var(--teal-800);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 8px;
-  background: var(--teal-900);
+  background: var(--teal-grey-900);
 }
 
 /* Recent sends (made easier to read 8 Oct 2026): numbers right-aligned so
@@ -157,7 +157,7 @@
 .table td {
   text-align: left;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--teal-800);
+  border-bottom: 1px solid var(--teal-grey-800);
   vertical-align: top;
 }
 
@@ -169,8 +169,8 @@
 
 .table th {
   padding-top: 0;
-  border-bottom-color: var(--teal-700);
-  color: var(--teal-400);
+  border-bottom-color: var(--teal-grey-700);
+  color: var(--teal-grey-400);
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
@@ -187,11 +187,11 @@
 /* Every other issue a shade lighter (Bryce, 8 Oct 2026). On the row, not
    the cells, so a faded test send keeps the same shade. */
 .table tbody:nth-of-type(even) tr {
-  background: color-mix(in srgb, var(--teal-800) 45%, transparent);
+  background: color-mix(in srgb, var(--teal-grey-800) 45%, transparent);
 }
 
 .table tbody tr:hover td {
-  background: var(--teal-800);
+  background: var(--teal-grey-800);
 }
 
 /* Every column but the first is only as wide as its contents, so the
@@ -209,7 +209,7 @@
 }
 
 .muted {
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .issueName {
@@ -224,7 +224,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--teal-500);
+  background: var(--teal-grey-500);
 }
 
 .dotEvents {
@@ -264,14 +264,14 @@
   margin-top: 2px;
   font-size: 12px;
   font-weight: 400;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .tag {
   padding: 1px 6px;
-  border: 1px solid var(--teal-600);
+  border: 1px solid var(--teal-grey-600);
   border-radius: 4px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.4px;
@@ -320,7 +320,7 @@
   margin: 12px 0 0 4px;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .tableNote a {
@@ -349,8 +349,8 @@
   width: 100%;
   max-width: 460px;
   padding: 24px;
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-700);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 12px;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
 }
@@ -373,7 +373,7 @@
 }
 
 .dialogFacts dt {
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .dialogFacts dd {
@@ -385,7 +385,7 @@
 .dialogNote {
   margin: 16px 0 0;
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   line-height: 1.5;
 }
 
@@ -426,14 +426,14 @@
   flex-direction: column;
   gap: 2px;
   padding: 12px 14px;
-  border: 1px solid var(--teal-800);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 8px;
-  background: var(--teal-900);
+  background: var(--teal-grey-900);
 }
 
 .lineupLabel {
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .lineupCounts {
@@ -457,7 +457,7 @@
 
 .lineupSince {
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .lineupList {
@@ -474,7 +474,7 @@
 .lineupGroup {
   margin: 8px 0 0;
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .lineupList ul {
@@ -490,9 +490,9 @@
   flex-direction: column;
   gap: 12px;
   padding: 14px 16px;
-  border: 1px solid var(--teal-800);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 8px;
-  background: var(--teal-900);
+  background: var(--teal-grey-900);
   /* The editor block hands down a fixed 27px line-height (sized for its
      17px text); at 13px a wrapped title looked double-spaced (Bryce, 16
      Sept 2026). */
@@ -508,7 +508,7 @@
 .reorderGroupLabel {
   font-size: 12px;
   font-weight: 600;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .reorderList {
@@ -525,9 +525,9 @@
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
-  border: 1px solid var(--teal-800);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 6px;
-  background: var(--teal-850);
+  background: var(--teal-grey-850);
   color: var(--white);
   font-size: 13px;
   cursor: grab;
@@ -544,14 +544,14 @@
 }
 
 .reorderHandle {
-  color: var(--teal-500);
+  color: var(--teal-grey-500);
   letter-spacing: -2px;
   font-size: 14px;
 }
 
 .reorderIndex {
   min-width: 18px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
@@ -579,10 +579,10 @@
 .rowButton {
   flex: 0 0 auto;
   padding: 3px 9px;
-  border: 1px solid var(--teal-700);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 6px;
-  background: var(--teal-900);
-  color: var(--teal-200);
+  background: var(--teal-grey-900);
+  color: var(--teal-grey-200);
   font-family: inherit;
   font-size: 11px;
   font-weight: 600;
@@ -590,7 +590,7 @@
 }
 
 .rowButton:hover:not(:disabled) {
-  background: var(--teal-800);
+  background: var(--teal-grey-800);
   color: var(--white);
 }
 
@@ -613,7 +613,7 @@
   cursor: default;
   border-style: dashed;
   background: transparent;
-  color: var(--teal-200);
+  color: var(--teal-grey-200);
 }
 
 .removedRow:active {
@@ -622,7 +622,7 @@
 
 .removedSection {
   font-size: 11px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 /* Send test after a test of the issue as it is now went out. */
@@ -647,9 +647,9 @@
   gap: 10px;
   margin: 2px 0 6px;
   padding: 10px 12px;
-  border: 1px solid var(--teal-700);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 6px;
-  background: var(--teal-900);
+  background: var(--teal-grey-900);
 }
 
 .fitLabel {
@@ -658,7 +658,7 @@
   gap: 6px;
   font-size: 12px;
   font-weight: 600;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 /* Always as tall as its text (GrowingTextarea sets the height), so there is
@@ -666,9 +666,9 @@
 .fitTextarea {
   width: 100%;
   padding: 8px 10px;
-  border: 1px solid var(--teal-700);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 6px;
-  background: var(--teal-850);
+  background: var(--teal-grey-850);
   color: var(--white);
   font-family: inherit;
   font-size: 13px;
@@ -700,7 +700,7 @@
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: var(--teal-200);
+  color: var(--teal-grey-200);
   cursor: pointer;
 }
 
@@ -711,9 +711,9 @@
   align-items: center;
   gap: 14px;
   padding: 18px 20px;
-  border: 1px solid var(--teal-700);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 8px;
-  background: var(--teal-900);
+  background: var(--teal-grey-900);
   color: var(--white);
   font-size: 14px;
   line-height: 1.4;
@@ -728,7 +728,7 @@
   display: block;
   margin-top: 3px;
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .spinner {
@@ -835,7 +835,7 @@
   gap: 8px;
   margin: 0;
   padding: 10px 12px;
-  border: 1px solid var(--teal-700);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 8px;
 }
 
@@ -862,7 +862,7 @@
   gap: 6px;
   margin: 0;
   padding: 10px 12px;
-  border: 1px solid var(--teal-700);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 8px;
   font-size: 12px;
   line-height: 1.5;
@@ -871,7 +871,7 @@
 .wavesTitle {
   padding: 0 4px;
   font-weight: 600;
-  color: var(--teal-200);
+  color: var(--teal-grey-200);
 }
 
 .waveList {
@@ -911,13 +911,13 @@
 
 /* Waves after the next one: shown, not choosable yet. */
 .waveLater {
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   cursor: default;
 }
 
 .waveNumbers {
   margin: 0 0 0 22px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   overflow-wrap: anywhere;
 }
 
@@ -929,7 +929,7 @@
 
 .waveSubRow td:first-child {
   padding-left: 22px;
-  color: var(--teal-200);
+  color: var(--teal-grey-200);
 }
 
 .rowActions {
