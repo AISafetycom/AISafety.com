@@ -36,11 +36,7 @@
    on the bars in range is the global .drop-shadow-extra-dark class. */
 .bar,
 .fill {
-  background-image: linear-gradient(
-    to right,
-    var(--teal-bright-300),
-    var(--teal-bright-500)
-  );
+  background-image: linear-gradient(to right, var(--teal-300), var(--teal-500));
 }
 
 .bar {
@@ -52,7 +48,7 @@
 
 /* Outside the chosen range. */
 .barOff {
-  background: var(--teal-bright-750);
+  background: var(--teal-750);
 }
 
 /* The shadow of a bar in range, as its own layer behind every bar: drawn on
@@ -79,7 +75,7 @@
 }
 
 .track {
-  background: var(--teal-bright-750);
+  background: var(--teal-750);
 }
 
 .handle {
@@ -144,14 +140,14 @@
   width: 24px;
   height: 24px;
   box-sizing: border-box;
-  border: 1px solid var(--teal-bright-750);
+  border: 1px solid var(--teal-750);
   border-radius: 50%;
-  background: var(--teal-bright-800);
+  background: var(--teal-800);
   pointer-events: none;
 }
 
 /* The drawn handle follows the invisible input just before it. */
 .handle:focus-visible + .thumb {
-  outline: 2px solid var(--teal-bright-300);
+  outline: 2px solid var(--teal-300);
   outline-offset: 2px;
 }

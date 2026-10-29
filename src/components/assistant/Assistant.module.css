@@ -134,7 +134,7 @@
 .headerLabelIcon {
   width: 16px;
   height: 16px;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .headerActions {
@@ -191,7 +191,7 @@
 }
 
 .greetingBubble a {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   text-decoration: none;
 }
 
@@ -241,7 +241,7 @@
 
 .chip:hover {
   background-color: var(--teal-grey-800);
-  border-color: var(--bright-teal-500);
+  border-color: var(--teal-400);
 }
 
 /* Messages */
@@ -306,7 +306,7 @@
 }
 
 .assistantMessage a {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   text-decoration: none;
   transition: color var(--hover-transition);
 }
@@ -328,7 +328,7 @@
   display: inline-block;
   width: 7px;
   height: 14px;
-  background-color: var(--bright-teal-500);
+  background-color: var(--teal-400);
   vertical-align: text-bottom;
   margin-left: 2px;
   animation: blink 1s infinite;
@@ -389,7 +389,7 @@
   background-color: transparent;
   border: 1px dashed var(--teal-grey-700);
   border-radius: 12px;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   font-size: 13px;
   font-weight: 600;
   letter-spacing: -0.2px;
@@ -420,7 +420,7 @@
   justify-content: center;
   width: 36px;
   height: 36px;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .citationLogoImg {
@@ -465,7 +465,7 @@
 
 .citationNote {
   font-size: 12px;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   letter-spacing: -0.2px;
   line-height: 1.35;
   margin-top: 3px;
@@ -487,7 +487,7 @@
 }
 
 /* Doubled selector + scope inside .assistantMessage to win against the
-   generic `.assistantMessage a { color: var(--bright-teal-300) }` rule. */
+   generic `.assistantMessage a { color: var(--teal-300) }` rule. */
 
 .assistantMessage .suggestButton,
 .suggestButton.suggestButton {
@@ -496,7 +496,7 @@
   align-self: flex-start;
   gap: 6px;
   padding: 9px 16px;
-  background-color: var(--bright-teal-500);
+  background-color: var(--teal-400);
   color: var(--teal-grey-900);
   border: none;
   border-radius: 999px;
@@ -510,7 +510,7 @@
 
 .assistantMessage .suggestButton:hover,
 .suggestButton.suggestButton:hover {
-  background-color: var(--bright-teal-300);
+  background-color: var(--teal-300);
   color: var(--teal-grey-900);
 }
 
@@ -682,7 +682,7 @@
 .toolPillDetailsCode {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   line-height: 1.5;
 }
 
@@ -705,11 +705,11 @@
 .toolPillDetails code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .toolPillRunning {
-  border-color: var(--bright-teal-500);
+  border-color: var(--teal-400);
   color: var(--white);
   background-color: var(--teal-grey-750);
 }
@@ -720,7 +720,7 @@
   justify-content: center;
   width: 16px;
   height: 16px;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .toolPillIcon svg {
@@ -732,7 +732,7 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  border: 1.5px solid var(--bright-teal-500);
+  border: 1.5px solid var(--teal-400);
   border-top-color: transparent;
   animation: spin 0.7s linear infinite;
 }
@@ -806,7 +806,7 @@
 .thinkToggleIcon {
   width: 12px;
   height: 12px;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .thinkChevron {
@@ -978,7 +978,7 @@
    persists while hovering the active button. */
 .feedbackButtonUp.feedbackButtonActive,
 .feedbackButtonDown.feedbackButtonActive {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 /* User message — hover state reveals the edit button */
@@ -1049,7 +1049,7 @@
   height: 14px;
   vertical-align: 1px;
   margin-left: 2px;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   border-radius: 3px;
   cursor: pointer;
   transition:
@@ -1084,7 +1084,7 @@
 .retryButton {
   align-self: flex-start;
   padding: 6px 14px;
-  background-color: var(--bright-teal-500);
+  background-color: var(--teal-400);
   color: var(--teal-grey-900);
   border: none;
   border-radius: 999px;

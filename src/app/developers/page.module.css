@@ -41,7 +41,7 @@
   background-color: var(--teal-grey-850);
   border: 1px solid var(--teal-grey-700);
   border-radius: 16px;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13.5px;
   line-height: 1.7;
@@ -54,7 +54,7 @@
   border-radius: 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.9em;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 /* Endpoint tiles: reuse the global .card visual, override its padding here. */
@@ -83,8 +83,8 @@ a.endpointCard {
   flex: none;
   padding: 3px 8px;
   border-radius: 6px;
-  background-color: color-mix(in srgb, var(--bright-teal-300) 12%, transparent);
-  color: var(--bright-teal-300);
+  background-color: color-mix(in srgb, var(--teal-300) 12%, transparent);
+  color: var(--teal-300);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.5px;

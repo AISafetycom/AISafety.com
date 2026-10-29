@@ -225,7 +225,7 @@ export default function AboutPage() {
               <Icon
                 src="/images/icons/people.svg"
                 size={16}
-                className="color-teal-bright-300"
+                className="color-teal-300"
               />
             </div>
             <p className="paragraph-small color-teal-grey-300 padding-top-24px padding-bottom-24px">
@@ -248,7 +248,7 @@ export default function AboutPage() {
               <Icon
                 src="/images/icons/speech-bubble.svg"
                 size={16}
-                className="color-teal-bright-300"
+                className="color-teal-300"
               />
             </div>
             <p className="paragraph-small color-teal-grey-300 padding-top-24px padding-bottom-24px">
@@ -272,7 +272,7 @@ export default function AboutPage() {
             <Icon
               src="/images/icons/add-doc.svg"
               size={16}
-              className="color-teal-bright-300"
+              className="color-teal-300"
             />
           </div>
           <p className="paragraph-small color-teal-grey-300 padding-top-24px padding-bottom-24px">

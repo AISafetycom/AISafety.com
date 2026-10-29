@@ -106,7 +106,7 @@ export default async function NewsletterPage({ params }: Props) {
         newsletterTrackingPage={archivePath(key)}
         description={
           <>
-            <span className="color-teal-bright-300">{nl.sender}</span>{' '}
+            <span className="color-teal-300">{nl.sender}</span>{' '}
             {NEWSLETTER_ABOUT[key]}
           </>
         }

@@ -31,7 +31,7 @@
   min-height: 48px;
   padding: 6px 44px 6px 40px;
   border-radius: 24px;
-  background-color: color-mix(in srgb, var(--bright-teal-500) 10%, transparent);
+  background-color: color-mix(in srgb, var(--teal-400) 10%, transparent);
   cursor: text;
 }
 
@@ -54,7 +54,7 @@
   gap: 6px;
   padding: 5px 10px 5px 14px;
   border-radius: 999px;
-  background-color: var(--teal-bright-800);
+  background-color: var(--teal-800);
   color: var(--white);
   white-space: nowrap;
 }
@@ -101,7 +101,7 @@
   z-index: 5;
   padding: 8px;
   border-radius: 16px;
-  background-color: var(--teal-bright-850);
+  background-color: var(--teal-850);
   max-height: 280px;
   overflow-y: auto;
 }
@@ -122,7 +122,7 @@
 
 .cityOption:hover,
 .cityOptionHighlighted {
-  background-color: color-mix(in srgb, var(--bright-teal-500) 10%, transparent);
+  background-color: color-mix(in srgb, var(--teal-400) 10%, transparent);
 }
 
 .cityOptionIcon {

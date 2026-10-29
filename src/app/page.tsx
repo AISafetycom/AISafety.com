@@ -655,7 +655,7 @@ export default async function Home() {
           <span>AISafety.info</span>
           <Icon
             src="/images/icons/arrow-up-right.svg"
-            className="color-teal-bright-400"
+            className="color-teal-400"
           />
         </TrackedLink>
       </div>

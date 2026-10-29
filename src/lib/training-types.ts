@@ -17,7 +17,7 @@ const TRAINING_TYPE_COLOR: Record<string, string> = {
 }
 
 export function trainingTypeColor(type: string): string {
-  return TRAINING_TYPE_COLOR[type] ?? 'color-teal-bright-400'
+  return TRAINING_TYPE_COLOR[type] ?? 'color-teal-400'
 }
 
 export const ENTRY_BARS = ['Low', 'Mid', 'High'] as const

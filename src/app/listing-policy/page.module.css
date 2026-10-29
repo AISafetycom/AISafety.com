@@ -18,7 +18,7 @@
   padding: 24px 28px;
   border-radius: 16px;
   background-color: var(--teal-grey-850);
-  border: 1px solid color-mix(in srgb, var(--bright-teal-300) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--teal-300) 30%, transparent);
 }
 
 .h2 {
@@ -44,7 +44,7 @@
 }
 
 .pageLink {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   font-weight: 600;
 }
 

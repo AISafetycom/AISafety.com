@@ -358,7 +358,7 @@ export default function Navigation({
               >
                 <div className={styles['nav-item-icon']}>
                   <Icon
-                    className="color-teal-bright-800"
+                    className="color-teal-800"
                     src={`/images/icons/${item.icon}`}
                   />
                 </div>
@@ -411,7 +411,7 @@ export default function Navigation({
                     >
                       <div className={styles['nav-item-icon']}>
                         <Icon
-                          className="color-teal-bright-800"
+                          className="color-teal-800"
                           src={`/images/icons/${item.icon}`}
                         />
                       </div>
@@ -485,7 +485,7 @@ export default function Navigation({
             >
               <div className={styles['nav-item-icon']}>
                 <Icon
-                  className="color-teal-bright-800"
+                  className="color-teal-800"
                   src={`/images/icons/${item.icon}`}
                 />
               </div>
@@ -502,10 +502,7 @@ export default function Navigation({
             onClick={() => setIsMenuOpen(false)}
           >
             <div className={styles['nav-item-icon']}>
-              <Icon
-                className="color-teal-bright-800"
-                src="/images/icons/search.svg"
-              />
+              <Icon className="color-teal-800" src="/images/icons/search.svg" />
             </div>
             <p className="paragraph-default-bold">Search</p>
           </SearchButton>

@@ -89,7 +89,7 @@
   height: 40px;
   padding-left: 4px;
   padding-right: 16px;
-  border: 1px solid color-mix(in srgb, var(--bright-teal-300) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--teal-300) 30%, transparent);
   border-radius: 20px;
   flex: none;
   max-width: 100%;
@@ -108,7 +108,7 @@
   gap: 8px;
   height: 40px;
   padding: 0 16px;
-  border: 1px solid color-mix(in srgb, var(--bright-teal-300) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--teal-300) 30%, transparent);
   border-radius: 20px;
   transition: all var(--hover-transition);
   position: relative;
@@ -185,7 +185,7 @@
   height: 40px;
   padding-left: 4px;
   padding-right: 16px;
-  border: 1px solid color-mix(in srgb, var(--bright-teal-300) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--teal-300) 30%, transparent);
   border-radius: 20px;
   width: 100%;
   max-width: 100%;
@@ -213,7 +213,7 @@
    change. aria-current is set in the JSX, one link at a time. */
 .nav-item[aria-current='page'],
 .nav-dropdown-item[aria-current='page'] {
-  border-color: var(--bright-teal-300);
+  border-color: var(--teal-300);
   background-color: var(--teal-grey-850);
 }
 
@@ -232,7 +232,7 @@
 /* Ring-only hint on the +N pill when the current page's link is hidden
    inside the overflow dropdown. */
 .nav-item-last[data-active-inside] {
-  border-color: var(--bright-teal-300);
+  border-color: var(--teal-300);
 }
 
 .nav-search-button {

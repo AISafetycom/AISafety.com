@@ -237,7 +237,7 @@ export default function MapClient({
             View cards
             <Icon
               src="/images/icons/arrow-down.svg"
-              className="color-teal-bright-400"
+              className="color-teal-400"
             />
           </button>
         </div>

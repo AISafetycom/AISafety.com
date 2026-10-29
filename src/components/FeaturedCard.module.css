@@ -13,8 +13,8 @@
      row of cards reads as one continuous field. See FeaturedCard.tsx. */
   background-image: radial-gradient(
     farthest-corner at left top,
-    var(--teal-bright-800) 0%,
-    var(--teal-bright-850) 100%
+    var(--teal-800) 0%,
+    var(--teal-850) 100%
   );
   background-repeat: no-repeat;
   box-shadow: var(--shadow-dark);
@@ -58,7 +58,7 @@
   align-self: flex-start;
   height: 24px;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--bright-teal-300) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--teal-300) 30%, transparent);
 }
 
 .dot {

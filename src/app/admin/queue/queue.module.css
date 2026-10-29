@@ -898,7 +898,7 @@ a.pageNav {
   gap: 6px;
   height: 28px;
   padding: 0 11px 0 2px;
-  border: 1px solid color-mix(in srgb, var(--bright-teal-300) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--teal-300) 30%, transparent);
   border-radius: 14px;
   font-size: 13px;
   font-weight: 600;

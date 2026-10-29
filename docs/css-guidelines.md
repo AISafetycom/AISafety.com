@@ -8,10 +8,17 @@ This project uses a **constraint-based design system**. These rules ensure visua
 
 Always use a pre-defined variable for colors. Never hardcode hex values. Never add new variables unless you are a designer.
 
+There are two teal scales with the same steps (100 to 900, plus 750 and 850 at the dark end):
+
+- `--teal-grey-*` is the neutral workhorse for text, cards and backgrounds.
+- `--teal-*` is the saturated bright accent for highlights.
+
+The darkest step is the same color in both (`--teal-900` is `--teal-grey-900`).
+
 ```css
 /* Good */
 background-color: var(--teal-grey-800);
-color: var(--bright-teal-300);
+color: var(--teal-300);
 
 /* Bad */
 background-color: #1c3334;
@@ -64,7 +71,7 @@ Assign text colors using these utility classes.
 
 // Bad
 .new-class {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 ```
 

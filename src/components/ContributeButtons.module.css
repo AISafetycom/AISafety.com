@@ -18,7 +18,7 @@
   text-decoration: none;
 }
 
-/* Circular icon badge. Fill comes from the .bg-teal-bright-850 utility. */
+/* Circular icon badge. Fill comes from the .bg-teal-850 utility. */
 .badge {
   flex: 0 0 auto;
   width: 24px;

@@ -18,7 +18,7 @@
 }
 
 .link:hover {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 /* Honeypot field: moved off-screen rather than display:none so naive bots

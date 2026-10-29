@@ -5592,7 +5592,7 @@ function Detail({
                   <>
                     <span className={styles.pageTagIcon}>
                       <Icon
-                        className="color-teal-bright-800"
+                        className="color-teal-800"
                         src={`/images/icons/${nav.icon}`}
                         size={12}
                       />

@@ -24,7 +24,7 @@
 }
 
 .statusLive {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .statusError {
@@ -70,7 +70,7 @@
 }
 
 .bannerOk {
-  border-color: var(--bright-teal-500);
+  border-color: var(--teal-400);
 }
 
 /* ─── Outline + editor split ──────────────────────────────────────────── */
@@ -141,7 +141,7 @@
 }
 
 .nodeDragOver {
-  border-top-color: var(--bright-teal-300);
+  border-top-color: var(--teal-300);
 }
 
 .nodeHandle {
@@ -225,7 +225,7 @@
 
 .input:focus {
   outline: none;
-  border-color: var(--bright-teal-300);
+  border-color: var(--teal-300);
 }
 
 .input:disabled {
@@ -289,11 +289,11 @@
 }
 
 .sectionBlockActive {
-  border-top-color: var(--bright-teal-300);
+  border-top-color: var(--teal-300);
 }
 
 .sectionBlockDragOver {
-  border-top: 2px solid var(--bright-teal-300);
+  border-top: 2px solid var(--teal-300);
 }
 
 /* The grip down the right of a section: drag it to reorder. */
@@ -366,8 +366,8 @@
 }
 
 .tbButtonOn {
-  background-color: var(--bright-teal-300);
-  border-color: var(--bright-teal-300);
+  background-color: var(--teal-300);
+  border-color: var(--teal-300);
   color: var(--teal-grey-900);
 }
 
@@ -406,7 +406,7 @@
 }
 
 .prose:focus-within {
-  border-color: var(--bright-teal-300);
+  border-color: var(--teal-300);
 }
 
 .prose.proseIntro :global(.ProseMirror) {
@@ -452,7 +452,7 @@
 }
 
 .prose :global(.ProseMirror a) {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   text-decoration: underline;
 }
 
@@ -461,7 +461,7 @@
 }
 
 .prose.proseIntro :global(.ProseMirror strong) {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   font-weight: inherit;
 }
 
@@ -586,7 +586,7 @@
 .versionLive {
   margin-left: auto;
   font-size: 11px;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .diffList {

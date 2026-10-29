@@ -21,5 +21,5 @@ const EVENT_TYPE_COLOR: Record<string, string> = {
 }
 
 export function eventTypeColor(type: string): string {
-  return EVENT_TYPE_COLOR[type] ?? 'color-teal-bright-400'
+  return EVENT_TYPE_COLOR[type] ?? 'color-teal-400'
 }

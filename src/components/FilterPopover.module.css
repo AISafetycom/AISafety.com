@@ -17,12 +17,12 @@
 }
 
 .pill:hover {
-  border-color: var(--teal-bright-750);
+  border-color: var(--teal-750);
   cursor: pointer;
 }
 
 .pill.pillActive {
-  background: var(--teal-bright-800);
+  background: var(--teal-800);
   color: var(--white);
 }
 

@@ -85,7 +85,7 @@
   border-radius: 20px;
   background-color: color-mix(
     in srgb,
-    var(--bright-teal-500) 10%,
+    var(--teal-400) 10%,
     var(--teal-grey-900)
   );
   color: var(--white);
@@ -148,7 +148,7 @@
 .map-search-results {
   margin-top: 8px;
   padding: 8px;
-  background-color: var(--teal-bright-850);
+  background-color: var(--teal-850);
   border-radius: 16px;
   box-shadow: 0px 12px 24px 0px rgba(0, 25, 27, 0.5);
 }
@@ -170,7 +170,7 @@
 /* Active (keyboard cursor) must come after the base row rule so it wins. */
 .map-search-row:hover,
 .map-search-row-active {
-  background-color: color-mix(in srgb, var(--bright-teal-500) 10%, transparent);
+  background-color: color-mix(in srgb, var(--teal-400) 10%, transparent);
 }
 
 .map-search-logo {
@@ -233,7 +233,7 @@
 }
 
 .map-search-suggest {
-  color: var(--bright-teal-500);
+  color: var(--teal-400);
   cursor: pointer;
 }
 

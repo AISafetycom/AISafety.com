@@ -16,7 +16,7 @@
   flex-direction: column;
   gap: 16px;
   padding: 32px;
-  border: 1px solid color-mix(in srgb, var(--bright-teal-300) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--teal-300) 30%, transparent);
   border-radius: 16px;
 }
 
@@ -79,7 +79,7 @@
 }
 
 .inlineLink {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .inlineLink:hover {
@@ -143,8 +143,8 @@
 }
 
 .copyBtn[data-copied='true'] {
-  border-color: var(--bright-teal-300);
-  color: var(--bright-teal-300);
+  border-color: var(--teal-300);
+  color: var(--teal-300);
 }
 
 /* Key facts: a two-column definition list. */
@@ -223,7 +223,7 @@
 }
 
 .orgList li::marker {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 /* Brand assets */
@@ -291,7 +291,7 @@
 }
 
 .assetLinks a {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   font-weight: 500;
 }
 
@@ -365,7 +365,7 @@
 }
 
 .newsTitle a:hover {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .newsOutlet {
@@ -383,13 +383,13 @@
   /* Don't stretch to the height of the lists beside it. */
   align-self: start;
   padding: 32px;
-  border: 1px solid color-mix(in srgb, var(--bright-teal-300) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--teal-300) 30%, transparent);
   border-radius: 16px;
 }
 
 .email {
   display: inline-block;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   font-size: 22px;
   letter-spacing: -0.5px;
   padding: 8px 0 16px;

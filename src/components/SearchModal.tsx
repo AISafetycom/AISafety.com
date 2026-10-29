@@ -325,11 +325,7 @@ export default function SearchModal({
                       className={`${styles['browse-card-icon']} drop-shadow-light flex items-center justify-center`}
                     >
                       {icon && (
-                        <Icon
-                          src={icon}
-                          size={16}
-                          className="color-teal-bright-800"
-                        />
+                        <Icon src={icon} size={16} className="color-teal-800" />
                       )}
                     </div>
                     <span
@@ -478,7 +474,7 @@ function ResultIcon({ entry }: { entry: SearchEntry }) {
       <div
         className={`${styles['result-icon']} ${styles['result-icon-page']} drop-shadow-light flex items-center justify-center`}
       >
-        <Icon src={entry.logo} size={16} className="color-teal-bright-800" />
+        <Icon src={entry.logo} size={16} className="color-teal-800" />
       </div>
     )
   }

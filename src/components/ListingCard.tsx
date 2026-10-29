@@ -14,7 +14,7 @@ export interface ListingCardMeta {
 
 export interface ListingCardPill {
   label: string
-  /** Optional color utility class, e.g. 'color-teal-bright-400'. */
+  /** Optional color utility class, e.g. 'color-teal-400'. */
   colorClass?: string
 }
 
@@ -93,7 +93,7 @@ export default function ListingCard({
           {pills.map((pill, i) => (
             <span
               key={i}
-              className={`${styles.pill} ${pill.colorClass ?? 'color-teal-bright-400'}`}
+              className={`${styles.pill} ${pill.colorClass ?? 'color-teal-400'}`}
             >
               {pill.label}
             </span>

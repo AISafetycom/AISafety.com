@@ -65,7 +65,7 @@
 .badgeYou {
   border-color: transparent;
   background-color: var(--teal-grey-800);
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 /* One pill per tab. Pills for tabs that can change the live site carry a
@@ -87,7 +87,7 @@
 }
 
 .pickOn {
-  border-color: var(--bright-teal-500);
+  border-color: var(--teal-400);
   color: var(--white);
 }
 
@@ -137,7 +137,7 @@
 }
 
 .pick input {
-  accent-color: var(--bright-teal-300);
+  accent-color: var(--teal-300);
   margin: 0;
   cursor: pointer;
 }
@@ -229,5 +229,5 @@
 
 .noticeOk {
   font-size: 12px;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }

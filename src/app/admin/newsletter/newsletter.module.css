@@ -15,7 +15,7 @@
 }
 
 .statusOk {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   font-weight: 600;
 }
 
@@ -60,8 +60,8 @@
 }
 
 .buttonPrimary {
-  border: 1px solid var(--bright-teal-300);
-  background: var(--bright-teal-300);
+  border: 1px solid var(--teal-300);
+  background: var(--teal-300);
   color: var(--teal-grey-900);
 }
 
@@ -87,7 +87,7 @@
 
 .noticeOk {
   font-size: 12px;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 /* The line under a draft's buttons after Send test. The editor block hands
@@ -250,12 +250,12 @@
 }
 
 .issueLinkText {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   text-underline-offset: 2px;
 }
 
 .issueLink:hover .issueLinkText {
-  color: var(--bright-teal-500);
+  color: var(--teal-400);
   text-decoration: underline;
 }
 
@@ -303,7 +303,7 @@
 }
 
 .pillOk {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .pillWait {
@@ -324,7 +324,7 @@
 }
 
 .tableNote a {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .tableNote a:hover {
@@ -468,7 +468,7 @@
 
 .lineupList summary {
   cursor: pointer;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .lineupGroup {
@@ -571,7 +571,7 @@
 }
 
 .reorderRow:focus-visible {
-  outline: 2px solid var(--bright-teal-300);
+  outline: 2px solid var(--teal-300);
   outline-offset: 1px;
 }
 
@@ -627,7 +627,7 @@
 
 /* Send test after a test of the issue as it is now went out. */
 .sentTick {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 /* A draft's Delete: small, at the far end of the row, away from Approve. */
@@ -637,7 +637,7 @@
 
 .rowEdited {
   font-size: 11px;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   white-space: nowrap;
 }
 
@@ -679,7 +679,7 @@
 }
 
 .fitTextarea:focus-visible {
-  outline: 2px solid var(--bright-teal-300);
+  outline: 2px solid var(--teal-300);
   outline-offset: 1px;
 }
 
@@ -737,7 +737,7 @@
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  border: 2px solid var(--bright-teal-300);
+  border: 2px solid var(--teal-300);
   border-top-color: transparent;
   animation: spin 0.8s linear infinite;
 }

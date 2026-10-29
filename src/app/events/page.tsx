@@ -31,7 +31,7 @@ export default async function EventsPage() {
         description={
           <>
             Find{' '}
-            <span className="color-teal-bright-300">
+            <span className="color-teal-300">
               conferences, talks, workshops, meetups, and competitions
             </span>{' '}
             in AI safety, both online and in person.

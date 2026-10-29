@@ -98,11 +98,7 @@
   overflow: hidden;
   background-image:
     url('/images/faces-desktop.webp'),
-    radial-gradient(
-      circle at 20% 0,
-      var(--bright-teal-500),
-      var(--teal-bright-500)
-    );
+    radial-gradient(circle at 20% 0, var(--teal-400), var(--teal-500));
   background-position:
     50%,
     0 0;
@@ -146,7 +142,7 @@
   padding: 56px;
   background-image:
     url('/images/handshake.webp'),
-    radial-gradient(circle at 20% 0, var(--teal-bright-800), #073536);
+    radial-gradient(circle at 20% 0, var(--teal-800), #073536);
   background-position:
     50% 82%,
     0 0;
@@ -163,7 +159,7 @@
   padding: 56px;
   background-image:
     url('/images/phone-podcast.webp'),
-    radial-gradient(circle at 20% 0, var(--teal-bright-800), #073536);
+    radial-gradient(circle at 20% 0, var(--teal-800), #073536);
   background-position:
     50% 100%,
     0 0;
@@ -180,8 +176,8 @@
   padding: 56px;
   background-image: radial-gradient(
     circle at 20% 0,
-    var(--bright-teal-500),
-    var(--teal-bright-500)
+    var(--teal-400),
+    var(--teal-500)
   );
   border-radius: 16px;
 }
@@ -231,8 +227,8 @@
   padding: 40px 40px 0;
   background-image: radial-gradient(
     circle at 20% 0,
-    var(--bright-teal-500),
-    var(--teal-bright-500)
+    var(--teal-400),
+    var(--teal-500)
   );
   border-radius: 16px;
 }
@@ -245,7 +241,7 @@
   padding: 40px;
   background-image:
     url('/images/open-hands.webp'),
-    radial-gradient(circle at 20% 0, var(--teal-bright-800), #073536);
+    radial-gradient(circle at 20% 0, var(--teal-800), #073536);
   background-position:
     100% 89%,
     0 0;
@@ -308,7 +304,7 @@
   align-items: center;
   position: relative;
   padding: 56px;
-  border: 1px solid var(--bright-teal-500);
+  border: 1px solid var(--teal-400);
   border-radius: 16px;
   justify-content: space-between;
 }
@@ -373,11 +369,7 @@
     overflow: visible;
     background-image:
       url('/images/faces-mobile.webp'),
-      radial-gradient(
-        circle at 20% 0,
-        var(--bright-teal-500),
-        var(--teal-bright-500)
-      );
+      radial-gradient(circle at 20% 0, var(--teal-400), var(--teal-500));
     background-position:
       65% top,
       0 0;

@@ -71,7 +71,7 @@
 
 .filter-chip {
   flex: none;
-  background-color: var(--bright-teal-300);
+  background-color: var(--teal-300);
   color: var(--teal-grey-900);
   border: none;
   border-radius: 999px;
@@ -80,11 +80,7 @@
 }
 
 .filter-chip:hover {
-  background-color: color-mix(
-    in srgb,
-    var(--bright-teal-300) 80%,
-    var(--white)
-  );
+  background-color: color-mix(in srgb, var(--teal-300) 80%, var(--white));
 }
 
 .filter-chip svg {
@@ -121,7 +117,7 @@
 
 .browse-card:focus-visible:not(:disabled) {
   background-color: var(--teal-grey-800);
-  border-color: var(--bright-teal-500);
+  border-color: var(--teal-400);
   outline: none;
 }
 
@@ -130,7 +126,7 @@
 @media (hover: hover) {
   .browse-card:hover:not(:disabled) {
     background-color: var(--teal-grey-800);
-    border-color: var(--bright-teal-500);
+    border-color: var(--teal-400);
   }
 }
 
@@ -228,7 +224,7 @@
 
 .result-icon-initials {
   background-color: var(--teal-grey-750);
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   border-radius: 50%;
 }
 
@@ -246,7 +242,7 @@
 }
 
 .result-subtitle {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .result-description {

@@ -52,9 +52,9 @@ function ActionRow({
       target="_blank"
       rel="noopener noreferrer"
       onClick={onClick}
-      className={`flex items-center gap-8px color-teal-bright-300 hover-white ${styles.row}`}
+      className={`flex items-center gap-8px color-teal-300 hover-white ${styles.row}`}
     >
-      <span className={`bg-teal-bright-850 ${styles.badge}`}>
+      <span className={`bg-teal-850 ${styles.badge}`}>
         <Icon src={icon} size={12} />
       </span>
       <span className="paragraph-xs">{label}</span>

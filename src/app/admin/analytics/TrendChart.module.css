@@ -46,7 +46,7 @@
 }
 
 .tilePicked::before {
-  background-color: var(--bright-teal-300);
+  background-color: var(--teal-300);
 }
 
 .tileLabel {
@@ -80,7 +80,7 @@
 }
 
 .up {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .down {
@@ -108,13 +108,13 @@
 }
 
 .area {
-  fill: var(--bright-teal-300);
+  fill: var(--teal-300);
   fill-opacity: 0.1;
 }
 
 .line {
   fill: none;
-  stroke: var(--bright-teal-300);
+  stroke: var(--teal-300);
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -144,7 +144,7 @@
   width: 12px;
   height: 12px;
   margin: -6px 0 0 -6px;
-  background-color: var(--bright-teal-300);
+  background-color: var(--teal-300);
   border: 2px solid var(--teal-grey-850);
   border-radius: 50%;
   pointer-events: none;

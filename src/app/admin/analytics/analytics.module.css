@@ -21,7 +21,7 @@
   font-size: 11px;
   font-weight: 600;
   color: var(--teal-grey-900);
-  background-color: var(--bright-teal-300);
+  background-color: var(--teal-300);
   padding: 3px 8px;
   border-radius: 999px;
 }
@@ -176,7 +176,7 @@
 
 .numCol {
   text-align: right;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -239,7 +239,7 @@
 }
 
 .rankFeatured {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   font-weight: 600;
 }
 
@@ -342,8 +342,8 @@
 .clickToggleBtnActive,
 .clickToggleBtnActive:hover {
   color: var(--teal-grey-900);
-  background-color: var(--bright-teal-300);
-  border-color: var(--bright-teal-300);
+  background-color: var(--teal-300);
+  border-color: var(--teal-300);
 }
 
 /* ─── Exclude-my-activity control (in the header meta row) ─────────────── */
@@ -356,7 +356,7 @@
 }
 
 .excludeMetaOn {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .excludeLink {
@@ -432,8 +432,8 @@
 
 .sourceStatActive,
 .sourceStatActive:hover {
-  background-color: var(--bright-teal-300);
-  border-color: var(--bright-teal-300);
+  background-color: var(--teal-300);
+  border-color: var(--teal-300);
 }
 
 /* On the active (light) pill, recolor every part for contrast. */
@@ -509,8 +509,8 @@
 .pageTabActive,
 .pageTabActive:hover {
   color: var(--teal-grey-900);
-  background-color: var(--bright-teal-300);
-  border-color: var(--bright-teal-300);
+  background-color: var(--teal-300);
+  border-color: var(--teal-300);
 }
 
 .empty {
@@ -553,7 +553,7 @@
 
 .pill {
   font-size: 11px;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   border: 1px solid var(--teal-grey-700);
   padding: 2px 8px;
   border-radius: 999px;
@@ -671,8 +671,8 @@
 .presetBtnActive,
 .presetBtnActive:hover {
   color: var(--teal-grey-900);
-  background-color: var(--bright-teal-300);
-  border-color: var(--bright-teal-300);
+  background-color: var(--teal-300);
+  border-color: var(--teal-300);
 }
 
 .custom {
@@ -711,14 +711,14 @@
   font-weight: 600;
   font-family: inherit;
   color: var(--teal-grey-900);
-  background-color: var(--bright-teal-300);
+  background-color: var(--teal-300);
   border: none;
   border-radius: 999px;
   cursor: pointer;
 }
 
 .applyBtn:hover:not(:disabled) {
-  background-color: var(--bright-teal-500);
+  background-color: var(--teal-400);
 }
 
 .applyBtn:disabled {
@@ -762,7 +762,7 @@
   font-size: 28px;
   font-weight: 600;
   line-height: 1.1;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   font-variant-numeric: tabular-nums;
 }
 
@@ -816,8 +816,8 @@
 .clickToggle .clickToggleBtn:has([data-pending]),
 .presets .presetBtn:has([data-pending]) {
   color: var(--teal-grey-900);
-  background-color: var(--bright-teal-300);
-  border-color: var(--bright-teal-300);
+  background-color: var(--teal-300);
+  border-color: var(--teal-300);
 }
 
 .sourceSplit:has([data-pending]) .sourceStatActive {
@@ -838,8 +838,8 @@
 }
 
 .sourceSplit .sourceStat:has([data-pending]) {
-  background-color: var(--bright-teal-300);
-  border-color: var(--bright-teal-300);
+  background-color: var(--teal-300);
+  border-color: var(--teal-300);
 }
 
 .sourceSplit
@@ -1187,7 +1187,7 @@
   width: 100%;
   max-width: 24px;
   min-height: 2px;
-  background-color: var(--bright-teal-300);
+  background-color: var(--teal-300);
   border-radius: 4px 4px 0 0;
   transition: background-color var(--hover-transition);
 }
