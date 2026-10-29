@@ -52,6 +52,7 @@ import {
   sortValue,
   type Placed,
 } from './queue-place'
+import { fillFirst, neededLeft } from './queue-needed'
 import type { ListingDates } from './queue-urgent'
 import { reviewAgainAt } from './queue-later'
 import { ruleTestOf, type RuleTest } from './queue-rule-test'
@@ -1090,22 +1091,31 @@ export async function getPageOrder(table: string): Promise<Placed[] | null> {
   }))
 }
 
-/** Refuses to publish an addition with no place on a page kept in a
- *  manual order (the page's Accept guard, checked again here): the
- *  edits' Sort if they hold one (an emptied one counts as none), else the
- *  record's (Bryce, 28 Oct 2026: "make it impossible to accept a Queue
- *  suggestion if no sort is picked"). */
-async function requirePlace(
+/** Refuses to publish an addition its page could not show whole (the
+ *  page's Accept guards, checked again here), going by the record with the
+ *  edits in (an emptied field counts as empty): one with no place on a page
+ *  kept in a manual order (Bryce, 28 Oct 2026: "make it impossible to
+ *  accept a Queue suggestion if no sort is picked"), or with a field its
+ *  page needs still empty (queue-needed.ts; Bryce, 29 Oct 2026: "accepting
+ *  something with a field missing should be blocked from being accepted").
+ *  A 422, not a 409: the item is still open, and Accept works once it is
+ *  filled in. A record no longer in Airtable is left to the write, which
+ *  says so. */
+async function requireReady(
+  item: QueueItem,
   table: string,
   record: string,
   edits: Record<string, unknown>
 ): Promise<void> {
-  if (!keepsOrder(await getTableSchema(table))) return
-  const sort =
-    SORT_FIELD in edits
-      ? edits[SORT_FIELD]
-      : (await currentValues(table, record, [SORT_FIELD]))[SORT_FIELD]
-  if (sortValue(sort) === null) throw new QueueError(NO_PLACE, 409)
+  const schema = await getTableSchema(table)
+  const read = await getTargetFields(table, record)
+  if (!read) return
+  const sort = SORT_FIELD in edits ? edits[SORT_FIELD] : read.fields[SORT_FIELD]
+  if (keepsOrder(schema) && sortValue(sort) === null) {
+    throw new QueueError(NO_PLACE, 422)
+  }
+  const missing = neededLeft(item.page, table, read.fields, edits, schema)
+  if (missing.length > 0) throw new QueueError(fillFirst(missing), 422)
 }
 
 /** Frees a Sort value for the addition being published: the listing that
@@ -1926,13 +1936,19 @@ export async function acceptItem(
       : null
   const draftFields: Record<string, unknown> =
     draft !== null && draft !== item.replyDraft ? { [F.replyDraft]: draft } : {}
-  // Before the try: an addition with no place stays open, not Failed.
+  // Before the try: an addition with no place or an empty needed field
+  // stays open, not Failed.
   if (
     item.type === 'Add' &&
     item.targetTable &&
     isRecordId(item.targetRecord ?? '')
   ) {
-    await requirePlace(item.targetTable, item.targetRecord as string, edits)
+    await requireReady(
+      item,
+      item.targetTable,
+      item.targetRecord as string,
+      edits
+    )
   }
   try {
     if (item.type === 'Add') {

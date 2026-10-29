@@ -2,7 +2,8 @@
  *  site's card draws or its filters run on. The Queue names any of these
  *  that is still empty in an amber strip at the top of the record instead
  *  of folding it into the quiet "Not set" line (Bryce, 17 Sept 2026: IASEAI
- *  and PauseAI South Korea went out with no Cost, "I had missed that").
+ *  and PauseAI South Korea went out with no Cost, "I had missed that"), and
+ *  an addition cannot be published until none is (29 Oct 2026).
  *
  *  Housekeeping (Publish?, Hide?, Featured, Sort, Newsletter, Internal
  *  notes) is never needed. A field the site draws only in some cases is
@@ -12,6 +13,8 @@
  *  needs a start date, exact or approximate; a recurring one has no dates
  *  and needs its typical length instead. Field names are Airtable's own,
  *  matched without regard to case. */
+
+import { listed } from './queue-fable'
 
 type Fields = Record<string, unknown>
 
@@ -210,4 +213,33 @@ export function missingFields(
     }
   }
   return out
+}
+
+/** What an addition still lacks before it can be published: the needed
+ *  fields `fields` leaves empty once `edits` are in (an edit of "false" is
+ *  an unticked box), leaving out any the table does not have, as it could
+ *  not be set (a recurring program was asked for a Start date, 24 Oct
+ *  2026). With no `schema` yet, every needed field counts. Accept waits
+ *  until this is empty (Bryce, 29 Oct 2026: "accepting something with a
+ *  field missing should be blocked from being accepted"). */
+export function neededLeft(
+  page: string | null,
+  table: string | null | undefined,
+  fields: Fields,
+  edits: Fields,
+  schema: readonly { name: string }[]
+): string[] {
+  const current: Fields = { ...fields }
+  for (const [k, v] of Object.entries(edits)) {
+    current[k] = v === 'false' ? false : v
+  }
+  const columns = new Set(schema.map(f => f.name.trim().toLowerCase()))
+  return missingFields(page, current, table).filter(
+    k => columns.size === 0 || columns.has(k.toLowerCase())
+  )
+}
+
+/** What Accept says while an addition lacks `missing`. */
+export function fillFirst(missing: string[]): string {
+  return `Fill in ${listed(missing)} first`
 }

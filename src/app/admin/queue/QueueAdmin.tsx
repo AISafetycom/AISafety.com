@@ -13,7 +13,7 @@ import type {
   QueueItem,
   RejectReply,
 } from '@/lib/admin/queue'
-import { missingFields } from '@/lib/admin/queue-needed'
+import { fillFirst, neededLeft } from '@/lib/admin/queue-needed'
 import { replyWho } from '@/lib/admin/queue-also'
 import { backSince, laterSince, laterUntil } from '@/lib/admin/queue-later'
 import { LEFT_OUT_KEY, withLeftOut } from '@/lib/admin/queue-left-out'
@@ -905,6 +905,24 @@ function unplacedAdd(
     SORT_FIELD in edits
       ? edits[SORT_FIELD]
       : (live?.fields ?? item.fields ?? {})[SORT_FIELD]
+  )
+}
+
+/** The fields an addition's page needs that the record, with the edits in,
+ *  still leaves empty: Accept waits for them (Bryce, 29 Oct 2026). Nothing
+ *  for a change, whose listing is already out. */
+function unfilledAdd(
+  item: QueueItem,
+  live: { fields: Record<string, unknown>; schema: FieldInfo[] } | null,
+  edits: Record<string, string>
+): string[] {
+  if (item.type !== 'Add') return []
+  return neededLeft(
+    item.page,
+    item.targetTable,
+    live?.fields ?? item.fields ?? {},
+    edits,
+    live?.schema ?? []
   )
 }
 
@@ -3465,6 +3483,25 @@ export default function QueueAdmin({
               setPlaceFocus(n => n + 1)
               break
             }
+            // One with a needed field still empty opens the first that
+            // takes typing (a picture is dropped in its slot instead).
+            const unfilled = unfilledAdd(
+              item,
+              live[item.id] ?? null,
+              activeEdits(d)
+            )
+            if (unfilled.length > 0) {
+              const types = new Map(
+                (live[item.id]?.schema ?? []).map(f => [f.name, f.type])
+              )
+              const first = unfilled.find(
+                k =>
+                  types.get(k) !== 'multipleAttachments' &&
+                  types.get(k) !== 'checkbox'
+              )
+              if (first) setDraft(item.id, { editing: first })
+              break
+            }
             void act(item, 'accept', {
               keep: fableFieldsRef.current[item.id] ?? [],
               edits: withLeftOut(
@@ -5072,6 +5109,7 @@ function Detail({
   const placeable = item.type === 'Add' && keepsOrder(live?.schema ?? [])
   const sortWas = shownFields[SORT_FIELD]
   const unplaced = unplacedAdd(item, live, activeEdits(d))
+  const unfilled = unfilledAdd(item, live, activeEdits(d))
 
   const hasCard =
     item.type === 'Change' && Boolean(item.targetTable && item.targetRecord)
@@ -6156,8 +6194,14 @@ function Detail({
           <div className={styles.buttons}>
             <button
               className={`${styles.button} ${styles.primary}`}
-              disabled={d.busy || unplaced}
-              title={unplaced ? NO_PLACE : undefined}
+              disabled={d.busy || unplaced || unfilled.length > 0}
+              title={
+                unplaced
+                  ? NO_PLACE
+                  : unfilled.length > 0
+                    ? fillFirst(unfilled)
+                    : undefined
+              }
               onClick={() =>
                 act('accept', {
                   edits: withLeftOut(editsToSave(), d.leftOut),
@@ -6195,6 +6239,9 @@ function Detail({
               <span className={styles.note}>
                 Pick its position on the page first <kbd>P</kbd>
               </span>
+            )}
+            {unfilled.length > 0 && !d.busy && (
+              <span className={styles.note}>{fillFirst(unfilled)}</span>
             )}
             {(editCount > 0 || leftCount > 0) && (
               <span className={styles.note}>
@@ -6755,16 +6802,7 @@ function Fields({
   // here – still leaves empty (Bryce, 17 Sept 2026: two events went out
   // with no Cost, "I had missed that"). Its name goes orange and bold where
   // it sits; and it is listed even before the table's field list arrives.
-  const current: Record<string, unknown> = { ...all }
-  for (const [k, v] of Object.entries(d.edits)) {
-    current[k] = v === 'false' ? false : v
-  }
-  // A field the table does not have is never asked for: it could not be
-  // set (a recurring program was asked for a Start date, 24 Oct 2026).
-  const columns = new Set(schema.map(f => f.name.trim().toLowerCase()))
-  const missing = missingFields(item.page, current, item.targetTable).filter(
-    k => columns.size === 0 || columns.has(k.toLowerCase())
-  )
+  const missing = neededLeft(item.page, item.targetTable, all, d.edits, schema)
   const missingSet = new Set(missing)
   for (const k of missing) if (!(k in all)) all[k] = null
   const entries = Object.entries(all)

@@ -300,8 +300,9 @@ describe('asAttachmentWrite', () => {
 
 // Publishing an addition to a page kept in a manual order needs its place
 // on the page, so it never lands at the very top with no Sort (Tracks @
-// XLab on /self-study, 28 Oct 2026).
-describe('an addition needs its place on an ordered page', () => {
+// XLab on /self-study, 28 Oct 2026), and every field its page needs filled
+// in (29 Oct 2026).
+describe('an addition needs its place and its needed fields', () => {
   const SELF_STUDY = 'tblRNYJ0m1cmJXKKk'
   let patches: { path: string; fields: Record<string, unknown> }[]
   let stored: Record<string, unknown>
@@ -358,9 +359,10 @@ describe('an addition needs its place on an ordered page', () => {
     patches.find(p => p.path.startsWith(`${SELF_STUDY}/`))?.fields
 
   it('refuses one with no Sort picked or stored, and leaves the row open', async () => {
-    await expect(acceptItem(addition(), {})).rejects.toThrow(
-      'Pick its position on the page first'
-    )
+    await expect(acceptItem(addition(), {})).rejects.toMatchObject({
+      message: expect.stringContaining('Pick its position on the page first'),
+      status: 422,
+    })
     expect(patches).toEqual([])
   })
 
@@ -383,11 +385,60 @@ describe('an addition needs its place on an ordered page', () => {
     expect(published()).toMatchObject({ 'Publish?': true })
   })
 
+  const LOGO = [{ url: 'https://dl.airtable.com/logo.png' }]
+  const event = () => patches.find(p => p.path.startsWith(`${EVENTS}/`))?.fields
+
   it('leaves pages that order themselves alone', async () => {
+    stored = { Name: 'An event', 'Host name': 'XLab', Logo: LOGO }
     await acceptItem(item({}), {})
-    expect(
-      patches.find(p => p.path.startsWith(`${EVENTS}/`))?.fields
-    ).toMatchObject({ 'Publish?': true })
+    expect(event()).toMatchObject({ 'Publish?': true })
+  })
+
+  it('refuses one with a needed field empty, names it, and leaves the row open', async () => {
+    stored = { Name: 'An event', Logo: LOGO }
+    await expect(acceptItem(item({}), {})).rejects.toMatchObject({
+      message: 'Fill in Host name first',
+      status: 422,
+    })
+    stored = { Name: 'An event' }
+    await expect(acceptItem(item({}), {})).rejects.toThrow(
+      'Fill in Host name and Logo first'
+    )
+    expect(patches).toEqual([])
+  })
+
+  it('publishes one whose edits fill the gap', async () => {
+    stored = { Name: 'An event', Logo: LOGO }
+    await acceptItem(item({}), { 'Host name': 'XLab' })
+    expect(event()).toMatchObject({ 'Host name': 'XLab', 'Publish?': true })
+  })
+
+  it('refuses one whose edits empty a needed field', async () => {
+    stored = { Name: 'An event', 'Host name': 'XLab', Logo: LOGO }
+    await expect(acceptItem(item({}), { 'Host name': '' })).rejects.toThrow(
+      'Fill in Host name first'
+    )
+    expect(patches).toEqual([])
+  })
+
+  it('never asks for a field the table does not have', async () => {
+    // /events needs a Cost, dates and more, but this table has none of them.
+    stored = { Name: 'An event', 'Host name': 'XLab', Logo: LOGO }
+    await acceptItem(item({}), {})
+    expect(event()).toMatchObject({ 'Publish?': true })
+  })
+
+  it('leaves changes alone: their listing is already out', async () => {
+    stored = { Name: 'An event' }
+    await acceptItem(
+      item({
+        type: 'Change',
+        source: 'Broom',
+        changes: [{ field: 'Name', from: 'An event', to: 'The event' }],
+      }),
+      {}
+    )
+    expect(event()).toEqual({ Name: 'The event' })
   })
 })
 

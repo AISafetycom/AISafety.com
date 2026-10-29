@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { isEmptyValue, missingFields } from './queue-needed'
+import {
+  fillFirst,
+  isEmptyValue,
+  missingFields,
+  neededLeft,
+} from './queue-needed'
 
 // An event as Comb writes one, every needed field filled.
 const EVENT = {
@@ -249,5 +254,61 @@ describe('missingFields', () => {
         y: 12.5,
       })
     ).toEqual([])
+  })
+})
+
+describe('neededLeft', () => {
+  const columns = Object.keys(EVENT).map(name => ({ name }))
+  const noCostNoLogo: Record<string, unknown> = { ...EVENT }
+  delete noCostNoLogo.Cost
+  delete noCostNoLogo.Logo
+
+  it('goes by the record with the edits in', () => {
+    expect(neededLeft('/events', null, noCostNoLogo, {}, columns)).toEqual([
+      'Cost',
+      'Logo',
+    ])
+    expect(
+      neededLeft('/events', null, noCostNoLogo, { Cost: 'Free' }, columns)
+    ).toEqual(['Logo'])
+    expect(neededLeft('/events', null, EVENT, { Cost: '' }, columns)).toEqual([
+      'Cost',
+    ])
+  })
+
+  it('reads an edit of "false" as an unticked box', () => {
+    expect(
+      neededLeft(
+        '/communities',
+        null,
+        { Featured: true },
+        { Featured: 'false' },
+        [{ name: 'Featured' }, { name: 'Featured tagline' }]
+      )
+    ).toEqual([])
+  })
+
+  it('never asks for a field the table does not have', () => {
+    const noCost = columns.filter(c => c.name !== 'Cost')
+    expect(neededLeft('/events', null, noCostNoLogo, {}, noCost)).toEqual([
+      'Logo',
+    ])
+  })
+
+  it('counts every needed field until the field list is known', () => {
+    expect(neededLeft('/events', null, noCostNoLogo, {}, [])).toEqual([
+      'Cost',
+      'Logo',
+    ])
+  })
+})
+
+describe('fillFirst', () => {
+  it('names what is left, with an Oxford comma', () => {
+    expect(fillFirst(['Cost'])).toBe('Fill in Cost first')
+    expect(fillFirst(['Cost', 'Logo'])).toBe('Fill in Cost and Logo first')
+    expect(fillFirst(['Cost', 'Logo', 'Mode'])).toBe(
+      'Fill in Cost, Logo, and Mode first'
+    )
   })
 })
