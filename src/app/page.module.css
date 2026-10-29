@@ -98,7 +98,11 @@
   overflow: hidden;
   background-image:
     url('/images/faces-desktop.webp'),
-    radial-gradient(circle at 20% 0, var(--bright-teal-500), #4da9a7);
+    radial-gradient(
+      circle at 20% 0,
+      var(--bright-teal-500),
+      var(--teal-bright-500)
+    );
   background-position:
     50%,
     0 0;
@@ -142,7 +146,7 @@
   padding: 56px;
   background-image:
     url('/images/handshake.webp'),
-    radial-gradient(circle at 20% 0, #094141, #073536);
+    radial-gradient(circle at 20% 0, var(--teal-bright-800), #073536);
   background-position:
     50% 82%,
     0 0;
@@ -159,7 +163,7 @@
   padding: 56px;
   background-image:
     url('/images/phone-podcast.webp'),
-    radial-gradient(circle at 20% 0, #094141, #073536);
+    radial-gradient(circle at 20% 0, var(--teal-bright-800), #073536);
   background-position:
     50% 100%,
     0 0;
@@ -177,7 +181,7 @@
   background-image: radial-gradient(
     circle at 20% 0,
     var(--bright-teal-500),
-    #4da9a7
+    var(--teal-bright-500)
   );
   border-radius: 16px;
 }
@@ -228,7 +232,7 @@
   background-image: radial-gradient(
     circle at 20% 0,
     var(--bright-teal-500),
-    #4da9a7
+    var(--teal-bright-500)
   );
   border-radius: 16px;
 }
@@ -241,7 +245,7 @@
   padding: 40px;
   background-image:
     url('/images/open-hands.webp'),
-    radial-gradient(circle at 20% 0, #094141, #073536);
+    radial-gradient(circle at 20% 0, var(--teal-bright-800), #073536);
   background-position:
     100% 89%,
     0 0;
@@ -369,7 +373,11 @@
     overflow: visible;
     background-image:
       url('/images/faces-mobile.webp'),
-      radial-gradient(circle at 20% 0, var(--bright-teal-500), #4da9a7);
+      radial-gradient(
+        circle at 20% 0,
+        var(--bright-teal-500),
+        var(--teal-bright-500)
+      );
     background-position:
       65% top,
       0 0;

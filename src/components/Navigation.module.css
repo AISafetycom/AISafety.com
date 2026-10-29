@@ -50,7 +50,7 @@
   left: 1px;
   right: 1px;
   height: 1px;
-  background-color: white;
+  background-color: var(--white);
   border-radius: 1px;
   transition:
     transform 0.3s ease,

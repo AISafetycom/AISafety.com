@@ -17,7 +17,7 @@
   width: 100%;
   height: 40px;
   background-color: var(--teal-850);
-  color: white;
+  color: var(--white);
   border: none;
   border-radius: 0;
   cursor: pointer;
