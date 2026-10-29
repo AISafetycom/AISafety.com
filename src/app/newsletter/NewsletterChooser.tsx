@@ -7,7 +7,11 @@ import {
   trackNewsletterSignupError,
   trackNewsletterSignupSuccess,
 } from '@/lib/analytics'
-import { hashHasKeyParam, keyFromHash } from '@/lib/newsletter-manage-link'
+import {
+  KEY_PATTERN,
+  hashHasKeyParam,
+  keyFromHash,
+} from '@/lib/newsletter-manage-link'
 import {
   SIGNUP_NEWSLETTERS,
   type SignupNewsletter,
@@ -17,8 +21,9 @@ import styles from './NewsletterChooser.module.css'
 /** The newsletters on /newsletter, for a visitor to tick and sign up to, or
  *  (from the "Manage subscriptions" link in an issue) for a reader to see
  *  and change. The reader's key arrives in the address's fragment and goes
- *  straight out of the address bar; it lives in this component's state
- *  only, never in browser storage. */
+ *  straight out of the address bar; it lives in this component's state and
+ *  on this page's own entry in the tab's history (so Back from Past issues,
+ *  or a reload, finds it again), never in browser storage. */
 
 type Subscriptions = Record<SignupNewsletter, boolean>
 
@@ -42,6 +47,9 @@ interface Updates {
  *  boxes on /events, /training and /funding). */
 const TRACKING_PAGE = '/newsletter'
 const NONE: Subscriptions = { events: false, training: false, funding: false }
+/** Where the key waits in history.state. The browser keeps it with this one
+ *  history entry and drops it when the tab closes. */
+const HISTORY_KEY = 'newsletterSettingsKey'
 
 const SOMETHING_WRONG =
   'Something went wrong. Please try again in a few minutes.'
@@ -106,14 +114,16 @@ export default function NewsletterChooser({
 }) {
   const [view, setView] = useState<View>({ kind: 'signup' })
 
-  async function load(key: string) {
+  async function load(key: string, { returning = false } = {}) {
     setView({ kind: 'loading' })
     const answer = await callSettings({ k: key })
-    trackEvent('newsletter_settings_open', {
-      page: TRACKING_PAGE,
-      label: 'Newsletter settings',
-      source: answer.ok ? 'ok' : (answer.reason ?? 'error'),
-    })
+    // Coming back to the page (Back, a reload) isn't another open of the link.
+    if (!returning)
+      trackEvent('newsletter_settings_open', {
+        page: TRACKING_PAGE,
+        label: 'Newsletter settings',
+        source: answer.ok ? 'ok' : (answer.reason ?? 'error'),
+      })
     if (answer.ok && answer.email && answer.subscribed) {
       setView({
         kind: 'manage',
@@ -136,17 +146,25 @@ export default function NewsletterChooser({
 
   useEffect(() => {
     const hash = window.location.hash
-    if (!hashHasKeyParam(hash)) return
+    if (!hashHasKeyParam(hash)) {
+      // Back on this entry after the link already opened it.
+      const kept: unknown = window.history.state?.[HISTORY_KEY]
+      if (typeof kept === 'string' && KEY_PATTERN.test(kept))
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: the fragment and history.state only exist in the browser, after the static page has hydrated
+        void load(kept, { returning: true })
+      return
+    }
+    const key = keyFromHash(hash)
     // Out of the address bar straight away, so an address copied from it
     // never carries the reader's key.
     window.history.replaceState(
-      window.history.state,
+      key
+        ? { ...window.history.state, [HISTORY_KEY]: key }
+        : window.history.state,
       '',
       window.location.pathname + window.location.search
     )
-    const key = keyFromHash(hash)
     if (key) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: the fragment only exists in the browser, after the static page has hydrated
       void load(key)
       return
     }
