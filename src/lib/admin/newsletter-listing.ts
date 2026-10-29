@@ -11,7 +11,8 @@
 
   Removing a card (9 Oct 2026) clears the listing's Newsletter tick, Pen's
   rule for an item Bryce drops during review: Pen picks listings with the tick
-  clear, so it can go in a later issue.
+  clear, so it can go in a later issue. Putting it back (29 Oct 2026) ticks
+  it again: the listing is in this issue after all.
 */
 
 import { airtableRequest, isRecordId } from '@/lib/admin/airtable'
@@ -191,6 +192,55 @@ export async function untickNewsletter(
   } catch (err) {
     console.error(
       `[newsletter] untick ${recordId} failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    )
+    return {
+      status: 'failed',
+      reason: 'Airtable couldn’t be reached; details are in the server log',
+    }
+  }
+}
+
+export type NewsletterRetickUpdate =
+  /** The tick was set again. */
+  | { status: 'ticked' }
+  /** Nothing to set: why (not a listing, Funding, or ticked already). */
+  | { status: 'none'; why: string }
+  | { status: 'failed'; reason: string }
+
+/** Tick the Newsletter box again on the listing behind a card that was put
+ *  back into a draft, and leave a record comment saying why. Never throws:
+ *  the card is already back in the email when this runs, so a failure here
+ *  is reported next to it, not instead of it. */
+export async function retickNewsletter(
+  recordId: string
+): Promise<NewsletterRetickUpdate> {
+  try {
+    const found = await findListing(recordId)
+    if ('missing' in found)
+      return found.elsewhere
+        ? { status: 'none', why: found.missing }
+        : { status: 'failed', reason: found.missing }
+    const { table, newsletter } = found.home
+    if (!newsletter)
+      return { status: 'none', why: 'Funding listings have no Newsletter tick' }
+    if (found.fields[newsletter] === true)
+      return { status: 'none', why: 'its Newsletter box is ticked already' }
+    const res = await airtableRequest(`${table}/${recordId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ fields: { [newsletter]: true } }),
+    })
+    if (!res.ok) return { status: 'failed', reason: await refusal(res) }
+    await noteOnRecord(
+      table,
+      recordId,
+      'Newsletter ticked again: its card was put back into a newsletter draft'
+    )
+    return { status: 'ticked' }
+  } catch (err) {
+    console.error(
+      `[newsletter] retick ${recordId} failed: ${
         err instanceof Error ? err.message : String(err)
       }`
     )

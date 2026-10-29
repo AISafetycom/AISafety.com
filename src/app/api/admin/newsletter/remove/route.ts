@@ -6,18 +6,21 @@
   block, its plain-text segment and its manifest entry go, the text is
   rebuilt and the content marker re-stamped so the draft still verifies, and
   the manifest remembers the card so a rebuild on the owner's machine leaves
-  it out too. Then the listing's Newsletter tick in Airtable is cleared —
+  it out too. A copy of what went is stored on the Blob store first, so Put
+  back (put-back/route.ts) can bring it back; when it can't be stored, the
+  card stays in. Then the listing's Newsletter tick in Airtable is cleared —
   Pen's rule for an item dropped during review — so Pen can put it in a later
   issue. The last card of a section can't be removed. `message` (the id the
   page listed) lets the draft's message be read alongside the checks.
   Approvers only (canSendNewsletter) — it edits the email but sends nothing,
   so no fresh-session requirement.
-  → { cards, tick: { status: 'unticked' } | { status: 'none', why } |
+  → { cards, removed, tick: { status: 'unticked' } | { status: 'none', why } |
       { status: 'failed', reason } }
     409 with { problems } when the draft fails verification (or sits on a
     real list, 6/7/8, and this isn't production, or waves of the issue are on
-    their way), 400 for a bad body or a card that can't be removed, 403 when
-    not posted from the admin page itself.
+    their way), 400 for a bad body or a card that can't be removed, 502 when
+    the copy for Put back can't be stored, 403 when not posted from the admin
+    page itself.
 */
 
 import { NextRequest } from 'next/server'
@@ -29,7 +32,9 @@ import {
   RemoveCardError,
   removeDraftCard,
 } from '@/lib/admin/newsletter'
+import { countCardEdit } from '@/lib/admin/newsletter-edit-counts'
 import { untickNewsletter } from '@/lib/admin/newsletter-listing'
+import { RemovalCopyError } from '@/lib/admin/newsletter-removed'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -98,6 +103,7 @@ export async function POST(req: NextRequest) {
     if (err instanceof RemoveCardError) {
       return json({ error: err.detail }, 400)
     }
+    if (err instanceof RemovalCopyError) return json({ error: err.detail }, 502)
     const detail = err instanceof Error ? err.message : String(err)
     console.error(`[newsletter] remove card ${campaignId} failed: ${detail}`)
     return json(
@@ -106,8 +112,11 @@ export async function POST(req: NextRequest) {
     )
   }
   // The card is out of the email now; the tick is reported beside that.
-  const tick = await untickNewsletter(key as string)
+  const [tick] = await Promise.all([
+    untickNewsletter(key as string),
+    countCardEdit('remove'),
+  ])
   if (tick.status === 'failed')
     console.error(`[newsletter] untick ${key} failed: ${tick.reason}`)
-  return json({ cards: removed.cards, tick })
+  return json({ cards: removed.cards, removed: removed.removed, tick })
 }

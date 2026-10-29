@@ -131,6 +131,10 @@ import {
   readClicks,
 } from '@/lib/newsletter-clicks'
 import { MIN_READERS } from '@/lib/newsletter-archive'
+import {
+  keepRemovalCopy,
+  readRemovalCopy,
+} from '@/lib/admin/newsletter-removed'
 
 /** Re-exported for callers that already import them from here. */
 export {
@@ -646,6 +650,8 @@ export interface DraftSummary {
   /** The email's cards by section, in their current order — what the
    *  Reorder panel edits. Null for emails built before card markers existed. */
   cards: CardGroup[] | null
+  /** Cards taken out of it on this page, oldest first (Put back). */
+  removed: RemovedCard[]
 }
 
 export interface SentSummary {
@@ -2300,6 +2306,7 @@ export async function listDrafts(): Promise<DraftSummary[]> {
       editLock,
       preview: previewText(msg.html ?? ''),
       cards: cardGroups(msg.html ?? ''),
+      removed: removedCards(msg.html ?? ''),
     }
     return row
   })
@@ -2572,7 +2579,20 @@ interface Manifest {
   text: Array<{ t: string; c?: string }>
   /** Cards taken out on this page, oldest first; a rebuild leaves them out
    *  too (render.py `merge_removals()`). */
-  removed?: Array<{ g: string; key: string; title: string }>
+  removed?: RemovedEntry[]
+}
+
+/** A card on the manifest's `removed` list. `p` (its place in Pen's order,
+ *  null when the manifest had no entry for it), `d` (its place in the email)
+ *  and `b` (the name of its removal copy) since 29 Oct 2026: an older entry
+ *  can't be put back from this page. */
+interface RemovedEntry {
+  g: string
+  key: string
+  title: string
+  p?: number | null
+  d?: number
+  b?: string
 }
 
 function readManifest(html: string): Manifest | null {
@@ -2715,12 +2735,99 @@ export class RemoveCardError extends Error {
   }
 }
 
+/** What Put back needs to bring a removed card back, kept off the email (the
+ *  manifest goes to every reader, and an Events email is close to its 96 KB
+ *  limit): its block, its manifest entry and its text segment, as one JSON
+ *  file on the Blob store named by its content, like the link lists. */
+export interface RemovalCopy {
+  /** Where it is stored: `newsletter/removed/<b>.json`. */
+  path: string
+  /** The JSON, exactly as stored. */
+  body: string
+  /** Its name: the first 16 hex characters of its SHA-256. */
+  b: string
+}
+
+/** The JSON a removal copy holds. */
+export interface RemovedCopy {
+  v: number
+  g: string
+  key: string
+  block: string
+  card: ManifestCard | null
+  text: string | null
+}
+
+/** The i-th place (from 0) that isn't in `taken`: a card's place with the
+ *  section's removed cards still in it. */
+function fullPlace(i: number, taken: Set<number>): number {
+  for (let p = 0; ; p++) {
+    if (taken.has(p)) continue
+    if (i === 0) return p
+    i--
+  }
+}
+
+function placesOf(
+  removals: RemovedEntry[],
+  gid: string,
+  field: 'p' | 'd'
+): Set<number> {
+  const out = new Set<number>()
+  for (const r of removals) {
+    const v = r[field]
+    if (r.g === gid && typeof v === 'number' && Number.isInteger(v)) out.add(v)
+  }
+  return out
+}
+
+/** The manifest's `removed` list, as render.py `card_removals()` reads it. */
+function removalsOf(manifest: Manifest): RemovedEntry[] {
+  const removed = manifest.removed as unknown
+  return Array.isArray(removed)
+    ? removed.filter(
+        (r): r is RemovedEntry =>
+          !!r && typeof r === 'object' && !!(r as RemovedEntry).key
+      )
+    : []
+}
+
+/** Pure: the copy Put back needs, from the email before the card goes.
+ *  Mirrors render.py `removal_copy()` byte for byte (fixture
+ *  newsletter-card-put-back.json). */
+export function removalCopy(
+  html: string,
+  gid: string,
+  key: string
+): RemovalCopy {
+  const manifest = readManifest(html)
+  if (!manifest) throw new RemoveCardError('no card manifest in this email')
+  const block = cardBlocks(html).find(b => b.gid === gid && b.key === key)
+  if (!block) throw new RemoveCardError(`unknown card ${gid}:${key}`)
+  const group = manifest.groups.find(g => g.id === gid)
+  const card = group?.cards.find(c => c.key === key) ?? null
+  const seg = manifest.text.find(s => s.c === `${gid}:${key}`)
+  const copy: RemovedCopy = {
+    v: 1,
+    g: gid,
+    key,
+    block: block.raw,
+    card,
+    text: seg ? seg.t : null,
+  }
+  const body = JSON.stringify(copy)
+  const b = createHash('sha256').update(body, 'utf8').digest('hex').slice(0, 16)
+  return { path: `newsletter/removed/${b}.json`, body, b }
+}
+
 /** Pure: the email without one card — its block, its plain-text segment and
  *  its manifest entry — with the plain text rebuilt in the cards' current
  *  order, and the card added to the manifest's `removed` list so a rebuild
  *  leaves it out too. The last card of a section can't go: its heading (or
- *  the whole email) would have nothing under it. Mirrors render.py
- *  `remove_card()` byte for byte (fixture newsletter-card-remove.json). */
+ *  the whole email) would have nothing under it. The entry names the card's
+ *  removal copy (`removalCopy()` on the same email), which must be stored
+ *  before this email goes anywhere. Mirrors render.py `remove_card()` byte
+ *  for byte (fixtures newsletter-card-remove.json, …-put-back.json). */
 export function removeCardHtml(
   html: string,
   gid: string,
@@ -2735,15 +2842,25 @@ export function removeCardHtml(
     throw new RemoveCardError(
       'it’s the only card in its section, so it can’t be removed on its own'
     )
+  const removals = removalsOf(manifest)
   let title = key
+  let p: number | null = null
   for (const g of manifest.groups) {
     if (g.id !== gid) continue
-    const card = g.cards.find(c => c.key === key)
-    if (card) title = card.title || key
+    const i = g.cards.findIndex(c => c.key === key)
+    if (i >= 0) {
+      title = g.cards[i].title || key
+      p = fullPlace(i, placesOf(removals, gid, 'p'))
+    }
     g.cards = g.cards.filter(c => c.key !== key)
   }
+  const d = fullPlace(mine.indexOf(block), placesOf(removals, gid, 'd'))
+  const { b } = removalCopy(html, gid, key)
   manifest.text = manifest.text.filter(seg => seg.c !== `${gid}:${key}`)
-  manifest.removed = [...(manifest.removed ?? []), { g: gid, key, title }]
+  manifest.removed = [
+    ...(manifest.removed ?? []),
+    { g: gid, key, title, p, d, b },
+  ]
   const encoded = Buffer.from(JSON.stringify(manifest), 'utf8').toString(
     'base64'
   )
@@ -2754,6 +2871,174 @@ export function removeCardHtml(
   const order: Record<string, string[]> = {}
   for (const b of cardBlocks(out)) (order[b.gid] ??= []).push(b.key)
   return { html: out, text: rebuildText(manifest, order) }
+}
+
+/** A card the page can't put back; `detail` is written for the page. */
+export class PutBackError extends Error {
+  readonly detail: string
+  constructor(detail: string) {
+    super(detail)
+    this.detail = detail
+  }
+}
+
+/** Exactly one card block, nothing around it. */
+const ONE_CARD_RE = /^<!--card:(g\d+):([^>]+?)-->([\s\S]*?)<!--\/card-->$/
+
+/** Pure: the email with a removed card back where it was — its block in the
+ *  email, its manifest entry in Pen's order, its text segment — off the
+ *  `removed` list, and the plain text rebuilt in the cards' current order.
+ *  `copy` is its removal copy as read back (the caller checks it against the
+ *  entry's `b`). Mirrors render.py `restore_card()` byte for byte (fixture
+ *  newsletter-card-put-back.json). */
+export function restoreCardHtml(
+  html: string,
+  copy: RemovedCopy
+): { html: string; text: string } {
+  const manifest = readManifest(html)
+  if (!manifest) throw new PutBackError('no card manifest in this email')
+  const { g: gid, key } = copy
+  const removals = removalsOf(manifest)
+  const entry = removals.find(r => r.g === gid && r.key === key)
+  if (!entry)
+    throw new PutBackError(
+      `${gid}:${key} isn’t on this email’s list of removed cards`
+    )
+  const d = entry.d
+  if (typeof d !== 'number' || !Number.isInteger(d))
+    throw new PutBackError(
+      'it was removed before Put back existed, so its place wasn’t recorded'
+    )
+  const one = ONE_CARD_RE.exec(copy.block ?? '')
+  if (
+    !one ||
+    [...copy.block.matchAll(CARD_RE)].length !== 1 ||
+    one[1] !== gid ||
+    one[2] !== key
+  )
+    throw new PutBackError(`the saved copy isn’t the card ${gid}:${key}`)
+  const group = manifest.groups.find(g => g.id === gid)
+  const mine = cardBlocks(html).filter(b => b.gid === gid)
+  if (!group || mine.length === 0)
+    throw new PutBackError(`the section ${gid} isn’t in this email any more`)
+  if (mine.some(b => b.key === key))
+    throw new PutBackError('it’s in the email already')
+  const others = removals.filter(r => !(r.g === gid && r.key === key))
+  // Where the card goes among the `n` there now: its place minus the
+  // section's cards still out before it.
+  const place = (field: 'p' | 'd', at: number, n: number) => {
+    let ahead = 0
+    for (const v of placesOf(others, gid, field)) if (v < at) ahead++
+    return Math.min(Math.max(at - ahead, 0), n)
+  }
+  const at = place('d', d, mine.length)
+  const pos = at < mine.length ? mine[at].start : mine[mine.length - 1].end
+  let out = html.slice(0, pos) + copy.block + html.slice(pos)
+  if (copy.card != null) {
+    const cards = group.cards
+    const p = entry.p
+    const i =
+      typeof p === 'number' && Number.isInteger(p)
+        ? place('p', p, cards.length)
+        : cards.length
+    group.cards = [...cards.slice(0, i), copy.card, ...cards.slice(i)]
+  }
+  if (copy.text != null) {
+    const segs = manifest.text
+    const segAt = (k: string) => {
+      const n = segs.findIndex(s => s.c === `${gid}:${k}`)
+      return n >= 0 ? n : null
+    }
+    const keys = group.cards.map(c => c.key)
+    let where: number | null = null
+    const i = keys.indexOf(key)
+    if (i >= 0) {
+      // Beside its neighbour in Pen's order: after the one before it, else
+      // before the next one.
+      for (const k of keys.slice(0, i).reverse()) {
+        const n = segAt(k)
+        if (n != null) {
+          where = n + 1
+          break
+        }
+      }
+      if (where == null)
+        for (const k of keys.slice(i + 1)) {
+          const n = segAt(k)
+          if (n != null) {
+            where = n
+            break
+          }
+        }
+    }
+    if (where == null) {
+      const ns = segs.flatMap((s, n) =>
+        (s.c ?? '').split(':', 1)[0] === gid ? [n] : []
+      )
+      if (ns.length === 0)
+        throw new PutBackError(
+          `the text version has nothing for the section ${gid}`
+        )
+      where = ns[ns.length - 1] + 1
+    }
+    manifest.text = [
+      ...segs.slice(0, where),
+      { c: `${gid}:${key}`, t: copy.text },
+      ...segs.slice(where),
+    ]
+  }
+  const rest = (manifest.removed ?? []).filter(
+    r => !(r && typeof r === 'object' && r.g === gid && r.key === key)
+  )
+  if (rest.length > 0) manifest.removed = rest
+  else delete manifest.removed
+  const encoded = Buffer.from(JSON.stringify(manifest), 'utf8').toString(
+    'base64'
+  )
+  out = out.replace(MANIFEST_RE, () => `<!--aisafety-cards:${encoded}-->`)
+  const order: Record<string, string[]> = {}
+  for (const b of cardBlocks(out)) (order[b.gid] ??= []).push(b.key)
+  return { html: out, text: rebuildText(manifest, order) }
+}
+
+/** A card taken out of the email on this page, for the Removed list under
+ *  the Reorder panel. */
+export interface RemovedCard {
+  group: string
+  key: string
+  title: string
+  /** Its place and copy were recorded (removed since 29 Oct 2026, or kept
+   *  out of a rebuild since then), so Put back can bring it back. */
+  canPutBack: boolean
+}
+
+/** The cards on the manifest's `removed` list, oldest first. */
+export function removedCards(html: string): RemovedCard[] {
+  const manifest = readManifest(html)
+  if (!manifest) return []
+  return removalsOf(manifest).map(r => ({
+    group: r.g,
+    key: r.key,
+    title: r.title || r.key,
+    canPutBack:
+      typeof r.d === 'number' &&
+      Number.isInteger(r.d) &&
+      typeof r.b === 'string' &&
+      /^[0-9a-f]{16}$/.test(r.b),
+  }))
+}
+
+/** The `b` of a card's entry on the `removed` list, or null. */
+export function removalName(
+  html: string,
+  gid: string,
+  key: string
+): string | null {
+  const manifest = readManifest(html)
+  const r = manifest
+    ? removalsOf(manifest).find(e => e.g === gid && e.key === key)
+    : null
+  return r && typeof r.b === 'string' && /^[0-9a-f]{16}$/.test(r.b) ? r.b : null
 }
 
 /** The plain-text email from the manifest's segments, with each listed
@@ -3158,20 +3443,60 @@ export async function reorderDraft(
   )
 }
 
+/** A draft's cards after an edit, and the cards taken out of it. */
+export interface DraftCards {
+  cards: CardGroup[]
+  removed: RemovedCard[]
+}
+
 /** Take one card out of a draft, the same way as a reorder: verify, rewrite
- *  HTML + text, re-stamp, write back, re-check. Returns the cards left. The
- *  listing's Newsletter tick is the route's job (newsletter-listing.ts), once
- *  this has gone through. */
+ *  HTML + text, re-stamp, write back, re-check. The copy Put back needs is
+ *  stored first (newsletter-removed.ts), so the email never names a copy
+ *  that isn't there; when it can't be, the card stays in. Returns the cards
+ *  left. The listing's Newsletter tick is the route's job
+ *  (newsletter-listing.ts), once this has gone through. */
 export async function removeDraftCard(
   draftId: string,
   gid: string,
   key: string,
   knownMessageId?: string
-): Promise<{ cards: CardGroup[] }> {
+): Promise<DraftCards> {
   return rewriteDraft(
     draftId,
-    body => removeCardHtml(body, gid, key),
+    async body => {
+      const out = removeCardHtml(body, gid, key)
+      await keepRemovalCopy(removalCopy(body, gid, key))
+      return out
+    },
     `card ${gid}:${key} removed`,
+    knownMessageId
+  )
+}
+
+/** Bring a removed card back into a draft where it was (Put back, 29 Oct
+ *  2026), the same way as a reorder: verify, read the card's removal copy
+ *  back, rewrite HTML + text, re-stamp, write back, re-check. The edit locks
+ *  apply as to every edit. Returns the cards. The listing's Newsletter tick
+ *  is the route's job, once this has gone through. */
+export async function putBackDraftCard(
+  draftId: string,
+  gid: string,
+  key: string,
+  knownMessageId?: string
+): Promise<DraftCards> {
+  return rewriteDraft(
+    draftId,
+    async body => {
+      const b = removalName(body, gid, key)
+      if (!b)
+        throw new PutBackError(
+          removedCards(body).some(r => r.group === gid && r.key === key)
+            ? 'it was removed before Put back existed, so this page can’t bring it back; a rebuild with --put-back can'
+            : 'it isn’t on this email’s list of removed cards (put back already?)'
+        )
+      return restoreCardHtml(body, await readRemovalCopy(b, gid, key))
+    },
+    `card ${gid}:${key} put back`,
     knownMessageId
   )
 }
@@ -3198,10 +3523,12 @@ export async function editDraftFit(
  *  answers with. Two round trips when the page passes the message id. */
 async function rewriteDraft(
   draftId: string,
-  change: (body: string) => { html: string; text: string },
+  change: (
+    body: string
+  ) => { html: string; text: string } | Promise<{ html: string; text: string }>,
   logLine: string,
   knownMessageId?: string
-): Promise<{ cards: CardGroup[] }> {
+): Promise<DraftCards> {
   // The campaigns are read alongside the draft (uncached: an approval may
   // have scheduled a wave a moment ago).
   const [{ campaign, problems, messageId, msg, listIds }, campaigns] =
@@ -3235,7 +3562,7 @@ async function rewriteDraft(
   )
   if (approving) throw new DraftProblemError([approving])
   const body = (msg.html ?? '').replace(MARKER_RE, '')
-  const { html, text } = change(body)
+  const { html, text } = await change(body)
   const stamped = `<!--aisafety-issue:${contentDigest(html)}-->` + html
   const stored = await v3put<{ message?: RawMessage }>(
     `messages/${acId(messageId)}`,
@@ -3254,7 +3581,7 @@ async function rewriteDraft(
   const cards = cardGroups(liveHtml)
   if (!cards) throw new Error('card markers missing after the edit')
   console.info(`[newsletter] draft ${draftId} ${logLine}`)
-  return { cards }
+  return { cards, removed: removedCards(liveHtml) }
 }
 
 /* ─── Analytics: sends in a date range ────────────────────────────────── */

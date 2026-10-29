@@ -40,7 +40,7 @@ vi.mock('@/lib/admin/airtable', async importOriginal => ({
   },
 }))
 
-const { untickNewsletter, updateListingDescription } =
+const { retickNewsletter, untickNewsletter, updateListingDescription } =
   await import('./newsletter-listing')
 
 const EVENTS = 'tblXbN9swwldwq8f7'
@@ -109,6 +109,49 @@ describe('untickNewsletter (a card removed from a draft)', () => {
     const refused = await untickNewsletter('recEventTicked001')
     expect(refused.status).toBe('failed')
     expect(base.get('recEventTicked001')!.fields.fldRdDbcWhCsoLrQj).toBe(true)
+  })
+})
+
+describe('retickNewsletter (a removed card put back into a draft)', () => {
+  it('ticks an Events listing again and says so on the record', async () => {
+    await untickNewsletter('recEventTicked001')
+    writes.length = 0
+    expect(await retickNewsletter('recEventTicked001')).toEqual({
+      status: 'ticked',
+    })
+    const record = base.get('recEventTicked001')!
+    expect(record.fields.fldRdDbcWhCsoLrQj).toBe(true)
+    expect(record.comments.at(-1)).toBe(
+      'Newsletter ticked again: its card was put back into a newsletter draft'
+    )
+    expect(writes).toEqual([
+      `PATCH ${EVENTS}/recEventTicked001`,
+      `POST ${EVENTS}/recEventTicked001/comments`,
+    ])
+  })
+  it('writes through the listing’s own table (a Training one here)', async () => {
+    expect(await retickNewsletter('recTrainingClear1')).toEqual({
+      status: 'ticked',
+    })
+    expect(writes[0]).toBe(`PATCH ${TRAINING}/recTrainingClear1`)
+  })
+  it('leaves a listing alone when there is nothing to set', async () => {
+    for (const id of [
+      'recTrainingTick01', // ticked already
+      'recFundingRecord1', // Funding has no tick
+      'recMapOrganizat01', // a callout card's /map organization
+      'u1a2b3c4d5e', // a card with no record id
+    ])
+      expect((await retickNewsletter(id)).status).toBe('none')
+    expect(writes).toEqual([])
+  })
+  it('reports a listing it can’t find or can’t write', async () => {
+    expect((await retickNewsletter('recMissingRecord1')).status).toBe('failed')
+    refuseWrites = 422
+    expect((await retickNewsletter('recTrainingClear1')).status).toBe('failed')
+    expect(
+      base.get('recTrainingClear1')!.fields.fldirVkgSCVk726Di
+    ).toBeUndefined()
   })
 })
 

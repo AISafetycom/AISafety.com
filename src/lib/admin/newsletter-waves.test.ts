@@ -833,6 +833,15 @@ describe('approving the waves (approve once)', () => {
     expect((e.err as Error).message).toMatch(
       /Wave 1 of this issue \(campaign 180\) is scheduled and uses this draft’s email, so card edits are off/
     )
+    // Remove and Put back too, before any copy is stored or read.
+    for (const edit of [
+      nl.removeDraftCard('200', 'g0', 'recAAAAAAAAAAAAAA'),
+      nl.putBackDraftCard('200', 'g0', 'recAAAAAAAAAAAAAA'),
+    ]) {
+      const r = await outcome(edit)
+      expect(r.err).toBeInstanceOf(nl.DraftProblemError)
+      expect((r.err as Error).message).toMatch(/so card edits are off/)
+    }
     expect(ac.calls.some(c => c.method === 'PUT')).toBe(false)
     const [d] = await nl.listDrafts()
     expect(d.editable).toBe(false)

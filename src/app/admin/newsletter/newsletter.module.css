@@ -607,6 +607,24 @@
   padding: 1px 4px;
 }
 
+/* A card taken out of the draft, under the sections (Put back, 29 Oct
+   2026): not draggable, so no grab cursor; dimmed beside the cards in it. */
+.removedRow {
+  cursor: default;
+  border-style: dashed;
+  background: transparent;
+  color: var(--teal-200);
+}
+
+.removedRow:active {
+  cursor: default;
+}
+
+.removedSection {
+  font-size: 11px;
+  color: var(--teal-400);
+}
+
 /* Send test after a test of the issue as it is now went out. */
 .sentTick {
   color: var(--bright-teal-300);

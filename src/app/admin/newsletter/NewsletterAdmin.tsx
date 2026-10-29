@@ -89,6 +89,16 @@ interface CardGroup {
   cards: CardInfo[]
 }
 
+/** A card taken out of the draft on this page. */
+interface RemovedCard {
+  group: string
+  key: string
+  title: string
+  /** Its copy and place were recorded (removed since 29 Oct 2026), so Put
+   *  back can bring it back. */
+  canPutBack: boolean
+}
+
 interface Draft {
   id: string
   /** The draft's message: sent with every save and the preview so the server
@@ -131,6 +141,8 @@ interface Draft {
   /** Cards by section, current order; null for drafts built before the
    *  renderer stamped card markers (no Reorder button then). */
   cards: CardGroup[] | null
+  /** Cards taken out of it on this page, oldest first. */
+  removed: RemovedCard[]
 }
 
 /** Something to look at before sending: leftover words (TEST, TODO…) or a
@@ -1047,12 +1059,21 @@ export default function NewsletterAdmin({
   /** A reorder or a text edit was written into the draft: keep the cards,
    *  reload the preview where the reader was, say so (an empty `text` = an
    *  autosave, which reports inside the editor instead). */
-  function draftChanged(draftId: string, cards: CardGroup[], text: string) {
+  function draftChanged(
+    draftId: string,
+    cards: CardGroup[],
+    text: string,
+    removed?: RemovedCard[]
+  ) {
     setData(d =>
       d
         ? {
             ...d,
-            drafts: d.drafts.map(x => (x.id === draftId ? { ...x, cards } : x)),
+            drafts: d.drafts.map(x =>
+              x.id === draftId
+                ? { ...x, cards, ...(removed ? { removed } : {}) }
+                : x
+            ),
           }
         : d
     )
@@ -1558,8 +1579,8 @@ export default function NewsletterAdmin({
                       <ReorderPanel
                         key={draft.id}
                         draft={draft}
-                        onSaved={(cards, text) =>
-                          draftChanged(draft.id, cards, text)
+                        onSaved={(cards, text, removed) =>
+                          draftChanged(draft.id, cards, text, removed)
                         }
                         onUnsavedChange={pending =>
                           setUnsavedId(id =>
@@ -1742,7 +1763,7 @@ function ReorderPanel({
   onUnsavedChange,
 }: {
   draft: Draft
-  onSaved: (cards: CardGroup[], notice: string) => void
+  onSaved: (cards: CardGroup[], notice: string, removed?: RemovedCard[]) => void
   /** True while something here isn't in the draft yet; the page holds Send
    *  test and Approve & send back until it is. */
   onUnsavedChange: (unsaved: boolean) => void
@@ -1781,12 +1802,20 @@ function ReorderPanel({
     card: CardInfo
   } | null>(null)
   const [removeShown, removeClosing] = useClosing(removing)
-  /** A removal in flight, or how the last one went (said in the panel). */
+  /** A removal or a put back in flight, or how the last one went (said in
+   *  the panel); `undo` = the card just removed, which the line offers to
+   *  put back. */
   const [removeNote, setRemoveNote] = useState<{
     kind: 'busy' | 'ok' | 'error'
     text: string
+    undo?: { gid: string; key: string; title: string }
   } | null>(null)
   const removeBusy = removeNote?.kind === 'busy'
+  /** The cards taken out of this draft, oldest first (Put back, 29 Oct
+   *  2026: Bryce may change his mind well after removing one). */
+  const [removed, setRemoved] = useState<RemovedCard[]>(
+    () => draft.removed ?? []
+  )
 
   // Chrome doesn't always fire dragend on a row React moved in the DOM while
   // it was being dragged, which left that row dimmed after the drop (Bryce,
@@ -2093,6 +2122,7 @@ function ReorderPanel({
           error?: string
           problems?: string[]
           cards?: CardGroup[]
+          removed?: RemovedCard[]
           tick?:
             | { status: 'unticked' }
             | { status: 'none'; why: string }
@@ -2112,8 +2142,12 @@ function ReorderPanel({
               : g
           )
         )
-        onSaved(body.cards, '')
+        if (body.removed) setRemoved(body.removed)
+        onSaved(body.cards, '', body.removed)
         const tick = body.tick
+        const undoable = body.removed?.some(
+          r => r.group === gid && r.key === card.key && r.canPutBack
+        )
         setRemoveNote({
           kind: 'ok',
           text: `Removed “${card.title}”.${
@@ -2123,12 +2157,87 @@ function ReorderPanel({
                 ? ` Its Newsletter box in Airtable couldn’t be unticked (${tick.reason}): untick it there if it should go in a later issue.`
                 : ''
           }`,
+          undo: undoable
+            ? { gid, key: card.key, title: card.title }
+            : undefined,
         })
         return true
       } catch (err) {
         setRemoveNote({
           kind: 'error',
           text: `“${card.title}” not removed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        })
+        return false
+      }
+    })()
+    inFlight.current = run
+    await run
+    inFlight.current = null
+  }
+
+  /** Bring a removed card back where it was (Put back, or Undo in the
+   *  Removed line; Bryce, 29 Oct 2026). The draft's answer is the cards with
+   *  it back in; the panel says what happened to the Newsletter tick. Waits
+   *  for a save in flight, like Remove. */
+  async function putBack(
+    card: { gid: string; key: string; title: string },
+    from: 'undo' | 'list'
+  ) {
+    if (inFlight.current) await inFlight.current
+    const run = (async () => {
+      setRemoveNote({ kind: 'busy', text: `Putting back “${card.title}”…` })
+      try {
+        const res = await fetch('/api/admin/newsletter/put-back', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            campaign: draft.id,
+            message: draft.messageId ?? undefined,
+            group: card.gid,
+            key: card.key,
+            from,
+          }),
+        })
+        const body = (await res.json()) as {
+          error?: string
+          problems?: string[]
+          cards?: CardGroup[]
+          removed?: RemovedCard[]
+          tick?:
+            | { status: 'ticked' }
+            | { status: 'none'; why: string }
+            | { status: 'failed'; reason: string }
+        }
+        if (!res.ok || !body.cards) {
+          throw new Error(
+            body.problems?.length
+              ? body.problems.join('; ')
+              : (body.error ?? `HTTP ${res.status}`)
+          )
+        }
+        // The order on screen is the draft's (Put back waits for a moved
+        // card to save), so the draft's answer replaces it.
+        setGroups(body.cards.map(g => ({ ...g, cards: [...g.cards] })))
+        setRemoved(body.removed ?? [])
+        onSaved(body.cards, '', body.removed ?? [])
+        const tick = body.tick
+        setRemoveNote({
+          kind: 'ok',
+          text: `Put back “${card.title}” where it was.${
+            tick?.status === 'ticked'
+              ? ' Its Newsletter box in Airtable is ticked again.'
+              : tick?.status === 'failed'
+                ? ` Its Newsletter box in Airtable couldn’t be ticked again (${tick.reason}): tick it there, or Pen may pick it for a later issue too.`
+                : ''
+          }`,
+        })
+        return true
+      } catch (err) {
+        setRemoveNote({
+          kind: 'error',
+          text: `“${card.title}” not put back: ${
             err instanceof Error ? err.message : String(err)
           }`,
         })
@@ -2417,6 +2526,54 @@ function ReorderPanel({
           </ol>
         </div>
       ))}
+      {removed.length > 0 && (
+        <div className={styles.reorderGroup}>
+          <div className={styles.reorderGroupLabel}>
+            Removed from this issue
+          </div>
+          <ul className={styles.reorderList}>
+            {[...removed].reverse().map(r => (
+              <li
+                key={`${r.group}:${r.key}`}
+                className={`${styles.reorderRow} ${styles.removedRow}`}
+              >
+                <span className={styles.reorderTitle}>
+                  {r.title}
+                  {groups.length > 1 && (
+                    <span className={styles.removedSection}>
+                      {' '}
+                      · {groups.find(g => g.id === r.group)?.label ?? r.group}
+                    </span>
+                  )}
+                </span>
+                {r.canPutBack ? (
+                  <button
+                    type="button"
+                    className={styles.rowButton}
+                    disabled={busy || dirty}
+                    aria-label={`Put “${r.title}” back into this issue`}
+                    onClick={() =>
+                      void putBack(
+                        { gid: r.group, key: r.key, title: r.title },
+                        'list'
+                      )
+                    }
+                  >
+                    Put back
+                  </button>
+                ) : (
+                  <span
+                    className={styles.removedSection}
+                    title="Removed before Put back existed (29 October 2026), so its copy wasn’t kept. A rebuild of the issue with --put-back brings it back."
+                  >
+                    Needs a rebuild to put back
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {(error || saving || dirty) && (
         <p
           className={error ? styles.noticeError : styles.notice}
@@ -2458,6 +2615,22 @@ function ReorderPanel({
         >
           {removeNote.text}
           {removeNote.kind === 'busy' && slowNote}
+          {removeNote.kind === 'ok' && removeNote.undo && (
+            <>
+              {' '}
+              <button
+                type="button"
+                className={styles.rowButton}
+                disabled={busy || dirty}
+                onClick={() => {
+                  const undo = removeNote.undo
+                  if (undo) void putBack(undo, 'undo')
+                }}
+              >
+                Undo
+              </button>
+            </>
+          )}
         </p>
       )}
       {removeShown && (
