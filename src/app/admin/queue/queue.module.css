@@ -2782,6 +2782,24 @@ select.input {
   color: var(--q-text);
 }
 
+/* F, beside the paperclip, as the search box shows / (29 Oct 2026). */
+.chatBoxKeyed .chatInput {
+  padding-right: 62px;
+}
+
+.chatKey {
+  position: absolute;
+  right: 36px;
+  bottom: 10px;
+  margin: 0;
+  pointer-events: none;
+}
+
+.chatInput:focus ~ .chatKey,
+.chatInput:not(:placeholder-shown) ~ .chatKey {
+  display: none;
+}
+
 /* Stop, beside the paperclip while Fable answers. */
 .chatBoxAnswering .chatInput {
   padding-right: 68px;

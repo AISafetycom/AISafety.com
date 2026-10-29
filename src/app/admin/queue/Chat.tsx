@@ -1226,7 +1226,7 @@ export default function Chat({
           </div>
         )}
         <div
-          className={`${styles.chatBox} ${busy || pending ? styles.chatBoxAnswering : ''}`}
+          className={`${styles.chatBox} ${busy || pending ? styles.chatBoxAnswering : styles.chatBoxKeyed}`}
         >
           <textarea
             ref={inputRef}
@@ -1262,6 +1262,9 @@ export default function Chat({
               }
             }}
           />
+          {/* The key that puts the cursor here, while the box is empty and
+              not in use (the stylesheet hides it then). */}
+          {!busy && !pending && <kbd className={styles.chatKey}>F</kbd>}
           <input
             ref={fileRef}
             type="file"
