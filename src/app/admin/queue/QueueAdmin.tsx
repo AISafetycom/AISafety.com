@@ -3742,7 +3742,7 @@ export default function QueueAdmin({
                     setDoneOpen(false)
                   }}
                 >
-                  {doneToday} done today
+                  {doneToday} done today <kbd>T</kbd>
                 </button>
               </>
             )}
@@ -3905,7 +3905,7 @@ export default function QueueAdmin({
                           setDoneOpen(false)
                         }}
                       >
-                        {ordered.found.done.length} done today
+                        {ordered.found.done.length} done today <kbd>T</kbd>
                       </button>
                     </>
                   )}
@@ -5486,15 +5486,19 @@ function Detail({
     item.source === 'Comb' && item.sourceExcerpt
       ? foundLink(item.sourceExcerpt)
       : null
+  // The post is what Q opens, so its key sits beside it.
   const foundText = foundHref ? (
-    <a
-      className={styles.foundLink}
-      href={foundHref}
-      target="_blank"
-      rel="noreferrer"
-    >
-      {found}
-    </a>
+    <>
+      <a
+        className={styles.foundLink}
+        href={foundHref}
+        target="_blank"
+        rel="noreferrer"
+      >
+        {found}
+      </a>
+      <kbd>Q</kbd>
+    </>
   ) : (
     found
   )
@@ -5529,10 +5533,11 @@ function Detail({
                 href={livePageUrl(item)}
                 target="_blank"
                 rel="noreferrer"
-                title="Opens the live card and copies the listing's name (D)"
+                title="Opens the live card and copies the listing's name"
                 onClick={() => copyListingName(item)}
               >
                 {pageLabel(item)}
+                <kbd>D</kbd>
               </a>
             )}
             <span className={styles.when}>{ago(item.createdAt)}</span>
@@ -5546,6 +5551,9 @@ function Detail({
                 >
                   <Icon src={linkIcon(item.sourceLink)} size={12} />
                   {linkLabel(item.sourceLink)}
+                  {/* Q opens the email or Discord message, never Airtable;
+                      a Comb find's Q is its Source link instead. */}
+                  {sourceHref(item) === item.sourceLink && <kbd>Q</kbd>}
                 </a>
               )}
             </div>
