@@ -69,6 +69,10 @@
   --yellow-300: #ffff99;
   --yellow-700: color-mix(in srgb, var(--yellow-300) 30%, transparent);
   --yellow-800: color-mix(in srgb, var(--yellow-300) 12%, transparent);
+  /* Red is the error color (the chatbot's error message). */
+  --red-300: #ff8b8b;
+  --red-700: color-mix(in srgb, var(--red-300) 30%, transparent);
+  --red-800: color-mix(in srgb, var(--red-300) 12%, transparent);
   /* Green was retired as the site's highlight on 19 July 2026 (PR #474):
      highlights are --teal-300 again. Still used on purpose by the event and
      training type colour classes (.color-green-300 / .bg-green-300) and a few
