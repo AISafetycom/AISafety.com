@@ -84,10 +84,11 @@
   --hover-transition: 0.1s ease-in-out;
 
   /* Shadows */
-  --shadow-light: 0 4px 12px rgba(0, 0, 0, 0.1);
-  --shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-  --shadow-dark: 0 16px 40px rgba(0, 0, 0, 0.4);
-  --shadow-extra-dark: 0 16px 40px rgba(0, 0, 0, 0.7);
+  --shadow-light: 0 4px 12px color-mix(in srgb, var(--black) 10%, transparent);
+  --shadow: 0 4px 12px color-mix(in srgb, var(--black) 20%, transparent);
+  --shadow-dark: 0 16px 40px color-mix(in srgb, var(--black) 40%, transparent);
+  --shadow-extra-dark: 0 16px 40px
+    color-mix(in srgb, var(--black) 70%, transparent);
 }
 
 /* ===============================
@@ -990,7 +991,7 @@ label {
   height: 48px;
   padding: 0 18px;
   background-color: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  border: 1px solid color-mix(in srgb, var(--white) 40%, transparent);
   border-radius: 24px;
   color: white;
   font-size: 15px;
@@ -1001,7 +1002,7 @@ label {
 }
 
 .button-secondary:hover {
-  background-color: rgba(255, 255, 255, 0.08);
+  background-color: color-mix(in srgb, var(--white) 8%, transparent);
 }
 
 /* ===============================
@@ -1104,7 +1105,8 @@ select.text-field {
 
 .shadow-text {
   /* Shared shadow treatment for text on light-ish backgrounds */
-  text-shadow: 0 0 12px rgba(0, 25, 27, 0.8);
+  text-shadow: 0 0 12px
+    color-mix(in srgb, var(--teal-grey-900) 80%, transparent);
 }
 
 /* Surfaces */
