@@ -5,7 +5,7 @@
   gap: 16px;
   height: fit-content;
   padding: 16px;
-  border: 1px solid color-mix(in srgb, var(--bright-teal-300) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--teal-300) 30%, transparent);
   border-radius: 16px;
 }
 
@@ -25,12 +25,12 @@
   padding: 4px;
   border: 1px solid transparent;
   border-radius: 999px;
-  background-color: color-mix(in srgb, var(--bright-teal-500) 20%, transparent);
+  background-color: color-mix(in srgb, var(--teal-400) 20%, transparent);
   cursor: text;
 }
 
 .field:focus-within {
-  border-color: color-mix(in srgb, var(--bright-teal-500) 60%, transparent);
+  border-color: color-mix(in srgb, var(--teal-400) 60%, transparent);
 }
 
 .input {
@@ -46,7 +46,7 @@
 }
 
 .input::placeholder {
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .input:-webkit-autofill,

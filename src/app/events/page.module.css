@@ -16,7 +16,7 @@
   z-index: 1;
   width: 16px;
   height: 16px;
-  background-color: var(--teal-400);
+  background-color: var(--teal-grey-400);
   -webkit-mask: url('/images/icons/pin.svg') no-repeat center / contain;
   mask: url('/images/icons/pin.svg') no-repeat center / contain;
 }
@@ -31,7 +31,7 @@
   min-height: 48px;
   padding: 6px 44px 6px 40px;
   border-radius: 24px;
-  background-color: color-mix(in srgb, var(--bright-teal-500) 10%, transparent);
+  background-color: color-mix(in srgb, var(--teal-400) 10%, transparent);
   cursor: text;
 }
 
@@ -54,7 +54,7 @@
   gap: 6px;
   padding: 5px 10px 5px 14px;
   border-radius: 999px;
-  background-color: var(--teal-bright-800);
+  background-color: var(--teal-800);
   color: var(--white);
   white-space: nowrap;
 }
@@ -66,7 +66,7 @@
   padding: 0;
   border: none;
   background-color: transparent;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   cursor: pointer;
 }
 
@@ -85,12 +85,12 @@
   justify-content: center;
   border: none;
   background-color: transparent;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   cursor: pointer;
 }
 
 .nearMeInput::placeholder {
-  color: var(--teal-500);
+  color: var(--teal-grey-500);
 }
 
 .cityList {
@@ -101,7 +101,7 @@
   z-index: 5;
   padding: 8px;
   border-radius: 16px;
-  background-color: var(--teal-bright-850);
+  background-color: var(--teal-850);
   max-height: 280px;
   overflow-y: auto;
 }
@@ -122,19 +122,19 @@
 
 .cityOption:hover,
 .cityOptionHighlighted {
-  background-color: color-mix(in srgb, var(--bright-teal-500) 10%, transparent);
+  background-color: color-mix(in srgb, var(--teal-400) 10%, transparent);
 }
 
 .cityOptionIcon {
   flex: none;
   width: 16px;
   height: 16px;
-  background-color: var(--teal-400);
+  background-color: var(--teal-grey-400);
   -webkit-mask: url('/images/icons/pin.svg') no-repeat center / contain;
   mask: url('/images/icons/pin.svg') no-repeat center / contain;
 }
 
 .cityEmpty {
   padding: 12px 16px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }

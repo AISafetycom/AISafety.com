@@ -50,7 +50,7 @@ export default function PageHeader({
       {lastUpdatedIso && (
         <RelativeDate
           iso={lastUpdatedIso}
-          className="paragraph-small color-teal-300 margin-bottom-40px"
+          className="paragraph-small color-teal-grey-300 margin-bottom-40px"
         />
       )}
       <h2 className="width-7-col margin-bottom-56px">{description}</h2>

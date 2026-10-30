@@ -29,7 +29,7 @@ const D3Map = dynamic(() => import('./D3Map'), {
         justifyContent: 'center',
       }}
     >
-      <p className="paragraph-small color-teal-300">Loading map...</p>
+      <p className="paragraph-small color-teal-grey-300">Loading map...</p>
     </div>
   ),
 })
@@ -237,7 +237,7 @@ export default function MapClient({
             View cards
             <Icon
               src="/images/icons/arrow-down.svg"
-              className="color-teal-bright-400"
+              className="color-teal-400"
             />
           </button>
         </div>
@@ -248,12 +248,12 @@ export default function MapClient({
         {lastUpdatedIso && (
           <RelativeDate
             iso={lastUpdatedIso}
-            className="padding-bottom-24px paragraph-small color-teal-300"
+            className="padding-bottom-24px paragraph-small color-teal-grey-300"
           />
         )}
         <h2 className="width-7-col padding-bottom-56px">
           An overview of the key{' '}
-          <span className="color-light-teal">
+          <span className="color-teal-300">
             organizations, programs, and other resources
           </span>{' '}
           in the AI safety space.
@@ -278,7 +278,9 @@ export default function MapClient({
                 />
               ))}
               {filteredOrgs.length === 0 && (
-                <p className="paragraph-small color-teal-300">Nothing found.</p>
+                <p className="paragraph-small color-teal-grey-300">
+                  Nothing found.
+                </p>
               )}
             </div>
           </div>

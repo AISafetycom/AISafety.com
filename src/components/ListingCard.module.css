@@ -1,6 +1,6 @@
 /* Pill label shown at the top of a listing card (e.g. a category/type).
    Border and text share currentColor, so set the color with a utility
-   class (e.g. .color-teal-bright-400) for colour-coded pills. */
+   class (e.g. .color-teal-400) for colour-coded pills. */
 .pill {
   display: inline-flex;
   align-items: center;

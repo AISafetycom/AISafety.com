@@ -14,7 +14,7 @@ export interface ListingCardMeta {
 
 export interface ListingCardPill {
   label: string
-  /** Optional color utility class, e.g. 'color-teal-bright-400'. */
+  /** Optional color utility class, e.g. 'color-teal-400'. */
   colorClass?: string
 }
 
@@ -59,7 +59,7 @@ function MetaRows({ rows }: { rows: ListingCardMeta[] }) {
   return (
     <div className="flex flex-col gap-4px">
       {rows.map((field, i) => (
-        <div key={i} className="flex items-center gap-8px color-teal-300">
+        <div key={i} className="flex items-center gap-8px color-teal-grey-300">
           <Icon src={field.icon} />
           <p className="paragraph-xs">{field.value}</p>
         </div>
@@ -93,7 +93,7 @@ export default function ListingCard({
           {pills.map((pill, i) => (
             <span
               key={i}
-              className={`${styles.pill} ${pill.colorClass ?? 'color-teal-bright-400'}`}
+              className={`${styles.pill} ${pill.colorClass ?? 'color-teal-400'}`}
             >
               {pill.label}
             </span>
@@ -141,7 +141,7 @@ export default function ListingCard({
       <MetaRows rows={meta} />
 
       {footnote && (
-        <p className="paragraph-xs color-teal-500 padding-top-16px">
+        <p className="paragraph-xs color-teal-grey-500 padding-top-16px">
           {footnote}
         </p>
       )}

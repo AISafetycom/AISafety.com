@@ -36,12 +36,12 @@ const PILL = { left: 637, width: 486, height: 124, pitch: 144, firstTop: -40 }
 const DISC = 104
 const ICON = 40
 
-// Nav icons are drawn in --teal-300; on the white discs they are --teal-bright-800.
+// Nav icons are drawn in --teal-grey-300; on the white discs they are --teal-800.
 const ICON_SOURCE_COLOR = /#AAB2B3/gi
 const ICON_COLOR = '#094141'
 
 // The current page's pill uses the global nav's active state:
-// --bright-teal-300 ring on a --teal-850 fill (Navigation.module.css).
+// --teal-300 ring on a --teal-grey-850 fill (Navigation.module.css).
 const RING = '#a6dad9'
 const FILL = '#0e2628'
 

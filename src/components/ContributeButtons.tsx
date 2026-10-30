@@ -52,9 +52,9 @@ function ActionRow({
       target="_blank"
       rel="noopener noreferrer"
       onClick={onClick}
-      className={`flex items-center gap-8px color-teal-bright-300 hover-white ${styles.row}`}
+      className={`flex items-center gap-8px color-teal-300 hover-white ${styles.row}`}
     >
-      <span className={`bg-teal-bright-850 ${styles.badge}`}>
+      <span className={`bg-teal-850 ${styles.badge}`}>
         <Icon src={icon} size={12} />
       </span>
       <span className="paragraph-xs">{label}</span>
@@ -80,7 +80,7 @@ export default function ContributeButtons({
     <div className="flex flex-col gap-16px">
       {/* Contribute card */}
       <div className={`border-only ${styles.card}`}>
-        <p className="paragraph-xs color-teal-300 padding-bottom-16px">
+        <p className="paragraph-xs color-teal-grey-300 padding-bottom-16px">
           Contribute to this page
         </p>
 
@@ -119,7 +119,7 @@ export default function ContributeButtons({
         onClick={() => {
           if (trackingPage) trackAirtableView(trackingPage, airtableUrl)
         }}
-        className={`border-only border-hover color-teal-300 hover-white ${styles.airtableCard}`}
+        className={`border-only border-hover color-teal-grey-300 hover-white ${styles.airtableCard}`}
       >
         <Image
           src="/images/airtable-vector.svg"

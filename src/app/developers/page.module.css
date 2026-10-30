@@ -14,7 +14,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 10px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   font-size: 15px;
 }
 
@@ -28,7 +28,7 @@
 
 .sectionLead {
   max-width: 720px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   margin: 0 0 24px;
 }
 
@@ -38,10 +38,10 @@
   overflow-x: auto;
   margin: 0;
   padding: 20px 24px;
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-700);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 16px;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13.5px;
   line-height: 1.7;
@@ -49,12 +49,12 @@
 
 .inline {
   padding: 2px 7px;
-  background-color: var(--teal-800);
-  border: 1px solid var(--teal-700);
+  background-color: var(--teal-grey-800);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.9em;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 /* Endpoint tiles: reuse the global .card visual, override its padding here. */
@@ -83,8 +83,8 @@ a.endpointCard {
   flex: none;
   padding: 3px 8px;
   border-radius: 6px;
-  background-color: color-mix(in srgb, var(--bright-teal-300) 12%, transparent);
-  color: var(--bright-teal-300);
+  background-color: color-mix(in srgb, var(--teal-300) 12%, transparent);
+  color: var(--teal-300);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.5px;
@@ -99,7 +99,7 @@ a.endpointCard {
 
 .cardDesc {
   margin: 0;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   font-size: 15px;
   line-height: 1.55;
 }
@@ -115,8 +115,8 @@ a.endpointCard {
 .tag {
   padding: 3px 9px;
   border-radius: 999px;
-  border: 1px solid var(--teal-700);
-  color: var(--teal-400);
+  border: 1px solid var(--teal-grey-700);
+  color: var(--teal-grey-400);
   font-size: 12px;
 }
 
@@ -134,12 +134,12 @@ a.endpointCard {
   flex-wrap: wrap;
   gap: 12px;
   align-items: baseline;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .license {
   max-width: 760px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   line-height: 1.6;
 }
 

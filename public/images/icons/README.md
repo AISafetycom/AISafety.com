@@ -8,7 +8,7 @@ on an active pill. **Never bake more than one color into an icon.**
 
 ```tsx
 import Icon from '@/components/Icon'
-;<Icon src="/images/icons/globe.svg" className="color-teal-300" /> // size defaults to 16
+;<Icon src="/images/icons/globe.svg" className="color-teal-grey-300" /> // size defaults to 16
 ```
 
 ## Designing a new icon
@@ -35,7 +35,7 @@ import Icon from '@/components/Icon'
   - **White** → only inside a _filled/emphasis control_ (assistant launcher pill,
     map zoom buttons, send button, active filter pill) where the icon is the
     foreground on a colored fill.
-  - **Dark** (`teal-bright-800`) → on a **light/white surface** (nav category
+  - **Dark** (`teal-800`) → on a **light/white surface** (nav category
     chips, search-modal circles) for contrast.
 - **Equal visual _area_**: size every icon so it carries roughly the same amount
   of _ink_ — they should read at the same weight, not fill the same box.

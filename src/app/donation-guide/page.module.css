@@ -11,7 +11,7 @@
 }
 
 .tabLink {
-  border: 1px solid var(--teal-700);
+  border: 1px solid var(--teal-grey-700);
   color: var(--white);
   background-color: transparent;
   border-radius: 24px;
@@ -28,13 +28,14 @@
 }
 
 .tabLink:hover {
-  background-color: var(--teal-850);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  background-color: var(--teal-grey-850);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--black) 15%, transparent);
 }
 
 .tabLinkActive {
-  background-color: var(--teal-850);
-  box-shadow: 0 12px 24px rgba(0, 25, 27, 0.5);
+  background-color: var(--teal-grey-850);
+  box-shadow: 0 12px 24px
+    color-mix(in srgb, var(--teal-grey-900) 50%, transparent);
 }
 
 .tabContent {
@@ -48,7 +49,7 @@
 }
 
 .divider {
-  background-color: var(--teal-700);
+  background-color: var(--teal-grey-700);
   height: 1px;
   margin-bottom: 40px;
 }

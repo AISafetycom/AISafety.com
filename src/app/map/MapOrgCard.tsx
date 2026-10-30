@@ -58,7 +58,7 @@ export default function MapOrgCard({ org, placement }: MapOrgCardProps) {
         <h3>{org.title}</h3>
       </div>
       <p className="paragraph-small padding-bottom-24px">{org.description}</p>
-      <p className="paragraph-xs-bold color-teal-400 padding-bottom-4px">
+      <p className="paragraph-xs-bold color-teal-grey-400 padding-bottom-4px">
         Category
       </p>
       <p className="paragraph-small">{org.category}</p>

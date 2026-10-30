@@ -9,15 +9,15 @@ export const TRAINING_TYPES = [
 export type TrainingType = (typeof TRAINING_TYPES)[number]
 
 const TRAINING_TYPE_COLOR: Record<string, string> = {
-  Fellowship: 'color-orange',
-  Bootcamp: 'color-pink',
-  Course: 'color-bright-green',
-  'Immersive workshop': 'color-blue',
-  Other: 'color-teal-300',
+  Fellowship: 'color-orange-300',
+  Bootcamp: 'color-pink-300',
+  Course: 'color-green-300',
+  'Immersive workshop': 'color-blue-300',
+  Other: 'color-teal-grey-300',
 }
 
 export function trainingTypeColor(type: string): string {
-  return TRAINING_TYPE_COLOR[type] ?? 'color-teal-bright-400'
+  return TRAINING_TYPE_COLOR[type] ?? 'color-teal-400'
 }
 
 export const ENTRY_BARS = ['Low', 'Mid', 'High'] as const

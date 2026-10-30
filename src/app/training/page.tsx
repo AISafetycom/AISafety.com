@@ -32,7 +32,7 @@ export default async function TrainingPage() {
         description={
           <>
             Find{' '}
-            <span className="color-teal-bright-300">
+            <span className="color-teal-300">
               fellowships, bootcamps, and courses
             </span>{' '}
             in AI safety to upskill and build career capital. Both online and in
@@ -40,7 +40,7 @@ export default async function TrainingPage() {
           </>
         }
       >
-        <Link href="/events" className="paragraph-small color-teal-300">
+        <Link href="/events" className="paragraph-small color-teal-grey-300">
           For conferences, talks, workshops, and more go to{' '}
           <span className="color-white">Events</span>&nbsp;&rarr;
         </Link>

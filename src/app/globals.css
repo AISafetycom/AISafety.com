@@ -24,62 +24,75 @@
    =============================== */
 
 :root {
-  /* Teal Scale */
-  --teal-100: #e3e5e6;
-  --teal-200: #c6cccc;
-  --teal-300: #aab2b3;
-  --teal-400: #8e999a;
-  --teal-500: #717f80;
-  --teal-600: #556667;
-  --teal-700: #394c4e;
-  --teal-750: #2a3f41;
-  --teal-800: #1c3334;
-  --teal-850: #0e2628;
-  --teal-900: #00191b;
+  /* Teal Grey Scale */
+  --teal-grey-100: #e3e5e6;
+  --teal-grey-200: #c6cccc;
+  --teal-grey-300: #aab2b3;
+  --teal-grey-400: #8e999a;
+  --teal-grey-500: #717f80;
+  --teal-grey-600: #556667;
+  --teal-grey-700: #394c4e;
+  --teal-grey-750: #2a3f41;
+  --teal-grey-800: #1c3334;
+  --teal-grey-850: #0e2628;
+  --teal-grey-900: #00191b;
 
-  /* Bright Teal Scale (more saturated parallel to the Teal Scale above) */
-  --teal-bright-100: #f1faf9;
-  --teal-bright-150: #e1f2f1;
-  --teal-bright-200: #d0eceb;
-  --teal-bright-250: #b8e1e0;
-  --teal-bright-300: #a6dad9;
-  --teal-bright-350: #88ccc9;
-  --teal-bright-400: #6cbdbb;
-  --teal-bright-450: #5fb3b0;
-  --teal-bright-500: #4da9a7;
-  --teal-bright-550: #3f9d9b;
-  --teal-bright-600: #2d9292;
-  --teal-bright-650: #237c7d;
-  --teal-bright-700: #176c6c;
-  --teal-bright-750: #0f5858;
-  --teal-bright-800: #094141;
-  --teal-bright-850: #04292a;
-  --teal-bright-900: #00191b;
+  /* Teal Scale (more saturated parallel to the Teal Grey Scale above) */
+  --teal-100: #f1faf9;
+  --teal-200: #d0eceb;
+  --teal-300: #a6dad9;
+  --teal-400: #6cbdbb;
+  --teal-500: #4da9a7;
+  --teal-600: #2d9292;
+  --teal-700: #176c6c;
+  --teal-750: #0f5858;
+  --teal-800: #094141;
+  --teal-850: #04292a;
+  --teal-900: var(--teal-grey-900); /* same color as --teal-grey-900 */
 
-  /* Accent Colors */
-  --bright-teal-300: #a6dad9;
-  --bright-teal-500: #6cbdbb;
-  /* Retired as the site's highlight on 19 July 2026 (PR #474): highlights are
-     --bright-teal-300 again. Still used on purpose by the event/training type
-     colour classes (.color-bright-green / .bg-bright-green) and a few older
-     admin styles; don't reach for it in new work. */
-  --bright-green: #7affb2;
-  --orange: #ffb580;
-  --pink: #ff80fd;
-  --blue: #75e3ff;
-  --purple: #b390ff;
-  --yellow: #ffff99;
+  /* Accent Colors
+     Each hue sits at step 300, about 75% lightness, the same tier as --teal-300.
+     Steps 700 and 800 are see-through washes of the 300 color, at 30% and 12%.
+     Over the page background they land where the teal 700 and 800 steps do. */
+  --orange-300: #ffb580;
+  --orange-700: color-mix(in srgb, var(--orange-300) 30%, transparent);
+  --orange-800: color-mix(in srgb, var(--orange-300) 12%, transparent);
+  --pink-300: #ff80fd;
+  --pink-700: color-mix(in srgb, var(--pink-300) 30%, transparent);
+  --pink-800: color-mix(in srgb, var(--pink-300) 12%, transparent);
+  --blue-300: #75e3ff;
+  --blue-700: color-mix(in srgb, var(--blue-300) 30%, transparent);
+  --blue-800: color-mix(in srgb, var(--blue-300) 12%, transparent);
+  --purple-300: #b390ff;
+  --purple-700: color-mix(in srgb, var(--purple-300) 30%, transparent);
+  --purple-800: color-mix(in srgb, var(--purple-300) 12%, transparent);
+  --yellow-300: #ffff99;
+  --yellow-700: color-mix(in srgb, var(--yellow-300) 30%, transparent);
+  --yellow-800: color-mix(in srgb, var(--yellow-300) 12%, transparent);
+  /* Red is the error color (the chatbot's error message). */
+  --red-300: #ff8b8b;
+  --red-700: color-mix(in srgb, var(--red-300) 30%, transparent);
+  --red-800: color-mix(in srgb, var(--red-300) 12%, transparent);
+  /* Green was retired as the site's highlight on 19 July 2026 (PR #474):
+     highlights are --teal-300 again. Still used on purpose by the event and
+     training type colour classes (.color-green-300 / .bg-green-300) and a few
+     older admin styles; don't reach for it in new work. */
+  --green-300: #7affb2;
+  --green-700: color-mix(in srgb, var(--green-300) 30%, transparent);
+  --green-800: color-mix(in srgb, var(--green-300) 12%, transparent);
   --white: white;
+  --black: black;
   --off-white: #f3f3f3;
 
   /* Transitions */
   --hover-transition: 0.1s ease-in-out;
 
   /* Shadows */
-  --shadow-light: 0 4px 12px rgba(0, 0, 0, 0.1);
-  --shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-  --shadow-dark: 0 16px 40px rgba(0, 0, 0, 0.4);
-  --shadow-extra-dark: 0 16px 40px rgba(0, 0, 0, 0.7);
+  --shadow-light: 0 4px 12px color-mix(in srgb, var(--black) 10%, transparent);
+  --shadow: 0 4px 12px color-mix(in srgb, var(--black) 20%, transparent);
+  --shadow-dark: 0 16px 40px color-mix(in srgb, var(--black) 40%, transparent);
+  --shadow-extra-dark: 0 16px 40px
+    color-mix(in srgb, var(--black) 70%, transparent);
 }
 
 /* ===============================
@@ -123,7 +136,7 @@ a {
    anchor links) via the UpButton component. */
 
 *:focus-visible {
-  outline: 2px solid var(--bright-teal-500);
+  outline: 2px solid var(--teal-400);
   outline-offset: 2px;
 }
 
@@ -132,7 +145,7 @@ a {
    =============================== */
 
 body {
-  background-color: var(--teal-900);
+  background-color: var(--teal-grey-900);
   background-image: url('/images/bg.svg');
   background-position: top center;
   background-repeat: no-repeat;
@@ -233,6 +246,29 @@ label {
    =============================== */
 
 /* Text colors */
+.color-teal-grey-300 {
+  color: var(--teal-grey-300);
+}
+.color-teal-grey-400 {
+  color: var(--teal-grey-400);
+}
+.color-teal-grey-500 {
+  color: var(--teal-grey-500);
+}
+.color-white {
+  color: var(--white);
+}
+.color-grey {
+  color: var(--teal-grey-400);
+}
+
+/* Bright Teal text colors */
+.color-teal-100 {
+  color: var(--teal-100);
+}
+.color-teal-200 {
+  color: var(--teal-200);
+}
 .color-teal-300 {
   color: var(--teal-300);
 }
@@ -242,172 +278,103 @@ label {
 .color-teal-500 {
   color: var(--teal-500);
 }
-.color-teal {
-  color: var(--bright-teal-500);
+.color-teal-600 {
+  color: var(--teal-600);
 }
-.color-light-teal {
-  color: var(--bright-teal-300);
+.color-teal-700 {
+  color: var(--teal-700);
 }
-.color-white {
-  color: #fff;
+.color-teal-750 {
+  color: var(--teal-750);
 }
-.color-grey {
-  color: #8e999a;
+.color-teal-800 {
+  color: var(--teal-800);
 }
-
-/* Bright Teal text colors */
-.color-teal-bright-100 {
-  color: var(--teal-bright-100);
+.color-teal-850 {
+  color: var(--teal-850);
 }
-.color-teal-bright-150 {
-  color: var(--teal-bright-150);
-}
-.color-teal-bright-200 {
-  color: var(--teal-bright-200);
-}
-.color-teal-bright-250 {
-  color: var(--teal-bright-250);
-}
-.color-teal-bright-300 {
-  color: var(--teal-bright-300);
-}
-.color-teal-bright-350 {
-  color: var(--teal-bright-350);
-}
-.color-teal-bright-400 {
-  color: var(--teal-bright-400);
-}
-.color-teal-bright-450 {
-  color: var(--teal-bright-450);
-}
-.color-teal-bright-500 {
-  color: var(--teal-bright-500);
-}
-.color-teal-bright-550 {
-  color: var(--teal-bright-550);
-}
-.color-teal-bright-600 {
-  color: var(--teal-bright-600);
-}
-.color-teal-bright-650 {
-  color: var(--teal-bright-650);
-}
-.color-teal-bright-700 {
-  color: var(--teal-bright-700);
-}
-.color-teal-bright-750 {
-  color: var(--teal-bright-750);
-}
-.color-teal-bright-800 {
-  color: var(--teal-bright-800);
-}
-.color-teal-bright-850 {
-  color: var(--teal-bright-850);
-}
-.color-teal-bright-900 {
-  color: var(--teal-bright-900);
+.color-teal-900 {
+  color: var(--teal-900);
 }
 
 /* Bright Teal background colors */
-.bg-teal-bright-100 {
-  background-color: var(--teal-bright-100);
+.bg-teal-100 {
+  background-color: var(--teal-100);
 }
-.bg-teal-bright-150 {
-  background-color: var(--teal-bright-150);
+.bg-teal-200 {
+  background-color: var(--teal-200);
 }
-.bg-teal-bright-200 {
-  background-color: var(--teal-bright-200);
+.bg-teal-300 {
+  background-color: var(--teal-300);
 }
-.bg-teal-bright-250 {
-  background-color: var(--teal-bright-250);
+.bg-teal-400 {
+  background-color: var(--teal-400);
 }
-.bg-teal-bright-300 {
-  background-color: var(--teal-bright-300);
+.bg-teal-500 {
+  background-color: var(--teal-500);
 }
-.bg-teal-bright-350 {
-  background-color: var(--teal-bright-350);
+.bg-teal-600 {
+  background-color: var(--teal-600);
 }
-.bg-teal-bright-400 {
-  background-color: var(--teal-bright-400);
+.bg-teal-700 {
+  background-color: var(--teal-700);
 }
-.bg-teal-bright-450 {
-  background-color: var(--teal-bright-450);
+.bg-teal-750 {
+  background-color: var(--teal-750);
 }
-.bg-teal-bright-500 {
-  background-color: var(--teal-bright-500);
+.bg-teal-800 {
+  background-color: var(--teal-800);
 }
-.bg-teal-bright-550 {
-  background-color: var(--teal-bright-550);
+.bg-teal-850 {
+  background-color: var(--teal-850);
 }
-.bg-teal-bright-600 {
-  background-color: var(--teal-bright-600);
-}
-.bg-teal-bright-650 {
-  background-color: var(--teal-bright-650);
-}
-.bg-teal-bright-700 {
-  background-color: var(--teal-bright-700);
-}
-.bg-teal-bright-750 {
-  background-color: var(--teal-bright-750);
-}
-.bg-teal-bright-800 {
-  background-color: var(--teal-bright-800);
-}
-.bg-teal-bright-850 {
-  background-color: var(--teal-bright-850);
-}
-.bg-teal-bright-900 {
-  background-color: var(--teal-bright-900);
+.bg-teal-900 {
+  background-color: var(--teal-900);
 }
 
 /* Accent text colors */
-.color-orange {
-  color: var(--orange);
+.color-orange-300 {
+  color: var(--orange-300);
 }
-.color-pink {
-  color: var(--pink);
+.color-pink-300 {
+  color: var(--pink-300);
 }
-.color-blue {
-  color: var(--blue);
+.color-blue-300 {
+  color: var(--blue-300);
 }
-.color-purple {
-  color: var(--purple);
+.color-purple-300 {
+  color: var(--purple-300);
 }
-.color-yellow {
-  color: var(--yellow);
+.color-yellow-300 {
+  color: var(--yellow-300);
 }
-.color-bright-green {
-  color: var(--bright-green);
+.color-green-300 {
+  color: var(--green-300);
 }
 
 /* Accent background colors */
-.bg-orange {
-  background-color: var(--orange);
+.bg-orange-300 {
+  background-color: var(--orange-300);
 }
-.bg-pink {
-  background-color: var(--pink);
+.bg-pink-300 {
+  background-color: var(--pink-300);
 }
-.bg-blue {
-  background-color: var(--blue);
+.bg-blue-300 {
+  background-color: var(--blue-300);
 }
-.bg-purple {
-  background-color: var(--purple);
+.bg-purple-300 {
+  background-color: var(--purple-300);
 }
-.bg-yellow {
-  background-color: var(--yellow);
+.bg-yellow-300 {
+  background-color: var(--yellow-300);
 }
-.bg-bright-green {
-  background-color: var(--bright-green);
+.bg-green-300 {
+  background-color: var(--green-300);
 }
 
 .underline {
   text-decoration: underline;
-  text-decoration-color: color-mix(
-    in srgb,
-    var(--bright-teal-300) 30%,
-    transparent
-  );
+  text-decoration-color: color-mix(in srgb, var(--teal-300) 30%, transparent);
   text-underline-offset: 6px;
   transition: all var(--hover-transition);
 }
@@ -934,7 +901,7 @@ label {
 /* Divider */
 .divider {
   height: 1px;
-  background-color: var(--teal-700);
+  background-color: var(--teal-grey-700);
 }
 
 /* Cursor */
@@ -986,7 +953,7 @@ label {
 }
 
 /* Fade text to white on hover. Put on a link whose text color (e.g.
-   color-teal-bright-300) should brighten to white; the text may sit on the same
+   color-teal-300) should brighten to white; the text may sit on the same
    element or inherit from it. */
 .hover-white {
   transition: color var(--hover-transition);
@@ -1007,7 +974,7 @@ label {
   height: 48px;
   padding: 0 18px;
   background-color: var(--white);
-  color: var(--teal-900);
+  color: var(--teal-grey-900);
   border: none;
   border-radius: 24px;
   font-size: 15px;
@@ -1028,7 +995,7 @@ label {
   height: 48px;
   padding: 0 18px;
   background-color: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  border: 1px solid color-mix(in srgb, var(--white) 40%, transparent);
   border-radius: 24px;
   color: white;
   font-size: 15px;
@@ -1039,7 +1006,7 @@ label {
 }
 
 .button-secondary:hover {
-  background-color: rgba(255, 255, 255, 0.08);
+  background-color: color-mix(in srgb, var(--white) 8%, transparent);
 }
 
 /* ===============================
@@ -1050,21 +1017,21 @@ label {
   width: 100%;
   height: 56px;
   padding: 0 16px;
-  background-color: var(--teal-900);
-  border: 1px solid var(--teal-600);
+  background-color: var(--teal-grey-900);
+  border: 1px solid var(--teal-grey-600);
   border-radius: 16px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   /* Type (size/tracking/etc.) inherits the default body text style. */
 }
 
 .text-field:hover,
 .text-field:focus {
-  border-color: var(--teal-400);
+  border-color: var(--teal-grey-400);
   outline: none;
 }
 
 .text-field::placeholder {
-  color: var(--teal-600);
+  color: var(--teal-grey-600);
 }
 
 /* Native <select> arrows sit flush against the edge and ignore padding, so
@@ -1086,7 +1053,7 @@ select.text-field {
   height: 24px;
   min-height: 24px;
   margin: 0 8px 0 0;
-  background-color: color-mix(in srgb, var(--teal-bright-500) 20%, transparent);
+  background-color: color-mix(in srgb, var(--teal-500) 20%, transparent);
   border: none;
   border-radius: 4px;
   cursor: pointer;
@@ -1094,11 +1061,11 @@ select.text-field {
 }
 
 .checkbox:hover {
-  background-color: color-mix(in srgb, var(--teal-bright-500) 35%, transparent);
+  background-color: color-mix(in srgb, var(--teal-500) 35%, transparent);
 }
 
 .checkbox:checked {
-  background-color: var(--bright-teal-500);
+  background-color: var(--teal-400);
   box-shadow: var(--shadow);
 }
 
@@ -1142,24 +1109,25 @@ select.text-field {
 
 .shadow-text {
   /* Shared shadow treatment for text on light-ish backgrounds */
-  text-shadow: 0 0 12px rgba(0, 25, 27, 0.8);
+  text-shadow: 0 0 12px
+    color-mix(in srgb, var(--teal-grey-900) 80%, transparent);
 }
 
 /* Surfaces */
 .border-plus-fill {
   /* Shared surface treatment: subtle border + light fill. */
-  background-color: var(--teal-bright-850);
-  border: 1px solid var(--teal-bright-800);
+  background-color: var(--teal-850);
+  border: 1px solid var(--teal-800);
 }
 
 .border-only {
   /* Shared surface treatment: subtle border, no fill */
-  border: 1px solid color-mix(in srgb, var(--teal-bright-500) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--teal-500) 30%, transparent);
   transition: border-color var(--hover-transition);
 }
 
 .border-only:hover {
-  border-color: color-mix(in srgb, var(--teal-bright-500) 50%, transparent);
+  border-color: color-mix(in srgb, var(--teal-500) 50%, transparent);
 }
 
 .backdrop-blur {
@@ -1177,7 +1145,7 @@ select.text-field {
   /* a link to #<record id> lands with the card clear of the nav */
   scroll-margin-top: 110px;
   padding: 40px;
-  background-color: var(--teal-bright-850);
+  background-color: var(--teal-850);
   border-radius: 16px;
   box-shadow: var(--shadow-dark);
   will-change: transform;

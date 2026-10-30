@@ -18,7 +18,7 @@
   text-decoration: none;
 }
 
-/* Circular icon badge. Fill comes from the .bg-teal-bright-850 utility. */
+/* Circular icon badge. Fill comes from the .bg-teal-850 utility. */
 .badge {
   flex: 0 0 auto;
   width: 24px;
@@ -38,7 +38,7 @@
 }
 
 /* The table illustration sits at the top, inset slightly below the border
-   per the Figma card; its baked-in gradient fades to --teal-900 (the page
+   per the Figma card; its baked-in gradient fades to --teal-grey-900 (the page
    bg) so the label below reads cleanly over it. */
 .airtableImg {
   position: absolute;
@@ -52,9 +52,9 @@
   position: absolute;
   top: 8px;
   right: 8px;
-  /* A --teal-800 circle over the illustration's top-right corner, with the
+  /* A --teal-grey-800 circle over the illustration's top-right corner, with the
      white hairline arrow (the Figma arrow SVG bakes in its proportions). */
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
 }
 
 /* Push the label down past the illustration's rows into the faded area —

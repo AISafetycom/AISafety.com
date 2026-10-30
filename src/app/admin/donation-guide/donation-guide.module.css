@@ -20,15 +20,15 @@
 
 .status {
   font-size: 12px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .statusLive {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .statusError {
-  color: var(--pink);
+  color: var(--pink-300);
 }
 
 .actions {
@@ -61,16 +61,16 @@
   margin-bottom: 16px;
   border-radius: 8px;
   font-size: 13px;
-  border: 1px solid var(--teal-700);
-  background-color: var(--teal-850);
+  border: 1px solid var(--teal-grey-700);
+  background-color: var(--teal-grey-850);
 }
 
 .bannerWarn {
-  border-color: var(--pink);
+  border-color: var(--pink-300);
 }
 
 .bannerOk {
-  border-color: var(--bright-teal-500);
+  border-color: var(--teal-400);
 }
 
 /* ─── Outline + editor split ──────────────────────────────────────────── */
@@ -87,8 +87,8 @@
   flex-direction: column;
   gap: 4px;
   padding: 12px;
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 10px;
   position: sticky;
   top: 76px;
@@ -96,7 +96,7 @@
 
 .outlineHint {
   font-size: 11px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   padding: 2px 8px 6px;
 }
 
@@ -117,12 +117,12 @@
 }
 
 .node:hover {
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
 }
 
 .nodeActive {
-  background-color: var(--teal-800);
-  border-color: var(--teal-700);
+  background-color: var(--teal-grey-800);
+  border-color: var(--teal-grey-700);
 }
 
 .nodeTab {
@@ -132,7 +132,7 @@
 
 .nodeSection {
   margin-left: 18px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .nodeSection.nodeActive,
@@ -141,11 +141,11 @@
 }
 
 .nodeDragOver {
-  border-top-color: var(--bright-teal-300);
+  border-top-color: var(--teal-300);
 }
 
 .nodeHandle {
-  color: var(--teal-500);
+  color: var(--teal-grey-500);
   font-size: 12px;
   cursor: grab;
   flex-shrink: 0;
@@ -160,7 +160,7 @@
 }
 
 .nodeAdd {
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   font-size: 12px;
 }
 
@@ -179,8 +179,8 @@
   flex-direction: column;
   gap: 14px;
   padding: 18px;
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 10px;
   min-height: 320px;
 }
@@ -193,7 +193,7 @@
 
 .paneCrumb {
   font-size: 12px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .field {
@@ -204,20 +204,20 @@
 
 .fieldLabel {
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .fieldHint {
   font-size: 11px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .input {
   width: 100%;
   padding: 9px 12px;
   border-radius: 6px;
-  border: 1px solid var(--teal-700);
-  background-color: var(--teal-900);
+  border: 1px solid var(--teal-grey-700);
+  background-color: var(--teal-grey-900);
   color: var(--white);
   font: inherit;
   font-size: 14px;
@@ -225,7 +225,7 @@
 
 .input:focus {
   outline: none;
-  border-color: var(--bright-teal-300);
+  border-color: var(--teal-300);
 }
 
 .input:disabled {
@@ -237,7 +237,7 @@
   gap: 8px;
   flex-wrap: wrap;
   padding-top: 6px;
-  border-top: 1px solid var(--teal-800);
+  border-top: 1px solid var(--teal-grey-800);
 }
 
 .paneHead {
@@ -256,7 +256,7 @@
 
 .danger:hover {
   background-color: var(--dg-danger);
-  color: var(--teal-900);
+  color: var(--teal-grey-900);
 }
 
 .danger:disabled {
@@ -284,16 +284,16 @@
   grid-template-columns: 200px minmax(0, 1fr);
   gap: 18px;
   padding-top: 18px;
-  border-top: 1px solid var(--teal-800);
+  border-top: 1px solid var(--teal-grey-800);
   scroll-margin-top: 76px;
 }
 
 .sectionBlockActive {
-  border-top-color: var(--bright-teal-300);
+  border-top-color: var(--teal-300);
 }
 
 .sectionBlockDragOver {
-  border-top: 2px solid var(--bright-teal-300);
+  border-top: 2px solid var(--teal-300);
 }
 
 /* The grip down the right of a section: drag it to reorder. */
@@ -307,14 +307,14 @@
   justify-content: center;
   align-self: stretch;
   border-radius: 6px;
-  color: var(--teal-500);
+  color: var(--teal-grey-500);
   cursor: grab;
   user-select: none;
 }
 
 .sectionGrip:hover {
   color: var(--white);
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
 }
 
 .sectionGrip:active {
@@ -344,7 +344,7 @@
 .tbButton {
   padding: 5px 10px;
   border-radius: 5px;
-  border: 1px solid var(--teal-700);
+  border: 1px solid var(--teal-grey-700);
   background: transparent;
   color: var(--white);
   font: inherit;
@@ -353,7 +353,7 @@
 }
 
 .tbButton:hover {
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
 }
 
 .tbIcon {
@@ -366,9 +366,9 @@
 }
 
 .tbButtonOn {
-  background-color: var(--bright-teal-300);
-  border-color: var(--bright-teal-300);
-  color: var(--teal-900);
+  background-color: var(--teal-300);
+  border-color: var(--teal-300);
+  color: var(--teal-grey-900);
 }
 
 .tbButton:disabled {
@@ -383,8 +383,8 @@
   flex-wrap: wrap;
   padding: 8px 10px;
   border-radius: 6px;
-  border: 1px solid var(--teal-700);
-  background-color: var(--teal-900);
+  border: 1px solid var(--teal-grey-700);
+  background-color: var(--teal-grey-900);
 }
 
 .linkPop .input {
@@ -396,17 +396,17 @@
 
 .linkHint {
   font-size: 11px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .prose {
-  border: 1px solid var(--teal-700);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 6px;
-  background-color: var(--teal-900);
+  background-color: var(--teal-grey-900);
 }
 
 .prose:focus-within {
-  border-color: var(--bright-teal-300);
+  border-color: var(--teal-300);
 }
 
 .prose.proseIntro :global(.ProseMirror) {
@@ -452,7 +452,7 @@
 }
 
 .prose :global(.ProseMirror a) {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   text-decoration: underline;
 }
 
@@ -461,7 +461,7 @@
 }
 
 .prose.proseIntro :global(.ProseMirror strong) {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   font-weight: inherit;
 }
 
@@ -473,9 +473,9 @@
 
 .preview {
   margin-top: 20px;
-  border: 1px solid var(--teal-800);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 10px;
-  background-color: var(--teal-850);
+  background-color: var(--teal-grey-850);
   overflow: hidden;
 }
 
@@ -486,14 +486,14 @@
   gap: 12px;
   padding: 10px 14px;
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .previewFrame {
   position: relative;
   height: 760px;
   overflow: hidden;
-  background-color: var(--teal-900);
+  background-color: var(--teal-grey-900);
 }
 
 .previewFrame iframe {
@@ -507,8 +507,8 @@
 
 .previewPage {
   min-height: 100vh;
-  background: var(--teal-900) url('/images/bg.svg') top center / 2028px 944px
-    no-repeat;
+  background: var(--teal-grey-900) url('/images/bg.svg') top center / 2028px
+    944px no-repeat;
 }
 
 /* ─── History drawer + dialogs ────────────────────────────────────────── */
@@ -530,8 +530,8 @@
   z-index: 100;
   display: flex;
   flex-direction: column;
-  background-color: var(--teal-850);
-  border-left: 1px solid var(--teal-700);
+  background-color: var(--teal-grey-850);
+  border-left: 1px solid var(--teal-grey-700);
   box-shadow: 0 12px 24px rgba(0, 25, 27, 0.5);
 }
 
@@ -540,7 +540,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 16px 18px;
-  border-bottom: 1px solid var(--teal-800);
+  border-bottom: 1px solid var(--teal-grey-800);
   font-weight: 600;
 }
 
@@ -569,8 +569,8 @@
 
 .versionRow:hover,
 .versionRowActive {
-  background-color: var(--teal-800);
-  border-color: var(--teal-700);
+  background-color: var(--teal-grey-800);
+  border-color: var(--teal-grey-700);
 }
 
 .versionNum {
@@ -579,14 +579,14 @@
 }
 
 .versionMeta {
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   font-size: 12px;
 }
 
 .versionLive {
   margin-left: auto;
   font-size: 11px;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .diffList {
@@ -599,8 +599,8 @@
 .diffItem {
   padding: 10px 12px;
   border-radius: 6px;
-  border: 1px solid var(--teal-800);
-  background-color: var(--teal-900);
+  border: 1px solid var(--teal-grey-800);
+  background-color: var(--teal-grey-900);
 }
 
 .diffWhere {
@@ -610,7 +610,7 @@
 
 .diffKind {
   font-weight: 400;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   margin-left: 6px;
 }
 
@@ -625,7 +625,7 @@
 
 .diffBefore {
   background-color: rgba(255, 45, 149, 0.1);
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   text-decoration: line-through;
 }
 
@@ -646,8 +646,8 @@
   max-height: calc(100vh - 64px);
   display: flex;
   flex-direction: column;
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-700);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 10px;
   box-shadow: 0 12px 24px rgba(0, 25, 27, 0.5);
 }
@@ -670,17 +670,17 @@
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 18px 16px;
-  border-top: 1px solid var(--teal-800);
+  border-top: 1px solid var(--teal-grey-800);
 }
 
 .muted {
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .empty {
   padding: 24px;
   text-align: center;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   font-size: 13px;
 }
 

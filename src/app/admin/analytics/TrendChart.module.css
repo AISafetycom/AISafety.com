@@ -21,8 +21,8 @@
   overflow: hidden;
   text-align: left;
   color: var(--white);
-  background-color: var(--teal-900);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-900);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 8px;
   cursor: pointer;
   transition:
@@ -38,20 +38,20 @@
 }
 
 .tile:hover {
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
 }
 
 .tilePicked {
-  border-color: var(--teal-700);
+  border-color: var(--teal-grey-700);
 }
 
 .tilePicked::before {
-  background-color: var(--bright-teal-300);
+  background-color: var(--teal-300);
 }
 
 .tileLabel {
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 /* Pushed down to the tile's foot, so the figures stay in a line when one
@@ -69,33 +69,33 @@
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .change {
   padding: 1px 6px;
   font-weight: 600;
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
   border-radius: 999px;
 }
 
 .up {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .down {
-  color: var(--orange);
+  color: var(--orange-300);
 }
 
 .flat {
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 /* The whole plot answers the pointer: the nearest day lights up. */
 .plot {
   position: relative;
   flex: 1;
-  border-bottom: 1px solid var(--teal-700);
+  border-bottom: 1px solid var(--teal-grey-700);
   cursor: crosshair;
 }
 
@@ -108,13 +108,13 @@
 }
 
 .area {
-  fill: var(--bright-teal-300);
+  fill: var(--teal-300);
   fill-opacity: 0.1;
 }
 
 .line {
   fill: none;
-  stroke: var(--bright-teal-300);
+  stroke: var(--teal-300);
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -133,7 +133,7 @@
   top: 0;
   bottom: 0;
   width: 1px;
-  background-color: var(--teal-600);
+  background-color: var(--teal-grey-600);
   pointer-events: none;
 }
 
@@ -144,8 +144,8 @@
   width: 12px;
   height: 12px;
   margin: -6px 0 0 -6px;
-  background-color: var(--bright-teal-300);
-  border: 2px solid var(--teal-850);
+  background-color: var(--teal-300);
+  border: 2px solid var(--teal-grey-850);
   border-radius: 50%;
   pointer-events: none;
 }
@@ -155,7 +155,7 @@
   top: 0;
   bottom: 0;
   width: 1px;
-  background-color: var(--teal-700);
+  background-color: var(--teal-grey-700);
   pointer-events: none;
 }
 
@@ -165,7 +165,7 @@
   padding: 0 6px;
   font-size: 10px;
   white-space: nowrap;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .markerLabel[data-side='right'] {

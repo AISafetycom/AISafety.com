@@ -180,7 +180,7 @@ export default function NewsletterChooser({
   return (
     <>
       {view.kind === 'loading' && (
-        <p className="color-teal-300" role="status">
+        <p className="color-teal-grey-300" role="status">
           Loading your newsletters
         </p>
       )}
@@ -197,7 +197,7 @@ export default function NewsletterChooser({
         <>
           {view.note && (
             <div className="padding-bottom-40px">
-              <p className="color-orange" role="status">
+              <p className="color-orange-300" role="status">
                 {view.note}
               </p>
               {view.retryKey && (
@@ -250,12 +250,12 @@ function NewsletterRows({
           <div>
             <label htmlFor={`${id}-${n.key}`} className="cursor-pointer">
               <span className="color-white">{n.name}</span>{' '}
-              <span className="color-teal-300">{n.about}</span>
+              <span className="color-teal-grey-300">{n.about}</span>
             </label>
             <p className="paragraph-small padding-top-8px">
               <a
                 href={n.archive}
-                className={`color-light-teal ${styles.link}`}
+                className={`color-teal-300 ${styles.link}`}
                 onClick={() =>
                   trackEvent('newsletter_page_click', {
                     page: TRACKING_PAGE,
@@ -406,9 +406,9 @@ function SignupForm({ newsletters }: { newsletters: Newsletter[] }) {
         aria-live="polite"
         className={
           state === 'done'
-            ? 'color-light-teal padding-top-32px'
+            ? 'color-teal-300 padding-top-32px'
             : error
-              ? 'paragraph-xs color-orange padding-top-8px'
+              ? 'paragraph-xs color-orange-300 padding-top-8px'
               : ''
         }
       >
@@ -426,7 +426,7 @@ function SignupForm({ newsletters }: { newsletters: Newsletter[] }) {
           onChange={e => setHp(e.target.value)}
         />
       </div>
-      <p className="paragraph-small color-teal-300 padding-top-40px">
+      <p className="paragraph-small color-teal-grey-300 padding-top-40px">
         Already getting one? To change which newsletters you get, or to stop
         them all, use the Manage subscriptions link at the bottom of any of
         their emails.
@@ -504,7 +504,7 @@ function ManageForm({
       aria-busy={busy}
     >
       <h3 className="padding-bottom-8px">Your newsletters</h3>
-      <p className="color-teal-300 padding-bottom-16px">
+      <p className="color-teal-grey-300 padding-bottom-16px">
         For {email}. Tick the ones you want to get, then save.
       </p>
       <NewsletterRows
@@ -537,8 +537,8 @@ function ManageForm({
         className={
           status
             ? status.ok
-              ? 'color-light-teal padding-top-24px'
-              : 'paragraph-small color-orange padding-top-24px'
+              ? 'color-teal-300 padding-top-24px'
+              : 'paragraph-small color-orange-300 padding-top-24px'
             : ''
         }
       >
@@ -551,13 +551,13 @@ function ManageForm({
 /** The Updates newsletter, still on Substack: a link, not a box to tick. */
 function UpdatesNote({ updates }: { updates: Updates }) {
   return (
-    <p className="paragraph-small color-teal-300 padding-top-24px">
+    <p className="paragraph-small color-teal-grey-300 padding-top-24px">
       <span className="color-white">{updates.name}</span> {updates.about}{' '}
       <a
         href={updates.url}
         target="_blank"
         rel="noopener noreferrer"
-        className={`color-light-teal ${styles.link}`}
+        className={`color-teal-300 ${styles.link}`}
         onClick={() =>
           trackEvent('newsletter_page_click', {
             page: TRACKING_PAGE,

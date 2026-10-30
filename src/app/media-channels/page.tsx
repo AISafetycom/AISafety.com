@@ -26,7 +26,7 @@ export default async function MediaChannelsPage() {
         lastUpdatedIso={lastUpdated.lastUpdated}
         description={
           <>
-            <span className="color-light-teal">
+            <span className="color-teal-300">
               The AI safety space is changing rapidly.
             </span>{' '}
             These information sources can help you learn more and stay up to

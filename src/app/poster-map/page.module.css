@@ -32,7 +32,7 @@
   line-height: 160%;
   text-align: left;
   background-color: #ff1493;
-  color: white;
+  color: var(--white);
   border: 2px solid #ff69b4;
   box-shadow: 0px 16px 40px 0px rgba(255, 20, 147, 0.3);
   cursor: pointer;
@@ -68,7 +68,7 @@
   width: 40px;
   height: 40px;
   background-color: #ff1493;
-  color: white;
+  color: var(--white);
   border: none;
   border-radius: 0;
   cursor: pointer;

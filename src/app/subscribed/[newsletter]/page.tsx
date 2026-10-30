@@ -94,25 +94,25 @@ export default async function SubscribedPage({
             Thanks for confirming.{' '}
             {listOf(
               picked.map(n => (
-                <span key={n.name} className="color-light-teal">
+                <span key={n.name} className="color-teal-300">
                   {n.name}
                 </span>
               ))
             )}{' '}
             will arrive in your inbox{one ? ` ${one.when}` : ''}.
           </h2>
-          <p className="color-teal-300 padding-bottom-16px">
+          <p className="color-teal-grey-300 padding-bottom-16px">
             {one
               ? 'If it lands in spam or Promotions, move it to your inbox and it will stay there.'
               : 'If any of them lands in spam or Promotions, move it to your inbox and its next issues will stay there.'}
           </p>
-          <p className="color-teal-300">
+          <p className="color-teal-grey-300">
             In the meantime, see all{' '}
             {listOf(
               picked.map(n => (
                 <Fragment key={n.page}>
                   {n.what} on{' '}
-                  <Link href={n.page} className="color-light-teal">
+                  <Link href={n.page} className="color-teal-300">
                     AISafety.com{n.page}
                   </Link>
                 </Fragment>

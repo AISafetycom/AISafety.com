@@ -3,7 +3,7 @@
 
 .adminWrap {
   min-height: 100vh;
-  background-color: var(--teal-900);
+  background-color: var(--teal-grey-900);
   color: var(--white);
   /* Open and close timings for every admin panel (motion.module.css). */
   --admin-open: 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -44,8 +44,8 @@
   position: sticky;
   top: 0;
   z-index: 50;
-  background-color: var(--teal-850);
-  border-bottom: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-850);
+  border-bottom: 1px solid var(--teal-grey-800);
 }
 
 .adminHeaderInner {
@@ -78,19 +78,19 @@
 .adminNavLink {
   padding: 6px 12px;
   font-size: 13px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   text-decoration: none;
   border-radius: 6px;
 }
 
 .adminNavLink:hover {
   color: var(--white);
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
 }
 
 .adminNavLinkActive {
   color: var(--white);
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
 }
 
 /* A dropdown of tabs (Bot, Editors). */
@@ -123,8 +123,8 @@
   display: flex;
   flex-direction: column;
   padding: 6px;
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-700);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 8px;
   box-shadow: 0 12px 24px rgba(0, 25, 27, 0.5);
 }
@@ -132,7 +132,7 @@
 .adminNavMenuItem {
   padding: 8px 12px;
   font-size: 13px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   text-decoration: none;
   border-radius: 6px;
   white-space: nowrap;
@@ -141,7 +141,7 @@
 .adminNavMenuItem:hover,
 .adminNavMenuItemActive {
   color: var(--white);
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
 }
 
 .adminNavDivider {
@@ -149,7 +149,7 @@
   width: 1px;
   height: 18px;
   margin: 0 8px;
-  background-color: var(--teal-700);
+  background-color: var(--teal-grey-700);
 }
 
 .adminHeaderRight {
@@ -168,12 +168,12 @@
 }
 
 .adminSignedInLabel {
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .adminBackLink {
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   text-decoration: none;
 }
 
@@ -183,7 +183,7 @@
 
 .adminLogoutButton {
   background: transparent;
-  border: 1px solid var(--teal-700);
+  border: 1px solid var(--teal-grey-700);
   color: var(--white);
   padding: 5px 10px;
   border-radius: 6px;
@@ -193,7 +193,7 @@
 }
 
 .adminLogoutButton:hover {
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
 }
 
 /* ─── Login ───────────────────────────────────────────────────────────── */
@@ -210,8 +210,8 @@
   width: 100%;
   max-width: 360px;
   padding: 28px;
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 10px;
 }
 
@@ -233,7 +233,7 @@
   padding: 0 14px;
   background-color: var(--white);
   color: #1f1f1f;
-  border: 1px solid var(--teal-800);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 6px;
   font-size: 14px;
   font-weight: 600;
@@ -246,7 +246,7 @@
 }
 
 .loginGoogle:focus-visible {
-  outline: 2px solid var(--bright-teal-300);
+  outline: 2px solid var(--teal-300);
   outline-offset: 2px;
 }
 
@@ -258,8 +258,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: var(--bright-teal-300);
-  color: var(--teal-900);
+  background-color: var(--teal-300);
+  color: var(--teal-grey-900);
   font-size: 24px;
   font-weight: 700;
   line-height: 1;
@@ -269,7 +269,7 @@
   margin: 0 0 18px;
   font-size: 13px;
   line-height: 1.55;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .loginText strong {
@@ -312,11 +312,11 @@
 
 .pageMeta {
   font-size: 12px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .pageMetaValue {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 /* One-paragraph explainer under a page title, for people new to the tool. */
@@ -326,7 +326,7 @@
   font-size: 13px;
   line-height: 1.55;
   letter-spacing: -0.1px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 /* ─── Playground split ───────────────────────────────────────────────── */
@@ -349,8 +349,8 @@
 .chatHost {
   position: relative;
   height: min(76vh, 720px);
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 10px;
   display: flex;
   flex-direction: column;
@@ -362,7 +362,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--teal-800);
+  border-bottom: 1px solid var(--teal-grey-800);
 }
 
 .chatHostBadge {
@@ -370,21 +370,21 @@
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .chatHostBadgeDot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background-color: var(--bright-green);
+  background-color: var(--green-300);
   box-shadow: 0 0 6px rgba(122, 255, 178, 0.5);
 }
 
 .chatHostClear {
   background: transparent;
-  border: 1px solid var(--teal-700);
-  color: var(--teal-300);
+  border: 1px solid var(--teal-grey-700);
+  color: var(--teal-grey-300);
   padding: 4px 10px;
   border-radius: 6px;
   font-size: 11px;
@@ -393,7 +393,7 @@
 }
 
 .chatHostClear:hover {
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
   color: var(--white);
 }
 
@@ -410,8 +410,8 @@
   flex-direction: column;
   gap: 10px;
   padding: 16px;
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 10px;
 }
 
@@ -432,7 +432,7 @@
 
 .sectionHint {
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   letter-spacing: -0.1px;
   line-height: 1.5;
   margin: 0;
@@ -441,10 +441,10 @@
 .sectionHint code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
-  background-color: var(--teal-900);
+  background-color: var(--teal-grey-900);
   padding: 1px 5px;
   border-radius: 3px;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .editorRow {
@@ -456,15 +456,15 @@
 
 .editorRowLabel {
   font-size: 12px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .editorInput,
 .editorSelect {
   height: 32px;
   padding: 0 10px;
-  background-color: var(--teal-900);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-900);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 6px;
   color: var(--white);
   font-size: 13px;
@@ -474,15 +474,15 @@
 
 .editorInput:focus,
 .editorSelect:focus {
-  border-color: var(--teal-500);
+  border-color: var(--teal-grey-500);
 }
 
 .editorTextarea {
   width: 100%;
   min-height: 320px;
   padding: 12px 14px;
-  background-color: var(--teal-900);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-900);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 6px;
   color: var(--white);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -493,7 +493,7 @@
 }
 
 .editorTextarea:focus {
-  border-color: var(--teal-500);
+  border-color: var(--teal-grey-500);
 }
 
 .editorToolbar {
@@ -516,30 +516,30 @@
 
 .editorButton {
   background-color: transparent;
-  border: 1px solid var(--teal-700);
+  border: 1px solid var(--teal-grey-700);
   color: var(--white);
 }
 
 .editorButton:hover {
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
 }
 
 .editorButtonPrimary {
-  background-color: var(--bright-teal-300);
-  color: var(--teal-900);
+  background-color: var(--teal-300);
+  color: var(--teal-grey-900);
 }
 
 .editorButtonPrimary:hover {
-  background-color: var(--bright-teal-500);
+  background-color: var(--teal-400);
 }
 
 .editorStatus {
   font-size: 11px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .editorStatusSaving {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 /* ─── Saved versions list ────────────────────────────────────────────── */
@@ -549,7 +549,7 @@
   flex-direction: column;
   margin-top: 8px;
   padding-top: 12px;
-  border-top: 1px solid var(--teal-800);
+  border-top: 1px solid var(--teal-grey-800);
 }
 
 .editorVersionListToggle {
@@ -559,7 +559,7 @@
   background: transparent;
   border: none;
   padding: 4px 0;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   font-family: inherit;
   font-size: 12px;
   cursor: pointer;
@@ -601,8 +601,8 @@
   justify-content: space-between;
   gap: 8px;
   padding: 6px 10px;
-  background-color: var(--teal-900);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-900);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 6px;
   color: var(--white);
   cursor: pointer;
@@ -614,12 +614,12 @@
 }
 
 .editorVersionPick:hover {
-  border-color: var(--teal-600);
+  border-color: var(--teal-grey-600);
 }
 
 .editorVersionRowActive .editorVersionPick {
-  background-color: var(--teal-800);
-  border-color: var(--bright-teal-500);
+  background-color: var(--teal-grey-800);
+  border-color: var(--teal-400);
 }
 
 .editorVersionName {
@@ -632,20 +632,20 @@
 
 .editorVersionActiveDot {
   font-size: 9px;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   line-height: 1;
 }
 
 .editorVersionMeta {
   font-size: 11px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .editorVersionDelete {
   background: transparent;
-  border: 1px solid var(--teal-800);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 6px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   font-size: 16px;
   min-width: 30px;
   padding: 0 8px;
@@ -658,7 +658,7 @@
 }
 
 .editorVersionDelete:hover {
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
   color: var(--white);
 }
 
@@ -698,8 +698,8 @@
   height: 32px;
   min-width: 260px;
   padding: 0 12px;
-  background-color: var(--teal-900);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-900);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 6px;
   color: var(--white);
   font-size: 13px;
@@ -708,16 +708,16 @@
 }
 
 .convSearch:focus {
-  border-color: var(--teal-500);
+  border-color: var(--teal-grey-500);
 }
 
 .convSearch::placeholder {
-  color: var(--teal-500);
+  color: var(--teal-grey-500);
 }
 
 .convFilters label {
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -738,14 +738,14 @@
   margin: 20px 0 6px;
   font-size: 12px;
   font-weight: 600;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .convDayDivider::after {
   content: '';
   flex: 1;
   height: 1px;
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
 }
 
 .convList > .convDayDivider:first-child {
@@ -763,8 +763,8 @@
   flex-direction: column;
   gap: 6px;
   padding: 12px 14px;
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 8px;
   text-align: left;
   cursor: pointer;
@@ -773,7 +773,7 @@
 }
 
 .convRow:hover {
-  border-color: var(--teal-700);
+  border-color: var(--teal-grey-700);
 }
 
 .convRowHeader {
@@ -782,7 +782,7 @@
   justify-content: space-between;
   gap: 12px;
   font-size: 11px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .convRowMeta {
@@ -793,14 +793,14 @@
 }
 
 .convRowDate {
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .convRowPage {
   padding: 1px 7px;
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
   border-radius: 999px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 10px;
 }
@@ -835,7 +835,7 @@
 /* Chats this browser has already opened read like seen emails — the question
    drops from white to muted so unreviewed rows stand out. */
 .convRowViewed .convRowQuery {
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 /* Our own test chats (the 'internal' label) are there to be skipped: the row
@@ -843,11 +843,11 @@
 .convRowInternal {
   background-color: transparent;
   border-style: dashed;
-  border-color: var(--teal-700);
+  border-color: var(--teal-grey-700);
 }
 
 .convRowInternal .convRowQuery {
-  color: var(--teal-500);
+  color: var(--teal-grey-500);
 }
 
 /* Open, the row is the header of a solid card — a dashed top would clash. */
@@ -871,8 +871,8 @@
   flex-direction: column;
   gap: 12px;
   padding: 14px 16px;
-  background-color: var(--teal-900);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-900);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 0 0 8px 8px;
   margin-top: -1px;
 }
@@ -885,7 +885,7 @@
 
 .convDetailLabel {
   font-size: 11px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .convDetailValue {
@@ -908,7 +908,7 @@
 .convGreeting {
   font-size: 12px;
   font-style: italic;
-  color: var(--teal-500);
+  color: var(--teal-grey-500);
   line-height: 1.5;
   padding: 0 2px 2px;
   opacity: 0.7;
@@ -929,7 +929,7 @@
 
 .convGreetingChips .convChipPressed {
   opacity: 1;
-  border-color: var(--bright-teal-300);
+  border-color: var(--teal-300);
   color: var(--white);
 }
 
@@ -938,8 +938,8 @@
   padding: 0 5px;
   font-size: 10px;
   font-weight: 700;
-  color: var(--teal-900);
-  background-color: var(--bright-teal-300);
+  color: var(--teal-grey-900);
+  background-color: var(--teal-300);
   border-radius: 999px;
 }
 
@@ -951,7 +951,7 @@
   gap: 8px;
   font-size: 11px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   margin: 2px 0;
 }
 
@@ -959,29 +959,29 @@
 .convNavDivider::after {
   content: '';
   flex: 1;
-  border-top: 1px solid var(--teal-800);
+  border-top: 1px solid var(--teal-grey-800);
 }
 
 .convTurnUser,
 .convTurnAssistant {
   padding: 8px 10px;
   border-radius: 6px;
-  border: 1px solid var(--teal-800);
+  border: 1px solid var(--teal-grey-800);
 }
 
 .convTurnUser {
-  background-color: var(--teal-850);
+  background-color: var(--teal-grey-850);
 }
 
 .convTurnAssistant {
-  background-color: var(--teal-900);
+  background-color: var(--teal-grey-900);
 }
 
 .convTurnRole {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   margin-bottom: 4px;
 }
 
@@ -989,7 +989,7 @@
   margin-left: 8px;
   text-transform: none;
   letter-spacing: normal;
-  color: var(--teal-500);
+  color: var(--teal-grey-500);
 }
 
 .convRating {
@@ -1005,7 +1005,7 @@
   margin-left: 8px;
   text-transform: none;
   letter-spacing: normal;
-  color: var(--teal-500);
+  color: var(--teal-grey-500);
 }
 
 .convDeliveryWarn {
@@ -1028,12 +1028,12 @@
   flex-wrap: wrap;
   gap: 2px 12px;
   font-size: 11px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   margin-bottom: 6px;
 }
 
 .convTurnVisited a {
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   text-decoration: underline;
 }
 
@@ -1065,18 +1065,18 @@
 }
 
 .convLink {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
 .convLink:hover {
-  color: var(--bright-teal-500);
+  color: var(--teal-400);
 }
 
 /* Inline link the visitor actually clicked: brighter, with a small ✓ badge. */
 .convLinkClicked {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   font-weight: 600;
 }
 
@@ -1085,8 +1085,8 @@
   margin-left: 3px;
   font-size: 10px;
   font-weight: 700;
-  color: var(--teal-900);
-  background-color: var(--bright-teal-300);
+  color: var(--teal-grey-900);
+  background-color: var(--teal-300);
   border-radius: 999px;
   padding: 0 4px;
   text-decoration: none;
@@ -1096,8 +1096,8 @@
 .convThinking {
   margin-bottom: 10px;
   padding: 6px 10px;
-  border-left: 2px solid var(--teal-700);
-  color: var(--teal-400);
+  border-left: 2px solid var(--teal-grey-700);
+  color: var(--teal-grey-400);
   font-size: 12px;
   font-style: italic;
 }
@@ -1108,7 +1108,7 @@
   font-style: normal;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--teal-500);
+  color: var(--teal-grey-500);
   margin-bottom: 2px;
 }
 
@@ -1125,8 +1125,8 @@
   align-items: center;
   gap: 8px;
   padding: 5px 10px;
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-700);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 8px;
   font-size: 12px;
   color: var(--white);
@@ -1134,12 +1134,12 @@
 
 .convCardType {
   padding: 1px 7px;
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
   border-radius: 999px;
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.4px;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .convCardLogo {
@@ -1161,8 +1161,8 @@
 }
 
 .convCardLink:hover {
-  border-color: var(--bright-teal-300);
-  background-color: var(--teal-800);
+  border-color: var(--teal-300);
+  background-color: var(--teal-grey-800);
 }
 
 .convCardName {
@@ -1171,23 +1171,23 @@
 }
 
 .convCardNote {
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 /* Card the visitor actually clicked: brighter border + a small badge. */
 .convCardClickedRow {
-  border-color: var(--bright-teal-300);
+  border-color: var(--teal-300);
 }
 
 .convCardClicked {
   padding: 1px 7px;
-  background-color: var(--bright-teal-300);
+  background-color: var(--teal-300);
   border-radius: 999px;
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.4px;
-  color: var(--teal-900);
+  color: var(--teal-grey-900);
   white-space: nowrap;
 }
 
@@ -1218,17 +1218,17 @@
 .convCardGhost {
   display: inline-flex;
   padding: 5px 10px;
-  border: 1px dashed var(--teal-600);
+  border: 1px dashed var(--teal-grey-600);
   border-radius: 8px;
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   opacity: 0.65;
 }
 
 /* Token the live renderer stripped (malformed directive) or a reference that
    resolved to nothing — the visitor saw no trace of it. */
 .convStripped {
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   opacity: 0.6;
 }
 
@@ -1242,10 +1242,10 @@
 .convCardInline {
   display: inline;
   padding: 0 5px;
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
   border-radius: 4px;
   font-size: 12px;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .convChips {
@@ -1257,11 +1257,11 @@
 
 .convChip {
   padding: 3px 10px;
-  background-color: var(--teal-800);
-  border: 1px solid var(--teal-700);
+  background-color: var(--teal-grey-800);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 999px;
   font-size: 11px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .convError {
@@ -1273,8 +1273,8 @@
   width: 100%;
   min-height: 70px;
   padding: 8px 10px;
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 6px;
   color: var(--white);
   font-size: 13px;
@@ -1284,13 +1284,13 @@
 }
 
 .convNotes:focus {
-  border-color: var(--teal-500);
+  border-color: var(--teal-grey-500);
 }
 
 .convReviewedBy {
   margin-top: 6px;
   font-size: 11px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .convActivity {
@@ -1304,7 +1304,7 @@
 .convActivityRow {
   font-size: 12px;
   line-height: 1.45;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .convActivityWho {
@@ -1315,17 +1315,17 @@
 .convActivityWhen {
   margin-left: 8px;
   font-size: 11px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .convNoteLegacy {
   margin-bottom: 10px;
   padding: 8px 10px;
-  border: 1px dashed var(--teal-800);
+  border: 1px dashed var(--teal-grey-800);
   border-radius: 6px;
   font-size: 13px;
   line-height: 1.5;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   white-space: pre-wrap;
 }
 
@@ -1339,8 +1339,8 @@
 
 .convNoteEntry {
   padding: 8px 10px;
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 6px;
 }
 
@@ -1363,7 +1363,7 @@
   background: none;
   border: none;
   padding: 0;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   font-size: 11px;
   font-family: inherit;
   cursor: pointer;
@@ -1393,13 +1393,13 @@
 
 .convStatus {
   font-size: 11px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .convTzNote {
   margin-left: auto;
   font-size: 11px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   cursor: default;
   white-space: nowrap;
 }
@@ -1413,18 +1413,18 @@
   gap: 10px;
   margin: 14px 0 8px;
   padding: 8px 14px;
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 8px;
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .convLinkedClear {
   background: none;
   border: none;
   padding: 0;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   font-size: 12px;
   font-family: inherit;
   cursor: pointer;
@@ -1438,7 +1438,7 @@
 }
 
 .convRowReviewGood {
-  color: var(--bright-green);
+  color: var(--green-300);
 }
 
 .convRowReviewBad {
@@ -1452,9 +1452,9 @@
 /* Label pill in the collapsed row, styled like the page pill beside it. */
 .convRowTag {
   padding: 1px 7px;
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
   border-radius: 999px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   font-size: 10px;
 }
 
@@ -1468,10 +1468,10 @@
 
 .convRateBtn {
   padding: 4px 14px;
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-700);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 999px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   font-size: 12px;
   font-weight: 500;
   font-family: inherit;
@@ -1479,14 +1479,14 @@
 }
 
 .convRateBtn:hover {
-  border-color: var(--teal-500);
+  border-color: var(--teal-grey-500);
   color: var(--white);
 }
 
 .convRateGood.convRateActive {
   background-color: rgba(122, 255, 178, 0.12);
-  border-color: var(--bright-green);
-  color: var(--bright-green);
+  border-color: var(--green-300);
+  color: var(--green-300);
 }
 
 .convRateBad.convRateActive {
@@ -1505,16 +1505,16 @@
   margin-left: auto;
   padding: 4px 12px;
   background-color: transparent;
-  border: 1px solid var(--teal-700);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 6px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   font-size: 12px;
   font-family: inherit;
   cursor: pointer;
 }
 
 .convCopyLink:hover {
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
   color: var(--white);
 }
 
@@ -1523,8 +1523,8 @@
   align-items: center;
   gap: 5px;
   padding: 3px 6px 3px 10px;
-  background-color: var(--teal-800);
-  border: 1px solid var(--teal-700);
+  background-color: var(--teal-grey-800);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 999px;
   font-size: 12px;
   color: var(--white);
@@ -1540,7 +1540,7 @@
   background: none;
   border: none;
   border-radius: 999px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   font-size: 13px;
   line-height: 1;
   font-family: inherit;
@@ -1548,7 +1548,7 @@
 }
 
 .convLabelRemove:hover {
-  background-color: var(--teal-700);
+  background-color: var(--teal-grey-700);
   color: var(--white);
 }
 
@@ -1556,8 +1556,8 @@
   height: 28px;
   min-width: 150px;
   padding: 0 10px;
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 999px;
   color: var(--white);
   font-size: 12px;
@@ -1566,11 +1566,11 @@
 }
 
 .convLabelInput:focus {
-  border-color: var(--teal-500);
+  border-color: var(--teal-grey-500);
 }
 
 .convLabelInput::placeholder {
-  color: var(--teal-500);
+  color: var(--teal-grey-500);
 }
 
 /* Sized to sit flush beside the 28px pill input. */
@@ -1578,7 +1578,7 @@
   height: 28px;
   padding: 0 14px;
   background-color: transparent;
-  border: 1px solid var(--teal-700);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 999px;
   color: var(--white);
   font-size: 12px;
@@ -1588,7 +1588,7 @@
 }
 
 .convLabelAdd:hover {
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
 }
 
 /* Anchor for the label suggestion menu below the input. */
@@ -1608,8 +1608,8 @@
   max-height: 288px;
   overflow-y: auto;
   padding: 4px;
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-700);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 10px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
@@ -1621,7 +1621,7 @@
   background: none;
   border: none;
   border-radius: 6px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   font-size: 12px;
   line-height: 1.4;
   font-family: inherit;
@@ -1633,7 +1633,7 @@
 /* One class for both hover and keyboard highlight — mouseenter and arrow keys
    drive the same highlight index. */
 .convLabelOptionActive {
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
   color: var(--white);
 }
 
@@ -1648,14 +1648,14 @@
 }
 
 .excludeMetaOn {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .excludeLink {
   padding: 0;
   font: inherit;
   font-size: 12px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   background: none;
   border: none;
   text-decoration: underline;
@@ -1671,9 +1671,9 @@
 
 .notice {
   padding: 14px 16px;
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 8px;
   font-size: 13px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }

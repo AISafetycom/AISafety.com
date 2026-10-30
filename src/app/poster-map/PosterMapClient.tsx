@@ -17,7 +17,7 @@ const D3PosterMap = dynamic(() => import('./D3PosterMap'), {
         justifyContent: 'center',
       }}
     >
-      <p className="paragraph-small color-teal-300">Loading map...</p>
+      <p className="paragraph-small color-teal-grey-300">Loading map...</p>
     </div>
   ),
 })
@@ -46,7 +46,7 @@ export default function PosterMapClient({ orgs }: PosterMapClientProps) {
           <span style={{ color: '#81878f' }}>
             <Icon
               src="/images/icons/arrow-down.svg"
-              className="color-teal-bright-400"
+              className="color-teal-400"
             />
           </span>
         </button>

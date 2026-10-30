@@ -5592,7 +5592,7 @@ function Detail({
                   <>
                     <span className={styles.pageTagIcon}>
                       <Icon
-                        className="color-teal-bright-800"
+                        className="color-teal-800"
                         src={`/images/icons/${nav.icon}`}
                         size={12}
                       />
@@ -6412,7 +6412,7 @@ function typePills(
   return (
     <span className={styles.typePills}>
       {types.map(t => (
-        // The site's colour class names its variable: color-orange → --orange.
+        // The site's colour class names its variable: color-orange-300 → --orange-300.
         <span
           key={t}
           className={styles.typePill}

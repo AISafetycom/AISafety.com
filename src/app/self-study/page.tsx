@@ -27,9 +27,7 @@ export default async function SelfStudyPage() {
         description={
           <>
             These curricula and reading lists enable you to{' '}
-            <span className="color-teal-bright-300">
-              dive deeper into AI safety{' '}
-            </span>
+            <span className="color-teal-300">dive deeper into AI safety </span>
             through independent learning.
           </>
         }

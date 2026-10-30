@@ -10,7 +10,7 @@
   padding: 9px 15px;
   background: none;
   border: none;
-  color: white;
+  color: var(--white);
   font-size: 20px;
   cursor: pointer;
   text-decoration: none;

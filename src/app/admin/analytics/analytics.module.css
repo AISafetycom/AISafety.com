@@ -20,8 +20,8 @@
 .badge {
   font-size: 11px;
   font-weight: 600;
-  color: var(--teal-900);
-  background-color: var(--bright-teal-300);
+  color: var(--teal-grey-900);
+  background-color: var(--teal-300);
   padding: 3px 8px;
   border-radius: 999px;
 }
@@ -29,8 +29,8 @@
 /* A saved copy on show while the server reads the latest events (page.tsx):
    muted, and breathing gently until the live figures replace it. */
 .badgeUpdating {
-  color: var(--teal-300);
-  background-color: var(--teal-800);
+  color: var(--teal-grey-300);
+  background-color: var(--teal-grey-800);
   animation: updatingPulse 1.2s ease-in-out infinite alternate;
 }
 
@@ -51,15 +51,15 @@
 
 .total {
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 /* How far back the stored data reaches, shown when the selected range extends
  * beyond it. Dotted underline signals the tooltip carrying the full story. */
 .coverage {
   font-size: 12px;
-  color: var(--teal-300);
-  border-bottom: 1px dotted var(--teal-500);
+  color: var(--teal-grey-300);
+  border-bottom: 1px dotted var(--teal-grey-500);
   cursor: help;
 }
 
@@ -104,8 +104,8 @@
 }
 
 .panel {
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 10px;
   padding: 20px;
   margin-bottom: 20px;
@@ -113,8 +113,12 @@
 
 /* A panel about something else (site visitors beside job clicks). */
 .panelBlue {
-  background-color: color-mix(in srgb, var(--blue) 7%, var(--teal-850));
-  border-color: color-mix(in srgb, var(--blue) 30%, var(--teal-800));
+  background-color: color-mix(
+    in srgb,
+    var(--blue-300) 7%,
+    var(--teal-grey-850)
+  );
+  border-color: color-mix(in srgb, var(--blue-300) 30%, var(--teal-grey-800));
 }
 
 .panelTitle {
@@ -138,14 +142,14 @@
   text-align: left;
   font-size: 12px;
   font-weight: 600;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   padding: 6px 8px;
-  border-bottom: 1px solid var(--teal-800);
+  border-bottom: 1px solid var(--teal-grey-800);
 }
 
 .table td {
   padding: 8px;
-  border-bottom: 1px solid var(--teal-800);
+  border-bottom: 1px solid var(--teal-grey-800);
   vertical-align: top;
 }
 
@@ -156,7 +160,11 @@
 /* Every other body row gets a faint tint so wide rows are easier to track.
    The show-more button row is a control, not data, so it stays untinted. */
 .table tbody tr:nth-child(even):not(.showMoreRow) {
-  background-color: color-mix(in srgb, var(--teal-850) 60%, var(--teal-800));
+  background-color: color-mix(
+    in srgb,
+    var(--teal-grey-850) 60%,
+    var(--teal-grey-800)
+  );
 }
 
 .nameCell {
@@ -172,7 +180,7 @@
 
 .numCol {
   text-align: right;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -197,7 +205,7 @@
 /* Per-row share of the chart total — a secondary, dimmer column. */
 .pctCol {
   text-align: right;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   width: 1%;
@@ -214,7 +222,7 @@
 }
 
 .totalLabel {
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 /* Listing placement on the /funding page (F1/F2 featured, then 1, 2, 3…). */
@@ -222,7 +230,7 @@
   width: 1%;
   white-space: nowrap;
   text-align: right;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   font-variant-numeric: tabular-nums;
 }
 
@@ -235,13 +243,13 @@
 }
 
 .rankFeatured {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   font-weight: 600;
 }
 
 .dim {
   font-size: 13px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 /* "Show more" row: a full-width button under a truncated listing table. */
@@ -255,9 +263,9 @@
   padding: 6px 16px;
   font-size: 13px;
   font-family: inherit;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   background-color: transparent;
-  border: 1px solid var(--teal-800);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 6px;
   cursor: pointer;
   transition:
@@ -267,7 +275,7 @@
 
 .showMoreBtn:hover {
   color: var(--white);
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
 }
 
 /* Sortable column headers: the header text is a button, styled to read
@@ -298,7 +306,7 @@
   margin-top: 12px;
   font-size: 11px;
   line-height: 1.5;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 /* ─── Unique / total click toggle ─────────────────────────────────────── */
@@ -312,7 +320,7 @@
 }
 
 .clickToggleLabel {
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   margin-right: 2px;
 }
 
@@ -320,9 +328,9 @@
 .clickToggleBtn {
   padding: 3px 10px;
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   background-color: transparent;
-  border: 1px solid var(--teal-800);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 999px;
   text-decoration: none;
   transition:
@@ -332,14 +340,14 @@
 
 .clickToggleBtn:hover {
   color: var(--white);
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
 }
 
 .clickToggleBtnActive,
 .clickToggleBtnActive:hover {
-  color: var(--teal-900);
-  background-color: var(--bright-teal-300);
-  border-color: var(--bright-teal-300);
+  color: var(--teal-grey-900);
+  background-color: var(--teal-300);
+  border-color: var(--teal-300);
 }
 
 /* ─── Exclude-my-activity control (in the header meta row) ─────────────── */
@@ -352,13 +360,13 @@
 }
 
 .excludeMetaOn {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .excludeLink {
   padding: 0;
   font: inherit;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   background: none;
   border: none;
   text-decoration: underline;
@@ -385,7 +393,7 @@
 }
 
 .sourceSplitLabel {
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   font-weight: 600;
 }
 
@@ -394,13 +402,13 @@
   align-items: baseline;
   gap: 6px;
   padding: 4px 10px;
-  background-color: var(--teal-900);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-900);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 6px;
 }
 
 .sourceStatName {
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .sourceStatCount {
@@ -410,7 +418,7 @@
 }
 
 .sourceStatPct {
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
@@ -423,20 +431,20 @@
 }
 
 .sourceStatLink:hover {
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
 }
 
 .sourceStatActive,
 .sourceStatActive:hover {
-  background-color: var(--bright-teal-300);
-  border-color: var(--bright-teal-300);
+  background-color: var(--teal-300);
+  border-color: var(--teal-300);
 }
 
 /* On the active (light) pill, recolor every part for contrast. */
 .sourceStatActive .sourceStatName,
 .sourceStatActive .sourceStatCount,
 .sourceStatActive .sourceStatPct {
-  color: var(--teal-900);
+  color: var(--teal-grey-900);
 }
 
 /* ─── Per-page drill-down ─────────────────────────────────────────────── */
@@ -468,9 +476,9 @@
   /* Symmetric by default so text-only tabs (e.g. Home) stay centered. */
   padding: 5px 12px;
   font-size: 13px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   background-color: transparent;
-  border: 1px solid var(--teal-800);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 6px;
   text-decoration: none;
   white-space: nowrap;
@@ -499,23 +507,23 @@
 
 .pageTab:hover {
   color: var(--white);
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
 }
 
 .pageTabActive,
 .pageTabActive:hover {
-  color: var(--teal-900);
-  background-color: var(--bright-teal-300);
-  border-color: var(--bright-teal-300);
+  color: var(--teal-grey-900);
+  background-color: var(--teal-300);
+  border-color: var(--teal-300);
 }
 
 .empty {
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 10px;
   padding: 28px;
   font-size: 14px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   line-height: 1.5;
 }
 
@@ -532,7 +540,7 @@
   align-items: center;
   gap: 12px;
   padding: 8px 0;
-  border-bottom: 1px solid var(--teal-800);
+  border-bottom: 1px solid var(--teal-grey-800);
   font-size: 13px;
 }
 
@@ -541,7 +549,7 @@
 }
 
 .recentTime {
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   font-size: 12px;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
@@ -549,8 +557,8 @@
 
 .pill {
   font-size: 11px;
-  color: var(--bright-teal-300);
-  border: 1px solid var(--teal-700);
+  color: var(--teal-300);
+  border: 1px solid var(--teal-grey-700);
   padding: 2px 8px;
   border-radius: 999px;
   white-space: nowrap;
@@ -576,7 +584,7 @@
 }
 
 .recentUrl {
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   font-size: 12px;
   text-decoration: none;
   white-space: nowrap;
@@ -622,7 +630,7 @@
 
 .logoFallback {
   display: inline-block;
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
 }
 
 /* ─── Date-range picker ───────────────────────────────────────────────── */
@@ -647,9 +655,9 @@
   padding: 3px 10px;
   font-size: 12px;
   font-family: inherit;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   background-color: transparent;
-  border: 1px solid var(--teal-800);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 999px;
   text-decoration: none;
   white-space: nowrap;
@@ -661,14 +669,14 @@
 
 .presetBtn:hover {
   color: var(--white);
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
 }
 
 .presetBtnActive,
 .presetBtnActive:hover {
-  color: var(--teal-900);
-  background-color: var(--bright-teal-300);
-  border-color: var(--bright-teal-300);
+  color: var(--teal-grey-900);
+  background-color: var(--teal-300);
+  border-color: var(--teal-300);
 }
 
 .custom {
@@ -684,19 +692,19 @@
   font-size: 12px;
   font-family: inherit;
   color: var(--white);
-  background-color: var(--teal-900);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-900);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 999px;
   color-scheme: dark;
 }
 
 .dateInput:focus {
   outline: none;
-  border-color: var(--teal-500);
+  border-color: var(--teal-grey-500);
 }
 
 .rangeDash {
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   font-size: 12px;
 }
 
@@ -706,15 +714,15 @@
   font-size: 12px;
   font-weight: 600;
   font-family: inherit;
-  color: var(--teal-900);
-  background-color: var(--bright-teal-300);
+  color: var(--teal-grey-900);
+  background-color: var(--teal-300);
   border: none;
   border-radius: 999px;
   cursor: pointer;
 }
 
 .applyBtn:hover:not(:disabled) {
-  background-color: var(--bright-teal-500);
+  background-color: var(--teal-400);
 }
 
 .applyBtn:disabled {
@@ -749,8 +757,8 @@
   min-width: 120px;
   padding: 16px;
   text-align: center;
-  background-color: var(--teal-900);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-900);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 8px;
 }
 
@@ -758,14 +766,14 @@
   font-size: 28px;
   font-weight: 600;
   line-height: 1.1;
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
   font-variant-numeric: tabular-nums;
 }
 
 .funnelLabel {
   margin-top: 6px;
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .funnelArrow {
@@ -779,12 +787,12 @@
 
 .funnelArrowGlyph {
   font-size: 16px;
-  color: var(--teal-500);
+  color: var(--teal-grey-500);
 }
 
 .funnelPct {
   font-size: 11px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   font-variant-numeric: tabular-nums;
 }
 
@@ -803,26 +811,26 @@
 .pageTabs:has([data-pending]) .pageTabActive,
 .clickToggle:has([data-pending]) .clickToggleBtnActive,
 .presets:has([data-pending]) .presetBtnActive {
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   background-color: transparent;
-  border-color: var(--teal-800);
+  border-color: var(--teal-grey-800);
 }
 
 .pageTabs .pageTab:has([data-pending]),
 .clickToggle .clickToggleBtn:has([data-pending]),
 .presets .presetBtn:has([data-pending]) {
-  color: var(--teal-900);
-  background-color: var(--bright-teal-300);
-  border-color: var(--bright-teal-300);
+  color: var(--teal-grey-900);
+  background-color: var(--teal-300);
+  border-color: var(--teal-300);
 }
 
 .sourceSplit:has([data-pending]) .sourceStatActive {
-  background-color: var(--teal-900);
-  border-color: var(--teal-800);
+  background-color: var(--teal-grey-900);
+  border-color: var(--teal-grey-800);
 }
 
 .sourceSplit:has([data-pending]) .sourceStatActive .sourceStatName {
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .sourceSplit:has([data-pending]) .sourceStatActive .sourceStatCount {
@@ -830,18 +838,18 @@
 }
 
 .sourceSplit:has([data-pending]) .sourceStatActive .sourceStatPct {
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .sourceSplit .sourceStat:has([data-pending]) {
-  background-color: var(--bright-teal-300);
-  border-color: var(--bright-teal-300);
+  background-color: var(--teal-300);
+  border-color: var(--teal-300);
 }
 
 .sourceSplit
   .sourceStat:has([data-pending])
   :is(.sourceStatName, .sourceStatCount, .sourceStatPct) {
-  color: var(--teal-900);
+  color: var(--teal-grey-900);
 }
 
 /* ─── Org lookup ──────────────────────────────────────────────────────── */
@@ -862,18 +870,18 @@
   font-size: 13px;
   font-family: inherit;
   color: var(--white);
-  background-color: var(--teal-900);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-900);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 6px;
   outline: none;
 }
 
 .orgSearchInput:focus {
-  border-color: var(--teal-500);
+  border-color: var(--teal-grey-500);
 }
 
 .orgSearchInput::placeholder {
-  color: var(--teal-500);
+  color: var(--teal-grey-500);
 }
 
 .orgSearch .applyBtn {
@@ -891,8 +899,8 @@
   gap: 8px 12px;
   margin-bottom: 20px;
   padding: 12px 14px;
-  background-color: var(--teal-900);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-900);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 8px;
 }
 
@@ -901,7 +909,7 @@
   margin: 0;
   font-size: 13px;
   line-height: 1.5;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .shareLabel {
@@ -917,14 +925,14 @@
   font-size: 13px;
   font-family: inherit;
   color: var(--white);
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-800);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-800);
   border-radius: 6px;
   outline: none;
 }
 
 .shareLink:focus {
-  border-color: var(--teal-500);
+  border-color: var(--teal-grey-500);
 }
 
 .shareNote {
@@ -932,14 +940,14 @@
   margin: 0;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 /* A button that reads as a link inside a sentence. */
 .shareInline {
   padding: 0;
   font: inherit;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   background: none;
   border: none;
   text-decoration: underline dotted;
@@ -957,14 +965,14 @@
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   white-space: nowrap;
 }
 
 .shareConfirm {
   font-size: 12px;
   line-height: 1.5;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 /* The org pages shared so far, before a search: name, how often opened,
@@ -988,7 +996,7 @@
 
 .sharedPagesNote {
   font-size: 12px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .sharedPagesActions {
@@ -1008,9 +1016,9 @@
   padding: 3px 12px;
   font-size: 12px;
   font-family: inherit;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   background-color: transparent;
-  border: 1px solid var(--teal-700);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 999px;
   text-decoration: none;
   cursor: pointer;
@@ -1022,7 +1030,7 @@
 
 .copyBtn:hover:not(:disabled) {
   color: var(--white);
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
 }
 
 .copyBtn:disabled {
@@ -1040,7 +1048,7 @@
 
 .orgNotes {
   font-size: 11px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 /* A listing no longer on the site: faded, cells only, so the row keeps its
@@ -1051,7 +1059,7 @@
 
 .leaveOut {
   font-size: 12px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   white-space: nowrap;
   text-decoration: underline dotted;
   text-underline-offset: 3px;
@@ -1086,7 +1094,7 @@
   padding: 0;
   list-style: none;
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .leftOutList li {
@@ -1097,7 +1105,7 @@
 .orgWarning {
   margin-bottom: 20px;
   font-size: 13px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 /* Clicks over time: one series, so no legend. Each day (or week) is a slot
@@ -1113,7 +1121,7 @@
 .chartReadout {
   min-height: 20px;
   font-size: 12px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 .chartReadout strong {
@@ -1138,7 +1146,7 @@
   width: 40px;
   margin: -7px 0;
   font-size: 11px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1149,7 +1157,7 @@
   align-items: stretch;
   /* 2px between columns, less on a phone, so 91 days still fit. */
   gap: min(2px, 0.3%);
-  border-bottom: 1px solid var(--teal-700);
+  border-bottom: 1px solid var(--teal-grey-700);
 }
 
 .chartGrid {
@@ -1157,7 +1165,7 @@
   left: 0;
   right: 0;
   height: 1px;
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
   pointer-events: none;
 }
 
@@ -1175,7 +1183,7 @@
 }
 
 .chartCol:focus-visible {
-  outline: 1px solid var(--teal-500);
+  outline: 1px solid var(--teal-grey-500);
   outline-offset: 1px;
 }
 
@@ -1183,7 +1191,7 @@
   width: 100%;
   max-width: 24px;
   min-height: 2px;
-  background-color: var(--bright-teal-300);
+  background-color: var(--teal-300);
   border-radius: 4px 4px 0 0;
   transition: background-color var(--hover-transition);
 }
@@ -1207,7 +1215,7 @@
   height: 1lh;
   margin-left: 48px;
   font-size: 11px;
-  color: var(--teal-400);
+  color: var(--teal-grey-400);
 }
 
 /* A box exactly as wide as its column, so the date centers under the bar;
@@ -1281,7 +1289,7 @@
 .chartTable {
   margin-top: 8px;
   font-size: 12px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
 }
 
 .chartTable summary {

@@ -6,7 +6,7 @@
   inset: 0;
   z-index: 2147483647;
   /* Kept in sync with mobile-menu backdrop in Navigation.module.css. */
-  background-color: rgba(5, 24, 26, 0.8);
+  background-color: color-mix(in srgb, var(--teal-grey-900) 80%, transparent);
   overflow-y: auto;
   /* 88px clears the fixed nav. */
   padding: 88px 24px 24px;
@@ -15,8 +15,8 @@
 .modal {
   width: 100%;
   max-width: 680px;
-  background-color: var(--teal-850);
-  border: 1px solid var(--teal-700);
+  background-color: var(--teal-grey-850);
+  border: 1px solid var(--teal-grey-700);
   border-radius: 20px;
   overflow: hidden;
   max-height: calc(100vh - 112px);
@@ -35,7 +35,7 @@
 }
 
 .input-row {
-  border-bottom: 1px solid var(--teal-750);
+  border-bottom: 1px solid var(--teal-grey-750);
 }
 
 .input-icon {
@@ -58,7 +58,7 @@
 }
 
 .input::placeholder {
-  color: var(--teal-500);
+  color: var(--teal-grey-500);
 }
 
 /* Suppress WebKit's built-in clear (×) button for type=search — the
@@ -71,8 +71,8 @@
 
 .filter-chip {
   flex: none;
-  background-color: var(--bright-teal-300);
-  color: var(--teal-900);
+  background-color: var(--teal-300);
+  color: var(--teal-grey-900);
   border: none;
   border-radius: 999px;
   cursor: pointer;
@@ -80,11 +80,7 @@
 }
 
 .filter-chip:hover {
-  background-color: color-mix(
-    in srgb,
-    var(--bright-teal-300) 80%,
-    var(--white)
-  );
+  background-color: color-mix(in srgb, var(--teal-300) 80%, var(--white));
 }
 
 .filter-chip svg {
@@ -109,7 +105,7 @@
 
 .browse-card {
   background-color: transparent;
-  border: 1px solid var(--teal-750);
+  border: 1px solid var(--teal-grey-750);
   border-radius: 12px;
   text-align: left;
   /* iOS Safari renders <button> text in its system blue by default. */
@@ -120,8 +116,8 @@
 }
 
 .browse-card:focus-visible:not(:disabled) {
-  background-color: var(--teal-800);
-  border-color: var(--bright-teal-500);
+  background-color: var(--teal-grey-800);
+  border-color: var(--teal-400);
   outline: none;
 }
 
@@ -129,8 +125,8 @@
    doesn't latch a sticky highlight on the card. */
 @media (hover: hover) {
   .browse-card:hover:not(:disabled) {
-    background-color: var(--teal-800);
-    border-color: var(--bright-teal-500);
+    background-color: var(--teal-grey-800);
+    border-color: var(--teal-400);
   }
 }
 
@@ -156,7 +152,7 @@
 
 .browse-card-count {
   flex: none;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   font-variant-numeric: tabular-nums;
 }
 
@@ -164,7 +160,7 @@
 .group-label {
   text-transform: uppercase;
   letter-spacing: 1px;
-  color: var(--teal-500);
+  color: var(--teal-grey-500);
 }
 
 .group-link {
@@ -172,13 +168,13 @@
 }
 
 .group-link:hover {
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
 
 .group-count {
-  color: var(--teal-600);
+  color: var(--teal-grey-600);
   font-weight: 400;
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
@@ -198,8 +194,8 @@
 @media (hover: hover) {
   .result:hover,
   .result-active {
-    background-color: var(--teal-800);
-    border-color: var(--teal-700);
+    background-color: var(--teal-grey-800);
+    border-color: var(--teal-grey-700);
   }
 }
 
@@ -227,8 +223,8 @@
 }
 
 .result-icon-initials {
-  background-color: var(--teal-750);
-  color: var(--bright-teal-300);
+  background-color: var(--teal-grey-750);
+  color: var(--teal-300);
   border-radius: 50%;
 }
 
@@ -246,7 +242,7 @@
 }
 
 .result-subtitle {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 
 .result-description {
@@ -257,7 +253,7 @@
 }
 
 .result-category {
-  color: var(--teal-500);
+  color: var(--teal-grey-500);
 }
 
 .shortcut-hint {
@@ -270,7 +266,7 @@
   appearance: none;
   -webkit-appearance: none;
   padding: 4px 8px;
-  border: 1px solid var(--teal-700);
+  border: 1px solid var(--teal-grey-700);
   background: transparent;
   border-radius: 6px;
   cursor: pointer;
@@ -280,8 +276,8 @@
 }
 
 .shortcut-hint:hover {
-  border-color: var(--teal-500);
-  color: var(--teal-300);
+  border-color: var(--teal-grey-500);
+  color: var(--teal-grey-300);
 }
 
 .shortcut-hint-x {
@@ -312,10 +308,10 @@
     width: 28px;
     height: 28px;
     padding: 0;
-    border-color: rgba(255, 255, 255, 0.4);
+    border-color: color-mix(in srgb, var(--white) 40%, transparent);
     /* Same colour as the border so the X reads as part of the box,
        not as a bright primary action. */
-    color: rgba(255, 255, 255, 0.4);
+    color: color-mix(in srgb, var(--white) 40%, transparent);
   }
   .shortcut-hint-esc {
     display: none;

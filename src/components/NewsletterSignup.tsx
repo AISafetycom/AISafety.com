@@ -125,9 +125,9 @@ function ActiveCampaignSignup({
   const status = state === 'done' ? (already ? ALREADY : SUCCESS) : error
   const statusStyle =
     state === 'done'
-      ? 'paragraph-small color-light-teal'
+      ? 'paragraph-small color-teal-300'
       : error
-        ? 'paragraph-xs color-orange padding-top-8px'
+        ? 'paragraph-xs color-orange-300 padding-top-8px'
         : ''
   return (
     <form

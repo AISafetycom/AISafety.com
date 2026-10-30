@@ -605,7 +605,7 @@ export default function EventsClient({ events }: EventsClientProps) {
               key={group.key}
               className={i === 0 ? undefined : 'padding-top-32px'}
             >
-              <p className="paragraph-small color-teal-300 padding-bottom-24px">
+              <p className="paragraph-small color-teal-grey-300 padding-bottom-24px">
                 {group.label}
               </p>
               <div className="collection-list">
@@ -623,7 +623,7 @@ export default function EventsClient({ events }: EventsClientProps) {
             </div>
           ))}
           {filteredEvents.length === 0 && (
-            <p className="paragraph-small color-teal-300">
+            <p className="paragraph-small color-teal-grey-300">
               {emptyStateMessage(
                 mode,
                 selectedStatus,

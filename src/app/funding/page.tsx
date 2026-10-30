@@ -37,7 +37,7 @@ export default async function FundingPage() {
         description={
           <>
             These organizations offer{' '}
-            <span className="color-light-teal">financial support</span> to
+            <span className="color-teal-300">financial support</span> to
             organizations and individuals working on AI safety.
           </>
         }
