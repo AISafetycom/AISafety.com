@@ -89,6 +89,7 @@ Each page adds its own bar, and seriousness is a separate gate: on topic isn't t
 **/funding** – funders, grant programs, and funding platforms.
 - The funder must explicitly and demonstrably fund AI x-risk work. Theoretical openness doesn't count, so general funders are out, though their dedicated safety programs are listed.
 - Cash only, no API credits or compute.
+- A micro-grant for one narrow task isn't listed, such as a few thousand dollars to write one report on the funder's own project. Small grants for any in-scope work are fine, and so is a well-funded call on a single topic.
 - Fellowships where you do the work as part of a program go on /training. A grant-style one (a stipend, no employer) can go here.
 - Funders that are closed for now or invitation-only stay on the page, flagged as not accepting.
 
@@ -143,5 +144,5 @@ An existing listing isn't a guarantee, and we review and remove listings often.
 - **Tell us if we misread you.** If we missed x-risk work on your site or picked the wrong page, show us where. Reply to our email or use the "Send us an email" button.
 - **Suggest a correction.** If you think another listing shouldn't be there, use "Suggest correction" on that page and say why.
 
-Last updated: 26 October 2026
+Last updated: 30 October 2026
 `
