@@ -6,7 +6,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   listAll: vi.fn(),
   airtableRequest: vi.fn(),
+  put: vi.fn(),
 }))
+// The Blob store that keeps the old side of a picture for Undo.
+vi.mock('@vercel/blob', () => ({ put: mocks.put, list: vi.fn() }))
 vi.mock('./airtable', () => ({
   airtableRequest: mocks.airtableRequest,
   listAll: mocks.listAll,
@@ -531,8 +534,8 @@ describe('picture fields on Apply and Undo', () => {
     expect(patches[0].fields[ERROR]).toContain('takes a picture link')
   })
 
-  it('on Undo, puts the other fields back and leaves a logo whose old side is only described', async () => {
-    await undoItem(
+  it('on Undo, puts the other fields back and names a logo whose old side is only described', async () => {
+    const notBack = await undoItem(
       logoChange({
         status: 'Applied',
         changes: [
@@ -550,6 +553,8 @@ describe('picture fields on Apply and Undo', () => {
       fields: { 'Host name': 'Mangrove' },
     })
     expect(patches[1].fields[STATUS]).toBe('Pending')
+    // The page is told, so the listing is not taken for undone.
+    expect(notBack).toEqual(['Logo'])
   })
 
   // Threading the Needle, 7 Oct 2026: Fable put finished logos on the
@@ -614,6 +619,192 @@ describe('picture fields on Apply and Undo', () => {
     await acceptItem(logoChange({ issueRow: rid('issue') }), {}, null, ['Logo'])
     expect(patches.map(p => p.path)).toEqual([`${QUEUE}/${rid('q1')}`])
     expect(patches[0].fields[STATUS]).toBe('Applied')
+  })
+})
+
+// The old picture behind a change, kept at Accept so Undo can put it back
+// (Bryce, 3 Nov 2026: AISUM26 was accepted and undone, and its listing kept
+// the new logo – the proposal named the old one only as "aisum26.svg").
+describe('the old picture on Accept and Undo', () => {
+  const EDITS = 'fldzCgKQbopgcbrwq'
+  const BEFORE = '(before)'
+  const newLogo = 'https://aisum.org/sites/aisanz/icon-192.png'
+  // Airtable's links carry when they stop working: 2100, and 2023.
+  const fresh =
+    'https://v5.airtableusercontent.com/v3/u/58/58/4102444800000/abc/def/ghi'
+  const spent =
+    'https://v5.airtableusercontent.com/v3/u/58/58/1700000000000/abc/def/ghi'
+  const store = 'https://store.public.blob.vercel-storage.com/'
+  let patches: { path: string; fields: Record<string, unknown> }[]
+  let stored: Record<string, unknown>
+  let row: Record<string, unknown>
+
+  beforeEach(() => {
+    patches = []
+    row = {}
+    stored = {
+      Logo: [
+        {
+          id: 'attOld0000000001',
+          url: fresh,
+          filename: 'aisum26.svg',
+          type: 'image/svg+xml',
+          size: 6,
+        },
+      ],
+    }
+    process.env.AIRTABLE_TOKEN = 'test-token'
+    process.env.AIRTABLE_BASE_ID = 'appTest'
+    process.env.BLOB_READ_WRITE_TOKEN = 'test-blob'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        url.includes('airtableusercontent.com')
+          ? new Response('<svg/>', {
+              headers: { 'content-type': 'image/svg+xml' },
+            })
+          : Response.json({
+              tables: [
+                {
+                  id: EVENTS,
+                  fields: [
+                    { id: 'fldName', name: 'Name', type: 'singleLineText' },
+                    {
+                      id: 'fldLogo',
+                      name: 'Logo',
+                      type: 'multipleAttachments',
+                    },
+                    {
+                      id: 'fldHost',
+                      name: 'Host name',
+                      type: 'singleLineText',
+                    },
+                  ],
+                },
+              ],
+            })
+      )
+    )
+    mocks.put.mockReset()
+    mocks.put.mockImplementation(async (path: string) => ({
+      url: `${store}${path}`,
+    }))
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(
+      async (path: string, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          const body = JSON.parse(String(init.body)) as {
+            fields: Record<string, unknown>
+          }
+          patches.push({ path, fields: body.fields })
+          return new Response('{}', { status: 200 })
+        }
+        if (path.startsWith(QUEUE)) return Response.json({ fields: row })
+        return Response.json({ id: rid('live'), fields: stored })
+      }
+    )
+  })
+
+  const logoChange = (over: Partial<QueueItem> = {}) =>
+    item({
+      type: 'Change',
+      source: 'Broom',
+      changes: [{ field: 'Logo', from: 'aisum26.svg', to: newLogo }],
+      ...over,
+    })
+
+  const savedBefore = () =>
+    (JSON.parse(String(patches[1].fields[EDITS])) as Record<string, unknown>)[
+      BEFORE
+    ] as Record<string, unknown>
+
+  it('keeps a lasting copy of the logo it replaces, and Undo writes that back', async () => {
+    await acceptItem(logoChange(), {})
+    expect(patches[0].fields).toEqual({
+      Logo: [{ url: newLogo, filename: 'icon-192.png' }],
+    })
+    // The copy is named by its bytes, in the Blob store's queue/before/.
+    expect(mocks.put).toHaveBeenCalledTimes(1)
+    const [path] = mocks.put.mock.calls[0] as [string]
+    expect(path).toMatch(/^queue\/before\/[0-9a-f]{16}\.svg$/)
+    const kept = [{ url: `${store}${path}`, filename: 'aisum26.svg' }]
+    expect(savedBefore()).toEqual({ Logo: kept })
+
+    patches = []
+    const notBack = await undoItem(
+      logoChange({ status: 'Applied', before: { Logo: kept } })
+    )
+    expect(notBack).toEqual([])
+    expect(patches[0]).toEqual({
+      path: `${EVENTS}/${rid('live')}`,
+      fields: { Logo: kept },
+    })
+    expect(patches[1].fields[STATUS]).toBe('Pending')
+    // What it replaced is spent: the row's edits go back to the draft.
+    expect(patches[1].fields[EDITS]).toBeNull()
+  })
+
+  it('keeps Airtable’s own link when the copy cannot be made, and says so in the log', async () => {
+    mocks.put.mockRejectedValue(new Error('store is down'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await acceptItem(logoChange(), {})
+    expect(savedBefore()).toEqual({
+      Logo: [{ url: fresh, filename: 'aisum26.svg' }],
+    })
+    expect(patches[1].fields[STATUS]).toBe('Applied')
+    expect(warn.mock.calls.flat().join(' ')).toContain('store is down')
+    warn.mockRestore()
+  })
+
+  it('puts an empty logo field back empty', async () => {
+    stored = {}
+    await acceptItem(logoChange(), {})
+    expect(mocks.put).not.toHaveBeenCalled()
+    expect(savedBefore()).toEqual({ Logo: [] })
+
+    patches = []
+    await undoItem(logoChange({ status: 'Applied', before: { Logo: [] } }))
+    expect(patches[0].fields).toEqual({ Logo: [] })
+  })
+
+  // Fixed from Done today: Fable had put its own logo on the listing, so
+  // Accept left the field, and the fix replaces Fable's.
+  it('keeps the logo a fix after the decision replaces, when Accept had not written it', async () => {
+    row = { [EDITS]: JSON.stringify({ '(kept by Fable)': ['Logo'] }) }
+    const edit = [{ url: newLogo, filename: 'icon-192.png' }]
+    await fixItem(logoChange({ status: 'Applied', keptByFable: ['Logo'] }), {
+      Logo: edit,
+    })
+    expect(patches[0]).toEqual({
+      path: `${EVENTS}/${rid('live')}`,
+      fields: { Logo: edit },
+    })
+    const [path] = mocks.put.mock.calls[0] as [string]
+    expect(JSON.parse(String(patches[1].fields[EDITS]))).toEqual({
+      [BEFORE]: { Logo: [{ url: `${store}${path}`, filename: 'aisum26.svg' }] },
+      Logo: edit,
+    })
+  })
+
+  it('on Undo, leaves and names a logo kept only by a link that has run out', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const notBack = await undoItem(
+      logoChange({
+        status: 'Applied',
+        changes: [
+          { field: 'Logo', from: 'aisum26.svg', to: newLogo },
+          { field: 'Host name', from: 'AIS ANZ', to: 'AISUM' },
+        ],
+        before: { Logo: [{ url: spent, filename: 'aisum26.svg' }] },
+      })
+    )
+    expect(notBack).toEqual(['Logo'])
+    expect(patches[0]).toEqual({
+      path: `${EVENTS}/${rid('live')}`,
+      fields: { 'Host name': 'AIS ANZ' },
+    })
+    expect(patches[1].fields[STATUS]).toBe('Pending')
+    warn.mockRestore()
   })
 })
 

@@ -1205,7 +1205,8 @@ const COPIED_NOTE = 'Reply copied · paste it in Discord'
 function toastReply(toast: Toast): string | null {
   if (toast.item.source !== 'Discord' || toast.later || toast.reopen)
     return null
-  if (toast.state === 'failed' || toast.state === 'undoing') return null
+  if (toast.state === 'failed' || toast.state === 'undoing' || toast.undone)
+    return null
   if (toast.copied) return toast.copied
   if (toast.state !== 'done') return null
   return (
@@ -1299,6 +1300,15 @@ function laterNote(item: QueueItem): string {
     : 'Back in the list then'
 }
 
+/** The fields an Undo could not put back, as the toast says them. */
+function notPutBackNote(fields: string[]): string {
+  const one = fields.length === 1
+  const names = one
+    ? fields[0]
+    : `${fields.slice(0, -1).join(', ')}${fields.length > 2 ? ',' : ''} and ${fields[fields.length - 1]}`
+  return `The listing still has the new ${names} – the old ${one ? 'one' : 'ones'} couldn’t be put back`
+}
+
 function workingLabel(item: QueueItem, action: Decision, d?: Draft): string {
   if (action === 'reject') return 'Rejecting…'
   if (action === 'later') return 'Setting it aside…'
@@ -1368,6 +1378,11 @@ interface Toast {
   copied?: string
   /** Reopen on a declined addition: no Undo, the mark is its arrow. */
   reopen?: boolean
+  /** An undo that landed with something to say: nothing left to undo, so
+   *  it offers Open and a close button instead. */
+  undone?: boolean
+  /** Stays up until closed: something left for the admin to fix by hand. */
+  stay?: boolean
 }
 
 /** What the page tells the Mac agent to do after a decision: save the
@@ -3144,7 +3159,11 @@ export default function QueueAdmin({
           }),
         })
         status = res.status
-        const data = (await res.json()) as { item?: QueueItem; error?: string }
+        const data = (await res.json()) as {
+          item?: QueueItem
+          error?: string
+          notPutBack?: string[]
+        }
         if (!res.ok || !data.item) {
           throw new Error(data.error ?? `HTTP ${res.status}`)
         }
@@ -3239,21 +3258,35 @@ export default function QueueAdmin({
           if (draftPending) void saveReply(updated)
           if (rejectReplyPending) void saveRejectReply(updated)
         } else if (action === 'undo') {
-          // A rejection's reply already in Gmail stays there: say so. A
-          // decision made while the undo was on its way keeps the toast.
+          // A rejection's reply already in Gmail stays there, and so does a
+          // picture Undo had no copy of (Bryce, 3 Nov 2026: AISUM26 kept
+          // the new logo): say so. A decision made while the undo was on
+          // its way keeps the toast.
+          const notBack = data.notPutBack ?? []
           setToast(prev =>
             prev && prev.item.id !== item.id
               ? prev
-              : item.status === 'Rejected' &&
-                  item.rejectReply?.state === 'saved'
+              : notBack.length > 0
                 ? {
                     item: updated,
                     no: false,
                     state: 'done',
                     text: 'Back in the queue',
-                    sub: 'The rejection reply is still in Gmail as a draft – delete it there',
+                    sub: notPutBackNote(notBack),
+                    undone: true,
+                    stay: true,
                   }
-                : null
+                : item.status === 'Rejected' &&
+                    item.rejectReply?.state === 'saved'
+                  ? {
+                      item: updated,
+                      no: false,
+                      state: 'done',
+                      text: 'Back in the queue',
+                      sub: 'The rejection reply is still in Gmail as a draft – delete it there',
+                      undone: true,
+                    }
+                  : null
           )
           setUndoable(null)
           select(updated.id)
@@ -3338,8 +3371,10 @@ export default function QueueAdmin({
 
   useEffect(() => {
     // A decision on its way, or one that failed, stays up until dealt with;
-    // so does one whose Discord reply is still to be pasted.
-    if (!toast || toast.state !== 'done' || toastReply(toast)) return
+    // so does one whose Discord reply is still to be pasted, and an undo
+    // that left a picture behind.
+    if (!toast || toast.state !== 'done' || toast.stay || toastReply(toast))
+      return
     const leave = setTimeout(
       () => setToastLeaving(true),
       TOAST_MS - TOAST_OUT_MS
@@ -4338,9 +4373,9 @@ export default function QueueAdmin({
               )}
             </>
           )}
-          {toast.state === 'failed' ? (
+          {toast.state === 'failed' || toast.undone ? (
             <>
-              {toastRetry && (
+              {toast.state === 'failed' && toastRetry && (
                 <button
                   className={styles.toastUndo}
                   onClick={() =>
