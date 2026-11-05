@@ -44,6 +44,7 @@ import {
 import { sealToken } from './session'
 import { parseRejectDrafts } from './queue-decline'
 import { isExpiredAttachment } from './attachment-url'
+import { isSpent, keepPictures } from './queue-before-picture'
 import {
   keepsOrder,
   NO_PLACE,
@@ -1666,15 +1667,23 @@ export async function deletedColumns(
  *  the table's schema cannot be read. A value that is not a picture either
  *  stops the write (`throw`, for an Apply the admin is watching) or leaves
  *  that one field as it is (`skip`, for an Undo that should still put the
- *  other fields back). */
+ *  other fields back, and say which it could not: `skipped`). `pictures`
+ *  names the attachment fields the write holds. */
 async function withAttachmentShapes(
   table: string,
   fields: Record<string, unknown>,
   onText: 'throw' | 'skip'
-): Promise<{ fields: Record<string, unknown>; gone: string[] }> {
+): Promise<{
+  fields: Record<string, unknown>
+  gone: string[]
+  pictures: string[]
+  skipped: string[]
+}> {
   const gone = await deletedColumns(table, Object.keys(fields))
   const schema = await getTableSchema(table)
   const out: Record<string, unknown> = {}
+  const pictures: string[] = []
+  const skipped: string[] = []
   for (const [k, v] of Object.entries(fields)) {
     if (gone.includes(k)) {
       console.warn(
@@ -1689,6 +1698,7 @@ async function withAttachmentShapes(
     const files = asAttachmentWrite(v)
     if (files) {
       out[k] = files
+      pictures.push(k)
       continue
     }
     const shown = (typeof v === 'string' ? v : JSON.stringify(v)).slice(0, 80)
@@ -1699,8 +1709,9 @@ async function withAttachmentShapes(
       )
     }
     console.warn(`[admin-queue] ${table}: left "${k}" alone – "${shown}"`)
+    skipped.push(k)
   }
-  return { fields: out, gone }
+  return { fields: out, gone, pictures, skipped }
 }
 
 export function sanitiseEdits(input: unknown): Record<string, unknown> {
@@ -2004,20 +2015,11 @@ export async function acceptItem(
         fields[c.field] =
           c.field in edits ? edits[c.field] : (asAttachments(c.to) ?? c.to)
       }
-      // Fields edited beyond the proposal go in the same write; what they
-      // held is kept on the row so Undo can put it back.
+      // Fields edited beyond the proposal go in the same write.
       const extra = t
         ? extraEdits(item, edits, await getTableSchema(t.table))
         : {}
-      if (t && Object.keys(extra).length > 0) {
-        const before = await currentValues(
-          t.table,
-          t.record,
-          Object.keys(extra)
-        )
-        Object.assign(fields, extra)
-        saved[BEFORE_KEY] = before
-      }
+      if (t) Object.assign(fields, extra)
       if (Object.keys(fields).length > 0) {
         const to = t ?? target(item) // fields but no listing: the usual error
         // A field whose column is no longer in Airtable (an old row's
@@ -2026,13 +2028,21 @@ export async function acceptItem(
         const shaped = await withAttachmentShapes(to.table, fields, 'throw')
         if (shaped.gone.length > 0) {
           for (const k of shaped.gone) delete saved[k]
-          if (isRecord(saved[BEFORE_KEY])) {
-            const was = { ...saved[BEFORE_KEY] }
-            for (const k of shaped.gone) delete was[k]
-            if (Object.keys(was).length > 0) saved[BEFORE_KEY] = was
-            else delete saved[BEFORE_KEY]
-          }
           saved[GONE_KEY] = shaped.gone
+        }
+        // What the write replaces is kept on the row so Undo can put it
+        // back: the fields edited beyond the proposal, and every picture,
+        // as a lasting copy – a proposal names the old one only by its file
+        // name (queue-before-picture.ts).
+        const keep = Object.keys(shaped.fields).filter(
+          k => k in extra || shaped.pictures.includes(k)
+        )
+        if (keep.length > 0) {
+          const was = await currentValues(to.table, to.record, keep)
+          for (const k of shaped.pictures) {
+            if (k in was) was[k] = await keepPictures(was[k])
+          }
+          saved[BEFORE_KEY] = was
         }
         if (Object.keys(shaped.fields).length > 0) {
           await patchRecord(to.table, to.record, shaped.fields)
@@ -2340,9 +2350,25 @@ export async function fixItem(
     // one edited before Accept does.
     const proposed = new Set(item.changes.map(c => c.field))
     const before = isRecord(saved[BEFORE_KEY]) ? { ...saved[BEFORE_KEY] } : {}
-    const fresh = keys.filter(k => !proposed.has(k) && !(k in before))
+    // So does a proposed picture Accept did not write (Fable had changed
+    // it, or it was left out): the listing still holds the one from
+    // before, and the proposal names it only by its file name.
+    const unwritten = new Set(
+      [saved[KEPT_KEY], saved[LEFT_OUT_KEY]].flatMap(l =>
+        Array.isArray(l) ? l : []
+      )
+    )
+    const fresh = keys.filter(
+      k =>
+        !(k in before) &&
+        (!proposed.has(k) || (shaped.pictures.includes(k) && unwritten.has(k)))
+    )
     if (fresh.length > 0) {
-      Object.assign(before, await currentValues(t.table, t.record, fresh))
+      const was = await currentValues(t.table, t.record, fresh)
+      for (const k of shaped.pictures) {
+        if (k in was) was[k] = await keepPictures(was[k])
+      }
+      Object.assign(before, was)
     }
     if (Object.keys(before).length > 0) saved[BEFORE_KEY] = before
     // A proposed field Fable had changed, or that was left out, is now
@@ -2411,14 +2437,17 @@ export async function reopenItem(item: QueueItem): Promise<void> {
   })
 }
 
-export async function undoItem(item: QueueItem): Promise<void> {
+/** Takes a decision back. Answers with the fields of an applied change it
+ *  could not put back (a picture with no copy to write), so the page can
+ *  say the listing still holds what Accept wrote there. */
+export async function undoItem(item: QueueItem): Promise<string[]> {
   // An item set aside: back in the list now.
   if (
     (item.status === 'Pending' || item.status === 'Failed') &&
     item.reviewAgainOn
   ) {
     await patchQueueRow(item.id, { [F.reviewAgainOn]: null })
-    return
+    return []
   }
   const reopen: Record<string, unknown> = {
     [F.status]: 'Pending',
@@ -2454,7 +2483,7 @@ export async function undoItem(item: QueueItem): Promise<void> {
     await patchRecord(t.table, t.record, { 'Publish?': false })
     await patchQueueRow(item.id, reopen)
     refreshCache()
-    return
+    return []
   }
   if (item.status === 'Applied' && item.type === 'Change') {
     const t = target(item)
@@ -2469,9 +2498,13 @@ export async function undoItem(item: QueueItem): Promise<void> {
       ) {
         continue
       }
+      // A picture goes back as the copy Accept kept: the proposal names
+      // the old one only by its file name.
       fields[c.field] = PROTECTED_FIELDS.has(c.field)
         ? asBox(c.from)
-        : (c.from ?? null)
+        : item.before && c.field in item.before
+          ? item.before[c.field]
+          : (c.from ?? null)
     }
     // The fields edited beyond the proposal, as they were before Accept.
     for (const [k, v] of Object.entries(item.before ?? {})) {
@@ -2479,8 +2512,18 @@ export async function undoItem(item: QueueItem): Promise<void> {
       fields[k] = v
     }
     // A column deleted since Accept wrote it cannot be put back; the other
-    // fields still are.
-    const back = (await withAttachmentShapes(t.table, fields, 'skip')).fields
+    // fields still are. So are they when a picture cannot be: one named
+    // only by its file name (accepted before 3 Nov 2026), or one Accept
+    // could keep only by Airtable's link, which has run out. Those are
+    // named back to the admin, so the listing is not taken for undone.
+    const shaped = await withAttachmentShapes(t.table, fields, 'skip')
+    const back = shaped.fields
+    const notBack = [...shaped.skipped]
+    for (const k of shaped.pictures) {
+      if (!isSpent(back[k])) continue
+      delete back[k]
+      notBack.push(k)
+    }
     if (Object.keys(back).length) await patchRecord(t.table, t.record, back)
     // The edits stay as the page's draft, the fields left out too; what
     // they replaced is spent, and so is the list of deleted columns.
@@ -2490,7 +2533,7 @@ export async function undoItem(item: QueueItem): Promise<void> {
     }
     await patchQueueRow(item.id, reopen)
     refreshCache()
-    return
+    return notBack
   }
   if (item.status === 'Rejected') {
     if (item.type === 'Add') {
@@ -2503,7 +2546,7 @@ export async function undoItem(item: QueueItem): Promise<void> {
       }
     }
     await patchQueueRow(item.id, reopen)
-    return
+    return []
   }
   if (
     item.status === 'Accepted' &&
@@ -2514,7 +2557,7 @@ export async function undoItem(item: QueueItem): Promise<void> {
     // is enough. A flag cleared since then cannot come back – its Broom row
     // is gone – but the item reopens like any applied change.
     await patchQueueRow(item.id, reopen)
-    return
+    return []
   }
   throw new QueueError(
     `Nothing to undo: the item is ${item.status.toLowerCase()}.`,

@@ -29,7 +29,8 @@
        old: the Mac rebuilds a deleted record from the row's saved copy –
        queue-reopen.ts; fix writes edits straight onto the listing of an
        addition already published or a change already applied, from Done
-       today)
+       today). An undo that could not put a field back (a picture with no
+       copy to write, queue-before-picture.ts) adds { notPutBack: [names] }.
 
   `agent` is { port, token } for the local agent on the owner's Mac (null
   when QUEUE_AGENT_SECRET is not set): the page calls it after an accept so
@@ -171,6 +172,7 @@ export async function POST(req: NextRequest) {
     const item = await getQueueItem(id)
     if (!item) return json({ error: 'That item no longer exists.' }, 404)
     const me = await currentAdmin()
+    let notPutBack: string[] = []
     if (action === 'accept') {
       await acceptItem(
         item,
@@ -212,12 +214,15 @@ export async function POST(req: NextRequest) {
         await flagItem(item, parsed.flag)
       }
     } else {
-      await undoItem(item)
+      notPutBack = await undoItem(item)
     }
     console.log(
-      `[admin-queue] ${action} ${item.type} ${item.id} "${item.title}" by ${me?.name ?? me?.email ?? '?'}`
+      `[admin-queue] ${action} ${item.type} ${item.id} "${item.title}" by ${me?.name ?? me?.email ?? '?'}${notPutBack.length ? ` – not put back: ${notPutBack.join(', ')}` : ''}`
     )
-    return json({ item: await getQueueItem(id) })
+    return json({
+      item: await getQueueItem(id),
+      ...(notPutBack.length ? { notPutBack } : {}),
+    })
   } catch (e) {
     return failure(e)
   }
