@@ -659,7 +659,7 @@ describe('the old picture on Accept and Undo', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) =>
-        url.includes('airtableusercontent.com')
+        new URL(url).hostname === 'v5.airtableusercontent.com'
           ? new Response('<svg/>', {
               headers: { 'content-type': 'image/svg+xml' },
             })
