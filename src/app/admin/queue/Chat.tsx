@@ -16,7 +16,9 @@ import {
 import Icon from '@/components/Icon'
 import type { AgentInfo, QueueItem } from '@/lib/admin/queue'
 import { reviewNewerThanChat } from '@/lib/admin/queue-reopen'
+import { insertDictated, isDictationKey } from '@/lib/admin/queue-dictation'
 import styles from './queue.module.css'
+import { useDictation } from './useDictation'
 
 // A conversation with Fable about the open item, beside the verdict. Each
 // message goes to the agent on the owner's Mac (~/Queue/agent.py, POST
@@ -332,6 +334,7 @@ export default function Chat({
   onFlag,
   onFableChanges,
   focusTick,
+  dictate = false,
 }: {
   item: QueueItem
   agent: AgentInfo
@@ -359,6 +362,8 @@ export default function Chat({
   onFableChanges?: (changes: FableChange[]) => void
   /** Bumped by the F key: focus the box. */
   focusTick: number
+  /** The Mac can turn speech into text: Cmd+D and the mic dictate. */
+  dictate?: boolean
 }) {
   // null while the history is loading
   const [messages, setMessages] = useState<Msg[] | null>(null)
@@ -857,8 +862,8 @@ export default function Chat({
   /** Enter: what was typed goes now; while Fable is still answering it
    *  stops that reply and goes right after (the Mac takes one message per
    *  item at a time). */
-  const submit = () => {
-    const typed = text.trim()
+  const submit = (typedText: string = text) => {
+    const typed = typedText.trim()
     if (!typed && !quote && files.length === 0) return
     // The quote goes first, as a markdown quote, then what was typed.
     const msg = quote
@@ -1030,6 +1035,93 @@ export default function Chat({
     },
     []
   )
+
+  // Dictation (Bryce, 5 Nov 2026: "For Queue Fable chat, can we add
+  // dictation using Command D, just like in the normal Claude Code app?").
+  // Cmd+D anywhere on the page, or the mic, starts it; Cmd+D again puts the
+  // words in the box, Enter puts them in and sends, Esc throws them away.
+  // The Mac turns the recording into words (~/Queue/dictate.py), so they
+  // are as good as its Whisper model and nothing goes to another service.
+  const textRef = useRef(text)
+  textRef.current = text
+  const submitRef = useRef(submit)
+  submitRef.current = submit
+  const micRef = useRef<HTMLButtonElement>(null)
+  const [heard, setHeard] = useState<{
+    text: string
+    retry?: () => void
+  } | null>(null)
+  const dictation = useDictation({
+    meterRef: micRef,
+    transcribe: async audio => {
+      const res = await call('/chat/dictate', {
+        audio: await base64Of(audio),
+        type: audio.type,
+      })
+      const data = (await res.json().catch(() => ({}))) as {
+        text?: string
+        error?: string
+      }
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
+      return data.text ?? ''
+    },
+    onWords: (words, send) => {
+      setHeard(null)
+      if (!mountedRef.current) {
+        // Bryce moved to another item while it listened: the words wait in
+        // this item's draft.
+        const d = draftOf(item.id)
+        const was = d?.text ?? ''
+        saveDraft(
+          item.id,
+          insertDictated(was, was.length, was.length, words).text,
+          d?.quote ?? null
+        )
+        return
+      }
+      const el = inputRef.current
+      const now = textRef.current
+      const [from, to] =
+        el && document.activeElement === el
+          ? [el.selectionStart, el.selectionEnd]
+          : [now.length, now.length]
+      const next = insertDictated(now, from, to, words)
+      if (send) {
+        submitRef.current(next.text)
+        return
+      }
+      setText(next.text)
+      requestAnimationFrame(() => {
+        const box = inputRef.current
+        if (!box) return
+        box.focus()
+        box.setSelectionRange(next.caret, next.caret)
+        grow(box)
+      })
+    },
+    onProblem: (message, retry) => setHeard({ text: message, retry }),
+  })
+  const listening =
+    dictation.state === 'listening' || dictation.state === 'starting'
+  const toggleDictation = () => {
+    setHeard(null)
+    if (dictation.state === 'off') inputRef.current?.focus()
+    dictation.toggle()
+  }
+  const toggleRef = useRef(toggleDictation)
+  toggleRef.current = toggleDictation
+  useEffect(() => {
+    if (!dictate) return
+    const mac = /Mac|iPhone|iPad/.test(navigator.platform)
+    const onKey = (e: KeyboardEvent) => {
+      if (!isDictationKey(e, mac)) return
+      // Not the browser's bookmark (Cmd+D).
+      e.preventDefault()
+      if (!e.repeat) toggleRef.current()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [dictate])
 
   // Stop: the Mac kills the reply being written and keeps what it wrote,
   // with "You stopped this reply" under it. Nothing new is coming, so it
@@ -1226,20 +1318,24 @@ export default function Chat({
           </div>
         )}
         <div
-          className={`${styles.chatBox} ${busy || pending ? styles.chatBoxAnswering : styles.chatBoxKeyed}`}
+          className={`${styles.chatBox} ${busy || pending ? styles.chatBoxAnswering : styles.chatBoxKeyed}${dictate ? ` ${styles.chatBoxMic}` : ''}`}
         >
           <textarea
             ref={inputRef}
             className={styles.chatInput}
             rows={1}
             placeholder={
-              quote
-                ? 'Your reply to that…'
-                : files.length
-                  ? 'Anything to add? Enter sends…'
-                  : thread.length
-                    ? 'Reply…'
-                    : 'Ask Fable, or say what should change…'
+              dictation.state === 'transcribing'
+                ? 'Turning your words into text…'
+                : listening
+                  ? 'Listening…'
+                  : quote
+                    ? 'Your reply to that…'
+                    : files.length
+                      ? 'Anything to add? Enter sends…'
+                      : thread.length
+                        ? 'Reply…'
+                        : 'Ask Fable, or say what should change…'
             }
             value={text}
             onChange={e => setText(e.target.value)}
@@ -1253,9 +1349,25 @@ export default function Chat({
               }
             }}
             onKeyDown={e => {
-              if (e.key === 'Enter' && !e.shiftKey) {
+              if (
+                e.key === 'Enter' &&
+                !e.shiftKey &&
+                dictation.state !== 'off'
+              ) {
+                // Enter while it listens: the words go in, then it sends.
+                e.preventDefault()
+                if (dictation.state === 'starting') {
+                  // Still asking for the microphone: send what is typed.
+                  dictation.finish('cancel')
+                  submit()
+                } else if (!dictation.finish('send')) submit()
+              } else if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
                 submit()
+              } else if (e.key === 'Escape' && listening) {
+                e.preventDefault()
+                e.stopPropagation()
+                dictation.finish('cancel')
               } else if (e.key === 'Escape' && quote) {
                 e.preventDefault()
                 setQuote(null)
@@ -1275,6 +1387,34 @@ export default function Chat({
               e.target.value = ''
             }}
           />
+          {dictate && (
+            <button
+              ref={micRef}
+              type="button"
+              className={`${styles.chatMic}${listening ? ` ${styles.chatMicOn}` : ''}`}
+              aria-label={listening ? 'Stop dictating' : 'Dictate'}
+              aria-pressed={listening}
+              title={
+                dictation.state === 'transcribing'
+                  ? 'Turning your words into text…'
+                  : listening
+                    ? 'Stop dictating (⌘D)'
+                    : 'Dictate (⌘D)'
+              }
+              disabled={dictation.state === 'transcribing'}
+              // The box keeps the cursor, so the words go where it is.
+              onMouseDown={e => e.preventDefault()}
+              onClick={toggleDictation}
+            >
+              {dictation.state === 'transcribing' ? (
+                <span className={styles.chatMicBusy} />
+              ) : listening ? (
+                <span className={styles.chatMicDot} />
+              ) : (
+                <Icon src="/images/icons/microphone.svg" size={16} />
+              )}
+            </button>
+          )}
           <button
             type="button"
             className={styles.chatAttach}
@@ -1297,6 +1437,33 @@ export default function Chat({
             </button>
           )}
         </div>
+        {dictation.state === 'listening' && (
+          <p className={styles.chatDictating}>
+            <kbd>⌘D</kbd> puts the words in · <kbd>Enter</kbd> sends ·{' '}
+            <kbd>Esc</kbd> cancels
+          </p>
+        )}
+        {heard && (
+          <p className={styles.chatError}>
+            {heard.text}
+            {heard.retry && (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  className={styles.chatLink}
+                  onClick={() => {
+                    const again = heard.retry
+                    setHeard(null)
+                    again?.()
+                  }}
+                >
+                  Try again
+                </button>
+              </>
+            )}
+          </p>
+        )}
         {thread.length > 0 && (
           // Always there once a thread exists, so the panel's foot keeps
           // its height while Fable answers (the box looked cut off at the
@@ -1437,14 +1604,19 @@ function asSent(files: Pending[]): Attachment[] {
 }
 
 /** A file's bytes as base64, the way the Mac agent takes them. */
-function base64Of(file: File): Promise<string> {
+function base64Of(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader()
     r.onload = () => {
       const s = String(r.result)
       resolve(s.slice(s.indexOf(',') + 1))
     }
-    r.onerror = () => reject(new Error(`${file.name} could not be read.`))
+    r.onerror = () =>
+      reject(
+        new Error(
+          `${file instanceof File ? file.name : 'The recording'} could not be read.`
+        )
+      )
     r.readAsDataURL(file)
   })
 }

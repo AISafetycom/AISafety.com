@@ -1397,6 +1397,8 @@ interface AgentResult {
   detail: string
   /** /ping: the agent can hold a conversation about an item (chat.py). */
   chat: boolean
+  /** /ping: the agent can turn speech into text (dictate.py). */
+  dictate?: boolean
   /** reject_draft: the words saved in Gmail. */
   rejectText?: string
   /** No draft: the owner had already replied in the thread, on this day. */
@@ -1440,6 +1442,7 @@ async function callAgent(
       detail?: string
       error?: string
       chat?: boolean
+      dictate?: boolean
       rejectText?: string
       alreadyReplied?: unknown
     }
@@ -1449,6 +1452,7 @@ async function callAgent(
       replyStatus: data.replyStatus ?? null,
       detail: data.detail ?? data.error ?? '',
       chat: Boolean(data.chat),
+      dictate: Boolean(data.dictate),
       rejectText: data.rejectText,
       alreadyReplied: alreadyRepliedOf(data.alreadyReplied) ?? undefined,
     }
@@ -1570,6 +1574,8 @@ export default function QueueAdmin({
   const [agentOnline, setAgentOnline] = useState<boolean | null>(null)
   // The agent answered the ping and can chat: the conversation panel shows.
   const [agentChat, setAgentChat] = useState(false)
+  // The Mac can turn speech into text: the chat's Cmd+D and mic.
+  const [agentDictate, setAgentDictate] = useState(false)
   // The chat threads on the Mac, and per row the newest reply already seen
   // in this browser (null until read), for the rows' teal bars.
   const [chatRows, setChatRows] = useState<ChatRows>({})
@@ -1958,6 +1964,7 @@ export default function QueueAdmin({
       if (cancelled) return
       setAgentOnline(res.ok)
       setAgentChat(res.ok && res.chat)
+      setAgentDictate(res.ok && Boolean(res.dictate))
     })
     return () => {
       cancelled = true
@@ -4271,6 +4278,7 @@ export default function QueueAdmin({
                 setD={patch => setDraft(selected.id, patch)}
                 act={(action, extra) => void act(selected, action, extra)}
                 chatAgent={canEdit && agentChat ? agent : null}
+                chatDictate={agentDictate}
                 chatFocus={chatFocus}
                 placeFocus={placeFocus}
                 fieldFocus={fieldFocus}
@@ -4831,6 +4839,7 @@ function Detail({
   setD,
   act,
   chatAgent,
+  chatDictate,
   chatFocus,
   placeFocus,
   fieldFocus,
@@ -4872,6 +4881,8 @@ function Detail({
   act: (action: Action, extra?: Record<string, unknown>) => void
   /** The Mac agent, when it is up and can chat; null hides the panel. */
   chatAgent: AgentInfo | null
+  /** The Mac can turn speech into text (Cmd+D in the chat). */
+  chatDictate: boolean
   chatFocus: number
   /** Bumped by P: open the Position list on an addition. */
   placeFocus: number
@@ -6123,6 +6134,7 @@ function Detail({
                 onFable?.(list.map(c => c.field))
               }}
               focusTick={chatFocus}
+              dictate={chatDictate}
             />
           )}
         </aside>
