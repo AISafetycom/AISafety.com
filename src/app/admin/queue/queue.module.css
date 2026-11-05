@@ -1938,6 +1938,23 @@ a.pageNav:hover {
   color: var(--q-muted);
 }
 
+/* A pressed while something is still missing: the note saying what goes
+   red, holds, then fades back. A colour change only, so it stays on with
+   reduced motion. */
+.noteFlash {
+  animation: noteFlash 1.4s ease-out;
+}
+
+@keyframes noteFlash {
+  0%,
+  55% {
+    color: var(--q-danger);
+  }
+  100% {
+    color: var(--q-muted);
+  }
+}
+
 .error {
   margin: 0;
   padding: 8px 12px;
