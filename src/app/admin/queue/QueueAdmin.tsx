@@ -1578,6 +1578,8 @@ export default function QueueAdmin({
   const [chatFocus, setChatFocus] = useState(0)
   const [placeFocus, setPlaceFocus] = useState(0)
   const [fieldFocus, setFieldFocus] = useState(0)
+  // Bumped when A can't accept yet: the "first" note flashes red.
+  const [blockedFlash, setBlockedFlash] = useState(0)
   const wantedRef = useRef<string | null>(null)
   // The focused item's record as it is in Airtable now, plus the table's
   // field list, so empty fields (a missing logo) show as empty. By item id.
@@ -3516,6 +3518,7 @@ export default function QueueAdmin({
             // instead: Accept waits for one.
             if (unplacedAdd(item, live[item.id] ?? null, activeEdits(d))) {
               setPlaceFocus(n => n + 1)
+              setBlockedFlash(n => n + 1)
               break
             }
             // One with a needed field still empty opens the first that
@@ -3535,6 +3538,7 @@ export default function QueueAdmin({
                   types.get(k) !== 'checkbox'
               )
               if (first) setDraft(item.id, { editing: first })
+              setBlockedFlash(n => n + 1)
               break
             }
             void act(item, 'accept', {
@@ -4270,6 +4274,7 @@ export default function QueueAdmin({
                 chatFocus={chatFocus}
                 placeFocus={placeFocus}
                 fieldFocus={fieldFocus}
+                blockedFlash={blockedFlash}
                 readOnly={
                   !canEdit ||
                   !(isOpen(selected) || Boolean(setAsideUntil(selected)))
@@ -4829,6 +4834,7 @@ function Detail({
   chatFocus,
   placeFocus,
   fieldFocus,
+  blockedFlash = 0,
   readOnly,
   onFable,
   onFlag,
@@ -4871,6 +4877,8 @@ function Detail({
   placeFocus: number
   /** Bumped by E: open the field list on a change. */
   fieldFocus: number
+  /** Bumped when A can't accept yet: the "first" note flashes red. */
+  blockedFlash?: number
   /** A view-only session: no editing, no deciding. */
   readOnly: boolean
 }) {
@@ -5145,6 +5153,25 @@ function Detail({
   const sortWas = shownFields[SORT_FIELD]
   const unplaced = unplacedAdd(item, live, activeEdits(d))
   const unfilled = unfilledAdd(item, live, activeEdits(d))
+  // A pressed while one of those is missing: the note saying so flashes
+  // red for a moment (Bryce, 5 Nov 2026). A new key restarts the flash on
+  // each press; it clears when the animation ends, so the note never
+  // flashes just by appearing.
+  const [flash, setFlash] = useState<number | null>(null)
+  const [seenFlash, setSeenFlash] = useState(blockedFlash)
+  if (blockedFlash !== seenFlash) {
+    setSeenFlash(blockedFlash)
+    setFlash(blockedFlash)
+  }
+  const blockedNote = (id: string, text: React.ReactNode) => (
+    <span
+      key={`${id}-${flash ?? 'still'}`}
+      className={`${styles.note} ${flash !== null ? styles.noteFlash : ''}`}
+      onAnimationEnd={() => setFlash(null)}
+    >
+      {text}
+    </span>
+  )
 
   const hasCard =
     item.type === 'Change' && Boolean(item.targetTable && item.targetRecord)
@@ -6270,14 +6297,17 @@ function Detail({
               <Icon src={ICON.clock} size={12} />
               Review again in a week <kbd>W</kbd>
             </button>
-            {unplaced && !d.busy && (
-              <span className={styles.note}>
-                Pick its position on the page first <kbd>P</kbd>
-              </span>
-            )}
-            {unfilled.length > 0 && !d.busy && (
-              <span className={styles.note}>{fillFirst(unfilled)}</span>
-            )}
+            {unplaced &&
+              !d.busy &&
+              blockedNote(
+                'place',
+                <>
+                  Pick its position on the page first <kbd>P</kbd>
+                </>
+              )}
+            {unfilled.length > 0 &&
+              !d.busy &&
+              blockedNote('fill', fillFirst(unfilled))}
             {(editCount > 0 || leftCount > 0) && (
               <span className={styles.note}>
                 {[
