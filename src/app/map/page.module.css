@@ -70,7 +70,7 @@
   z-index: 1;
   width: 16px;
   height: 16px;
-  background-color: var(--teal-grey-400);
+  background-color: var(--teal-grey-300);
   -webkit-mask: url('/images/icons/magnifying-glass.svg') no-repeat center /
     contain;
   mask: url('/images/icons/magnifying-glass.svg') no-repeat center / contain;
@@ -141,10 +141,6 @@
   .map-search-input-closing {
     animation: none;
   }
-}
-
-.map-search-input::placeholder {
-  color: var(--teal-grey-500);
 }
 
 .map-search-results {

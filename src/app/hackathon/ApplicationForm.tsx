@@ -14,7 +14,7 @@ const EMPTY = {
 }
 
 function Optional() {
-  return <em className="color-teal-grey-400">(optional)</em>
+  return <em className="color-teal-grey-300">(optional)</em>
 }
 
 export default function ApplicationForm() {

@@ -134,7 +134,7 @@ export default async function NewsletterPage({ params }: Props) {
                 key={issue.slug}
                 className={`${styles.issue} gap-16px padding-top-12px padding-bottom-12px`}
               >
-                <span className="color-teal-grey-400">
+                <span className="color-teal-grey-300">
                   {issue.sentAt ? formatDate(new Date(issue.sentAt)) : ''}
                 </span>
                 <ArchiveLink

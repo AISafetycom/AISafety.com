@@ -109,7 +109,7 @@
 }
 
 .copyHead span {
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   font-weight: 300;
 }
 
@@ -180,7 +180,7 @@
 
 .factsNote {
   padding-top: 24px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 /* People */
@@ -281,7 +281,7 @@
 }
 
 .assetNote {
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 .assetLinks {
@@ -357,7 +357,7 @@
 }
 
 .newsDate {
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 .newsTitle a {
@@ -369,7 +369,7 @@
 }
 
 .newsOutlet {
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 /* Get in touch */

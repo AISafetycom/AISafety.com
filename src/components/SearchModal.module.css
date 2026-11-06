@@ -57,10 +57,6 @@
   min-width: 0;
 }
 
-.input::placeholder {
-  color: var(--teal-grey-500);
-}
-
 /* Suppress WebKit's built-in clear (×) button for type=search — the
    component renders its own clear button next to the input. */
 .input::-webkit-search-cancel-button,

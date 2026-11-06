@@ -312,7 +312,7 @@
 
 .pageMeta {
   font-size: 12px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 .pageMetaValue {
@@ -456,7 +456,7 @@
 
 .editorRowLabel {
   font-size: 12px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 .editorInput,
@@ -535,7 +535,7 @@
 
 .editorStatus {
   font-size: 11px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 .editorStatusSaving {
@@ -638,14 +638,14 @@
 
 .editorVersionMeta {
   font-size: 11px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 .editorVersionDelete {
   background: transparent;
   border: 1px solid var(--teal-grey-800);
   border-radius: 6px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   font-size: 16px;
   min-width: 30px;
   padding: 0 8px;
@@ -709,10 +709,6 @@
 
 .convSearch:focus {
   border-color: var(--teal-grey-500);
-}
-
-.convSearch::placeholder {
-  color: var(--teal-grey-500);
 }
 
 .convFilters label {
@@ -782,7 +778,7 @@
   justify-content: space-between;
   gap: 12px;
   font-size: 11px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 .convRowMeta {
@@ -885,7 +881,7 @@
 
 .convDetailLabel {
   font-size: 11px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 .convDetailValue {
@@ -951,7 +947,7 @@
   gap: 8px;
   font-size: 11px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   margin: 2px 0;
 }
 
@@ -981,7 +977,7 @@
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   margin-bottom: 4px;
 }
 
@@ -1028,7 +1024,7 @@
   flex-wrap: wrap;
   gap: 2px 12px;
   font-size: 11px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   margin-bottom: 6px;
 }
 
@@ -1097,7 +1093,7 @@
   margin-bottom: 10px;
   padding: 6px 10px;
   border-left: 2px solid var(--teal-grey-700);
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   font-size: 12px;
   font-style: italic;
 }
@@ -1290,7 +1286,7 @@
 .convReviewedBy {
   margin-top: 6px;
   font-size: 11px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 .convActivity {
@@ -1315,7 +1311,7 @@
 .convActivityWhen {
   margin-left: 8px;
   font-size: 11px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 .convNoteLegacy {
@@ -1363,7 +1359,7 @@
   background: none;
   border: none;
   padding: 0;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   font-size: 11px;
   font-family: inherit;
   cursor: pointer;
@@ -1393,13 +1389,13 @@
 
 .convStatus {
   font-size: 11px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 .convTzNote {
   margin-left: auto;
   font-size: 11px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   cursor: default;
   white-space: nowrap;
 }
@@ -1540,7 +1536,7 @@
   background: none;
   border: none;
   border-radius: 999px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   font-size: 13px;
   line-height: 1;
   font-family: inherit;
@@ -1567,10 +1563,6 @@
 
 .convLabelInput:focus {
   border-color: var(--teal-grey-500);
-}
-
-.convLabelInput::placeholder {
-  color: var(--teal-grey-500);
 }
 
 /* Sized to sit flush beside the 28px pill input. */
@@ -1655,7 +1647,7 @@
   padding: 0;
   font: inherit;
   font-size: 12px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   background: none;
   border: none;
   text-decoration: underline;

@@ -170,7 +170,7 @@
 .table th {
   padding-top: 0;
   border-bottom-color: var(--teal-grey-700);
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
@@ -209,7 +209,7 @@
 }
 
 .muted {
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 .issueName {
@@ -264,7 +264,7 @@
   margin-top: 2px;
   font-size: 12px;
   font-weight: 400;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 .tag {
@@ -320,7 +320,7 @@
   margin: 12px 0 0 4px;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 .tableNote a {
@@ -373,7 +373,7 @@
 }
 
 .dialogFacts dt {
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 .dialogFacts dd {
@@ -551,7 +551,7 @@
 
 .reorderIndex {
   min-width: 18px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
@@ -622,7 +622,7 @@
 
 .removedSection {
   font-size: 11px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 /* Send test after a test of the issue as it is now went out. */

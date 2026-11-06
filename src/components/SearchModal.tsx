@@ -277,7 +277,7 @@ export default function SearchModal({
           <button
             type="button"
             onClick={onClose}
-            className={`${styles['shortcut-hint']} paragraph-xs color-teal-grey-400`}
+            className={`${styles['shortcut-hint']} paragraph-xs color-teal-grey-300`}
             aria-label="Close search"
           >
             <span className={styles['shortcut-hint-esc']}>esc</span>
@@ -295,7 +295,7 @@ export default function SearchModal({
             <div
               className={`${styles.empty} flex flex-col items-center gap-16px padding-top-32px padding-bottom-32px padding-left-24px padding-right-24px`}
             >
-              <p className="paragraph-small color-teal-grey-400">
+              <p className="paragraph-small color-teal-grey-300">
                 Search is temporarily unavailable.
               </p>
               <button
@@ -371,7 +371,7 @@ export default function SearchModal({
             <div
               className={`${styles.empty} padding-top-32px padding-bottom-32px padding-left-24px padding-right-24px`}
             >
-              <p className="paragraph-small color-teal-grey-400">
+              <p className="paragraph-small color-teal-grey-300">
                 {activeType
                   ? `No ${TYPE_LABEL[activeType].toLowerCase()} match “${query}”.`
                   : `No results for “${query}”.`}
@@ -517,7 +517,7 @@ function SearchIcon() {
     <Icon
       src="/images/icons/search.svg"
       size={16}
-      className={`${styles['input-icon']} color-teal-grey-400`}
+      className={`${styles['input-icon']} color-teal-grey-300`}
     />
   )
 }

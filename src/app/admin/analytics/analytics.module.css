@@ -142,7 +142,7 @@
   text-align: left;
   font-size: 12px;
   font-weight: 600;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   padding: 6px 8px;
   border-bottom: 1px solid var(--teal-grey-800);
 }
@@ -205,7 +205,7 @@
 /* Per-row share of the chart total — a secondary, dimmer column. */
 .pctCol {
   text-align: right;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   width: 1%;
@@ -230,7 +230,7 @@
   width: 1%;
   white-space: nowrap;
   text-align: right;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   font-variant-numeric: tabular-nums;
 }
 
@@ -249,7 +249,7 @@
 
 .dim {
   font-size: 13px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 /* "Show more" row: a full-width button under a truncated listing table. */
@@ -306,7 +306,7 @@
   margin-top: 12px;
   font-size: 11px;
   line-height: 1.5;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 /* ─── Unique / total click toggle ─────────────────────────────────────── */
@@ -320,7 +320,7 @@
 }
 
 .clickToggleLabel {
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   margin-right: 2px;
 }
 
@@ -366,7 +366,7 @@
 .excludeLink {
   padding: 0;
   font: inherit;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   background: none;
   border: none;
   text-decoration: underline;
@@ -393,7 +393,7 @@
 }
 
 .sourceSplitLabel {
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   font-weight: 600;
 }
 
@@ -418,7 +418,7 @@
 }
 
 .sourceStatPct {
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
@@ -549,7 +549,7 @@
 }
 
 .recentTime {
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   font-size: 12px;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
@@ -704,7 +704,7 @@
 }
 
 .rangeDash {
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   font-size: 12px;
 }
 
@@ -792,7 +792,7 @@
 
 .funnelPct {
   font-size: 11px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   font-variant-numeric: tabular-nums;
 }
 
@@ -838,7 +838,7 @@
 }
 
 .sourceSplit:has([data-pending]) .sourceStatActive .sourceStatPct {
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 .sourceSplit .sourceStat:has([data-pending]) {
@@ -878,10 +878,6 @@
 
 .orgSearchInput:focus {
   border-color: var(--teal-grey-500);
-}
-
-.orgSearchInput::placeholder {
-  color: var(--teal-grey-500);
 }
 
 .orgSearch .applyBtn {
@@ -940,7 +936,7 @@
   margin: 0;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 /* A button that reads as a link inside a sentence. */
@@ -965,7 +961,7 @@
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   white-space: nowrap;
 }
 
@@ -996,7 +992,7 @@
 
 .sharedPagesNote {
   font-size: 12px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 .sharedPagesActions {
@@ -1048,7 +1044,7 @@
 
 .orgNotes {
   font-size: 11px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 /* A listing no longer on the site: faded, cells only, so the row keeps its
@@ -1059,7 +1055,7 @@
 
 .leaveOut {
   font-size: 12px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   white-space: nowrap;
   text-decoration: underline dotted;
   text-underline-offset: 3px;
@@ -1121,7 +1117,7 @@
 .chartReadout {
   min-height: 20px;
   font-size: 12px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 .chartReadout strong {
@@ -1146,7 +1142,7 @@
   width: 40px;
   margin: -7px 0;
   font-size: 11px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1215,7 +1211,7 @@
   height: 1lh;
   margin-left: 48px;
   font-size: 11px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 /* A box exactly as wide as its column, so the date centers under the bar;

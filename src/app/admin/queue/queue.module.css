@@ -239,10 +239,6 @@
   font-size: 13.5px;
 }
 
-.searchInput::placeholder {
-  color: var(--q-muted);
-}
-
 .searchKey {
   flex: none;
   margin: 0;

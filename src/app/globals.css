@@ -50,6 +50,11 @@
   --teal-850: #04292a;
   --teal-900: var(--teal-grey-900); /* same color as --teal-grey-900 */
 
+  /* Base colors */
+  --white: white;
+  --black: black;
+  --off-white: #f3f3f3;
+
   /* Accent Colors
      Each hue sits at step 300, about 75% lightness, the same tier as --teal-300.
      Steps 700 and 800 are see-through washes of the 300 color, at 30% and 12%.
@@ -57,22 +62,28 @@
   --orange-300: #ffb580;
   --orange-700: color-mix(in srgb, var(--orange-300) 30%, transparent);
   --orange-800: color-mix(in srgb, var(--orange-300) 12%, transparent);
+
   --pink-300: #ff80fd;
   --pink-700: color-mix(in srgb, var(--pink-300) 30%, transparent);
   --pink-800: color-mix(in srgb, var(--pink-300) 12%, transparent);
+
   --blue-300: #75e3ff;
   --blue-700: color-mix(in srgb, var(--blue-300) 30%, transparent);
   --blue-800: color-mix(in srgb, var(--blue-300) 12%, transparent);
+
   --purple-300: #b390ff;
   --purple-700: color-mix(in srgb, var(--purple-300) 30%, transparent);
   --purple-800: color-mix(in srgb, var(--purple-300) 12%, transparent);
+
   --yellow-300: #ffff99;
   --yellow-700: color-mix(in srgb, var(--yellow-300) 30%, transparent);
   --yellow-800: color-mix(in srgb, var(--yellow-300) 12%, transparent);
+
   /* Red is the error color (the chatbot's error message). */
   --red-300: #ff8b8b;
   --red-700: color-mix(in srgb, var(--red-300) 30%, transparent);
   --red-800: color-mix(in srgb, var(--red-300) 12%, transparent);
+
   /* Green was retired as the site's highlight on 19 July 2026 (PR #474):
      highlights are --teal-300 again. Still used on purpose by the event and
      training type colour classes (.color-green-300 / .bg-green-300) and a few
@@ -80,9 +91,6 @@
   --green-300: #7affb2;
   --green-700: color-mix(in srgb, var(--green-300) 30%, transparent);
   --green-800: color-mix(in srgb, var(--green-300) 12%, transparent);
-  --white: white;
-  --black: black;
-  --off-white: #f3f3f3;
 
   /* Transitions */
   --hover-transition: 0.1s ease-in-out;
@@ -124,6 +132,13 @@ button,
 textarea,
 select {
   font: inherit;
+}
+
+/* Every placeholder (the hint inside an empty text box) uses one color.
+   Firefox dims placeholders by default, so reset the opacity. */
+::placeholder {
+  color: var(--teal-grey-500);
+  opacity: 1;
 }
 
 a {
@@ -249,19 +264,12 @@ label {
 .color-teal-grey-300 {
   color: var(--teal-grey-300);
 }
-.color-teal-grey-400 {
-  color: var(--teal-grey-400);
-}
 .color-teal-grey-500 {
   color: var(--teal-grey-500);
 }
 .color-white {
   color: var(--white);
 }
-.color-grey {
-  color: var(--teal-grey-400);
-}
-
 /* Bright Teal text colors */
 .color-teal-100 {
   color: var(--teal-100);
@@ -1020,18 +1028,13 @@ label {
   background-color: var(--teal-grey-900);
   border: 1px solid var(--teal-grey-600);
   border-radius: 16px;
-  color: var(--teal-grey-400);
+  color: var(--white);
   /* Type (size/tracking/etc.) inherits the default body text style. */
 }
 
-.text-field:hover,
 .text-field:focus {
   border-color: var(--teal-grey-400);
   outline: none;
-}
-
-.text-field::placeholder {
-  color: var(--teal-grey-600);
 }
 
 /* Native <select> arrows sit flush against the edge and ignore padding, so

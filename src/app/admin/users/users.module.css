@@ -41,13 +41,13 @@
 }
 
 .cardPending {
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   font-style: italic;
 }
 
 .cardMeta {
   font-size: 12px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   display: flex;
   gap: 16px;
   flex-wrap: wrap;
@@ -208,7 +208,7 @@
 
 .fieldLabel {
   font-size: 11px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 .formActions {

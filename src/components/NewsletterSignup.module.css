@@ -45,10 +45,6 @@
   color: var(--white);
 }
 
-.input::placeholder {
-  color: var(--teal-grey-400);
-}
-
 .input:-webkit-autofill,
 .input:-webkit-autofill:hover,
 .input:-webkit-autofill:focus {

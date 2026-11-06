@@ -273,7 +273,7 @@ export default function CommunitiesClient({
             >
               <h3 className="padding-bottom-16px">
                 Map of LessWrong groups{' '}
-                <span className="color-teal-grey-400">→</span>
+                <span className="color-teal-grey-300">→</span>
               </h3>
               <p className="paragraph-small color-teal-grey-300">
                 People in Rationalist groups like these often overlap with those
@@ -290,7 +290,7 @@ export default function CommunitiesClient({
               className="block hover-opacity-80"
             >
               <h3 className="padding-bottom-16px">
-                Map of EA groups <span className="color-teal-grey-400">→</span>
+                Map of EA groups <span className="color-teal-grey-300">→</span>
               </h3>
               <p className="paragraph-small color-teal-grey-300">
                 Effective Altruism groups also tend to be concerned with AI

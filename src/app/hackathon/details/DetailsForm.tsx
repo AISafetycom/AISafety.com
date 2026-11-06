@@ -142,7 +142,7 @@ export default function DetailsForm() {
         {f.hint && (
           <>
             <br />
-            <span className="paragraph-xs color-teal-grey-400">
+            <span className="paragraph-xs color-teal-grey-300">
               <Text>{f.hint}</Text>
             </span>
           </>

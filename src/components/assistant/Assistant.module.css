@@ -209,7 +209,7 @@
   padding: 0 4px;
   font-size: 11px;
   line-height: 1.4;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 /* Chips — flowing right-aligned reply suggestions */
@@ -555,10 +555,6 @@
   font-family: inherit;
 }
 
-.composerInput::placeholder {
-  color: var(--teal-grey-500);
-}
-
 .sendButton {
   display: inline-flex;
   align-items: center;
@@ -647,7 +643,7 @@
 .toolPillChevron {
   width: 12px;
   height: 12px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   flex-shrink: 0;
   transition: transform 0.15s ease-out;
 }
@@ -673,7 +669,7 @@
 
 .toolPillDetailsLabel {
   font-size: 11px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   font-weight: 600;
@@ -700,7 +696,7 @@
 }
 
 .toolPillDetailsMuted {
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 .toolPillDetails code {
@@ -813,7 +809,7 @@
 .thinkChevron {
   width: 11px;
   height: 11px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   transition: transform 0.15s ease-out;
 }
 
@@ -844,7 +840,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background-color: var(--teal-grey-400);
+  background-color: var(--teal-grey-300);
   animation: dot-pulse 1.2s infinite;
 }
 
@@ -936,7 +932,7 @@
   background: transparent;
   border: none;
   border-radius: 8px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   cursor: pointer;
   transition:
     background-color var(--hover-transition),
@@ -1001,7 +997,7 @@
   background: transparent;
   border: none;
   border-radius: 6px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   cursor: pointer;
   opacity: 0;
   transition:

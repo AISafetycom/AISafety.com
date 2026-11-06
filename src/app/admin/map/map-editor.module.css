@@ -290,7 +290,7 @@
   font-family: inherit;
   font-size: 11px;
   line-height: 1.4;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   pointer-events: none;
 }
 
@@ -367,7 +367,7 @@
 .rowCoords {
   font-size: 11px;
   line-height: 1.4;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
@@ -423,7 +423,7 @@
 .rowMeta {
   font-size: 11px;
   line-height: 1.4;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
   overflow-wrap: anywhere;
 }
 
@@ -481,7 +481,7 @@
 }
 
 .dl dt {
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 .dl dd {
@@ -514,7 +514,7 @@
   flex-direction: column;
   gap: 4px;
   font-size: 11px;
-  color: var(--teal-grey-400);
+  color: var(--teal-grey-300);
 }
 
 .coords input {
