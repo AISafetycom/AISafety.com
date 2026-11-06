@@ -34,12 +34,16 @@ export default function Footer() {
             </div>
           </div>
 
+          {/* The column headings are h2s so screen readers list them as
+              sections of their own, not as sub-points of the last heading on
+              the page (issue #749). Their look comes from the
+              paragraph-small-bold class, not the h2 default. */}
           <div className="flex flex-col-mobile gap-56px">
             {/* Second footer column */}
             <div>
-              <h4 className="paragraph-small-bold padding-bottom-16px">
+              <h2 className="paragraph-small-bold padding-bottom-16px">
                 Help us out
-              </h4>
+              </h2>
               <div
                 className={`paragraph-small flex flex-col gap-8px opacity-80 ${styles.links}`}
               >
@@ -66,7 +70,7 @@ export default function Footer() {
                 newsletter on it (/newsletter), where visitors sign up to
                 several at once. */}
             <div>
-              <h4
+              <h2
                 className={`paragraph-small-bold padding-bottom-16px ${styles.links}`}
               >
                 <FooterLink
@@ -74,7 +78,7 @@ export default function Footer() {
                   section="Newsletters"
                   label="Newsletters"
                 />
-              </h4>
+              </h2>
               <div
                 className={`paragraph-small flex flex-col gap-8px opacity-80 ${styles.links}`}
               >
@@ -108,9 +112,9 @@ export default function Footer() {
                 AISafety.com in their own work (journalists, developers),
                 which "Help us out" never fit. */}
             <div>
-              <h4 className="paragraph-small-bold padding-bottom-16px">
+              <h2 className="paragraph-small-bold padding-bottom-16px">
                 For press and developers
-              </h4>
+              </h2>
               <div
                 className={`paragraph-small flex flex-col gap-8px opacity-80 ${styles.links}`}
               >
