@@ -267,6 +267,7 @@ const ICON = {
   search: '/images/icons/magnifying-glass.svg',
   clock: '/images/icons/clock.svg',
   reopen: '/images/icons/redo.svg',
+  trash: '/images/icons/trash.svg',
 } as const
 
 // Each section's head carries its icon, in grey: colour in the list is kept
@@ -1205,7 +1206,8 @@ const COPIED_NOTE = 'Reply copied · paste it in Discord'
 function toastReply(toast: Toast): string | null {
   if (toast.item.source !== 'Discord' || toast.later || toast.reopen)
     return null
-  if (toast.state === 'failed' || toast.state === 'undoing') return null
+  if (toast.state === 'failed' || toast.state === 'undoing' || toast.undone)
+    return null
   if (toast.copied) return toast.copied
   if (toast.state !== 'done') return null
   return (
@@ -1299,8 +1301,40 @@ function laterNote(item: QueueItem): string {
     : 'Back in the list then'
 }
 
+/** What Delete asks before it goes ahead: it has no Undo. */
+function deleteAsk(item: QueueItem): string {
+  const after =
+    'No reply goes out, Fable learns nothing from it, and it can’t be undone.'
+  if (item.type === 'Add' && item.targetRecord) {
+    return `Delete this item and its unpublished Airtable record? ${after}`
+  }
+  if (item.type === 'Change') {
+    return `Delete this item? The listing stays as it is. ${after}`
+  }
+  return `Delete this item? ${after}`
+}
+
+/** The toast's second line after a Delete: what went with the item. */
+function deletedNote(item: QueueItem): string {
+  if (item.type === 'Add' && item.targetRecord) {
+    return 'Its Airtable record is gone too · no reply'
+  }
+  if (item.type === 'Change') return 'The listing is unchanged · no reply'
+  return 'No reply'
+}
+
+/** The fields an Undo could not put back, as the toast says them. */
+function notPutBackNote(fields: string[]): string {
+  const one = fields.length === 1
+  const names = one
+    ? fields[0]
+    : `${fields.slice(0, -1).join(', ')}${fields.length > 2 ? ',' : ''} and ${fields[fields.length - 1]}`
+  return `The listing still has the new ${names} – the old ${one ? 'one' : 'ones'} couldn’t be put back`
+}
+
 function workingLabel(item: QueueItem, action: Decision, d?: Draft): string {
   if (action === 'reject') return 'Rejecting…'
+  if (action === 'delete') return 'Deleting…'
   if (action === 'later') return 'Setting it aside…'
   const label = acceptLabel(item, d && activeEdits(d), d?.leftOut)
   if (label === 'Publish') return 'Publishing…'
@@ -1309,7 +1343,9 @@ function workingLabel(item: QueueItem, action: Decision, d?: Draft): string {
 }
 
 interface Draft {
-  mode: 'idle' | 'reject'
+  /** reject: picking a reason. delete: asked to confirm, since a delete
+   *  has no Undo. */
+  mode: 'idle' | 'reject' | 'delete'
   edits: Record<string, string>
   /** A change's proposed fields left out with the cross: Accept does not
    *  write them, so the listing keeps what it holds there. */
@@ -1368,6 +1404,14 @@ interface Toast {
   copied?: string
   /** Reopen on a declined addition: no Undo, the mark is its arrow. */
   reopen?: boolean
+  /** Delete: no Undo, the mark is a bin, and the item is gone from the
+   *  page, so a click on the toast opens nothing. */
+  deleted?: boolean
+  /** An undo that landed with something to say: nothing left to undo, so
+   *  it offers Open and a close button instead. */
+  undone?: boolean
+  /** Stays up until closed: something left for the admin to fix by hand. */
+  stay?: boolean
 }
 
 /** What the page tells the Mac agent to do after a decision: save the
@@ -1382,6 +1426,8 @@ interface AgentResult {
   detail: string
   /** /ping: the agent can hold a conversation about an item (chat.py). */
   chat: boolean
+  /** /ping: the agent can turn speech into text (dictate.py). */
+  dictate?: boolean
   /** reject_draft: the words saved in Gmail. */
   rejectText?: string
   /** No draft: the owner had already replied in the thread, on this day. */
@@ -1425,6 +1471,7 @@ async function callAgent(
       detail?: string
       error?: string
       chat?: boolean
+      dictate?: boolean
       rejectText?: string
       alreadyReplied?: unknown
     }
@@ -1434,6 +1481,7 @@ async function callAgent(
       replyStatus: data.replyStatus ?? null,
       detail: data.detail ?? data.error ?? '',
       chat: Boolean(data.chat),
+      dictate: Boolean(data.dictate),
       rejectText: data.rejectText,
       alreadyReplied: alreadyRepliedOf(data.alreadyReplied) ?? undefined,
     }
@@ -1490,7 +1538,7 @@ async function fetchChatRows(agent: AgentInfo): Promise<ChatRows | null> {
 const WORKER_NOTE = 'the Mac saves the reply draft within five minutes'
 const OFFLINE_SUB = `Mac agent not reachable · ${WORKER_NOTE}`
 
-type Decision = 'accept' | 'reject' | 'later'
+type Decision = 'accept' | 'reject' | 'later' | 'delete'
 type Action = Decision | 'undo' | 'reopen'
 
 export default function QueueAdmin({
@@ -1555,6 +1603,8 @@ export default function QueueAdmin({
   const [agentOnline, setAgentOnline] = useState<boolean | null>(null)
   // The agent answered the ping and can chat: the conversation panel shows.
   const [agentChat, setAgentChat] = useState(false)
+  // The Mac can turn speech into text: the chat's Cmd+D and mic.
+  const [agentDictate, setAgentDictate] = useState(false)
   // The chat threads on the Mac, and per row the newest reply already seen
   // in this browser (null until read), for the rows' teal bars.
   const [chatRows, setChatRows] = useState<ChatRows>({})
@@ -1563,6 +1613,8 @@ export default function QueueAdmin({
   const [chatFocus, setChatFocus] = useState(0)
   const [placeFocus, setPlaceFocus] = useState(0)
   const [fieldFocus, setFieldFocus] = useState(0)
+  // Bumped when A can't accept yet: the "first" note flashes red.
+  const [blockedFlash, setBlockedFlash] = useState(0)
   const wantedRef = useRef<string | null>(null)
   // The focused item's record as it is in Airtable now, plus the table's
   // field list, so empty fields (a missing logo) show as empty. By item id.
@@ -1941,6 +1993,7 @@ export default function QueueAdmin({
       if (cancelled) return
       setAgentOnline(res.ok)
       setAgentChat(res.ok && res.chat)
+      setAgentDictate(res.ok && Boolean(res.dictate))
     })
     return () => {
       cancelled = true
@@ -3045,7 +3098,10 @@ export default function QueueAdmin({
       const replyDraft =
         action === 'accept' && reply !== null ? { replyDraft: reply } : {}
       const decision =
-        action === 'accept' || action === 'reject' || action === 'later'
+        action === 'accept' ||
+        action === 'reject' ||
+        action === 'later' ||
+        action === 'delete'
       // A Discord reply goes on the clipboard with the decision, as the page
       // shows it, ready to paste (Bryce, 15 Oct 2026). Copied here, inside
       // the click or key press, because the browser allows it only then.
@@ -3077,8 +3133,9 @@ export default function QueueAdmin({
         }
         setToast({
           item,
-          no: action === 'reject',
+          no: action === 'reject' || action === 'delete',
           later: action === 'later',
+          deleted: action === 'delete',
           state: 'working',
           text: workingLabel(item, action, drafts[item.id]),
         })
@@ -3144,7 +3201,11 @@ export default function QueueAdmin({
           }),
         })
         status = res.status
-        const data = (await res.json()) as { item?: QueueItem; error?: string }
+        const data = (await res.json()) as {
+          item?: QueueItem
+          error?: string
+          notPutBack?: string[]
+        }
         if (!res.ok || !data.item) {
           throw new Error(data.error ?? `HTTP ${res.status}`)
         }
@@ -3172,6 +3233,24 @@ export default function QueueAdmin({
         })
         if (decision) {
           forget()
+          if (action === 'delete') {
+            // Gone for good: off the page, with nothing to undo.
+            undoAfterRef.current.delete(item.id)
+            setItems(prev => (prev ? prev.filter(i => i.id !== item.id) : prev))
+            setToast(prev =>
+              prev && prev.item.id === item.id
+                ? {
+                    item: updated,
+                    no: true,
+                    deleted: true,
+                    state: 'done',
+                    text: 'Deleted',
+                    sub: deletedNote(item),
+                  }
+                : prev
+            )
+            return
+          }
           const draftPending = action === 'accept' && wantsDraft(updated)
           const rejectReplyPending =
             action === 'reject' && wantsRejectReply(updated)
@@ -3239,21 +3318,35 @@ export default function QueueAdmin({
           if (draftPending) void saveReply(updated)
           if (rejectReplyPending) void saveRejectReply(updated)
         } else if (action === 'undo') {
-          // A rejection's reply already in Gmail stays there: say so. A
-          // decision made while the undo was on its way keeps the toast.
+          // A rejection's reply already in Gmail stays there, and so does a
+          // picture Undo had no copy of (Bryce, 3 Nov 2026: AISUM26 kept
+          // the new logo): say so. A decision made while the undo was on
+          // its way keeps the toast.
+          const notBack = data.notPutBack ?? []
           setToast(prev =>
             prev && prev.item.id !== item.id
               ? prev
-              : item.status === 'Rejected' &&
-                  item.rejectReply?.state === 'saved'
+              : notBack.length > 0
                 ? {
                     item: updated,
                     no: false,
                     state: 'done',
                     text: 'Back in the queue',
-                    sub: 'The rejection reply is still in Gmail as a draft – delete it there',
+                    sub: notPutBackNote(notBack),
+                    undone: true,
+                    stay: true,
                   }
-                : null
+                : item.status === 'Rejected' &&
+                    item.rejectReply?.state === 'saved'
+                  ? {
+                      item: updated,
+                      no: false,
+                      state: 'done',
+                      text: 'Back in the queue',
+                      sub: 'The rejection reply is still in Gmail as a draft – delete it there',
+                      undone: true,
+                    }
+                  : null
           )
           setUndoable(null)
           select(updated.id)
@@ -3280,7 +3373,7 @@ export default function QueueAdmin({
             item,
             no: action === 'reject',
             state: 'failed',
-            text: `${action === 'reject' ? 'Reject' : action === 'later' ? 'Review again in a week' : acceptLabel(item)} failed · ${closed ? message.replace(/\s*Reload the page\.$/, '') : message}`,
+            text: `${action === 'reject' ? 'Reject' : action === 'delete' ? 'Delete' : action === 'later' ? 'Review again in a week' : acceptLabel(item)} failed · ${closed ? message.replace(/\s*Reload the page\.$/, '') : message}`,
             sub: closed ? 'Moved to Done today' : 'Still in the list',
             retry: closed ? undefined : { action, extra },
           })
@@ -3338,8 +3431,10 @@ export default function QueueAdmin({
 
   useEffect(() => {
     // A decision on its way, or one that failed, stays up until dealt with;
-    // so does one whose Discord reply is still to be pasted.
-    if (!toast || toast.state !== 'done' || toastReply(toast)) return
+    // so does one whose Discord reply is still to be pasted, and an undo
+    // that left a picture behind.
+    if (!toast || toast.state !== 'done' || toast.stay || toastReply(toast))
+      return
     const leave = setTimeout(
       () => setToastLeaving(true),
       TOAST_MS - TOAST_OUT_MS
@@ -3437,7 +3532,11 @@ export default function QueueAdmin({
           select(top.id)
         } else if (decision) {
           void act(decision, 'undo')
-        } else if (toast?.state === 'working' && !toast.reopen) {
+        } else if (
+          toast?.state === 'working' &&
+          !toast.reopen &&
+          !toast.deleted
+        ) {
           queueUndo(toast.item.id)
         }
         return
@@ -3481,6 +3580,7 @@ export default function QueueAdmin({
             // instead: Accept waits for one.
             if (unplacedAdd(item, live[item.id] ?? null, activeEdits(d))) {
               setPlaceFocus(n => n + 1)
+              setBlockedFlash(n => n + 1)
               break
             }
             // One with a needed field still empty opens the first that
@@ -3500,6 +3600,7 @@ export default function QueueAdmin({
                   types.get(k) !== 'checkbox'
               )
               if (first) setDraft(item.id, { editing: first })
+              setBlockedFlash(n => n + 1)
               break
             }
             void act(item, 'accept', {
@@ -3537,6 +3638,33 @@ export default function QueueAdmin({
                 typed: d.other,
               }),
             })
+          } else if (
+            e.key === 'Enter' &&
+            canEdit &&
+            item &&
+            d.mode === 'delete' &&
+            !d.busy
+          ) {
+            e.preventDefault()
+            void act(item, 'delete')
+          }
+          break
+        case 'x':
+          // Delete (Bryce, 6 Nov 2026): X asks, X or Enter again deletes.
+          if (
+            canEdit &&
+            item &&
+            isOpen(item) &&
+            item.status !== 'Revising' &&
+            !d.busy
+          ) {
+            if (d.mode === 'delete') {
+              e.preventDefault()
+              void act(item, 'delete')
+            } else if (d.mode === 'idle') {
+              e.preventDefault()
+              setDraft(item.id, { mode: 'delete' })
+            }
           }
           break
         case 'w':
@@ -3619,7 +3747,11 @@ export default function QueueAdmin({
           if (undoable && !draft(undoable.id).busy) {
             e.preventDefault()
             void act(undoable, 'undo')
-          } else if (toast?.state === 'working' && !toast.reopen) {
+          } else if (
+            toast?.state === 'working' &&
+            !toast.reopen &&
+            !toast.deleted
+          ) {
             e.preventDefault()
             queueUndo(toast.item.id)
           }
@@ -4232,9 +4364,11 @@ export default function QueueAdmin({
                 setD={patch => setDraft(selected.id, patch)}
                 act={(action, extra) => void act(selected, action, extra)}
                 chatAgent={canEdit && agentChat ? agent : null}
+                chatDictate={agentDictate}
                 chatFocus={chatFocus}
                 placeFocus={placeFocus}
                 fieldFocus={fieldFocus}
+                blockedFlash={blockedFlash}
                 readOnly={
                   !canEdit ||
                   !(isOpen(selected) || Boolean(setAsideUntil(selected)))
@@ -4275,6 +4409,7 @@ export default function QueueAdmin({
           role="status"
           onClick={e => {
             if ((e.target as HTMLElement).closest('button, a')) return
+            if (toast.deleted) return
             openToastItem(toast.item.id)
           }}
         >
@@ -4292,11 +4427,13 @@ export default function QueueAdmin({
                 src={
                   toast.reopen
                     ? ICON.reopen
-                    : toast.later
-                      ? ICON.clock
-                      : toast.no
-                        ? ICON.x
-                        : ICON.check
+                    : toast.deleted
+                      ? ICON.trash
+                      : toast.later
+                        ? ICON.clock
+                        : toast.no
+                          ? ICON.x
+                          : ICON.check
                 }
                 size={16}
               />
@@ -4338,9 +4475,9 @@ export default function QueueAdmin({
               )}
             </>
           )}
-          {toast.state === 'failed' ? (
+          {toast.state === 'failed' || toast.undone ? (
             <>
-              {toastRetry && (
+              {toast.state === 'failed' && toastRetry && (
                 <button
                   className={styles.toastUndo}
                   onClick={() =>
@@ -4365,7 +4502,9 @@ export default function QueueAdmin({
                 <Icon src={ICON.x} size={12} />
               </button>
             </>
-          ) : toast.state === 'undoing' || toast.reopen ? null : (
+          ) : toast.state === 'undoing' ||
+            toast.reopen ||
+            toast.deleted ? null : (
             <button
               className={styles.toastUndo}
               disabled={toast.state === 'done' && draft(toast.item.id).busy}
@@ -4444,6 +4583,15 @@ export default function QueueAdmin({
                 review again in a week: out of the list until then, and Fable
                 reviews an addition again before it comes back, marked Back from
                 the day you set it aside
+              </dd>
+              <dt>
+                <kbd>X</kbd>
+              </dt>
+              <dd>
+                delete, for an item that shouldn&apos;t be here at all: asks
+                first, then <kbd>X</kbd> or <kbd>Enter</kbd> deletes it and an
+                addition&apos;s unpublished record, with no reply, nothing for
+                Fable to learn, and no Undo
               </dd>
               <dt>
                 <kbd>F</kbd>
@@ -4791,9 +4939,11 @@ function Detail({
   setD,
   act,
   chatAgent,
+  chatDictate,
   chatFocus,
   placeFocus,
   fieldFocus,
+  blockedFlash = 0,
   readOnly,
   onFable,
   onFlag,
@@ -4831,11 +4981,15 @@ function Detail({
   act: (action: Action, extra?: Record<string, unknown>) => void
   /** The Mac agent, when it is up and can chat; null hides the panel. */
   chatAgent: AgentInfo | null
+  /** The Mac can turn speech into text (Cmd+D in the chat). */
+  chatDictate: boolean
   chatFocus: number
   /** Bumped by P: open the Position list on an addition. */
   placeFocus: number
   /** Bumped by E: open the field list on a change. */
   fieldFocus: number
+  /** Bumped when A can't accept yet: the "first" note flashes red. */
+  blockedFlash?: number
   /** A view-only session: no editing, no deciding. */
   readOnly: boolean
 }) {
@@ -5110,6 +5264,25 @@ function Detail({
   const sortWas = shownFields[SORT_FIELD]
   const unplaced = unplacedAdd(item, live, activeEdits(d))
   const unfilled = unfilledAdd(item, live, activeEdits(d))
+  // A pressed while one of those is missing: the note saying so flashes
+  // red for a moment (Bryce, 5 Nov 2026). A new key restarts the flash on
+  // each press; it clears when the animation ends, so the note never
+  // flashes just by appearing.
+  const [flash, setFlash] = useState<number | null>(null)
+  const [seenFlash, setSeenFlash] = useState(blockedFlash)
+  if (blockedFlash !== seenFlash) {
+    setSeenFlash(blockedFlash)
+    setFlash(blockedFlash)
+  }
+  const blockedNote = (id: string, text: React.ReactNode) => (
+    <span
+      key={`${id}-${flash ?? 'still'}`}
+      className={`${styles.note} ${flash !== null ? styles.noteFlash : ''}`}
+      onAnimationEnd={() => setFlash(null)}
+    >
+      {text}
+    </span>
+  )
 
   const hasCard =
     item.type === 'Change' && Boolean(item.targetTable && item.targetRecord)
@@ -6061,6 +6234,7 @@ function Detail({
                 onFable?.(list.map(c => c.field))
               }}
               focusTick={chatFocus}
+              dictate={chatDictate}
             />
           )}
         </aside>
@@ -6119,6 +6293,28 @@ function Detail({
             <Icon src={ICON.timer} size={12} />
             Claude is revising this{item.note ? ` (“${item.note}”)` : ''}.
           </p>
+        ) : d.mode === 'delete' ? (
+          <div className={`${styles.panel} ${motion.fade}`}>
+            <p className={styles.note}>{deleteAsk(item)}</p>
+            <div className={styles.buttons}>
+              <button
+                autoFocus
+                className={`${styles.button} ${styles.danger}`}
+                disabled={d.busy}
+                onClick={() => act('delete')}
+              >
+                <Icon src={ICON.trash} size={12} />
+                {d.busy ? 'Deleting…' : 'Delete for good'} <kbd>↵</kbd>
+              </button>
+              <button
+                className={styles.ghost}
+                disabled={d.busy}
+                onClick={() => setD({ mode: 'idle' })}
+              >
+                Cancel <kbd>Esc</kbd>
+              </button>
+            </div>
+          </div>
         ) : d.mode === 'reject' ? (
           <div className={`${styles.panel} ${motion.fade}`}>
             <div className={styles.chips}>
@@ -6235,14 +6431,26 @@ function Detail({
               <Icon src={ICON.clock} size={12} />
               Review again in a week <kbd>W</kbd>
             </button>
-            {unplaced && !d.busy && (
-              <span className={styles.note}>
-                Pick its position on the page first <kbd>P</kbd>
-              </span>
-            )}
-            {unfilled.length > 0 && !d.busy && (
-              <span className={styles.note}>{fillFirst(unfilled)}</span>
-            )}
+            <button
+              className={styles.ghost}
+              disabled={d.busy}
+              title="Gone for good, as if deleted in Airtable: no reply, nothing for Fable to learn, no Undo"
+              onClick={() => setD({ mode: 'delete' })}
+            >
+              <Icon src={ICON.trash} size={12} />
+              Delete <kbd>X</kbd>
+            </button>
+            {unplaced &&
+              !d.busy &&
+              blockedNote(
+                'place',
+                <>
+                  Pick its position on the page first <kbd>P</kbd>
+                </>
+              )}
+            {unfilled.length > 0 &&
+              !d.busy &&
+              blockedNote('fill', fillFirst(unfilled))}
             {(editCount > 0 || leftCount > 0) && (
               <span className={styles.note}>
                 {[

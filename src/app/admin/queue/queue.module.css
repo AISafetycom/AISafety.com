@@ -1938,6 +1938,23 @@ a.pageNav:hover {
   color: var(--q-muted);
 }
 
+/* A pressed while something is still missing: the note saying what goes
+   red, holds, then fades back. A colour change only, so it stays on with
+   reduced motion. */
+.noteFlash {
+  animation: noteFlash 1.4s ease-out;
+}
+
+@keyframes noteFlash {
+  0%,
+  55% {
+    color: var(--q-danger);
+  }
+  100% {
+    color: var(--q-muted);
+  }
+}
+
 .error {
   margin: 0;
   padding: 8px 12px;
@@ -2871,6 +2888,93 @@ select.input {
   height: 9px;
   border-radius: 2px;
   background: var(--q-accent-text);
+}
+
+/* Dictation (5 Nov 2026): the mic left of the paperclip, a red dot whose
+   ring grows with his voice while it listens, a spinner while the Mac turns
+   it into words, and the keys under the box. */
+.chatBoxMic.chatBoxKeyed .chatInput {
+  padding-right: 92px;
+}
+
+.chatBoxMic.chatBoxAnswering .chatInput {
+  padding-right: 98px;
+}
+
+.chatBoxMic .chatKey {
+  right: 66px;
+}
+
+.chatBoxMic .chatStop {
+  right: 65px;
+}
+
+.chatMic {
+  position: absolute;
+  right: 35px;
+  bottom: 5px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--q-muted);
+  cursor: pointer;
+}
+
+.chatMic:hover {
+  background: var(--q-border);
+  color: var(--q-text);
+}
+
+.chatMic:disabled {
+  cursor: default;
+}
+
+.chatMicOn,
+.chatMicOn:hover {
+  border-radius: 50%;
+  background: var(--q-danger-soft);
+}
+
+.chatMicDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--q-danger);
+  box-shadow: 0 0 0 calc(var(--level, 0) * 6px) var(--q-danger-soft);
+  transition: box-shadow 80ms linear;
+}
+
+.chatMicBusy {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--q-muted);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.chatDictating {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--q-muted);
+}
+
+.chatDictating::before {
+  content: '';
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-right: 2px;
+  border-radius: 50%;
+  background: var(--q-danger);
+  animation: chatPulse 1.2s ease-in-out infinite;
 }
 
 .chatFiles,

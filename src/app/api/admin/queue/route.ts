@@ -20,7 +20,10 @@
        listings by Sort, for placing an addition (null for a table with no Sort)
   POST /api/admin/queue  body { id, action, edits?, reason?, replyDraft? } → { item }
        action: accept | reject | edit | later | undo | flag | reopen | fix
+       | delete
        (later sets the item aside for a week, Fable reviews it again then;
+       delete discards an open item silently: an addition's unpublished
+       record goes too, the row closes, no reply, no Undo – deleteItem;
        undo also brings back an item set aside; edit keeps the page's pending edits, and the reply draft as
        edited, on the row – nothing more; flag writes the verdict, reasons
        and reject buttons Fable gave in the chat onto the row, body
@@ -29,7 +32,8 @@
        old: the Mac rebuilds a deleted record from the row's saved copy –
        queue-reopen.ts; fix writes edits straight onto the listing of an
        addition already published or a change already applied, from Done
-       today)
+       today). An undo that could not put a field back (a picture with no
+       copy to write, queue-before-picture.ts) adds { notPutBack: [names] }.
 
   `agent` is { port, token } for the local agent on the owner's Mac (null
   when QUEUE_AGENT_SECRET is not set): the page calls it after an accept so
@@ -47,6 +51,7 @@ import {
   acceptItem,
   agentInfo,
   closeHandledRows,
+  deleteItem,
   fixItem,
   flagItem,
   getPageOrder,
@@ -150,6 +155,7 @@ const ACTIONS = new Set([
   'flag',
   'reopen',
   'fix',
+  'delete',
 ])
 
 export async function POST(req: NextRequest) {
@@ -171,6 +177,7 @@ export async function POST(req: NextRequest) {
     const item = await getQueueItem(id)
     if (!item) return json({ error: 'That item no longer exists.' }, 404)
     const me = await currentAdmin()
+    let notPutBack: string[] = []
     if (action === 'accept') {
       await acceptItem(
         item,
@@ -201,6 +208,8 @@ export async function POST(req: NextRequest) {
       await fixItem(item, sanitiseEdits(body.edits))
     } else if (action === 'later') {
       await laterItem(item)
+    } else if (action === 'delete') {
+      await deleteItem(item)
     } else if (action === 'reopen') {
       await reopenItem(item)
     } else if (action === 'flag') {
@@ -212,12 +221,15 @@ export async function POST(req: NextRequest) {
         await flagItem(item, parsed.flag)
       }
     } else {
-      await undoItem(item)
+      notPutBack = await undoItem(item)
     }
     console.log(
-      `[admin-queue] ${action} ${item.type} ${item.id} "${item.title}" by ${me?.name ?? me?.email ?? '?'}`
+      `[admin-queue] ${action} ${item.type} ${item.id} "${item.title}" by ${me?.name ?? me?.email ?? '?'}${notPutBack.length ? ` – not put back: ${notPutBack.join(', ')}` : ''}`
     )
-    return json({ item: await getQueueItem(id) })
+    return json({
+      item: await getQueueItem(id),
+      ...(notPutBack.length ? { notPutBack } : {}),
+    })
   } catch (e) {
     return failure(e)
   }
