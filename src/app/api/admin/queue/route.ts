@@ -20,7 +20,10 @@
        listings by Sort, for placing an addition (null for a table with no Sort)
   POST /api/admin/queue  body { id, action, edits?, reason?, replyDraft? } → { item }
        action: accept | reject | edit | later | undo | flag | reopen | fix
+       | delete
        (later sets the item aside for a week, Fable reviews it again then;
+       delete discards an open item silently: an addition's unpublished
+       record goes too, the row closes, no reply, no Undo – deleteItem;
        undo also brings back an item set aside; edit keeps the page's pending edits, and the reply draft as
        edited, on the row – nothing more; flag writes the verdict, reasons
        and reject buttons Fable gave in the chat onto the row, body
@@ -48,6 +51,7 @@ import {
   acceptItem,
   agentInfo,
   closeHandledRows,
+  deleteItem,
   fixItem,
   flagItem,
   getPageOrder,
@@ -151,6 +155,7 @@ const ACTIONS = new Set([
   'flag',
   'reopen',
   'fix',
+  'delete',
 ])
 
 export async function POST(req: NextRequest) {
@@ -203,6 +208,8 @@ export async function POST(req: NextRequest) {
       await fixItem(item, sanitiseEdits(body.edits))
     } else if (action === 'later') {
       await laterItem(item)
+    } else if (action === 'delete') {
+      await deleteItem(item)
     } else if (action === 'reopen') {
       await reopenItem(item)
     } else if (action === 'flag') {

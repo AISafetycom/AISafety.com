@@ -267,6 +267,7 @@ const ICON = {
   search: '/images/icons/magnifying-glass.svg',
   clock: '/images/icons/clock.svg',
   reopen: '/images/icons/redo.svg',
+  trash: '/images/icons/trash.svg',
 } as const
 
 // Each section's head carries its icon, in grey: colour in the list is kept
@@ -1300,6 +1301,28 @@ function laterNote(item: QueueItem): string {
     : 'Back in the list then'
 }
 
+/** What Delete asks before it goes ahead: it has no Undo. */
+function deleteAsk(item: QueueItem): string {
+  const after =
+    'No reply goes out, Fable learns nothing from it, and it can’t be undone.'
+  if (item.type === 'Add' && item.targetRecord) {
+    return `Delete this item and its unpublished Airtable record? ${after}`
+  }
+  if (item.type === 'Change') {
+    return `Delete this item? The listing stays as it is. ${after}`
+  }
+  return `Delete this item? ${after}`
+}
+
+/** The toast's second line after a Delete: what went with the item. */
+function deletedNote(item: QueueItem): string {
+  if (item.type === 'Add' && item.targetRecord) {
+    return 'Its Airtable record is gone too · no reply'
+  }
+  if (item.type === 'Change') return 'The listing is unchanged · no reply'
+  return 'No reply'
+}
+
 /** The fields an Undo could not put back, as the toast says them. */
 function notPutBackNote(fields: string[]): string {
   const one = fields.length === 1
@@ -1311,6 +1334,7 @@ function notPutBackNote(fields: string[]): string {
 
 function workingLabel(item: QueueItem, action: Decision, d?: Draft): string {
   if (action === 'reject') return 'Rejecting…'
+  if (action === 'delete') return 'Deleting…'
   if (action === 'later') return 'Setting it aside…'
   const label = acceptLabel(item, d && activeEdits(d), d?.leftOut)
   if (label === 'Publish') return 'Publishing…'
@@ -1319,7 +1343,9 @@ function workingLabel(item: QueueItem, action: Decision, d?: Draft): string {
 }
 
 interface Draft {
-  mode: 'idle' | 'reject'
+  /** reject: picking a reason. delete: asked to confirm, since a delete
+   *  has no Undo. */
+  mode: 'idle' | 'reject' | 'delete'
   edits: Record<string, string>
   /** A change's proposed fields left out with the cross: Accept does not
    *  write them, so the listing keeps what it holds there. */
@@ -1378,6 +1404,9 @@ interface Toast {
   copied?: string
   /** Reopen on a declined addition: no Undo, the mark is its arrow. */
   reopen?: boolean
+  /** Delete: no Undo, the mark is a bin, and the item is gone from the
+   *  page, so a click on the toast opens nothing. */
+  deleted?: boolean
   /** An undo that landed with something to say: nothing left to undo, so
    *  it offers Open and a close button instead. */
   undone?: boolean
@@ -1509,7 +1538,7 @@ async function fetchChatRows(agent: AgentInfo): Promise<ChatRows | null> {
 const WORKER_NOTE = 'the Mac saves the reply draft within five minutes'
 const OFFLINE_SUB = `Mac agent not reachable · ${WORKER_NOTE}`
 
-type Decision = 'accept' | 'reject' | 'later'
+type Decision = 'accept' | 'reject' | 'later' | 'delete'
 type Action = Decision | 'undo' | 'reopen'
 
 export default function QueueAdmin({
@@ -3069,7 +3098,10 @@ export default function QueueAdmin({
       const replyDraft =
         action === 'accept' && reply !== null ? { replyDraft: reply } : {}
       const decision =
-        action === 'accept' || action === 'reject' || action === 'later'
+        action === 'accept' ||
+        action === 'reject' ||
+        action === 'later' ||
+        action === 'delete'
       // A Discord reply goes on the clipboard with the decision, as the page
       // shows it, ready to paste (Bryce, 15 Oct 2026). Copied here, inside
       // the click or key press, because the browser allows it only then.
@@ -3101,8 +3133,9 @@ export default function QueueAdmin({
         }
         setToast({
           item,
-          no: action === 'reject',
+          no: action === 'reject' || action === 'delete',
           later: action === 'later',
+          deleted: action === 'delete',
           state: 'working',
           text: workingLabel(item, action, drafts[item.id]),
         })
@@ -3200,6 +3233,24 @@ export default function QueueAdmin({
         })
         if (decision) {
           forget()
+          if (action === 'delete') {
+            // Gone for good: off the page, with nothing to undo.
+            undoAfterRef.current.delete(item.id)
+            setItems(prev => (prev ? prev.filter(i => i.id !== item.id) : prev))
+            setToast(prev =>
+              prev && prev.item.id === item.id
+                ? {
+                    item: updated,
+                    no: true,
+                    deleted: true,
+                    state: 'done',
+                    text: 'Deleted',
+                    sub: deletedNote(item),
+                  }
+                : prev
+            )
+            return
+          }
           const draftPending = action === 'accept' && wantsDraft(updated)
           const rejectReplyPending =
             action === 'reject' && wantsRejectReply(updated)
@@ -3322,7 +3373,7 @@ export default function QueueAdmin({
             item,
             no: action === 'reject',
             state: 'failed',
-            text: `${action === 'reject' ? 'Reject' : action === 'later' ? 'Review again in a week' : acceptLabel(item)} failed · ${closed ? message.replace(/\s*Reload the page\.$/, '') : message}`,
+            text: `${action === 'reject' ? 'Reject' : action === 'delete' ? 'Delete' : action === 'later' ? 'Review again in a week' : acceptLabel(item)} failed · ${closed ? message.replace(/\s*Reload the page\.$/, '') : message}`,
             sub: closed ? 'Moved to Done today' : 'Still in the list',
             retry: closed ? undefined : { action, extra },
           })
@@ -3481,7 +3532,11 @@ export default function QueueAdmin({
           select(top.id)
         } else if (decision) {
           void act(decision, 'undo')
-        } else if (toast?.state === 'working' && !toast.reopen) {
+        } else if (
+          toast?.state === 'working' &&
+          !toast.reopen &&
+          !toast.deleted
+        ) {
           queueUndo(toast.item.id)
         }
         return
@@ -3583,6 +3638,33 @@ export default function QueueAdmin({
                 typed: d.other,
               }),
             })
+          } else if (
+            e.key === 'Enter' &&
+            canEdit &&
+            item &&
+            d.mode === 'delete' &&
+            !d.busy
+          ) {
+            e.preventDefault()
+            void act(item, 'delete')
+          }
+          break
+        case 'x':
+          // Delete (Bryce, 6 Nov 2026): X asks, X or Enter again deletes.
+          if (
+            canEdit &&
+            item &&
+            isOpen(item) &&
+            item.status !== 'Revising' &&
+            !d.busy
+          ) {
+            if (d.mode === 'delete') {
+              e.preventDefault()
+              void act(item, 'delete')
+            } else if (d.mode === 'idle') {
+              e.preventDefault()
+              setDraft(item.id, { mode: 'delete' })
+            }
           }
           break
         case 'w':
@@ -3665,7 +3747,11 @@ export default function QueueAdmin({
           if (undoable && !draft(undoable.id).busy) {
             e.preventDefault()
             void act(undoable, 'undo')
-          } else if (toast?.state === 'working' && !toast.reopen) {
+          } else if (
+            toast?.state === 'working' &&
+            !toast.reopen &&
+            !toast.deleted
+          ) {
             e.preventDefault()
             queueUndo(toast.item.id)
           }
@@ -4323,6 +4409,7 @@ export default function QueueAdmin({
           role="status"
           onClick={e => {
             if ((e.target as HTMLElement).closest('button, a')) return
+            if (toast.deleted) return
             openToastItem(toast.item.id)
           }}
         >
@@ -4340,11 +4427,13 @@ export default function QueueAdmin({
                 src={
                   toast.reopen
                     ? ICON.reopen
-                    : toast.later
-                      ? ICON.clock
-                      : toast.no
-                        ? ICON.x
-                        : ICON.check
+                    : toast.deleted
+                      ? ICON.trash
+                      : toast.later
+                        ? ICON.clock
+                        : toast.no
+                          ? ICON.x
+                          : ICON.check
                 }
                 size={16}
               />
@@ -4413,7 +4502,9 @@ export default function QueueAdmin({
                 <Icon src={ICON.x} size={12} />
               </button>
             </>
-          ) : toast.state === 'undoing' || toast.reopen ? null : (
+          ) : toast.state === 'undoing' ||
+            toast.reopen ||
+            toast.deleted ? null : (
             <button
               className={styles.toastUndo}
               disabled={toast.state === 'done' && draft(toast.item.id).busy}
@@ -4492,6 +4583,15 @@ export default function QueueAdmin({
                 review again in a week: out of the list until then, and Fable
                 reviews an addition again before it comes back, marked Back from
                 the day you set it aside
+              </dd>
+              <dt>
+                <kbd>X</kbd>
+              </dt>
+              <dd>
+                delete, for an item that shouldn&apos;t be here at all: asks
+                first, then <kbd>X</kbd> or <kbd>Enter</kbd> deletes it and an
+                addition&apos;s unpublished record, with no reply, nothing for
+                Fable to learn, and no Undo
               </dd>
               <dt>
                 <kbd>F</kbd>
@@ -6193,6 +6293,28 @@ function Detail({
             <Icon src={ICON.timer} size={12} />
             Claude is revising this{item.note ? ` (“${item.note}”)` : ''}.
           </p>
+        ) : d.mode === 'delete' ? (
+          <div className={`${styles.panel} ${motion.fade}`}>
+            <p className={styles.note}>{deleteAsk(item)}</p>
+            <div className={styles.buttons}>
+              <button
+                autoFocus
+                className={`${styles.button} ${styles.danger}`}
+                disabled={d.busy}
+                onClick={() => act('delete')}
+              >
+                <Icon src={ICON.trash} size={12} />
+                {d.busy ? 'Deleting…' : 'Delete for good'} <kbd>↵</kbd>
+              </button>
+              <button
+                className={styles.ghost}
+                disabled={d.busy}
+                onClick={() => setD({ mode: 'idle' })}
+              >
+                Cancel <kbd>Esc</kbd>
+              </button>
+            </div>
+          </div>
         ) : d.mode === 'reject' ? (
           <div className={`${styles.panel} ${motion.fade}`}>
             <div className={styles.chips}>
@@ -6308,6 +6430,15 @@ function Detail({
             >
               <Icon src={ICON.clock} size={12} />
               Review again in a week <kbd>W</kbd>
+            </button>
+            <button
+              className={styles.ghost}
+              disabled={d.busy}
+              title="Gone for good, as if deleted in Airtable: no reply, nothing for Fable to learn, no Undo"
+              onClick={() => setD({ mode: 'delete' })}
+            >
+              <Icon src={ICON.trash} size={12} />
+              Delete <kbd>X</kbd>
             </button>
             {unplaced &&
               !d.busy &&
