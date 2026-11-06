@@ -30,6 +30,8 @@ import {
   asAttachmentPreview,
   asAttachmentWrite,
   closeHandledRows,
+  DELETED_NOTE,
+  deleteItem,
   extraEdits,
   fixItem,
   flagItem,
@@ -2007,5 +2009,126 @@ describe('card preview with a formula built from an edited field', () => {
     expect(preview?.listing).toMatchObject({
       category: 'Research support, Resource',
     })
+  })
+})
+
+// Delete (Bryce, 6 Nov 2026: "Need a delete button"): a silent discard,
+// as if the suggestion had been deleted in Airtable by hand.
+describe('deleteItem', () => {
+  const ID = rid('gone')
+  const REC = rid('suggested')
+  const BROOM = 'tblntD3WITPEgjHRK'
+  const FLD = {
+    type: 'fldBc9YIDhjmu58f3',
+    targetTable: 'fld45SUjstUZROuXl',
+    targetRecord: 'fldszXtLdUijgFG4l',
+    issueRow: 'fld5zaEwhergaWYbF',
+    decidedAt: 'fldtt7z4lYvAR5t94',
+  }
+  let row: Record<string, unknown>
+  let record: Record<string, unknown> | null
+  let calls: string[]
+
+  beforeEach(() => {
+    row = {
+      [FLD.type]: 'Add',
+      [STATUS]: 'Pending',
+      [FLD.targetTable]: EVENTS,
+      [FLD.targetRecord]: REC,
+    }
+    record = { Name: 'A suggestion', 'Publish?': false }
+    calls = []
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(
+      async (path: string, init?: RequestInit) => {
+        const method = init?.method ?? 'GET'
+        calls.push(`${method} ${path.split('?')[0]}`)
+        if (path.startsWith(`${QUEUE}/${ID}`)) {
+          if (method === 'PATCH') {
+            const { fields } = JSON.parse(String(init?.body)) as {
+              fields: Record<string, unknown>
+            }
+            for (const [k, v] of Object.entries(fields)) {
+              if (v === null) delete row[k]
+              else row[k] = v
+            }
+          }
+          return Response.json({
+            id: ID,
+            createdTime: '2026-11-06T00:00:00.000Z',
+            fields: row,
+          })
+        }
+        if (path.startsWith(`${EVENTS}/${REC}`)) {
+          if (method === 'DELETE') {
+            record = null
+            return Response.json({ id: REC, deleted: true })
+          }
+          return record
+            ? Response.json({ id: REC, fields: record })
+            : Response.json({ error: 'NOT_FOUND' }, { status: 404 })
+        }
+        if (path.startsWith(`${BROOM}/`)) {
+          return Response.json({ deleted: true })
+        }
+        throw new Error(`unexpected ${method} ${path}`)
+      }
+    )
+  })
+
+  const current = async () => {
+    const i = await getQueueItem(ID)
+    if (!i) throw new Error('row gone')
+    return i
+  }
+
+  it("deletes an addition's unpublished record and closes the row, undecided", async () => {
+    await deleteItem(await current())
+    expect(record).toBeNull()
+    expect(row[STATUS]).toBe('Closed')
+    expect(row[ERROR]).toBe(DELETED_NOTE)
+    // Not a decision: no Decided at, so neither Done today nor Earlier.
+    expect(row[FLD.decidedAt]).toBeUndefined()
+  })
+
+  it('never deletes a live listing', async () => {
+    record = { Name: 'A suggestion', 'Publish?': true }
+    await expect(deleteItem(await current())).rejects.toMatchObject({
+      status: 409,
+    })
+    expect(record).not.toBeNull()
+    expect(row[STATUS]).toBe('Pending')
+    expect(calls.some(c => c.startsWith('DELETE'))).toBe(false)
+  })
+
+  it('keeps a record hidden in Airtable, and closes a row whose record is gone', async () => {
+    record = { Name: 'A suggestion', 'Hide?': true }
+    await deleteItem(await current())
+    expect(record).not.toBeNull()
+    expect(row[STATUS]).toBe('Closed')
+
+    row[STATUS] = 'Pending'
+    record = null
+    await deleteItem(await current())
+    expect(row[STATUS]).toBe('Closed')
+    expect(row[ERROR]).toBe(DELETED_NOTE)
+  })
+
+  it("leaves a change's listing alone and clears its Broom flag", async () => {
+    row[FLD.type] = 'Change'
+    row[FLD.issueRow] = rid('issue')
+    await deleteItem(await current())
+    expect(record).not.toBeNull()
+    expect(calls).toContain(`DELETE ${BROOM}/${rid('issue')}`)
+    expect(calls.some(c => c.startsWith(`DELETE ${EVENTS}`))).toBe(false)
+    expect(row[STATUS]).toBe('Closed')
+  })
+
+  it('refuses an item already decided', async () => {
+    row[STATUS] = 'Rejected'
+    await expect(deleteItem(await current())).rejects.toMatchObject({
+      status: 409,
+    })
+    expect(record).not.toBeNull()
   })
 })
