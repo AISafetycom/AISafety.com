@@ -12,17 +12,17 @@
   align-items: center;
   gap: 4px;
   border-radius: 100px;
-  color: var(--teal-300);
+  color: var(--teal-grey-300);
   transition: all var(--hover-transition);
 }
 
 .pill:hover {
-  border-color: var(--teal-bright-750);
+  border-color: var(--teal-750);
   cursor: pointer;
 }
 
 .pill.pillActive {
-  background: var(--teal-bright-800);
+  background: var(--teal-800);
   color: var(--white);
 }
 

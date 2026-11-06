@@ -21,7 +21,7 @@ export default async function JobsPage() {
         description={
           <>
             Pursuing a career in AI safety can be{' '}
-            <span className="color-light-teal">
+            <span className="color-teal-300">
               one of the most impactful ways
             </span>{' '}
             to contribute. Many roles don&apos;t require technical skills.

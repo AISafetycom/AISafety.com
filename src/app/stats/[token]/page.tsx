@@ -115,7 +115,7 @@ export default async function OrgStatsPage({
       <h1 className={`padding-bottom-12px ${styles.title}`}>
         {titleOf(share)}
       </h1>
-      <p className="color-teal-300 margin-bottom-32px">
+      <p className="color-teal-grey-300 margin-bottom-32px">
         How visitors to AISafety.com find your listings and click through to
         them. The figures are live, so pick any dates below. Only people with
         this link can see this page.
@@ -187,7 +187,7 @@ async function JobsPage({
       <h1 className={`padding-bottom-12px ${styles.title}`}>
         {titleOf(share)}
       </h1>
-      <p className="color-teal-300 margin-bottom-32px">
+      <p className="color-teal-grey-300 margin-bottom-32px">
         How visitors to AISafety.com find your jobs and click through to them.
         The figures are live, so pick a quarter or any dates below. Only people
         with this link can see this page.

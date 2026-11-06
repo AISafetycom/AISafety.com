@@ -11,13 +11,13 @@
 .issue {
   display: grid;
   grid-template-columns: 150px 1fr;
-  border-top: 1px solid var(--teal-700);
+  border-top: 1px solid var(--teal-grey-700);
 }
 
 .issue:last-child {
-  border-bottom: 1px solid var(--teal-700);
+  border-bottom: 1px solid var(--teal-grey-700);
 }
 
 .title:hover {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }

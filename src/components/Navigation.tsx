@@ -358,13 +358,13 @@ export default function Navigation({
               >
                 <div className={styles['nav-item-icon']}>
                   <Icon
-                    className="color-teal-bright-800"
+                    className="color-teal-800"
                     src={`/images/icons/${item.icon}`}
                   />
                 </div>
                 <p className="paragraph-small-bold">{item.label}</p>
                 {counts[item.href] && (
-                  <p className="paragraph-xs color-teal-300">
+                  <p className="paragraph-xs color-teal-grey-300">
                     {counts[item.href]}
                   </p>
                 )}
@@ -411,13 +411,13 @@ export default function Navigation({
                     >
                       <div className={styles['nav-item-icon']}>
                         <Icon
-                          className="color-teal-bright-800"
+                          className="color-teal-800"
                           src={`/images/icons/${item.icon}`}
                         />
                       </div>
                       <p className="paragraph-small-bold">{item.label}</p>
                       {counts[item.href] && (
-                        <p className="paragraph-xs color-teal-300">
+                        <p className="paragraph-xs color-teal-grey-300">
                           {counts[item.href]}
                         </p>
                       )}
@@ -485,13 +485,13 @@ export default function Navigation({
             >
               <div className={styles['nav-item-icon']}>
                 <Icon
-                  className="color-teal-bright-800"
+                  className="color-teal-800"
                   src={`/images/icons/${item.icon}`}
                 />
               </div>
               <p className="paragraph-default-bold">{item.label}</p>
               {counts[item.href] && (
-                <p className="paragraph-small color-teal-300">
+                <p className="paragraph-small color-teal-grey-300">
                   {counts[item.href]}
                 </p>
               )}
@@ -502,10 +502,7 @@ export default function Navigation({
             onClick={() => setIsMenuOpen(false)}
           >
             <div className={styles['nav-item-icon']}>
-              <Icon
-                className="color-teal-bright-800"
-                src="/images/icons/search.svg"
-              />
+              <Icon className="color-teal-800" src="/images/icons/search.svg" />
             </div>
             <p className="paragraph-default-bold">Search</p>
           </SearchButton>

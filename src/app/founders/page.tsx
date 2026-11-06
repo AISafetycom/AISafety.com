@@ -27,7 +27,7 @@ export default async function FoundersPage() {
         description={
           <>
             Resources for{' '}
-            <span className="color-light-teal">starting and growing</span> an AI
+            <span className="color-teal-300">starting and growing</span> an AI
             safety organization – including incubators, fiscal sponsors, VCs,
             and practical tools.
           </>

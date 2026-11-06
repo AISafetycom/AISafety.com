@@ -100,7 +100,7 @@ export default function RangeSlider({
           <Icon
             src="/images/icons/move-up-down-small.svg"
             size={12}
-            className="color-teal-300"
+            className="color-teal-grey-300"
           />
         </span>
 
@@ -122,18 +122,18 @@ export default function RangeSlider({
           <Icon
             src="/images/icons/move-up-down-small.svg"
             size={12}
-            className="color-teal-300"
+            className="color-teal-grey-300"
           />
         </span>
       </div>
 
       <div className="flex justify-between padding-top-16px">
         <div>
-          <p className="paragraph-xs color-teal-300">Minimum</p>
+          <p className="paragraph-xs color-teal-grey-300">Minimum</p>
           <p className="paragraph-small color-white">{labels[lo]}</p>
         </div>
         <div className="flex flex-col items-end">
-          <p className="paragraph-xs color-teal-300">Maximum</p>
+          <p className="paragraph-xs color-teal-grey-300">Maximum</p>
           <p className="paragraph-small color-white">{labels[hi]}</p>
         </div>
       </div>

@@ -528,7 +528,9 @@ export default function JobsClient({ jobs }: JobsClientProps) {
             )
           })}
           {filteredJobs.length === 0 && (
-            <p className="paragraph-small color-teal-300">Nothing found.</p>
+            <p className="paragraph-small color-teal-grey-300">
+              Nothing found.
+            </p>
           )}
         </div>
 
@@ -538,7 +540,7 @@ export default function JobsClient({ jobs }: JobsClientProps) {
             href={withUtm('https://jobs.80000hours.org/', 'Jobs')}
             target="_blank"
             rel="noopener noreferrer"
-            className="color-light-teal"
+            className="color-teal-300"
           >
             80,000 Hours Job Board
           </a>

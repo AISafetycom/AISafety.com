@@ -27,7 +27,7 @@ const MapEditorCanvas = dynamic(() => import('./MapEditorCanvas'), {
   ssr: false,
   loading: () => (
     <div className={`${styles.canvas} ${styles.canvasLoading}`}>
-      <p className="paragraph-small color-teal-300">Loading map…</p>
+      <p className="paragraph-small color-teal-grey-300">Loading map…</p>
     </div>
   ),
 })
@@ -877,7 +877,7 @@ export default function MapEditor({
             />
           ) : (
             <div className={`${styles.canvas} ${styles.canvasLoading}`}>
-              <p className="paragraph-small color-teal-300">
+              <p className="paragraph-small color-teal-grey-300">
                 {loadError ? 'Could not load the map.' : 'Loading map…'}
               </p>
             </div>

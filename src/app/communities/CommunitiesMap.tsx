@@ -665,7 +665,7 @@ export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
           <Icon
             src="/images/icons/arrow-down.svg"
             size={16}
-            className="color-teal-bright-400"
+            className="color-teal-400"
           />
         </button>
         <MapControls

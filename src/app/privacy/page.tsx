@@ -17,17 +17,16 @@ export default function PrivacyPage() {
 
           <h2 className="padding-bottom-56px">
             We collect{' '}
-            <span className="color-light-teal">as little as we can</span>, and
-            we don&apos;t use any of it for advertising or sell it to anyone.
-            This page explains what we do collect, why, and the choices you
-            have.
+            <span className="color-teal-300">as little as we can</span>, and we
+            don&apos;t use any of it for advertising or sell it to anyone. This
+            page explains what we do collect, why, and the choices you have.
           </h2>
 
           <h3 className="padding-bottom-16px">Who we are</h3>
-          <p className="color-teal-300 padding-bottom-40px">
+          <p className="color-teal-grey-300 padding-bottom-40px">
             AISafety.com is run by a small nonprofit team – you can meet us on
             the{' '}
-            <Link href="/about" className="color-light-teal">
+            <Link href="/about" className="color-teal-300">
               about page
             </Link>
             . Bryce Robertson, the site&apos;s project manager, is responsible
@@ -36,7 +35,7 @@ export default function PrivacyPage() {
               href="https://airtable.com/appF8XfZUGXtfi40E/pagUmmzVb8OnVvTZS/form"
               target="_blank"
               rel="noopener noreferrer"
-              className="color-light-teal"
+              className="color-teal-300"
             >
               send us a message
             </a>
@@ -44,7 +43,7 @@ export default function PrivacyPage() {
           </p>
 
           <h3 className="padding-bottom-16px">No cookies</h3>
-          <p className="color-teal-300 padding-bottom-40px">
+          <p className="color-teal-grey-300 padding-bottom-40px">
             This site doesn&apos;t set cookies for visitors. The only cookie we
             use anywhere is the one our own team gets when signing in to the
             site&apos;s admin area. The site does keep two small things in your
@@ -58,7 +57,7 @@ export default function PrivacyPage() {
           </p>
 
           <h3 className="padding-bottom-16px">Analytics</h3>
-          <p className="color-teal-300 padding-bottom-24px">
+          <p className="color-teal-grey-300 padding-bottom-24px">
             We use two privacy-respecting tools to understand how the site is
             used (and therefore improve it). Matomo, running in cookieless mode,
             gives us anonymous, aggregated statistics like page views and
@@ -69,7 +68,7 @@ export default function PrivacyPage() {
             tied to your name, email, or IP address, and it never follows you to
             other sites.
           </p>
-          <p className="color-teal-300 padding-bottom-24px">
+          <p className="color-teal-grey-300 padding-bottom-24px">
             If you&apos;d rather not be counted, you can switch analytics off
             for this browser. This also stops your chatbot conversations from
             being saved.
@@ -77,7 +76,7 @@ export default function PrivacyPage() {
           <AnalyticsOptOut />
 
           <h3 className="padding-bottom-16px">The chatbot</h3>
-          <p className="color-teal-300 padding-bottom-40px">
+          <p className="color-teal-grey-300 padding-bottom-40px">
             The chatbot is powered by Claude, an AI model from Anthropic – your
             messages are sent to Anthropic to generate each reply, and Anthropic
             doesn&apos;t train its models on them. Conversations are saved so we
@@ -93,7 +92,7 @@ export default function PrivacyPage() {
           </p>
 
           <h3 className="padding-bottom-16px">Newsletters</h3>
-          <p className="color-teal-300 padding-bottom-40px">
+          <p className="color-teal-grey-300 padding-bottom-40px">
             When you sign up for the AI Safety Events, AI Safety Training, or AI
             Safety Funding newsletter on this site, your email address goes to
             ActiveCampaign, the service that sends them, and you&apos;ll get an
@@ -107,7 +106,7 @@ export default function PrivacyPage() {
             to you or your email address. Every email has an unsubscribe link at
             the bottom, and a Manage subscriptions link that opens your
             newsletters on{' '}
-            <Link href="/newsletter" className="color-light-teal">
+            <Link href="/newsletter" className="color-teal-300">
               aisafety.com/newsletter
             </Link>{' '}
             so you can change which ones you get; the private code in that link
@@ -118,7 +117,7 @@ export default function PrivacyPage() {
           </p>
 
           <h3 className="padding-bottom-16px">Services we rely on</h3>
-          <p className="color-teal-300 padding-bottom-40px">
+          <p className="color-teal-grey-300 padding-bottom-40px">
             The site runs on Vercel (hosting), Matomo Cloud (analytics),
             Airtable (our listings database, forms, and chatbot logs), Anthropic
             (Claude, the AI model behind the chatbot), ipapi.co (the
@@ -128,14 +127,14 @@ export default function PrivacyPage() {
           </p>
 
           <h3 className="padding-bottom-16px">Your choices</h3>
-          <p className="color-teal-300 padding-bottom-40px">
+          <p className="color-teal-grey-300 padding-bottom-40px">
             You can ask us what data we hold about you, or ask us to correct or
             delete it, by{' '}
             <a
               href="https://airtable.com/appF8XfZUGXtfi40E/pagUmmzVb8OnVvTZS/form"
               target="_blank"
               rel="noopener noreferrer"
-              className="color-light-teal"
+              className="color-teal-300"
             >
               sending us a message
             </a>
@@ -146,7 +145,7 @@ export default function PrivacyPage() {
             and what it was about, and we&apos;ll delete it.
           </p>
 
-          <p className="paragraph-small color-teal-300 padding-bottom-80px">
+          <p className="paragraph-small color-teal-grey-300 padding-bottom-80px">
             Last updated: 26 October 2026
           </p>
         </div>

@@ -42,7 +42,7 @@ export default async function CommunitiesPage() {
             <>
               There are many groups dedicated to discussing and contributing to
               AI safety, both{' '}
-              <span className="color-light-teal">online and in-person.</span> We
+              <span className="color-teal-300">online and in-person.</span> We
               recommend joining a few.
             </>
           }

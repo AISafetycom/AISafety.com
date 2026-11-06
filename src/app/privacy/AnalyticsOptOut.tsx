@@ -29,7 +29,7 @@ export default function AnalyticsOptOut() {
   return (
     <div className="padding-bottom-40px">
       {optedOut && (
-        <p className="paragraph-small color-light-teal padding-bottom-16px">
+        <p className="paragraph-small color-teal-300 padding-bottom-16px">
           ✓ Analytics is off in this browser{since ? ` (since ${since})` : ''}.
         </p>
       )}

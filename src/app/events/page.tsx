@@ -31,14 +31,14 @@ export default async function EventsPage() {
         description={
           <>
             Find{' '}
-            <span className="color-teal-bright-300">
+            <span className="color-teal-300">
               conferences, talks, workshops, meetups, and competitions
             </span>{' '}
             in AI safety, both online and in person.
           </>
         }
       >
-        <Link href="/training" className="paragraph-small color-teal-300">
+        <Link href="/training" className="paragraph-small color-teal-grey-300">
           For fellowships, bootcamps, and courses go to{' '}
           <span className="color-white">Training programs</span>&nbsp;&rarr;
         </Link>

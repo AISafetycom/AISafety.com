@@ -43,15 +43,15 @@ export default async function UnsubscribedPage({
           </h1>
           <h2 className="padding-bottom-40px">
             You won&apos;t get any more emails from{' '}
-            <span className="color-light-teal">{name}</span>.
+            <span className="color-teal-300">{name}</span>.
           </h2>
-          <p className="color-teal-300 padding-bottom-16px">
+          <p className="color-teal-grey-300 padding-bottom-16px">
             Any other AISafety.com newsletters you get will keep coming – each
             one has its own unsubscribe link at the bottom of its emails.
           </p>
-          <p className="color-teal-300">
+          <p className="color-teal-grey-300">
             Unsubscribed by mistake? You can sign up again on{' '}
-            <Link href={page} className="color-light-teal">
+            <Link href={page} className="color-teal-300">
               AISafety.com{page}
             </Link>
             .
