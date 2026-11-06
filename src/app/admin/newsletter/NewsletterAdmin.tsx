@@ -74,8 +74,15 @@ type AlertState =
   | { status: 'error'; error: string }
 
 /** Pen stamps each item with its Airtable record id; only those cards can
- *  pass a description on to the site's listing. */
+ *  pass a title or description on to the site's listing. */
 const RECORD_KEY_RE = /^rec[A-Za-z0-9]{14}$/
+
+/** The card fields that can go on to the site's listing, and what each is
+ *  called on the button (title → the listing's Name, 6 Nov 2026). */
+const SITE_FIELDS: Record<string, string> = {
+  title: 'title',
+  desc: 'description',
+}
 
 /** How long after the last keystroke the editor saves by itself. */
 const AUTOSAVE_DELAY_MS = 900
@@ -1787,9 +1794,10 @@ function ReorderPanel({
   const [cardError, setCardError] = useState<string | null>(null)
   /** At least one save went through since the editor opened. */
   const [savedOnce, setSavedOnce] = useState(false)
-  /** The last "put this description on the site" for the open card. */
+  /** The last "put this title / description on the site" for the open card. */
   const [listing, setListing] = useState<{
     key: string
+    field: string
     text: string
     status: 'saving' | 'done' | { error: string }
   } | null>(null)
@@ -1986,12 +1994,13 @@ function ReorderPanel({
     if (await saveCard()) setEditing(null)
   }
 
-  /** "Put this description on the site too": the listing's Description in
-   *  Airtable gets the text in the box (Bryce decides each time). */
-  async function pushListing(gid: string, card: CardInfo) {
-    const text = (values.desc ?? '').replace(/\s+/g, ' ').trim()
+  /** "Put this title / description on the site too": the listing's Name or
+   *  Description in Airtable gets the text in the box (Bryce decides each
+   *  time). */
+  async function pushListing(gid: string, card: CardInfo, field: string) {
+    const text = (values[field] ?? '').replace(/\s+/g, ' ').trim()
     if (!text) return
-    setListing({ key: card.key, text, status: 'saving' })
+    setListing({ key: card.key, field, text, status: 'saving' })
     try {
       const res = await fetch('/api/admin/newsletter/card', {
         method: 'POST',
@@ -2001,6 +2010,7 @@ function ReorderPanel({
           group: gid,
           key: card.key,
           listing: text,
+          listingField: field,
         }),
       })
       const body = (await res.json()) as {
@@ -2011,12 +2021,14 @@ function ReorderPanel({
         throw new Error(body.error ?? `HTTP ${res.status}`)
       setListing({
         key: card.key,
+        field,
         text,
         status: body.listing.ok ? 'done' : { error: body.listing.reason },
       })
     } catch (err) {
       setListing({
         key: card.key,
+        field,
         text,
         status: { error: err instanceof Error ? err.message : String(err) },
       })
@@ -2396,9 +2408,12 @@ function ReorderPanel({
                       const v = values[f.name] ?? f.value
                       const vPlain = v.replace(/\s+/g, ' ').trim()
                       const onSite =
-                        listing?.key === c.key && listing.text === vPlain
+                        listing?.key === c.key &&
+                        listing.field === f.name &&
+                        listing.text === vPlain
                           ? listing.status
                           : null
+                      const siteWord = SITE_FIELDS[f.name]
                       return (
                         <div key={f.name} className={styles.fieldBlock}>
                           <label className={styles.fitLabel}>
@@ -2439,13 +2454,13 @@ function ReorderPanel({
                                 </button>
                               </div>
                             )}
-                          {f.name === 'desc' &&
+                          {siteWord &&
                             RECORD_KEY_RE.test(c.key) &&
                             (f.original !== null || vPlain !== f.value) &&
                             (onSite === 'done' ? (
                               <p className={styles.noticeOk}>
-                                ✓ The site’s listing has this description now
-                                (it shows there in two or three minutes).
+                                ✓ The site’s listing has this {siteWord} now (it
+                                shows there in two or three minutes).
                               </p>
                             ) : (
                               <div className={styles.fieldActions}>
@@ -2453,11 +2468,13 @@ function ReorderPanel({
                                   type="button"
                                   className={styles.rowButton}
                                   disabled={!vPlain || onSite === 'saving'}
-                                  onClick={() => void pushListing(g.id, c)}
+                                  onClick={() =>
+                                    void pushListing(g.id, c, f.name)
+                                  }
                                 >
                                   {onSite === 'saving'
                                     ? 'Updating the site…'
-                                    : 'Use this description on the site too'}
+                                    : `Use this ${siteWord} on the site too`}
                                 </button>
                                 {onSite && typeof onSite === 'object' && (
                                   <span className={styles.noticeError}>

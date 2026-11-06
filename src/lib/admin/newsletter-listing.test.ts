@@ -40,8 +40,12 @@ vi.mock('@/lib/admin/airtable', async importOriginal => ({
   },
 }))
 
-const { retickNewsletter, untickNewsletter, updateListingDescription } =
-  await import('./newsletter-listing')
+const {
+  retickNewsletter,
+  untickNewsletter,
+  updateListingDescription,
+  updateListingName,
+} = await import('./newsletter-listing')
 
 const EVENTS = 'tblXbN9swwldwq8f7'
 const TRAINING = 'tbli1YSCpIuNY2DvL'
@@ -177,5 +181,41 @@ describe('updateListingDescription (still the same after the shared lookup)', ()
       reason: 'the listing isn’t in the Events, Training or Funding table',
     })
     expect(writes).toEqual([])
+  })
+})
+
+describe('updateListingName (a card title passed on to the site, 6 Nov 2026)', () => {
+  it('writes the Name through the listing’s own table and says so on the record', async () => {
+    expect(
+      await updateListingName('recTrainingClear1', 'AGI Strategy')
+    ).toEqual({ ok: true, table: TRAINING })
+    const record = base.get('recTrainingClear1')!
+    expect(record.fields.fldNq08J2QqQ8SreD).toBe('AGI Strategy')
+    expect(record.fields.fldIRngvk0vjSwjh8).toBeUndefined()
+    expect(record.comments).toEqual(['Name updated from the newsletter editor'])
+    expect(writes).toEqual([
+      `PATCH ${TRAINING}/recTrainingClear1`,
+      `POST ${TRAINING}/recTrainingClear1/comments`,
+    ])
+  })
+  it('uses each table’s own Name field (Events and Funding here)', async () => {
+    await updateListingName('recEventTicked001', 'New event name')
+    await updateListingName('recFundingRecord1', 'New fund name')
+    expect(base.get('recEventTicked001')!.fields.fldHDwWtiBFYN9fgf).toBe(
+      'New event name'
+    )
+    expect(base.get('recFundingRecord1')!.fields.fldsFpgVduYnNuYkN).toBe(
+      'New fund name'
+    )
+  })
+  it('refuses cards that aren’t a newsletter listing, and reports a refused write', async () => {
+    expect((await updateListingName('recMapOrganizat01', 'x')).ok).toBe(false)
+    expect(writes).toEqual([])
+    refuseWrites = 422
+    const refused = await updateListingName('recTrainingClear1', 'x')
+    expect(refused.ok).toBe(false)
+    expect(base.get('recTrainingClear1')!.fields.fldNq08J2QqQ8SreD).toBe(
+      'A course'
+    )
   })
 })
