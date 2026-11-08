@@ -678,7 +678,7 @@ export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
       <div
         ref={tooltipRef}
         id="mapbox-tooltip"
-        className="paragraph-xs"
+        className="paragraph-xs border-plus-fill"
         style={{ display: 'none', position: 'fixed' }}
       />
     </>

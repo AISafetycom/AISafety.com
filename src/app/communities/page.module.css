@@ -87,16 +87,14 @@
      cursor and cause hover flicker. Mobile overrides this below so the
      tooltip can be tapped to open the listing. */
   pointer-events: none;
-  background-color: var(--teal-grey-850);
-  border: 1px solid var(--teal-grey-700);
+  /* Fill + border come from the global .border-plus-fill class. */
   border-radius: 8px;
   padding: 12px 16px;
   color: var(--teal-grey-300);
   max-width: 300px;
   max-height: 98%;
   overflow: auto;
-  box-shadow: 0 12px 24px
-    color-mix(in srgb, var(--teal-grey-900) 50%, transparent);
+  box-shadow: 0 12px 24px color-mix(in srgb, var(--teal-900) 50%, transparent);
   z-index: 9999;
   text-align: left;
 }

@@ -11,20 +11,18 @@
   width: 56px;
   height: 56px;
   padding: 0;
-  background-color: var(--teal-grey-800);
-  border: 1px solid var(--teal-grey-700);
   border-radius: 50%;
   color: var(--white);
   cursor: pointer;
   transition:
-    background-color var(--hover-transition),
     border-color var(--hover-transition),
     transform var(--hover-transition);
 }
 
+/* Fill + border come from the global .border-plus-fill class. Hover matches
+   the filter pills (FilterPopover.module.css). */
 .pill:hover {
-  background-color: var(--teal-grey-750);
-  border-color: var(--teal-grey-600);
+  border-color: var(--teal-750);
   transform: translateY(-1px);
 }
 
@@ -44,7 +42,7 @@
   position: fixed;
   inset: 0;
   z-index: 96;
-  background-color: color-mix(in srgb, var(--teal-grey-900) 55%, transparent);
+  background-color: color-mix(in srgb, var(--teal-900) 55%, transparent);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.18s ease-out;
@@ -67,11 +65,9 @@
   height: min(640px, calc(100vh - 200px));
   display: flex;
   flex-direction: column;
-  background-color: var(--teal-grey-850);
-  border: 1px solid var(--teal-grey-700);
+  /* Fill + border come from the global .border-plus-fill class. */
   border-radius: 20px;
-  box-shadow: 0 24px 48px
-    color-mix(in srgb, var(--teal-grey-900) 55%, transparent);
+  box-shadow: 0 24px 48px color-mix(in srgb, var(--teal-900) 55%, transparent);
   transform: translateY(12px) scale(0.98);
   transform-origin: bottom right;
   opacity: 0;
@@ -119,7 +115,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 10px 12px 10px 18px;
-  border-bottom: 1px solid var(--teal-grey-800);
+  border-bottom: 1px solid var(--teal-800);
 }
 
 .headerLabel {
@@ -159,7 +155,7 @@
 }
 
 .iconButton:hover {
-  background-color: var(--teal-grey-800);
+  background-color: var(--teal-800);
   color: var(--white);
 }
 
@@ -182,7 +178,7 @@
   align-self: flex-start;
   max-width: 90%;
   padding: 12px 14px;
-  background-color: var(--teal-grey-800);
+  background-color: var(--teal-800);
   border-radius: 14px;
   border-bottom-left-radius: 4px;
   font-size: 14px;
@@ -222,27 +218,26 @@
   margin-top: 4px;
 }
 
+/* Same fill as the filter pills (FilterPopover.module.css), with the border
+   and its hover half a step lighter than .border-plus-fill. */
 .chip {
   display: inline-block;
   padding: 8px 14px;
-  background-color: transparent;
-  border: 1px solid var(--teal-grey-600);
+  background-color: var(--teal-850);
+  border: 1px solid var(--teal-750);
   border-radius: 999px;
   color: var(--white);
   font-size: 13px;
   line-height: 1.3;
   letter-spacing: -0.2px;
   cursor: pointer;
-  transition:
-    background-color var(--hover-transition),
-    border-color var(--hover-transition);
+  transition: border-color var(--hover-transition);
   text-align: left;
   font-family: inherit;
 }
 
 .chip:hover {
-  background-color: var(--teal-grey-800);
-  border-color: var(--teal-400);
+  border-color: var(--teal-700);
 }
 
 /* Messages */
@@ -263,7 +258,7 @@
   align-self: flex-end;
   max-width: 85%;
   padding: 10px 14px;
-  background-color: var(--teal-grey-800);
+  background-color: var(--teal-800);
   border-radius: 14px;
   border-bottom-right-radius: 4px;
   font-size: 14px;
@@ -359,7 +354,7 @@
   gap: 12px;
   padding: 10px 12px;
   background-color: transparent;
-  border: 1px solid var(--teal-grey-700);
+  border: 1px solid var(--teal-800);
   border-radius: 12px;
   text-decoration: none;
   color: var(--white);
@@ -371,8 +366,8 @@
 }
 
 .citationCard:hover {
-  background-color: var(--teal-grey-800);
-  border-color: var(--teal-grey-600);
+  background-color: var(--teal-800);
+  border-color: var(--teal-750);
 }
 
 /* Shown in place of a card whose listing couldn't be resolved — an honest
@@ -388,7 +383,7 @@
   gap: 6px;
   padding: 8px 12px;
   background-color: transparent;
-  border: 1px dashed var(--teal-grey-700);
+  border: 1px dashed var(--teal-700);
   border-radius: 12px;
   color: var(--teal-300);
   font-size: 13px;
@@ -402,8 +397,8 @@
 
 .assistantMessage .citationFallback:hover,
 .citationFallback.citationFallback:hover {
-  background-color: var(--teal-grey-800);
-  border-color: var(--teal-grey-600);
+  background-color: var(--teal-800);
+  border-color: var(--teal-500);
 }
 
 .citationFallback svg {
@@ -482,8 +477,8 @@
   gap: 10px;
   padding: 12px 14px;
   margin-top: 8px;
-  background-color: var(--teal-grey-800);
-  border: 1px solid var(--teal-grey-700);
+  background-color: var(--teal-800);
+  border: 1px solid var(--teal-750);
   border-radius: 12px;
 }
 
@@ -520,22 +515,22 @@
 .composer {
   position: relative;
   padding: 12px 14px 14px;
-  background-color: var(--teal-grey-850);
+  background-color: var(--teal-850);
 }
 
 .composerField {
   position: relative;
   display: flex;
   align-items: flex-end;
-  background-color: var(--teal-grey-900);
-  border: 1px solid var(--teal-grey-700);
+  background-color: var(--teal-900);
+  border: 1px solid var(--teal-800);
   border-radius: 22px;
   padding: 4px 4px 4px 18px;
   transition: border-color var(--hover-transition);
 }
 
 .composerField:focus-within {
-  border-color: var(--teal-grey-500);
+  border-color: var(--teal-500);
 }
 
 .composerInput {
@@ -619,8 +614,8 @@
   align-items: center;
   gap: 6px;
   padding: 3px 6px 3px 6px;
-  background-color: var(--teal-grey-800);
-  border: 1px solid var(--teal-grey-700);
+  background-color: var(--teal-800);
+  border: 1px solid var(--teal-750);
   border-radius: 999px;
   font-size: 11px;
   color: var(--teal-grey-200);
@@ -636,8 +631,8 @@
 }
 
 .toolPill:hover {
-  background-color: var(--teal-grey-750);
-  border-color: var(--teal-grey-600);
+  background-color: var(--teal-750);
+  border-color: var(--teal-700);
 }
 
 .toolPillChevron {
@@ -657,8 +652,8 @@
   grid-template-columns: 60px 1fr;
   gap: 4px 12px;
   padding: 10px 12px;
-  background-color: var(--teal-grey-900);
-  border: 1px solid var(--teal-grey-700);
+  background-color: var(--teal-900);
+  border: 1px solid var(--teal-800);
   border-radius: 10px;
   font-size: 12px;
   color: var(--white);
@@ -708,7 +703,7 @@
 .toolPillRunning {
   border-color: var(--teal-400);
   color: var(--white);
-  background-color: var(--teal-grey-750);
+  background-color: var(--teal-750);
 }
 
 .toolPillIcon {
@@ -782,7 +777,7 @@
   gap: 6px;
   padding: 4px 10px 4px 8px;
   background-color: transparent;
-  border: 1px solid var(--teal-grey-700);
+  border: 1px solid var(--teal-700);
   border-radius: 999px;
   color: var(--teal-grey-300);
   font-size: 11px;
@@ -795,8 +790,8 @@
 }
 
 .thinkToggle:hover {
-  background-color: var(--teal-grey-800);
-  border-color: var(--teal-grey-600);
+  background-color: var(--teal-800);
+  border-color: var(--teal-500);
   color: var(--white);
 }
 
@@ -822,7 +817,7 @@
   flex-direction: column;
   gap: 8px;
   padding: 10px 12px;
-  border-left: 2px solid var(--teal-grey-700);
+  border-left: 2px solid var(--teal-800);
   margin-left: 6px;
   font-size: 13px;
   color: var(--teal-grey-200);
@@ -940,7 +935,7 @@
 }
 
 .feedbackButton:hover {
-  background-color: var(--teal-grey-800);
+  background-color: var(--teal-800);
   color: var(--white);
 }
 
@@ -954,8 +949,8 @@
   left: 0;
   z-index: 1;
   padding: 4px 8px;
-  background-color: var(--teal-grey-900);
-  border: 1px solid var(--teal-grey-700);
+  background-color: var(--teal-900);
+  border: 1px solid var(--teal-800);
   border-radius: 6px;
   color: var(--white);
   font-size: 11px;
@@ -1010,7 +1005,7 @@
 }
 
 .editButton:hover {
-  background-color: var(--teal-grey-800);
+  background-color: var(--teal-800);
   color: var(--white);
 }
 
@@ -1022,7 +1017,7 @@
   justify-content: center;
   width: 36px;
   height: 36px;
-  background-color: var(--teal-grey-700);
+  background-color: var(--teal-750);
   color: var(--white);
   border: none;
   border-radius: 50%;
@@ -1032,7 +1027,7 @@
 }
 
 .stopButton:hover {
-  background-color: var(--teal-grey-600);
+  background-color: var(--teal-700);
 }
 
 /* Inline citation marker — small superscript icon, since the listing name
@@ -1055,7 +1050,7 @@
 }
 
 .inlineCitation:hover {
-  background-color: var(--teal-grey-800);
+  background-color: var(--teal-800);
   color: var(--white);
 }
 

@@ -10,10 +10,10 @@
   flex-shrink: 0;
 }
 
+/* Fill + border come from the global .border-plus-fill class. Hover border and
+   the active fill match the filter pills (FilterPopover.module.css). */
 .tabLink {
-  border: 1px solid var(--teal-grey-700);
   color: var(--white);
-  background-color: transparent;
   border-radius: 24px;
   height: 48px;
   padding: 9px 30px 9px 16px;
@@ -24,18 +24,19 @@
   letter-spacing: inherit;
   transition:
     background-color 0.05s ease-in-out,
+    border-color 0.05s ease-in-out,
     box-shadow 0.05s ease-in-out;
 }
 
 .tabLink:hover {
-  background-color: var(--teal-grey-850);
+  border-color: var(--teal-750);
   box-shadow: 0 4px 12px color-mix(in srgb, var(--black) 15%, transparent);
 }
 
-.tabLinkActive {
-  background-color: var(--teal-grey-850);
-  box-shadow: 0 12px 24px
-    color-mix(in srgb, var(--teal-grey-900) 50%, transparent);
+/* Doubled selector so the fill beats .border-plus-fill. */
+.tabLink.tabLinkActive {
+  background-color: var(--teal-800);
+  box-shadow: 0 12px 24px color-mix(in srgb, var(--teal-900) 50%, transparent);
 }
 
 .tabContent {
@@ -46,12 +47,6 @@
 .tabContentFading {
   opacity: 0;
   transition: opacity 100ms ease;
-}
-
-.divider {
-  background-color: var(--teal-grey-700);
-  height: 1px;
-  margin-bottom: 40px;
 }
 
 .timeRow {
