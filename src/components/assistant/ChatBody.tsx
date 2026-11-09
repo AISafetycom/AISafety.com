@@ -15,6 +15,10 @@ import type {
   UIToolCall,
 } from '@/lib/assistant/types'
 import { extractChips, stripChipTokens } from '@/lib/assistant/tokens'
+import {
+  isDroppedBeforeReply,
+  pauseBeforeRetry,
+} from '@/lib/assistant/dropped-connection'
 import Composer from './Composer'
 import MessageContent from './MessageContent'
 import ToolCallPill from './ToolCallPill'
@@ -215,15 +219,19 @@ export interface TurnLifecycleEvent {
 
 /** One line for the delivery report on a failed turn: what went wrong and
  *  how much text had already arrived, so the admin log can tell a
- *  dead-on-arrival failure from a connection that dropped at the very end. */
+ *  dead-on-arrival failure from a connection that dropped at the very end.
+ *  `retryNote` says how this try relates to the automatic re-send. */
 function describeFailure(
   errorText: string | undefined,
-  arrivedChars: number
+  arrivedChars: number,
+  retryNote?: string
 ): string {
   const what = errorText ?? 'unknown error'
-  return arrivedChars > 0
-    ? `${what} (${arrivedChars} characters had arrived)`
-    : `${what} (nothing had arrived)`
+  const arrived =
+    arrivedChars > 0
+      ? `${arrivedChars} characters had arrived`
+      : 'nothing had arrived'
+  return `${what} (${arrived}${retryNote ? `, ${retryNote}` : ''})`
 }
 
 interface AssistantMessageViewProps {
@@ -496,6 +504,12 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
   useEffect(() => {
     onTurnLifecycleRef.current = onTurnLifecycle
   }, [onTurnLifecycle])
+  // Latest messages, so the automatic re-send can see whether the visitor has
+  // edited the failed turn away in the meantime.
+  const messagesRef = useRef(messages)
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
 
   // Hydrate from session storage (when key provided)
   useEffect(() => {
@@ -598,7 +612,11 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
   }, [])
 
   const send = useCallback(
-    async (text: string, historyOverride?: UIMessage[]) => {
+    async (
+      text: string,
+      historyOverride?: UIMessage[],
+      isAutoRetry = false
+    ) => {
       const trimmed = text.trim()
       if (!trimmed || isWaiting) return
       // A fresh user message (not a retry/regenerate) — funnel "sent a message".
@@ -651,8 +669,12 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
       // how much text had arrived by then.
       let errorText: string | undefined
       let arrivedChars = 0
+      // The connection dropped before anything arrived, so this try re-sends
+      // once by itself instead of showing the visitor an error.
+      let retryAutomatically = false
 
       try {
+        if (isAutoRetry) await pauseBeforeRetry(controller.signal)
         const extras =
           typeof bodyExtras === 'function'
             ? await bodyExtras()
@@ -868,30 +890,46 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
         } else {
           errorText =
             err instanceof Error ? `${err.name}: ${err.message}` : String(err)
-          setMessages(prev =>
-            prev.map(m =>
-              m.id === asstId
-                ? {
-                    ...m,
-                    error: err instanceof Error ? err.message : 'Network error',
-                    isStreaming: false,
-                  }
-                : m
+          retryAutomatically =
+            !isAutoRetry &&
+            isDroppedBeforeReply(err, arrivedChars) &&
+            messagesRef.current.some(m => m.id === asstId)
+          if (!retryAutomatically) {
+            setMessages(prev =>
+              prev.map(m =>
+                m.id === asstId
+                  ? {
+                      ...m,
+                      error:
+                        err instanceof Error ? err.message : 'Network error',
+                      isStreaming: false,
+                    }
+                  : m
+              )
             )
-          )
+          }
         }
       } finally {
         setIsWaiting(false)
         abortRef.current = null
+        const retryNote = retryAutomatically
+          ? 'retrying automatically'
+          : isAutoRetry
+            ? 'on the automatic retry'
+            : undefined
         onTurnLifecycleRef.current?.({
           phase: outcome,
           turnIndex,
           ms: Date.now() - sentAt,
           ...(outcome === 'error'
-            ? { error: describeFailure(errorText, arrivedChars) }
+            ? { error: describeFailure(errorText, arrivedChars, retryNote) }
             : {}),
         })
       }
+      // Same path as the Try again button: the failed bubble is replaced, the
+      // server stores the new reply in the same position, and it isn't counted
+      // as a new message. The visitor just keeps seeing the reply coming.
+      if (retryAutomatically) void send(trimmed, baseHistory, true)
     },
     [bodyExtras, endpoint, isWaiting, messages]
   )
