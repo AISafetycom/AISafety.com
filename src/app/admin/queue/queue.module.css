@@ -1351,10 +1351,12 @@ a.pageNav:hover {
 /* One flex item holds the whole value as running text: the box's baseline
    is then the value's first line, so a row's label stays level with it,
    while inside, the icon, text, "edited" mark and pencil wrap like a
-   paragraph. */
+   paragraph. The box reaches 8px past its column on each side, so the text
+   inside gets the column's full width and wraps exactly like the old value
+   beside it (Bryce, 9 Nov 2026: "so that it's easy to compare the changes"). */
 .editable {
   display: inline-flex;
-  max-width: 100%;
+  max-width: calc(100% + 16px);
   padding: 2px 8px;
   margin: -2px -8px;
   border-radius: 6px;
