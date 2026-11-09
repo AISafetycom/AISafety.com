@@ -134,7 +134,7 @@ Sometimes that's a fair point.
 - Many calls are close.
 - Some listings predate today's bar, which keeps sharpening.
 - A few are deliberate one-off exceptions.
-- We make mistakes. We're a small nonprofit with 1.25 salaried employees.
+- We make mistakes. We're a small nonprofit with 1.5 salaried employees.
 
 An existing listing isn't a guarantee, and we review and remove listings often.
 
