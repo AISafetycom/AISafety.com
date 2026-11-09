@@ -1,22 +1,59 @@
 # CSS Guidelines
 
-This project uses a **constraint-based design system**. These rules ensure visual consistency and prevent arbitrary styling decisions. **Always use utility classes from `globals.css` first.** Only create new classes in rare cases when utility classes can't solve the problem. The most important part of this system is the file 'globals.css', which defines the styling for the entire site. Familiarize yourself with this file! Please read this walkthrough of the sections in the file.
+This project uses a **constraint-based design system**. These rules ensure visual consistency and prevent arbitrary styling decisions. **Always use utility classes from `globals.css` first.** Only create new classes in rare cases when utility classes can't solve the problem. The most important part of this system is the file 'globals.css', which defines the styling for the entire site. Familiarize yourself with this file! Please read this walkthrough of the sections in that file.
 
 ## Walkthrough 'globals.css'
 
 ### 1. Variables
 
-Always use a pre-defined variable for colors. Never hardcode hex values. Never add new variables unless you are a designer.
+Always use a pre-defined variable for colors. Never hardcode hex, rgb, or rgba values. Never add new variables unless you are a designer, and check with Melissa.
+
+There are two teal scales with the same steps (100 to 900, plus 750 and 850 at the dark end):
+
+- `--teal-grey-*` is the neutral workhorse for text.
+- `--teal-*` is the saturated teal scale for almost everything else: backgrounds, borders, accents, etc.
+
+The darkest step is the same color in both (`--teal-900` is `--teal-grey-900`).
 
 ```css
 /* Good */
-background-color: var(--teal-800);
-color: var(--bright-teal-300);
+background-color: var(--teal-850);
+color: var(--teal-grey-300);
 
 /* Bad */
 background-color: #1c3334;
 color: #a6dad9;
 ```
+
+#### Which color for what
+
+Pick by job, not by look. If a job isn't listed here, ask Melissa before adding a variable.
+
+| Job                                      | Use                                                                                       |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------- |
+| **Text**                                 |                                                                                           |
+| Default: headings, body text, input text | `--white` (already set on `body` and `h1`–`h3`)                                           |
+| Secondary text                           | `--teal-grey-300`                                                                         |
+| Text highlights                          | `--teal-300`                                                                              |
+| Links outside buttons                    | `--teal-300`, `--white`, or `--teal-grey-300`                                             |
+| Error text                               | `--red-300`                                                                               |
+| Inverse                                  | `--teal-900`                                                                              |
+| **Backgrounds**                          |                                                                                           |
+| Page background                          | `--teal-900` (set once on `body`)                                                         |
+| Solid surface default                    | `--teal-850` (the `.card` class)                                                          |
+| Solid surface light                      | `--white`                                                                                 |
+| Gradient surface default                 | `--teal-800` fading to `--teal-850`                                                       |
+| Gradient surface alt                     | `--teal-400` fading to `--teal-500`                                                       |
+| **Lines**                                |                                                                                           |
+| Border default and dividers default      | `--teal-800`                                                                              |
+| Border alt and dividers alt              | `color-mix(in srgb, var(--teal-300) 30%, transparent)`                                    |
+| Highlight                                | `--teal-300`                                                                              |
+| **Accents**                              |                                                                                           |
+| Tags                                     | `--orange-300`, `--pink-300`, `--green-300`, `--blue-300`, `--purple-300`, `--yellow-300` |
+
+Each color above also has a text class: `.color-` plus the variable's name, for example `--teal-grey-300` is `.color-teal-grey-300`. In markup, color text with the class.
+
+Some older styles still use `--teal-grey-*` for backgrounds and borders. Those are being moved to the teal scale.
 
 ### 2. CSS Reset
 
@@ -59,12 +96,12 @@ Assign text colors using these utility classes.
 
 ```tsx
 // Good
-<p className="color-teal-300">Muted text</p>
-<span className="color-light-teal">Accent text</span>
+<p className="color-teal-grey-300">Muted text</p>
+<span className="color-teal-300">Accent text</span>
 
 // Bad
 .new-class {
-  color: var(--bright-teal-300);
+  color: var(--teal-300);
 }
 ```
 

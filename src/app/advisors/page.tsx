@@ -27,7 +27,7 @@ export default async function AdvisorsPage() {
         lastUpdatedIso={lastUpdated.lastUpdated}
         description={
           <>
-            <span className="color-light-teal">
+            <span className="color-teal-300">
               Connecting with human experts can be invaluable.
             </span>{' '}
             These advisors offer free guidance calls to help you most

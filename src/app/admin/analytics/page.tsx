@@ -2234,7 +2234,7 @@ function DashboardTabs({
             {t.icon && (
               <span className={styles.pageTabIcon}>
                 <Icon
-                  className="color-teal-bright-800"
+                  className="color-teal-800"
                   src={`/images/icons/${t.icon}`}
                   size={12}
                 />

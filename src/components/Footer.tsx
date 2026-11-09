@@ -23,7 +23,7 @@ export default function Footer() {
                 className="margin-bottom-24px"
               />
               <p className="paragraph-small padding-bottom-32px">
-                We&apos;re a small nonprofit driven by 1.25 salaried employees
+                We&apos;re a small nonprofit driven by 1.5 salaried employees
                 and lots of volunteers. We aim to multiply global AI safety
                 efforts through a centralized, comprehensive, and up-to-date
                 resource hub.

@@ -559,7 +559,7 @@ function CardPill({
       {info?.organization &&
         info.organization !== primary &&
         info.organization !== card.note && (
-          <span className="color-teal-300">{info.organization}</span>
+          <span className="color-teal-grey-300">{info.organization}</span>
         )}
       {showNote && <span className={styles.convCardNote}>{card.note}</span>}
       {wasClicked && <span className={styles.convCardClicked}>✓ clicked</span>}

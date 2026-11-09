@@ -16,6 +16,6 @@
 }
 
 .stuck {
-  background-color: color-mix(in srgb, var(--teal-900) 85%, transparent);
+  background-color: color-mix(in srgb, var(--teal-grey-900) 85%, transparent);
   backdrop-filter: blur(8px);
 }

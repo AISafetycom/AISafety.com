@@ -71,7 +71,7 @@ export default function DevelopersPage() {
             A public, read-only JSON API over the AISafety.com directories. Pull
             live communities, events, organizations, jobs, funding and more into
             your own site or tool, with{' '}
-            <span className="color-light-teal">
+            <span className="color-teal-300">
               no API key and no database to maintain.
             </span>
           </>
@@ -188,7 +188,7 @@ export default function DevelopersPage() {
         <p className={`paragraph-small ${styles.license}`}>
           Data is licensed{' '}
           <a
-            className="color-teal underline"
+            className="color-teal-400 underline"
             href={DATA_LICENSE_URL}
             target="_blank"
             rel="noopener noreferrer"
@@ -197,7 +197,7 @@ export default function DevelopersPage() {
           </a>
           . Use it for any purpose, including commercially, as long as you
           credit AISafety.com with a link back to{' '}
-          <a className="color-teal underline" href="https://aisafety.com">
+          <a className="color-teal-400 underline" href="https://aisafety.com">
             aisafety.com
           </a>
           . Organization logos remain the property of their respective owners.

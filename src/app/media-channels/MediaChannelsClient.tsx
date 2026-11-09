@@ -123,7 +123,9 @@ export default function MediaChannelsClient({
             />
           ))}
           {filteredChannels.length === 0 && (
-            <p className="paragraph-small color-teal-300">Nothing found.</p>
+            <p className="paragraph-small color-teal-grey-300">
+              Nothing found.
+            </p>
           )}
         </div>
 

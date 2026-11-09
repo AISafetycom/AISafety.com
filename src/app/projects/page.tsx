@@ -31,11 +31,9 @@ export default async function ProjectsPage() {
         description={
           <>
             Initiatives{' '}
-            <span className="color-light-teal">
-              seeking your volunteer help
-            </span>
-            . These projects are focused on supporting and improving the AI
-            safety field.
+            <span className="color-teal-300">seeking your volunteer help</span>.
+            These projects are focused on supporting and improving the AI safety
+            field.
           </>
         }
       />

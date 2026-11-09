@@ -2161,6 +2161,57 @@ export async function laterItem(item: QueueItem): Promise<void> {
   await patchQueueRow(item.id, { [F.reviewAgainOn]: reviewAgainAt(Date.now()) })
 }
 
+/** The row's Error once Delete has closed it. */
+export const DELETED_NOTE = 'Deleted in the Queue'
+
+/** Delete (Bryce, 6 Nov 2026: "Need a delete button", on an /advisors
+ *  suggestion Comb had picked up from a Discord yes to his own invitation):
+ *  a silent discard for an item that should not be in the Queue at all.
+ *  It does what deleting the suggestion in Airtable by hand does: an
+ *  addition's unpublished record goes at once, a Broom flag's issue row
+ *  with it, and the row closes the way the sync closes one whose record
+ *  was deleted outside the Queue. No reply is drafted or copied, Fable
+ *  learns nothing from it (the Mac's teach loop skips Closed rows), Comb
+ *  leaves a closed row alone, and it gets no Decided at, so it is not a
+ *  decision: it shows in neither Done today nor the search's Earlier
+ *  group. There is no Undo, so the page asks first. A live listing is
+ *  never deleted: an addition published outside the Queue is refused, and
+ *  one hidden there keeps its record. A change never touches its listing. */
+export async function deleteItem(item: QueueItem): Promise<void> {
+  requireOpen(item)
+  const table = item.targetTable ?? ''
+  const record = item.targetRecord ?? ''
+  if (
+    item.type === 'Add' &&
+    SUGGESTION_TABLES.has(table) &&
+    isRecordId(record)
+  ) {
+    const res = await airtableRequest(`${table}/${record}`)
+    if (res.ok) {
+      const { fields } = (await res.json()) as { fields: RawFields }
+      if (fields['Publish?']) {
+        throw new QueueError(
+          'It is live on the site, so Delete leaves it alone. Reload the page.',
+          409
+        )
+      }
+      if (!fields['Hide?']) await deleteRecord(table, record)
+    } else if (res.status !== 404 && res.status !== 403) {
+      throw new QueueError(
+        `Airtable read failed: ${res.status} ${await res.text()}`,
+        502
+      )
+    }
+  }
+  if (item.type === 'Change' && item.issueRow && isRecordId(item.issueRow)) {
+    await deleteRecord(BROOM_ISSUES_TABLE_ID, item.issueRow)
+  }
+  await patchQueueRow(item.id, {
+    [F.status]: 'Closed',
+    [F.error]: DELETED_NOTE,
+  })
+}
+
 /** The row's fields as Airtable holds them, for a write that must keep
  *  what it does not change (the Proposal JSON). */
 async function rawQueueFields(id: string): Promise<RawFields> {

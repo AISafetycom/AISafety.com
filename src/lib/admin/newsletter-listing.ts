@@ -1,8 +1,11 @@
 /*
   "Also update the listing on the site": when Bryce rewrites a card's
-  description on /admin/newsletter and ticks the box, the same text goes into
-  the listing's Description in Airtable, so the site and the email say the
-  same thing (Bryce, 25 Sept 2026: ask each time). A card's key is the
+  description on /admin/newsletter and presses the button under it, the same
+  text goes into the listing's Description in Airtable, so the site and the
+  email say the same thing (Bryce, 25 Sept 2026: ask each time). A card's
+  title gets the same button for the listing's Name (Bryce, 6 Nov 2026, after
+  a title he shortened in the email kept its old name on /training: "I should
+  get asked whether I want it to be transferred over"). A card's key is the
   Airtable record id Pen stamps on the item; the record can sit in the Events,
   Training or Funding table. Airtable answers a record id through ANY table of
   the base (a Training record read through the Events table comes back fine),
@@ -114,30 +117,54 @@ export type ListingUpdate =
   | { ok: true; table: string }
   | { ok: false; reason: string }
 
+/** The listing text a card's field can be passed on to: its title is the
+ *  listing's Name, its description the Description. */
+export type ListingText = 'name' | 'description'
+
+const LISTING_NOTE: Record<ListingText, string> = {
+  name: 'Name updated from the newsletter editor',
+  description: 'Description updated from the newsletter editor',
+}
+
 /** Write `description` (plain text) into the listing's Description and leave
- *  a record comment saying where the change came from. Never throws: the
- *  draft edit has already been saved when this runs, so a failure here is
- *  reported next to it, not instead of it. */
-export async function updateListingDescription(
+ *  a record comment saying where the change came from. */
+export function updateListingDescription(
   recordId: string,
   description: string
+): Promise<ListingUpdate> {
+  return updateListingText(recordId, 'description', description)
+}
+
+/** Write `name` (plain text) into the listing's Name, the same way. */
+export function updateListingName(
+  recordId: string,
+  name: string
+): Promise<ListingUpdate> {
+  return updateListingText(recordId, 'name', name)
+}
+
+/** Write `text` into the listing's Name or Description and leave a record
+ *  comment saying where the change came from. Never throws: the draft edit
+ *  has already been saved when this runs, so a failure here is reported next
+ *  to it, not instead of it. */
+async function updateListingText(
+  recordId: string,
+  which: ListingText,
+  text: string
 ): Promise<ListingUpdate> {
   try {
     const found = await findListing(recordId)
     if ('missing' in found) return { ok: false, reason: found.missing }
-    const { table, description: field } = found.home
+    const { table } = found.home
+    const field = found.home[which]
     const res = await airtableRequest(`${table}/${recordId}`, {
       method: 'PATCH',
-      body: JSON.stringify({ fields: { [field]: description } }),
+      body: JSON.stringify({ fields: { [field]: text } }),
     })
     if (!res.ok) return { ok: false, reason: await refusal(res) }
     // The comment tells whoever looks at the record later where the change
     // came from.
-    await noteOnRecord(
-      table,
-      recordId,
-      'Description updated from the newsletter editor'
-    )
+    await noteOnRecord(table, recordId, LISTING_NOTE[which])
     return { ok: true, table }
   } catch (err) {
     // The page gets a plain line; what went wrong stays in the server log.

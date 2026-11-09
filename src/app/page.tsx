@@ -410,32 +410,32 @@ export default async function Home() {
               height={32}
             />
             <p className="paragraph-small-bold padding-bottom-12px">
-              Standard intro course
+              Recommended intro course
             </p>
             <div className={`${styles['icon-row']} padding-bottom-24px`}>
               <Image
                 loading="lazy"
-                src="/images/blue-dot-impact.svg"
+                src="/images/lens-academy.svg"
                 alt=""
                 width={56}
                 height={56}
               />
-              <h3>BlueDot Impact: Technical &amp; Governance</h3>
+              <h3>Lens Academy: AI Risk Fundamentals</h3>
             </div>
             <p className="padding-bottom-24px">
-              Learn key concepts and research perspectives in AI safety, split
-              into two main tracks.
+              Learn the core case for why superintelligent AI could be
+              catastrophic, and what should be done about it.
             </p>
             <div className="block">
               <TrackedLink
-                href="https://bluedot.org/courses"
+                href="https://lensacademy.org/courses/ai-risk-fundamentals"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="button-secondary"
                 trackingPage="Home"
-                trackingName="BlueDot Impact: Technical & Governance"
+                trackingName="Lens Academy: AI Risk Fundamentals"
               >
-                View curricula
+                View course
               </TrackedLink>
             </div>
           </div>
@@ -637,7 +637,7 @@ export default async function Home() {
 
       <div className={styles['aisafety-info']}>
         <div className="width-6-col">
-          <p className="color-teal paragraph-small-bold padding-bottom-12px">
+          <p className="color-teal-400 paragraph-small-bold padding-bottom-12px">
             Visit AISafety.info
           </p>
           <h2 className="shadow-text">
@@ -655,7 +655,7 @@ export default async function Home() {
           <span>AISafety.info</span>
           <Icon
             src="/images/icons/arrow-up-right.svg"
-            className="color-teal-bright-400"
+            className="color-teal-400"
           />
         </TrackedLink>
       </div>
