@@ -1649,8 +1649,8 @@ a.pageNav:hover {
   color: var(--white);
 }
 
-/* The site's card is an <a>: the queue's link colour and hover underline
-   must not reach the text inside it. */
+/* The site's card title is an <a>: the queue's link colour and hover
+   underline must not reach it. */
 .queue .siteFrame a,
 .queue .siteFrame a:hover {
   color: inherit;

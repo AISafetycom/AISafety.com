@@ -1189,6 +1189,7 @@ select.text-field {
 }
 
 .collection-list {
+  list-style: none;
   display: grid;
   grid-template-columns: 369px 369px;
   gap: 40px;

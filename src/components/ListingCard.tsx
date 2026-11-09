@@ -9,6 +9,10 @@ import styles from './ListingCard.module.css'
 export interface ListingCardMeta {
   /** Path to a 16×16 svg icon in /images (already teal-300 tinted). */
   icon: string
+  /** What the value is ("Date", "Location"), read out by screen readers in
+   *  place of the icon, which they skip. null when the value already says it
+   *  ("By MATS", "Grant size: $10k"). */
+  label: string | null
   value: string
 }
 
@@ -61,7 +65,12 @@ function MetaRows({ rows }: { rows: ListingCardMeta[] }) {
       {rows.map((field, i) => (
         <div key={i} className="flex items-center gap-8px color-teal-grey-300">
           <Icon src={field.icon} />
-          <p className="paragraph-xs">{field.value}</p>
+          <p className="paragraph-xs">
+            {field.label && (
+              <span className="visually-hidden">{field.label}: </span>
+            )}
+            {field.value}
+          </p>
         </div>
       ))}
     </div>
@@ -70,7 +79,9 @@ function MetaRows({ rows }: { rows: ListingCardMeta[] }) {
 
 // The card used in the listing grids on the data-driven sub-pages
 // (self-study, communities, events …). Replaces the markup that used to be
-// copy-pasted into every *Client component.
+// copy-pasted into every *Client component. Renders an <li>, so its parent
+// must be a list: <ul role="list"> (Safari stops announcing a list whose
+// bullets CSS has removed unless the role is set).
 export default function ListingCard({
   href,
   name,
@@ -86,21 +97,11 @@ export default function ListingCard({
   placement,
   trackingSource,
 }: ListingCardProps) {
-  const inner = (
-    <>
-      {pills && pills.length > 0 && (
-        <div className="flex gap-8px padding-bottom-24px">
-          {pills.map((pill, i) => (
-            <span
-              key={i}
-              className={`${styles.pill} ${pill.colorClass ?? 'color-teal-400'}`}
-            >
-              {pill.label}
-            </span>
-          ))}
-        </div>
-      )}
-
+  return (
+    <li
+      id={listingId}
+      className={`card ${href ? '' : 'card-static'} ${styles.card}`}
+    >
       <div
         className={`flex gap-16px padding-bottom-24px ${
           titleMeta && titleMeta.length > 0 ? 'items-start' : 'items-center'
@@ -125,7 +126,31 @@ export default function ListingCard({
           </div>
         )}
         <div>
-          <h3>{name}</h3>
+          <h3>
+            {href ? (
+              <a
+                href={withUtm(href, trackingPage)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={styles.titleLink}
+                onClick={() =>
+                  trackListingClick(
+                    trackingPage,
+                    trackingName ?? name,
+                    href,
+                    listingId,
+                    placement,
+                    trackingSource
+                  )
+                }
+              >
+                {name}
+                <span className="visually-hidden"> (opens in new tab)</span>
+              </a>
+            ) : (
+              name
+            )}
+          </h3>
           {titleMeta && titleMeta.length > 0 && (
             <div className="padding-top-8px">
               <MetaRows rows={titleMeta} />
@@ -133,6 +158,21 @@ export default function ListingCard({
           )}
         </div>
       </div>
+
+      {/* After the title in the page source, so a screen reader reads the
+          title first; CSS order puts the pills back at the top of the card. */}
+      {pills && pills.length > 0 && (
+        <div className={`flex gap-8px padding-bottom-24px ${styles.pills}`}>
+          {pills.map((pill, i) => (
+            <span
+              key={i}
+              className={`${styles.pill} ${pill.colorClass ?? 'color-teal-400'}`}
+            >
+              {pill.label}
+            </span>
+          ))}
+        </div>
+      )}
 
       <p className="paragraph-small color-white padding-bottom-24px">
         {description}
@@ -145,37 +185,6 @@ export default function ListingCard({
           {footnote}
         </p>
       )}
-    </>
-  )
-
-  // No link → a static, non-clickable card (e.g. projects have no external URL).
-  if (!href) {
-    return (
-      <div id={listingId} className="card card-static">
-        {inner}
-      </div>
-    )
-  }
-
-  return (
-    <a
-      id={listingId}
-      href={withUtm(href, trackingPage)}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="card"
-      onClick={() =>
-        trackListingClick(
-          trackingPage,
-          trackingName ?? name,
-          href,
-          listingId,
-          placement,
-          trackingSource
-        )
-      }
-    >
-      {inner}
-    </a>
+    </li>
   )
 }

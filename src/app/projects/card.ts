@@ -11,12 +11,28 @@ export function projectCardProps(project: Project): CardProps {
     name: project.name,
     description: project.description,
     meta: [
-      { icon: '/images/icons/activity.svg', value: project.status },
+      {
+        icon: '/images/icons/activity.svg',
+        label: 'Status',
+        value: project.status,
+      },
       ...(project.contact
-        ? [{ icon: '/images/icons/person.svg', value: project.contact }]
+        ? [
+            {
+              icon: '/images/icons/person.svg',
+              label: 'Contact',
+              value: project.contact,
+            },
+          ]
         : []),
       ...(project.email
-        ? [{ icon: '/images/icons/mail.svg', value: project.email }]
+        ? [
+            {
+              icon: '/images/icons/mail.svg',
+              label: 'Email',
+              value: project.email,
+            },
+          ]
         : []),
     ],
   }

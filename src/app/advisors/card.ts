@@ -16,10 +16,20 @@ export function advisorMeta(advisor: Advisor): ListingCardMeta[] {
   const focus = focusLabel(advisor.focusAreas)
   const applicationsIcon = APPLICATIONS_ICONS[advisor.applications]
   return [
-    ...(who ? [{ icon: '/images/icons/team.svg', value: who }] : []),
-    ...(focus ? [{ icon: '/images/icons/target.svg', value: focus }] : []),
+    ...(who
+      ? [{ icon: '/images/icons/team.svg', label: null, value: who }]
+      : []),
+    ...(focus
+      ? [{ icon: '/images/icons/target.svg', label: null, value: focus }]
+      : []),
     ...(applicationsIcon
-      ? [{ icon: applicationsIcon, value: advisor.applications }]
+      ? [
+          {
+            icon: applicationsIcon,
+            label: 'Applications',
+            value: advisor.applications,
+          },
+        ]
       : []),
   ]
 }

@@ -154,7 +154,10 @@ export default function AdvisorsClient({ advisors }: AdvisorsClientProps) {
       </FilterBar>
 
       <div className="flex gap-56px">
-        <div className="collection-list padding-bottom-40px width-9-col">
+        <ul
+          role="list"
+          className="collection-list padding-bottom-40px width-9-col"
+        >
           {gridAdvisors.map(advisor => (
             <ListingCard
               key={advisor.id}
@@ -166,11 +169,13 @@ export default function AdvisorsClient({ advisors }: AdvisorsClientProps) {
             />
           ))}
           {filteredAdvisors.length === 0 && (
-            <p className="paragraph-small color-teal-grey-300">
-              Nothing found.
-            </p>
+            <li>
+              <p className="paragraph-small color-teal-grey-300">
+                Nothing found.
+              </p>
+            </li>
           )}
-        </div>
+        </ul>
 
         <div className="hide-mobile width-3-col">
           <ContributeButtons

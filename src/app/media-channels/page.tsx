@@ -35,7 +35,7 @@ export default async function MediaChannelsPage() {
         }
       />
 
-      <div className="flex flex-wrap gap-56px padding-bottom-80px">
+      <ul role="list" className="flex flex-wrap gap-56px padding-bottom-80px">
         {featured.map((channel, i) => (
           <FeaturedCard
             key={channel.id}
@@ -47,7 +47,13 @@ export default async function MediaChannelsPage() {
             logo={channel.logo ?? undefined}
             meta={
               channel.type
-                ? [{ icon: '/images/icons/computer.svg', value: channel.type }]
+                ? [
+                    {
+                      icon: '/images/icons/computer.svg',
+                      label: 'Type',
+                      value: channel.type,
+                    },
+                  ]
                 : []
             }
             trackingPage="Media channels"
@@ -58,7 +64,7 @@ export default async function MediaChannelsPage() {
             count={featured.length}
           />
         ))}
-      </div>
+      </ul>
 
       <MediaChannelsClient channels={channels} />
     </div>

@@ -14,3 +14,32 @@
   line-height: 167.5%;
   letter-spacing: -0.2px;
 }
+
+/* A column so the pills can be moved to the top with order, below. */
+.card {
+  display: flex;
+  flex-direction: column;
+}
+
+.pills {
+  order: -1;
+}
+
+/* Only the title is a link, so a screen reader announces a short name. This
+   stretches its click area over the whole card (.card is position: relative),
+   and draws the keyboard focus ring around the card rather than the title. */
+.titleLink::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+}
+
+.titleLink:focus-visible {
+  outline: none;
+}
+
+.titleLink:focus-visible::after {
+  outline: 2px solid var(--teal-400);
+  outline-offset: 2px;
+}

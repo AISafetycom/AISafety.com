@@ -36,6 +36,26 @@
   transform: scale(1);
 }
 
+/* Only the title is a link, so a screen reader announces a short name. This
+   stretches its click area over the whole card (.card is position: relative). */
+.titleLink::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+/* The keyboard focus ring goes around the card. It is drawn on .card itself
+   because .card's overflow: hidden would clip one drawn on the stretched
+   click area. */
+.titleLink:focus-visible {
+  outline: none;
+}
+
+.card:has(.titleLink:focus-visible) {
+  outline: 2px solid var(--teal-400);
+  outline-offset: 2px;
+}
+
 .bookmark {
   position: absolute;
   top: 0;
@@ -56,6 +76,8 @@
 .pill {
   /* Hug contents instead of stretching to full width in the flex-column card. */
   align-self: flex-start;
+  /* Top of the card, though it comes after the title in the page source. */
+  order: -1;
   height: 24px;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--teal-300) 30%, transparent);

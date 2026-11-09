@@ -111,7 +111,10 @@ export default function MediaChannelsClient({
       </FilterBar>
 
       <div className="flex gap-56px">
-        <div className="collection-list padding-bottom-40px width-9-col">
+        <ul
+          role="list"
+          className="collection-list padding-bottom-40px width-9-col"
+        >
           {gridChannels.map(channel => (
             <ListingCard
               key={channel.id}
@@ -123,11 +126,13 @@ export default function MediaChannelsClient({
             />
           ))}
           {filteredChannels.length === 0 && (
-            <p className="paragraph-small color-teal-grey-300">
-              Nothing found.
-            </p>
+            <li>
+              <p className="paragraph-small color-teal-grey-300">
+                Nothing found.
+              </p>
+            </li>
           )}
-        </div>
+        </ul>
 
         <div className="hide-mobile width-3-col">
           <ContributeButtons

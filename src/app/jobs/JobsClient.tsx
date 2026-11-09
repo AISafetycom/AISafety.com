@@ -435,7 +435,10 @@ export default function JobsClient({ jobs }: JobsClientProps) {
       </FilterBar>
 
       <div className="flex gap-56px">
-        <div className="collection-list padding-bottom-40px width-9-col">
+        <ul
+          role="list"
+          className="collection-list padding-bottom-40px width-9-col"
+        >
           {filteredJobs.map(job => {
             const posted = job.datePublished
               ? new Date(job.datePublished + 'T00:00:00').toLocaleDateString(
@@ -468,6 +471,7 @@ export default function JobsClient({ jobs }: JobsClientProps) {
                     ? [
                         {
                           icon: '/images/icons/building.svg',
+                          label: 'Organization',
                           value: job.organization,
                         },
                       ]
@@ -476,6 +480,7 @@ export default function JobsClient({ jobs }: JobsClientProps) {
                     ? [
                         {
                           icon: '/images/icons/pin.svg',
+                          label: 'Location',
                           value: job.locations.join(' · '),
                         },
                       ]
@@ -486,6 +491,7 @@ export default function JobsClient({ jobs }: JobsClientProps) {
                     ? [
                         {
                           icon: '/images/icons/wrench.svg',
+                          label: null,
                           value: `Skillset: ${job.skillSet}`,
                         },
                       ]
@@ -494,6 +500,7 @@ export default function JobsClient({ jobs }: JobsClientProps) {
                     ? [
                         {
                           icon: '/images/icons/briefcase.svg',
+                          label: null,
                           value: `Min experience: ${job.minimumExperience}`,
                         },
                       ]
@@ -506,17 +513,30 @@ export default function JobsClient({ jobs }: JobsClientProps) {
                     ? [
                         {
                           icon: '/images/icons/grad-cap.svg',
+                          label: 'Required degree',
                           value: job.requiredDegree,
                         },
                       ]
                     : []),
                   ...(roleTypeValue
-                    ? [{ icon: roleTypeIcon, value: roleTypeValue }]
+                    ? [
+                        {
+                          icon: roleTypeIcon,
+                          label: 'Role type',
+                          value: roleTypeValue,
+                        },
+                      ]
                     : []),
                   // Compensation last so its presence/absence never shifts the
                   // rows above it.
                   ...(job.salary
-                    ? [{ icon: '/images/icons/money.svg', value: job.salary }]
+                    ? [
+                        {
+                          icon: '/images/icons/money.svg',
+                          label: 'Salary',
+                          value: job.salary,
+                        },
+                      ]
                     : []),
                 ]}
                 footnote={posted ? `Posted ${posted}` : undefined}
@@ -528,11 +548,13 @@ export default function JobsClient({ jobs }: JobsClientProps) {
             )
           })}
           {filteredJobs.length === 0 && (
-            <p className="paragraph-small color-teal-grey-300">
-              Nothing found.
-            </p>
+            <li>
+              <p className="paragraph-small color-teal-grey-300">
+                Nothing found.
+              </p>
+            </li>
           )}
-        </div>
+        </ul>
 
         <div className="hide-mobile width-3-col">
           <p className="paragraph-small padding-bottom-4px">Source:</p>

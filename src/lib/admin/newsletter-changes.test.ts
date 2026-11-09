@@ -185,15 +185,20 @@ describe('siteFields', () => {
       logo: null,
       pills: [],
       titleMeta: [
-        { icon: '/images/icons/computer.svg', value: 'Online' },
-        { icon: '/images/icons/calendar.svg', value: '' },
+        { icon: '/images/icons/computer.svg', label: null, value: 'Online' },
+        { icon: '/images/icons/calendar.svg', label: null, value: '' },
         {
           icon: '/images/icons/calendar.svg',
+          label: null,
           value: '6 weeks · Starts 19 Oct 2026',
         },
       ],
       meta: [
-        { icon: '/images/icons/paper.svg', value: 'Apply by 17 Oct 2026' },
+        {
+          icon: '/images/icons/paper.svg',
+          label: null,
+          value: 'Apply by 17 Oct 2026',
+        },
       ],
     }
     expect(siteFields(p)).toEqual([
@@ -258,13 +263,25 @@ describe('compareCard', () => {
       logo: null,
       pills: [],
       titleMeta: [
-        { icon: '/images/icons/pin.svg', value: 'Paris, France' },
-        { icon: '/images/icons/calendar.svg', value: '18 Oct 2026' },
+        { icon: '/images/icons/pin.svg', label: null, value: 'Paris, France' },
+        {
+          icon: '/images/icons/calendar.svg',
+          label: null,
+          value: '18 Oct 2026',
+        },
       ],
       meta: [
-        { icon: '/images/icons/person.svg', value: 'By Nouvelle Machine' },
-        { icon: '/images/icons/tag.svg', value: 'Free' },
-        { icon: '/images/icons/paper.svg', value: 'Register by 18 Oct 2026' },
+        {
+          icon: '/images/icons/person.svg',
+          label: null,
+          value: 'By Nouvelle Machine',
+        },
+        { icon: '/images/icons/tag.svg', label: null, value: 'Free' },
+        {
+          icon: '/images/icons/paper.svg',
+          label: null,
+          value: 'Register by 18 Oct 2026',
+        },
       ],
       ...over,
     })
@@ -304,10 +321,15 @@ describe('compareCard', () => {
       testBenchCard('18 Oct 2026', '18 Oct 2026'),
       site({
         meta: [
-          { icon: '/images/icons/person.svg', value: 'By Nouvelle Machine' },
-          { icon: '/images/icons/tag.svg', value: 'Free' },
+          {
+            icon: '/images/icons/person.svg',
+            label: null,
+            value: 'By Nouvelle Machine',
+          },
+          { icon: '/images/icons/tag.svg', label: null, value: 'Free' },
           {
             icon: '/images/icons/paper-closed.svg',
+            label: null,
             value: 'Registration closed',
           },
         ],
