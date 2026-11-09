@@ -16,7 +16,7 @@ export default function AboutPage() {
       <h1 className="padding-top-56px padding-bottom-40px">About us</h1>
 
       <h2 className="width-9-col-narrow padding-bottom-56px">
-        We&apos;re a small nonprofit driven by 1.25 salaried employees and lots
+        We&apos;re a small nonprofit driven by 1.5 salaried employees and lots
         of volunteers. We aim to multiply global AI safety efforts through a{' '}
         <span className="color-teal-300">
           centralized, comprehensive, and up-to-date resource hub
@@ -30,12 +30,11 @@ export default function AboutPage() {
           <div>
             <h3 className="padding-bottom-16px">Funding</h3>
             <p className="color-teal-grey-300 padding-bottom-40px">
-              This project operates on about $100k USD of annual funding from
-              the Survival and Flourishing Fund, a grantmaker that supports
-              projects working on the long-term survival and flourishing of
-              sentient life. This pays for 1 full-time and 1 part-time salary
-              (everyone else is a volunteer) plus some other costs, like website
-              hosting.
+              This project operates on about $150k of annual funding from the
+              Survival and Flourishing Fund, a grantmaker that supports projects
+              working on the long-term survival and flourishing of sentient
+              life. This pays for 1 full-time and 1 part-time salary (everyone
+              else is a volunteer) plus some other costs, like website hosting.
             </p>
 
             <h3 className="padding-bottom-16px">
