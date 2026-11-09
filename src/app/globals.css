@@ -909,7 +909,7 @@ label {
 /* Divider */
 .divider {
   height: 1px;
-  background-color: var(--teal-grey-700);
+  background-color: var(--teal-800);
 }
 
 /* Cursor */
@@ -971,8 +971,21 @@ label {
 }
 
 /* ===============================
-   9. BUTTON STYLES
+   9. BUTTON & LINK STYLES
    =============================== */
+
+/* Links outside buttons: --teal-300, lightening to --teal-200 on hover. Put
+   .link on the <a> itself, or .link-group on a wrapper (a footer column, a
+   sentence) to style every <a> inside it; the wrapper itself stays put. */
+.link,
+.link-group a {
+  color: var(--teal-300);
+  transition: color var(--hover-transition);
+}
+.link:hover,
+.link-group a:hover {
+  color: var(--teal-200);
+}
 
 .button-primary {
   display: inline-flex;

@@ -297,7 +297,7 @@ export default function MapSearch({
       <div ref={rootRef} className={className}>
         <button
           type="button"
-          className={styles['map-search-toggle']}
+          className={`${styles['map-search-toggle']} border-plus-fill`}
           title="Search the map"
           aria-label="Search the map"
           onClick={() => openSearch('button')}
@@ -339,7 +339,10 @@ export default function MapSearch({
         }}
       />
       {open && (
-        <div className={styles['map-search-results']} role="listbox">
+        <div
+          className={`${styles['map-search-results']} border-plus-fill`}
+          role="listbox"
+        >
           {results.map((org, i) => (
             <button
               key={org.id}

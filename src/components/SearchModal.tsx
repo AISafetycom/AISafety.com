@@ -240,7 +240,9 @@ export default function SearchModal({
       aria-modal="true"
       aria-label="Search AISafety.com"
     >
-      <div className={`${styles.modal} drop-shadow-dark flex flex-col`}>
+      <div
+        className={`${styles.modal} border-plus-fill drop-shadow-dark flex flex-col`}
+      >
         <div
           className={`${styles['input-row']} flex items-center gap-12px padding-top-16px padding-bottom-16px padding-left-24px padding-right-24px`}
         >

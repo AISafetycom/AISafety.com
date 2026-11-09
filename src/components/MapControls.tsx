@@ -19,7 +19,7 @@ export default function MapControls({
 }: MapControlsProps) {
   return (
     <div className={className}>
-      <div className={styles.group}>
+      <div className={`${styles.group} border-plus-fill`}>
         <button className={styles.button} title="Zoom in" onClick={onZoomIn}>
           <Icon
             src="/images/icons/plus.svg"

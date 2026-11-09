@@ -44,9 +44,7 @@ export default function Footer() {
               <h2 className="paragraph-small-bold padding-bottom-16px">
                 Help us out
               </h2>
-              <div
-                className={`paragraph-small flex flex-col gap-8px opacity-80 ${styles.links}`}
-              >
+              <div className="paragraph-small flex flex-col gap-8px link-group">
                 <FooterLink
                   href="https://airtable.com/appF8XfZUGXtfi40E/pagndDvdya1DSqoxN/form"
                   section="Help us out"
@@ -71,7 +69,7 @@ export default function Footer() {
                 several at once. */}
             <div>
               <h2
-                className={`paragraph-small-bold padding-bottom-16px ${styles.links}`}
+                className={`paragraph-small-bold padding-bottom-16px ${styles.headingLink}`}
               >
                 <FooterLink
                   href="/newsletter"
@@ -79,9 +77,7 @@ export default function Footer() {
                   label="Newsletters"
                 />
               </h2>
-              <div
-                className={`paragraph-small flex flex-col gap-8px opacity-80 ${styles.links}`}
-              >
+              <div className="paragraph-small flex flex-col gap-8px link-group">
                 {/* Events, Training and Funding each have a page of their
                     own (signup box, past issues, feed: /newsletter/<key>);
                     Updates is still on Substack. */}
@@ -115,9 +111,7 @@ export default function Footer() {
               <h2 className="paragraph-small-bold padding-bottom-16px">
                 For press and developers
               </h2>
-              <div
-                className={`paragraph-small flex flex-col gap-8px opacity-80 ${styles.links}`}
-              >
+              <div className="paragraph-small flex flex-col gap-8px link-group">
                 <FooterLink
                   href="/media"
                   section="For press and developers"
@@ -146,7 +140,7 @@ export default function Footer() {
               Maintained by AI safety community-builders
             </p>
           </div>
-          <p className={`paragraph-xs opacity-80 ${styles.links}`}>
+          <p className="paragraph-xs color-teal-grey-300 link-group">
             (ɔ) 2026 · This site is released under a CC BY-SA license ·{' '}
             <Link href="/privacy">Privacy</Link>
           </p>

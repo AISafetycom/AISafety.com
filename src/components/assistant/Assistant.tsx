@@ -470,7 +470,7 @@ export default function Assistant() {
     <>
       <button
         type="button"
-        className={`${styles.pill} drop-shadow-dark`}
+        className={`${styles.pill} border-plus-fill drop-shadow-dark`}
         onClick={handleTogglePill}
         aria-label={
           isOpen ? 'Close the assistant' : 'Open the AISafety.com assistant'
@@ -491,7 +491,7 @@ export default function Assistant() {
       />
 
       <aside
-        className={`${styles.panel} ${isOpen ? styles.panelOpen : ''} ${isExpanded ? styles.panelExpanded : ''}`}
+        className={`${styles.panel} border-plus-fill ${isOpen ? styles.panelOpen : ''} ${isExpanded ? styles.panelExpanded : ''}`}
         role="dialog"
         aria-modal={isExpanded}
         aria-label="AISafety.com directory assistant"

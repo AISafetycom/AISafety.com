@@ -56,7 +56,7 @@ export default function DonationGuideClient({
             {guide.tabs.map(tab => (
               <button
                 key={tab.id}
-                className={`${styles.tabLink} ${activeTab === tab.id ? styles.tabLinkActive : ''}`}
+                className={`${styles.tabLink} border-plus-fill ${activeTab === tab.id ? styles.tabLinkActive : ''}`}
                 onClick={() => handleTabClick(tab.id)}
               >
                 <p>{tab.amount}</p>

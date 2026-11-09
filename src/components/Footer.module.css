@@ -1,7 +1,9 @@
-.links a {
+/* The Newsletters heading is a link too, but stays white (the heading color)
+   until hovered, then takes the link hover color from .link in globals.css. */
+.headingLink a {
   transition: color var(--hover-transition);
 }
 
-.links a:hover {
-  color: var(--teal-grey-200);
+.headingLink a:hover {
+  color: var(--teal-200);
 }
