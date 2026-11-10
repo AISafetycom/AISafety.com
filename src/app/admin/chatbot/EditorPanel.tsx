@@ -2,7 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { PAGES } from '@/lib/assistant/pages'
-import { DEFAULT_MODEL_ID, MODELS } from '@/lib/assistant/models'
+import {
+  DEFAULT_MODEL_ID,
+  MODELS,
+  currentModelId,
+} from '@/lib/assistant/models'
 import styles from '../admin.module.css'
 import { Collapse } from '../Collapse'
 import Icon from '@/components/Icon'
@@ -116,7 +120,10 @@ export default function EditorPanel({
     const draft = loadDraft()
     if (draft) {
       onPromptChange(draft.prompt)
-      onModelChange(draft.model || DEFAULT_MODEL_ID)
+      // A draft saved before the model list changed may name a model that is
+      // no longer offered. The stale id stays in lastSavedRef below, so the
+      // auto-save then rewrites the draft with the current one.
+      onModelChange(currentModelId(draft.model))
       onNameChange(draft.name || 'Draft')
       lastSavedRef.current = serialize(draft.prompt, draft.model, draft.name)
     } else {
@@ -153,7 +160,11 @@ export default function EditorPanel({
       setLoadedVersionId(null)
       return
     }
-    if (v.prompt !== prompt || v.model !== model || v.name !== name) {
+    if (
+      v.prompt !== prompt ||
+      currentModelId(v.model) !== model ||
+      v.name !== name
+    ) {
       setLoadedVersionId(null)
     }
   }, [prompt, model, name, loadedVersionId, versions])
@@ -181,7 +192,7 @@ export default function EditorPanel({
     const v = versions.find(x => x.id === id)
     if (!v) return
     onPromptChange(v.prompt)
-    onModelChange(v.model || DEFAULT_MODEL_ID)
+    onModelChange(currentModelId(v.model))
     onNameChange(v.name)
     lastSavedRef.current = serialize(v.prompt, v.model, v.name)
     setLoadedVersionId(id)
