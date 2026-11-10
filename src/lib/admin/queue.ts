@@ -57,6 +57,15 @@ import { fillFirst, neededLeft } from './queue-needed'
 import type { ListingDates } from './queue-urgent'
 import { reviewAgainAt } from './queue-later'
 import { ruleTestOf, type RuleTest } from './queue-rule-test'
+import {
+  PUBLIC_KEY,
+  publicChoiceOf,
+  ruleInstantOf,
+  rulePublicOf,
+  type PublicChoice,
+  type RuleInstant,
+  type RulePublic,
+} from './queue-rule-instant'
 import { alreadyRepliedOf, type AlreadyReplied } from './queue-already'
 import { replyAlsoOf } from './queue-also'
 import { reasonsText, type FlagUpdate } from './queue-flag'
@@ -183,6 +192,15 @@ export interface QueueItem {
    *  policy check, proposal `public_policy`), which no bot reads, so it is
    *  never tested on past decisions. */
   rulePublicPolicy: boolean
+  /** Rule: drafted minutes after one decision, and where that was
+   *  (proposal `instant`, ~/Queue/teach.py --instant); null for a rule from
+   *  the nightly pass. */
+  ruleInstant: RuleInstant | null
+  /** Rule: the wording for the public listing policy that goes in with it
+   *  (proposal `public`), and what the owner chose for it at Apply. The Mac
+   *  writes it only on "apply". */
+  rulePublic: RulePublic | null
+  rulePublicChoice: PublicChoice | null
   verdict: Verdict | null
   reasons: string[]
   rejectChips: string[]
@@ -595,6 +613,9 @@ function rowToItem(
   let ruleWas: string | null = null
   let ruleTest: RuleTest | null = null
   let rulePublicPolicy = false
+  let ruleInstant: RuleInstant | null = null
+  let rulePublic: RulePublic | null = null
+  let rulePublicChoice: PublicChoice | null = null
   let replyTo: string | null = null
   let replyAlso: string[] = []
   let noReply: NoReply | null = null
@@ -623,6 +644,8 @@ function rowToItem(
     ruleWas = str(proposal.was)
     ruleTest = ruleTestOf(proposal.replay)
     rulePublicPolicy = proposal.public_policy === true
+    ruleInstant = ruleInstantOf(proposal.instant)
+    rulePublic = rulePublicOf(proposal.public)
     name = str(proposal.name)
     url = str(proposal.url)
     if (isRecord(proposal.reply)) {
@@ -680,9 +703,11 @@ function rowToItem(
       [KEPT_KEY]: kept,
       [LEFT_OUT_KEY]: left,
       [GONE_KEY]: deleted,
+      [PUBLIC_KEY]: publicChoice,
       ...rest
     } = saved
     edits = rest
+    rulePublicChoice = publicChoiceOf(publicChoice)
     const goneNames = goneOf(deleted)
     gone = goneNames.length ? goneNames : null
     before = isRecord(was) ? was : null
@@ -731,6 +756,9 @@ function rowToItem(
     ruleWas,
     ruleTest,
     rulePublicPolicy,
+    ruleInstant,
+    rulePublic,
+    rulePublicChoice,
     verdict: str(f[F.verdict]) as Verdict | null,
     reasons: lines(f[F.reasons]),
     rejectChips: lines(f[F.rejectChips]),
@@ -1923,10 +1951,32 @@ export async function acceptItem(
   item: QueueItem,
   pageEdits: Record<string, unknown>,
   replyDraft: string | null = null,
-  keep: string[] = []
+  keep: string[] = [],
+  publicWording: { choice: PublicChoice; seen: string | null } | null = null
 ): Promise<string[]> {
   requireOpen(item)
   const stamp = now()
+  // A rule that brings wording for the public listing policy: the page says
+  // what he chose for it, and which wording it showed him. Before the try,
+  // so a refusal leaves the rule open, not Failed. 412, not 409: the rule is
+  // still open, and the page re-reads it so the wording he must see shows.
+  if (item.type === 'Rule' && item.rulePublic) {
+    if (!publicWording) {
+      throw new QueueError(
+        'This rule comes with wording for the public listing policy, which this page had not shown you. Read it on the rule, then apply again.',
+        412
+      )
+    }
+    if (
+      publicWording.choice === 'apply' &&
+      publicWording.seen !== item.rulePublic.wording
+    ) {
+      throw new QueueError(
+        'The wording for the public listing policy has changed since this page loaded it. Read the new wording, then apply again.',
+        412
+      )
+    }
+  }
   // The proposed fields left out with the cross come with the page's edits
   // under their own key, which is never a field to write.
   const { [LEFT_OUT_KEY]: left, ...edits } = pageEdits
@@ -2058,12 +2108,19 @@ export async function acceptItem(
         await deleteRecord(BROOM_ISSUES_TABLE_ID, item.issueRow)
       }
     } else {
-      // Rule: the file lives on the Mac; the worker applies it.
+      // Rule: the file lives on the Mac; the worker applies it. With public
+      // wording, his choice goes on the row for the worker to read: it puts
+      // the wording on the public page only on "apply".
       await patchQueueRow(item.id, {
         ...draftFields,
         [F.status]: 'Accepted',
         [F.decidedAt]: stamp,
         [F.error]: null,
+        ...(item.rulePublic && publicWording
+          ? {
+              [F.edits]: JSON.stringify({ [PUBLIC_KEY]: publicWording.choice }),
+            }
+          : {}),
       })
       return []
     }
