@@ -2,6 +2,7 @@
 
 import { useTrackingOptOut, formatExcludedSince } from '@/lib/useTrackingOptOut'
 import { trackEvent } from '@/lib/analytics'
+import Button from '@/components/Button'
 
 /** Visitor-facing analytics switch on the privacy page. Shares the one
  *  "exclude this browser" localStorage flag with the admin controls, so a
@@ -33,15 +34,11 @@ export default function AnalyticsOptOut() {
           ✓ Analytics is off in this browser{since ? ` (since ${since})` : ''}.
         </p>
       )}
-      <button
-        type="button"
-        className="button-secondary cursor-pointer"
-        onClick={handleToggle}
-      >
+      <Button variant="clear-border" type="button" onClick={handleToggle}>
         {optedOut
           ? 'Turn analytics back on'
           : 'Turn off analytics in this browser'}
-      </button>
+      </Button>
     </div>
   )
 }

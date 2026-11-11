@@ -1,0 +1,140 @@
+/* <Button> — shape and per-style color only. Text type comes from the global
+   .paragraph-small-bold / .paragraph-xs-bold classes in Button.tsx, and the
+   focus ring from the global *:focus-visible rule. Values follow the Figma
+   "Button" component set (node 11645:18071). */
+
+/* Every style has a 1px border (transparent where Figma has none), so bordered
+   and borderless buttons are the same size: 17px padding + 1px border = the
+   18px Figma side padding. */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: fit-content;
+  height: 48px;
+  padding: 0 17px;
+  border: 1px solid transparent;
+  border-radius: 24px;
+  background-color: transparent;
+  color: var(--white);
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color var(--hover-transition),
+    border-color var(--hover-transition);
+}
+
+/* Sizes */
+.small {
+  height: 40px;
+  padding: 0 15px;
+  gap: 4px;
+}
+
+.xs {
+  height: 32px;
+}
+
+.iconOnly {
+  padding: 0;
+  aspect-ratio: 1;
+}
+
+/* Styles. Hover first, disabled after, so disabled wins on a hovered
+   disabled button. */
+.white {
+  background-color: var(--white);
+  color: var(--teal-900);
+}
+.white:hover {
+  background-color: var(--teal-grey-50);
+}
+.white:disabled {
+  background-color: var(--teal-grey-500);
+}
+
+.teal {
+  background-color: var(--teal-850);
+  border-color: var(--teal-800);
+}
+.teal:hover {
+  border-color: var(--teal-750);
+}
+.teal:disabled {
+  background-color: var(--teal-grey-800);
+  border-color: var(--teal-grey-850);
+  color: var(--teal-grey-500);
+}
+
+.tealAlt {
+  background-color: var(--teal-800);
+  border-color: var(--teal-750);
+}
+.tealAlt:hover {
+  border-color: var(--teal-700);
+}
+.tealAlt:disabled {
+  background-color: var(--teal-grey-750);
+  border-color: var(--teal-grey-850);
+  color: var(--teal-grey-400);
+}
+
+.clear:hover {
+  background-color: color-mix(in srgb, var(--white) 8%, transparent);
+}
+.clear:disabled {
+  background-color: transparent;
+  color: var(--teal-grey-500);
+}
+
+.clearBorder {
+  border-color: color-mix(in srgb, var(--white) 40%, transparent);
+}
+.clearBorder:hover {
+  border-color: color-mix(in srgb, var(--white) 60%, transparent);
+}
+.clearBorder:disabled {
+  background-color: transparent;
+  border-color: var(--teal-grey-700);
+  color: var(--teal-grey-500);
+}
+
+.button:disabled {
+  cursor: default;
+}
+
+/* loading: the repeat icon, spinning, where the icon was. */
+.loading {
+  cursor: progress;
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 3s;
+  }
+}
+
+/* On mobile the default size drops to the small size, as the global
+   .paragraph-small-bold text does. */
+@media (max-width: 991px) {
+  .default {
+    height: 40px;
+    padding: 0 15px;
+    gap: 4px;
+  }
+  .iconOnly {
+    padding: 0;
+  }
+}

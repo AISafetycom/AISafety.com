@@ -3,6 +3,7 @@
 import Image from 'next/image'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import Button from '@/components/Button'
 import Icon from '@/components/Icon'
 import { trackSearchClick, trackSearchQuery } from '@/lib/analytics'
 import type { SearchEntry, SearchType } from '@/lib/data/search-index'
@@ -300,13 +301,9 @@ export default function SearchModal({
               <p className="paragraph-small color-teal-grey-300">
                 Search is temporarily unavailable.
               </p>
-              <button
-                type="button"
-                onClick={onRetry}
-                className="button-secondary"
-              >
+              <Button variant="clear-border" onClick={onRetry}>
                 Try again
-              </button>
+              </Button>
             </div>
           )}
 

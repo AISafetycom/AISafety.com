@@ -17,6 +17,7 @@ import {
   type SignupNewsletter,
 } from '@/lib/newsletter-signup'
 import styles from './NewsletterChooser.module.css'
+import Button from '@/components/Button'
 
 /** The newsletters on /newsletter, for a visitor to tick and sign up to, or
  *  (from the "Manage subscriptions" link in an issue) for a reader to see
@@ -201,13 +202,14 @@ export default function NewsletterChooser({
                 {view.note}
               </p>
               {view.retryKey && (
-                <button
+                <Button
+                  variant="clear-border"
                   type="button"
-                  className="button-secondary cursor-pointer margin-top-16px"
+                  className="margin-top-16px"
                   onClick={() => void load(view.retryKey as string)}
                 >
                   Try again
-                </button>
+                </Button>
               )}
             </div>
           )}
@@ -394,9 +396,9 @@ function SignupForm({ newsletters }: { newsletters: Newsletter[] }) {
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? statusId : undefined}
           />
-          <button type="submit" className="button-primary" disabled={sending}>
+          <Button type="submit" disabled={sending}>
             {sending ? 'Subscribing' : 'Subscribe'}
-          </button>
+          </Button>
         </div>
       )}
       {/* Always rendered, so screen readers announce what lands in it. */}
@@ -517,18 +519,18 @@ function ManageForm({
         }}
       />
       <div className="flex flex-wrap items-center gap-16px padding-top-32px">
-        <button type="submit" className="button-primary" disabled={busy}>
+        <Button type="submit" disabled={busy}>
           {busy ? 'Saving' : 'Save changes'}
-        </button>
+        </Button>
         {getsAny && (
-          <button
+          <Button
+            variant="clear-border"
             type="button"
-            className="button-secondary cursor-pointer"
             disabled={busy}
             onClick={() => void save(NONE)}
           >
             Unsubscribe from all
-          </button>
+          </Button>
         )}
       </div>
       <div
