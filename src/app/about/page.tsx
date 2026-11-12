@@ -33,7 +33,7 @@ export default function AboutPage() {
               This project operates on about $150k of annual funding from the
               Survival and Flourishing Fund, a grantmaker that supports projects
               working on the long-term survival and flourishing of sentient
-              life. This pays for 1 full-time and 1 part-time salary (everyone
+              life. This pays for one full-time and one part-time salary (everyone
               else is a volunteer) plus some other costs, like website hosting.
             </p>
 
