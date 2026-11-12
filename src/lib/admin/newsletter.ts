@@ -293,6 +293,11 @@ const READ_TIMEOUT_MS = 20_000
  *  per email (render.hoist_type), so 15 Events cards fit (~96 KB). Keep
  *  SITE_MAX_HTML_BYTES in ~/Newsletter/issue.py in step. */
 const MAX_HTML_BYTES = 96 * 1024
+/** Issues allowed over MAX_HTML_BYTES, by campaign name: a one-off trial of
+ *  sending a whole issue even though Gmail clips its bottom (Bryce, 12
+ *  November 2026: "test it out this once and then decide what we do long
+ *  term afterwards"). Every other issue is still blocked. */
+const OVERSIZE_TRIAL = new Set(['Events · Week 46, 2026'])
 /** How many campaigns one read covers (AC's page maximum). */
 export const CAMPAIGN_READ_WINDOW = 100
 
@@ -1973,7 +1978,7 @@ export function contentChecks(input: {
   }
 
   const bytes = Buffer.byteLength(html.replace(MARKER_RE, ''), 'utf8')
-  if (bytes > MAX_HTML_BYTES)
+  if (bytes > MAX_HTML_BYTES && !OVERSIZE_TRIAL.has(name))
     blocks.push(
       `the email is ${Math.round(bytes / 1024)} KB, over the ${MAX_HTML_BYTES / 1024} KB limit (Gmail cuts emails off at about 102 KB) – shorten the issue`
     )
