@@ -1035,7 +1035,7 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
                   className={styles.editButton}
                   onClick={() => handleEdit(m.id)}
                   aria-label="Edit message"
-                  title="Edit"
+                  tooltipPosition="above"
                 />
                 <div className={styles.userMessage}>{m.content}</div>
               </div>
@@ -1087,9 +1087,10 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
                           : '/images/icons/thumbs-up.svg'
                       }
                       iconPosition="only"
-                      className={`${styles.feedbackButton} ${styles.feedbackButtonUp}${m.rating === 'up' ? ` ${styles.feedbackButtonActive}` : ''}`}
+                      className={`${styles.feedbackButtonUp}${m.rating === 'up' ? ` ${styles.feedbackButtonActive}` : ''}`}
                       onClick={() => handleRate(m.id, 'up')}
                       aria-label="Good response"
+                      tooltipPosition="above"
                       aria-pressed={m.rating === 'up'}
                     />
                     <Button
@@ -1101,9 +1102,10 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
                           : '/images/icons/thumbs-down.svg'
                       }
                       iconPosition="only"
-                      className={`${styles.feedbackButton} ${styles.feedbackButtonDown}${m.rating === 'down' ? ` ${styles.feedbackButtonActive}` : ''}`}
+                      className={`${styles.feedbackButtonDown}${m.rating === 'down' ? ` ${styles.feedbackButtonActive}` : ''}`}
                       onClick={() => handleRate(m.id, 'down')}
                       aria-label="Bad response"
+                      tooltipPosition="above"
                       aria-pressed={m.rating === 'down'}
                     />
                   </div>

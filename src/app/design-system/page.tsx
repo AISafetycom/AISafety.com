@@ -16,6 +16,7 @@ const VARIANTS = ['white', 'teal', 'teal-alt', 'clear', 'clear-border'] as const
 const SIZES = ['default', 'small'] as const
 const ARROW = '/images/icons/arrow-right.svg'
 const PERSON = '/images/icons/person.svg'
+const TOOLTIP_POSITIONS = ['below', 'above', 'left', 'right'] as const
 
 export default function DesignSystemPage() {
   return (
@@ -101,6 +102,45 @@ export default function DesignSystemPage() {
             </Button>
           </div>
         </section>
+      </div>
+
+      <h2 className="padding-top-40px padding-bottom-12px">Tooltips</h2>
+      <p className="paragraph-small color-teal-grey-300 padding-bottom-24px">
+        Every icon-only button shows its label as a tooltip. Hover or tab to
+        each one. Small tooltips go with xs buttons, default tooltips with
+        everything bigger.
+      </p>
+      <div className="flex flex-col gap-40px">
+        {(['xs', 'small'] as const).map(size => (
+          <section key={size} className="flex flex-col gap-16px">
+            <h3>{size} button</h3>
+            <div className="flex flex-wrap items-center gap-192px padding-top-56px padding-bottom-56px padding-left-128px">
+              {TOOLTIP_POSITIONS.map(position =>
+                size === 'xs' ? (
+                  <Button
+                    key={position}
+                    variant="clear"
+                    size="xs"
+                    icon="/images/icons/arrow-up-right-small.svg"
+                    iconPosition="only"
+                    aria-label={`Tooltip ${position}`}
+                    tooltipPosition={position}
+                  />
+                ) : (
+                  <Button
+                    key={position}
+                    variant="clear"
+                    size="small"
+                    icon="/images/icons/search.svg"
+                    iconPosition="only"
+                    aria-label={`Tooltip ${position}`}
+                    tooltipPosition={position}
+                  />
+                )
+              )}
+            </div>
+          </section>
+        ))}
       </div>
     </main>
   )
