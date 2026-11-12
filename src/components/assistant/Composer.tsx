@@ -65,7 +65,7 @@ const Composer = forwardRef<HTMLTextAreaElement, Props>(function Composer(
             className={styles.composerButton}
             onClick={onStop}
             aria-label="Stop"
-            title="Stop"
+            tooltipPosition="above"
           />
         ) : (
           <Button
@@ -76,6 +76,7 @@ const Composer = forwardRef<HTMLTextAreaElement, Props>(function Composer(
             disabled={disabled || value.trim().length === 0}
             onClick={onSubmit}
             aria-label="Send"
+            tooltipPosition="above"
           />
         )}
       </div>
