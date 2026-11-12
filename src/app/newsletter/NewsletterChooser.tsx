@@ -274,8 +274,9 @@ function NewsletterRows({
   )
 }
 
-/** A visitor's signup: tick the newsletters, give the address, confirm once
- *  from the inbox. */
+/** A visitor's signup: tick the newsletters and give the address. They're
+ *  subscribed at once (since 12 November 2026), and one welcome email names
+ *  every newsletter. */
 function SignupForm({ newsletters }: { newsletters: Newsletter[] }) {
   const [ticks, setTicks] = useState<Subscriptions>(NONE)
   const [email, setEmail] = useState('')
@@ -303,6 +304,7 @@ function SignupForm({ newsletters }: { newsletters: Newsletter[] }) {
     let answer: {
       ok?: unknown
       already?: unknown
+      added?: unknown
       confirm?: unknown
       error?: unknown
       reason?: unknown
@@ -345,26 +347,28 @@ function SignupForm({ newsletters }: { newsletters: Newsletter[] }) {
       trackNewsletterSignupError(TRACKING_PAGE, 'already_subscribed')
       return
     }
-    // The newsletters the confirmation email names: the ones ticked that the
+    // The newsletters the welcome email names: the ones ticked that the
     // reader didn't get yet. One newsletter's email comes from it; a
     // combination's comes from AISafety.com.
-    const confirm = Array.isArray(answer.confirm)
-      ? SIGNUP_NEWSLETTERS.filter(n =>
-          (answer.confirm as unknown[]).includes(n)
-        )
+    const added = Array.isArray(answer.added)
+      ? SIGNUP_NEWSLETTERS.filter(n => (answer.added as unknown[]).includes(n))
       : []
     const sender =
-      confirm.length === 1
-        ? nameOf(confirm[0])
-        : confirm.length > 1
+      added.length === 1
+        ? nameOf(added[0])
+        : added.length > 1
           ? 'AISafety.com'
           : null
+    // `confirm` only when the site couldn't subscribe the reader itself:
+    // the button in the email still does.
     setDone(
-      `Check your inbox${sender ? ` for an email from ${sender}` : ''} and confirm your subscription.`
+      answer.confirm === true
+        ? `Almost done. Press the button in the email${sender ? ` from ${sender}` : ' we just sent you'} to finish signing up.`
+        : `You're subscribed. A welcome email${sender ? ` from ${sender}` : ''} is on its way.`
     )
     trackNewsletterSignupSuccess(
       TRACKING_PAGE,
-      confirm.length ? confirm.join('+') : undefined
+      added.length ? added.join('+') : undefined
     )
   }
 

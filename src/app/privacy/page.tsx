@@ -95,25 +95,24 @@ export default function PrivacyPage() {
           <p className="color-teal-grey-300 padding-bottom-40px">
             When you sign up for the AI Safety Events, AI Safety Training, or AI
             Safety Funding newsletter on this site, your email address goes to
-            ActiveCampaign, the service that sends them, and you&apos;ll get an
-            email asking you to confirm – you&apos;re only subscribed once you
-            do. If you subscribed to the AI Safety Events &amp; Training or the
-            AI Safety Funding newsletter on Substack, your email address moved
-            to ActiveCampaign with the newsletter in 2026. ActiveCampaign
-            records, for each reader, which emails they open and when they
-            unsubscribe. When you click a link in one of those emails, the click
-            is counted by aisafety.com itself, anonymously – it isn&apos;t tied
-            to you or your email address. Every email has an unsubscribe link at
-            the bottom, and a Manage subscriptions link that opens your
-            newsletters on{' '}
+            ActiveCampaign, the service that sends them, and you&apos;re
+            subscribed right away and get a welcome email. If you subscribed to
+            the AI Safety Events &amp; Training or the AI Safety Funding
+            newsletter on Substack, your email address moved to ActiveCampaign
+            with the newsletter in 2026. ActiveCampaign records, for each
+            reader, which emails they open and when they unsubscribe. When you
+            click a link in one of those emails, the click is counted by
+            aisafety.com itself, anonymously – it isn&apos;t tied to you or your
+            email address. Every email has an unsubscribe link at the bottom,
+            and a Manage subscriptions link that opens your newsletters on{' '}
             <Link href="/newsletter" className="color-teal-300">
               aisafety.com/newsletter
             </Link>{' '}
             so you can change which ones you get; the private code in that link
             stays out of our analytics. When you sign up for several newsletters
-            there at once, one confirmation email covers them all. The
-            AISafety.com Updates newsletter is hosted on Substack – when you
-            subscribe to it, Substack&apos;s own privacy policy applies.
+            there at once, one welcome email covers them all. The AISafety.com
+            Updates newsletter is hosted on Substack – when you subscribe to it,
+            Substack&apos;s own privacy policy applies.
           </p>
 
           <h3 className="padding-bottom-16px">Services we rely on</h3>
