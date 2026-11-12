@@ -24,7 +24,11 @@ import {
   type FlagUpdate,
 } from '@/lib/admin/queue-flag'
 import { rejectReplyFor, shownDeclineChip } from '@/lib/admin/queue-decline'
-import { reopeningLabel, type Reopening } from '@/lib/admin/queue-reopen'
+import {
+  afterUndoFailed,
+  reopeningLabel,
+  type Reopening,
+} from '@/lib/admin/queue-reopen'
 import { discordAppLink, replyToCopy } from '@/lib/admin/queue-discord'
 import {
   alreadyRepliedOf,
@@ -1395,6 +1399,8 @@ interface Toast {
     action: Action
     extra: Record<string, unknown>
     inPlace?: boolean
+    /** The button's word when it is not a plain Retry. */
+    label?: string
   }
   /** A Discord reply put on the clipboard with the decision. */
   copied?: string
@@ -3431,13 +3437,23 @@ export default function QueueAdmin({
                 : { action, extra, inPlace: opts.inPlace },
           })
         } else if (action === 'undo') {
+          // An Undo with nothing to take back never works a second time:
+          // a declined addition whose record is gone gets Reopen instead
+          // of Retry (Bryce, 12 Nov 2026: the toast said "Reopen brings it
+          // back" beside a Retry that could only fail again).
+          const next = afterUndoFailed(item, status)
           setToast({
             item,
             no: false,
             state: 'failed',
             text: `Undo failed · ${message}`,
             sub: 'The decision still stands',
-            retry: { action, extra },
+            retry:
+              next === 'reopen'
+                ? { action: 'reopen', extra: {}, label: 'Reopen' }
+                : next === 'retry'
+                  ? { action, extra }
+                  : undefined,
           })
         } else if (action === 'reopen') {
           setToast({
@@ -4600,7 +4616,7 @@ export default function QueueAdmin({
                   }
                 >
                   <Icon src={ICON.undo} size={12} className={styles.undoIcon} />
-                  Retry
+                  {toastRetry.label ?? 'Retry'}
                 </button>
               )}
               <button

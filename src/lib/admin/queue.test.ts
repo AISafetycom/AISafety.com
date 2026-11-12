@@ -1485,6 +1485,50 @@ describe('reopenItem', () => {
     })
   })
 
+  it('undoes a publish made after a Reject that was undone (The Gentle Romance)', async () => {
+    // Rejected at 09:13 (the Mac saved its decline), undone, published at
+    // 09:18. Undo leaves the reject block on the proposal, and it used to
+    // make the publish read as "declined, record deleted": Undo refused.
+    const EVENT = rid('romance')
+    row = {
+      ...deleted,
+      [FLD.proposal]: JSON.stringify({
+        ...proposal,
+        record: EVENT,
+        reply: {
+          ...proposal.reply,
+          reject: {
+            since: '2026-11-12T09:13:41.246Z',
+            text: 'Thanks for submitting this.',
+            draft: 'r1',
+          },
+        },
+      }),
+      [FLD.targetRecord]: EVENT,
+      [FLD.decidedAt]: '2026-11-12T09:18:26.163Z',
+      [FLD.appliedAt]: '2026-11-12T09:18:26.163Z',
+    }
+    delete row[FLD.rejectReason]
+    const listing: unknown[] = []
+    const queueRow = mocks.airtableRequest.getMockImplementation()
+    mocks.airtableRequest.mockImplementation(
+      async (path: string, init?: RequestInit) => {
+        if (path === `${TRAINING}/${EVENT}` && init?.method === 'PATCH') {
+          listing.push(JSON.parse(String(init.body)).fields)
+          return new Response('{}', { status: 200 })
+        }
+        return queueRow?.(path, init)
+      }
+    )
+    const item = await current()
+    expect(item.declined).toBe(false)
+    await expect(reopenItem(item)).rejects.toMatchObject({ status: 409 })
+    await undoItem(item)
+    expect(listing).toEqual([{ 'Publish?': false }])
+    expect(row[FLD.status]).toBe('Pending')
+    expect(row[FLD.decidedAt]).toBeUndefined()
+  })
+
   it('saves no second decline after a reopen with no reply from them', async () => {
     row[FLD.status] = 'Pending'
     delete row[FLD.decidedAt]

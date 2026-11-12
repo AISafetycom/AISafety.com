@@ -4,6 +4,8 @@ import {
   pushbackOf,
   reopenedOf,
   reopeningLabel,
+  afterUndoFailed,
+  rejectIsCurrent,
   reopeningOf,
   reviewNewerThanChat,
   wasDeclined,
@@ -67,6 +69,53 @@ describe('wasDeclined', () => {
     expect(
       wasDeclined({ ...declined, status: 'Pending', decidedAt: null })
     ).toBe(false)
+  })
+})
+
+describe('rejectIsCurrent', () => {
+  const decided = '2026-11-12T09:18:26.163Z'
+  it('counts the reject block of this decision', () => {
+    expect(rejectIsCurrent({ since: decided, draft: 'r1' }, decided)).toBe(true)
+    expect(
+      rejectIsCurrent({ since: '2026-11-12T09:18:40.000Z' }, decided)
+    ).toBe(true)
+  })
+  it('drops one left by a Reject that was undone (The Gentle Romance)', () => {
+    // Rejected 09:13, undone, published 09:18: the block is the old
+    // decision's, and the publish is no decline.
+    const stale = { since: '2026-11-12T09:13:41.246Z', draft: 'r1' }
+    expect(rejectIsCurrent(stale, decided)).toBe(false)
+    expect(
+      wasDeclined({
+        type: 'Add',
+        status: 'Applied',
+        decidedAt: decided,
+        appliedAt: decided,
+        rejectReason: null,
+        rejectReplied: rejectIsCurrent(stale, decided),
+        error: null,
+      })
+    ).toBe(false)
+  })
+  it('needs a block with a date', () => {
+    expect(rejectIsCurrent(null, decided)).toBe(false)
+    expect(rejectIsCurrent({ text: 'Thanks' }, decided)).toBe(false)
+    expect(rejectIsCurrent({ since: 'soon' }, decided)).toBe(false)
+  })
+})
+
+describe('afterUndoFailed', () => {
+  const add = { type: 'Add', declined: true }
+  it('offers Reopen when a declined addition has no record to undo to', () => {
+    expect(afterUndoFailed(add, 409)).toBe('reopen')
+  })
+  it('offers nothing when there is nothing to undo', () => {
+    expect(afterUndoFailed({ type: 'Add', declined: false }, 409)).toBeNull()
+    expect(afterUndoFailed({ type: 'Change', declined: false }, 409)).toBeNull()
+  })
+  it('keeps Retry for a failure that may pass', () => {
+    expect(afterUndoFailed(add, 500)).toBe('retry')
+    expect(afterUndoFailed(add, 0)).toBe('retry')
   })
 })
 
