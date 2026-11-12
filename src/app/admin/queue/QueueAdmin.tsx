@@ -16,6 +16,7 @@ import type {
 import { fillFirst, neededLeft } from '@/lib/admin/queue-needed'
 import { replyWho } from '@/lib/admin/queue-also'
 import { backSince, laterSince, laterUntil } from '@/lib/admin/queue-later'
+import { URL_KEYS, listingLink } from '@/lib/admin/queue-link'
 import { LEFT_OUT_KEY, withLeftOut } from '@/lib/admin/queue-left-out'
 import {
   flagRevisedNote,
@@ -767,33 +768,7 @@ function stashImage(key: string, stash: ImageStash): void {
 }
 
 const NAME_KEYS = /\b(name|title)\b|^organi[sz]ation$/i
-const URL_KEYS = /^(url|website|link|join link|apply link|application link)$/i
 const DESC_KEYS = /description/i
-
-/** The listing's own link: the row's, else the first link-like field of
- *  the record as read live (or as proposed). */
-function listingLink(
-  item: QueueItem,
-  fields: Record<string, unknown> | null | undefined,
-  overrides: Record<string, unknown> = {}
-): string | null {
-  // A Change that moves the listing's link (a rename, a new domain) means
-  // the NEW address, as the page shows it on the card – Bryce, 25 Sept 2026,
-  // Atlas Computing → Atlas Ignota: "S is going to the old link". So the
-  // proposed value and any edit typed on the page win over the stored one.
-  for (const [k, v] of Object.entries(overrides)) {
-    if (URL_KEYS.test(k) && typeof v === 'string' && /^https?:\/\//.test(v)) {
-      return v
-    }
-  }
-  if (item.url) return item.url
-  for (const [k, v] of Object.entries(fields ?? item.fields ?? {})) {
-    if (URL_KEYS.test(k) && typeof v === 'string' && /^https?:\/\//.test(v)) {
-      return v
-    }
-  }
-  return null
-}
 
 function linkLabel(url: string): string {
   if (hostOf(url) === 'mail.google.com') return 'Open email'
