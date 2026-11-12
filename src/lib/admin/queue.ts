@@ -80,6 +80,7 @@ import {
 import {
   declinedBeforeOf,
   pushbackOf,
+  rejectIsCurrent,
   reopenedOf,
   reopeningOf,
   wasDeclined,
@@ -568,11 +569,7 @@ export function rejectReplyOf(
   v: unknown,
   decidedAt: string | null
 ): RejectReply | null {
-  if (!isRecord(v)) return null
-  const since = Date.parse(str(v.since) ?? '')
-  const decided = Date.parse(decidedAt ?? '')
-  if (!Number.isFinite(since) || (Number.isFinite(decided) && since < decided))
-    return null
+  if (!isRecord(v) || !rejectIsCurrent(v, decidedAt)) return null
   const text = str(v.text)
   if (str(v.draft)) return { text, state: 'saved', error: null }
   if (str(v.ready) && text) return { text, state: 'ready', error: null }
@@ -632,10 +629,11 @@ function rowToItem(
     pushback = pushbackOf(proposal.pushback)
     reopened = reopenedOf(proposal.reopened)
     declinedBefore = declinedBeforeOf(proposal.reply, pushback)
+    // Only this decision's reject block: one left by a Reject that was
+    // undone must not make a later Publish read as a decline.
     rejectReplied =
       isRecord(proposal.reply) &&
-      isRecord(proposal.reply.reject) &&
-      Boolean(str(proposal.reply.reject.since))
+      rejectIsCurrent(proposal.reply.reject, str(f[F.decidedAt]))
     changes = toChanges(proposal.changes)
     diff = str(proposal.diff)
     summary = str(proposal.summary)
