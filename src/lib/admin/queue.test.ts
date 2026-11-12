@@ -40,6 +40,7 @@ import {
   handledOutside,
   mergeEdits,
   queueTargets,
+  emailLinkOf,
   noReplyOf,
   rejectItem,
   rejectReplyOf,
@@ -1150,6 +1151,37 @@ describe('rejectReplyOf', () => {
         decided
       )
     ).toBeNull()
+  })
+})
+
+describe('emailLinkOf', () => {
+  const link =
+    'https://mail.google.com/mail/?authuser=someone@example.com#all/1a1c1e17276b5143'
+
+  it("reads the form's email from the proposal's notification block", () => {
+    expect(
+      emailLinkOf({
+        kind: 'add',
+        notification: { thread: '1a1c', message: '1a1c1e17276b5143', link },
+      })
+    ).toBe(link)
+  })
+
+  it('is null until the Mac has found the email', () => {
+    expect(emailLinkOf({ kind: 'add' })).toBeNull()
+    expect(emailLinkOf({ notification: 'soon' })).toBeNull()
+    expect(emailLinkOf({ notification: { thread: '1a1c' } })).toBeNull()
+  })
+
+  it('passes on nothing but an https link to Gmail itself', () => {
+    for (const bad of [
+      'javascript:alert(1)',
+      'http://mail.google.com/mail/#all/1a1c',
+      'https://mail.google.com.example.org/mail/#all/1a1c',
+      'https://example.org/?to=mail.google.com',
+      'not a link',
+    ])
+      expect(emailLinkOf({ notification: { link: bad } })).toBeNull()
   })
 })
 

@@ -445,7 +445,10 @@ function foundLink(text: string): string | null {
  *  source instead of Airtable"): the post Comb found the listing in, or
  *  the email or Discord message a request arrived in. A link to Airtable
  *  is not a source, so a Broom flag, or a Comb find with no post link,
- *  has none. */
+ *  has none. A form submission's link is its record in Airtable, so Q
+ *  opens the email the form arrived as instead, once the Mac has found it
+ *  (Bryce, 12 Nov 2026: "Q should open the original email with the
+ *  form"). */
 function sourceHref(item: QueueItem): string | null {
   const found =
     item.source === 'Comb' && item.sourceExcerpt
@@ -453,7 +456,8 @@ function sourceHref(item: QueueItem): string | null {
       : null
   if (found) return found
   const link = item.sourceLink
-  return link && hostOf(link) && !onHost(link, 'airtable.com') ? link : null
+  if (link && hostOf(link) && !onHost(link, 'airtable.com')) return link
+  return item.emailLink ?? null
 }
 
 function ago(iso: string | null): string {
@@ -5920,6 +5924,20 @@ function Detail({
             )}
             <span className={styles.when}>{ago(item.createdAt)}</span>
             <div className={styles.links}>
+              {/* A form's own link is its record in Airtable; the email it
+                  arrived as sits beside it, and is what Q opens. */}
+              {item.emailLink && sourceHref(item) === item.emailLink && (
+                <a
+                  href={item.emailLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={styles.withIcon}
+                >
+                  <Icon src={linkIcon(item.emailLink)} size={12} />
+                  {linkLabel(item.emailLink)}
+                  <kbd>Q</kbd>
+                </a>
+              )}
               {item.sourceLink && (
                 <a
                   href={item.sourceLink}

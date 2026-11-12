@@ -165,6 +165,12 @@ export interface QueueItem {
   targetRecord: string | null
   issueRow: string | null
   sourceLink: string | null
+  /** Form: the "Airtable forms: someone has responded to …" email the
+   *  submission arrived as, in Gmail (the proposal's `notification.link`,
+   *  written by the Mac's forms duty). A Form row's Source link is the
+   *  record in Airtable, so this is what Q opens (Bryce, 12 Nov 2026: "Q
+   *  should open the original email with the form"). */
+  emailLink?: string | null
   sourceExcerpt: string | null
   /** The record's logo as the site shows it (from the site's own listing
    *  catalog for published records, else the Add snapshot), for the list. */
@@ -592,6 +598,24 @@ export function noReplyOf(proposal: Record<string, unknown>): NoReply | null {
   return null
 }
 
+/** The Gmail link to the email a Form row's submission arrived as (the
+ *  proposal's `notification.link`, written by the Mac's forms duty), or
+ *  null. The Mac builds the link, as this code is public and never names
+ *  the mailbox; only an https link on mail.google.com itself is passed on. */
+export function emailLinkOf(proposal: Record<string, unknown>): string | null {
+  if (!isRecord(proposal.notification)) return null
+  const link = str(proposal.notification.link)
+  if (!link) return null
+  try {
+    const u = new URL(link)
+    return u.protocol === 'https:' && u.hostname === 'mail.google.com'
+      ? link
+      : null
+  } catch {
+    return null
+  }
+}
+
 function rowToItem(
   row: {
     id: string
@@ -619,6 +643,7 @@ function rowToItem(
   let replyTo: string | null = null
   let replyAlso: string[] = []
   let noReply: NoReply | null = null
+  let emailLink: string | null = null
   let alreadyReplied: AlreadyReplied | null = null
   let rejectReply: RejectReply | null = null
   let saidBy: SaidBy | null = null
@@ -672,6 +697,7 @@ function rowToItem(
       }
     }
     noReply = noReplyOf(proposal)
+    emailLink = emailLinkOf(proposal)
     if (isRecord(proposal.fields)) {
       fields = proposal.fields
     } else if (changes.length === 0 && !diff) {
@@ -681,6 +707,7 @@ function rowToItem(
           k !== 'name' &&
           k !== 'url' &&
           k !== 'no_reply' &&
+          k !== 'notification' &&
           k !== FLAG_BEFORE_KEY &&
           k !== 'reopen' &&
           k !== 'pushback' &&
@@ -741,6 +768,7 @@ function rowToItem(
     targetRecord: str(f[F.targetRecord]),
     issueRow: str(f[F.issueRow]),
     sourceLink: str(f[F.sourceLink]),
+    emailLink,
     sourceExcerpt: str(f[F.sourceExcerpt]),
     logo:
       (str(f[F.targetRecord]) && logos.get(str(f[F.targetRecord]) ?? '')) ||
