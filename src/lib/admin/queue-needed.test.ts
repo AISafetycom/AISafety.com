@@ -64,6 +64,41 @@ describe('missingFields', () => {
     ).toEqual(['Deadline type'])
   })
 
+  it('wants no deadline while sign-up has not opened', () => {
+    const typed = { ...EVENT, 'Deadline type': 'Register' }
+    expect(
+      missingFields('/events', {
+        ...typed,
+        'Applications/registrations not yet open?': true,
+      })
+    ).toEqual([])
+    expect(
+      missingFields('/events', {
+        ...typed,
+        'Applications/registrations not yet open?': false,
+      })
+    ).toEqual(['Deadline'])
+    // Ticked in the Queue, not yet saved; then unticked again.
+    expect(
+      neededLeft(
+        '/events',
+        null,
+        typed,
+        { 'Applications/registrations not yet open?': 'true' },
+        []
+      )
+    ).toEqual([])
+    expect(
+      neededLeft(
+        '/events',
+        null,
+        { ...typed, 'Applications/registrations not yet open?': true },
+        { 'Applications/registrations not yet open?': 'false' },
+        []
+      )
+    ).toEqual(['Deadline'])
+  })
+
   it('lists every gap in the page’s order, matching names loosely', () => {
     expect(
       missingFields('/events', {
