@@ -935,6 +935,28 @@ describe('funding cards drawn by the site', () => {
   })
 })
 
+describe('contentChecks size limit', () => {
+  const oversize = (name: string) =>
+    contentChecks({
+      name,
+      listId: '6',
+      subject: 'Week 46, 2026',
+      html: `<p>${'a'.repeat(110 * 1024)}</p> %UNSUBSCRIBELINK% %SENDER-INFO-SINGLELINE%`,
+      text: '%UNSUBSCRIBELINK% %SENDER-INFO-SINGLELINE%',
+      fromEmail: 'events@news.aisafety.com',
+      replyTo: null,
+      now: new Date('2026-11-12T12:00:00Z'),
+    }).blocks.filter(b => b.includes('KB limit'))
+
+  it('blocks an email over the limit', () => {
+    expect(oversize('Events · Week 47, 2026')).toHaveLength(1)
+  })
+
+  it('lets the one trial issue through (12 November 2026)', () => {
+    expect(oversize('Events · Week 46, 2026')).toEqual([])
+  })
+})
+
 /* ─── Test copies ───────────────────────────────────────────────────── */
 
 describe('sendTestCopy', () => {
