@@ -3,11 +3,13 @@ import {
   cardGroups,
   contentChecks,
   contentDigest,
+  designOf,
   DraftProblemError,
   FieldError,
   FitError,
   formatLocal,
   isLiveCampaign,
+  lastIssueSent,
   liveCampaignsNamed,
   previewText,
   RemoveCardError,
@@ -433,6 +435,58 @@ describe('previewText', () => {
   })
   it('is null without a preheader', () => {
     expect(previewText('<p>no preheader</p>')).toBeNull()
+  })
+})
+
+describe('designOf (the stamp ~/Newsletter/design.py writes)', () => {
+  it('reads the fingerprint before </body>', () => {
+    const html =
+      '<body><p>x</p><!--aisafety-cards:eyJ2IjoxfQ==-->\n<!--aisafety-design:0a1b2c3d4e5f-->\n</body>'
+    expect(designOf(html)).toBe('0a1b2c3d4e5f')
+  })
+  it('is null for an email built before the stamp, or a malformed one', () => {
+    expect(designOf('<body><p>x</p></body>')).toBeNull()
+    expect(designOf('<!--aisafety-design:XYZ-->')).toBeNull()
+  })
+})
+
+describe('lastIssueSent', () => {
+  const c = (id: string, name: string, status: string, sent = '0') => ({
+    id,
+    name,
+    status,
+    send_amt: sent,
+  })
+  const campaigns = [
+    c('300', 'Events · Week 47, 2026', '0'),
+    c('290', 'Training · Week 46, 2026', '5', '3100'),
+    c('285', 'Events · Week 46, 2026 · wave 2/2', '1'),
+    c('284', 'Events · Week 46, 2026 · wave 1/2', '5', '1500'),
+    c('270', 'Events · Week 45, 2026', '5', '3000'),
+    c('260', 'Funding · Issue #26, 2026', '5', '850'),
+  ]
+  it('names the newest issue that reached readers in the same newsletter, without its wave', () => {
+    expect(lastIssueSent(campaigns, 'Events · Week 47, 2026', '6')).toBe(
+      'Events · Week 46, 2026'
+    )
+    expect(lastIssueSent(campaigns, 'Training · Week 47, 2026', '7')).toBe(
+      'Training · Week 46, 2026'
+    )
+  })
+  it('skips the draft’s own issue (a wave still to go) and sends that never started', () => {
+    expect(lastIssueSent(campaigns, 'Events · Week 46, 2026', '6')).toBe(
+      'Events · Week 45, 2026'
+    )
+    expect(
+      lastIssueSent(
+        [c('9', 'Funding · Issue #27, 2026', '1')],
+        'Funding · Issue #28, 2026',
+        '8'
+      )
+    ).toBeNull()
+  })
+  it('is null on a test list', () => {
+    expect(lastIssueSent(campaigns, 'Events · Week 47, 2026', '5')).toBeNull()
   })
 })
 
@@ -932,6 +986,28 @@ describe('funding cards drawn by the site', () => {
     ).toEqual([
       '“Corrigibility Research Fund” – Accepting applications: “Applications close 31 Oct 2026” (31 October 2026 has passed)',
     ])
+  })
+})
+
+describe('contentChecks size limit', () => {
+  const oversize = (name: string) =>
+    contentChecks({
+      name,
+      listId: '6',
+      subject: 'Week 46, 2026',
+      html: `<p>${'a'.repeat(110 * 1024)}</p> %UNSUBSCRIBELINK% %SENDER-INFO-SINGLELINE%`,
+      text: '%UNSUBSCRIBELINK% %SENDER-INFO-SINGLELINE%',
+      fromEmail: 'events@news.aisafety.com',
+      replyTo: null,
+      now: new Date('2026-11-12T12:00:00Z'),
+    }).blocks.filter(b => b.includes('KB limit'))
+
+  it('blocks an email over the limit', () => {
+    expect(oversize('Events · Week 47, 2026')).toHaveLength(1)
+  })
+
+  it('lets the one trial issue through (12 November 2026)', () => {
+    expect(oversize('Events · Week 46, 2026')).toEqual([])
   })
 })
 

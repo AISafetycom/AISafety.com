@@ -16,6 +16,7 @@ import type {
 import { fillFirst, neededLeft } from '@/lib/admin/queue-needed'
 import { replyWho } from '@/lib/admin/queue-also'
 import { backSince, laterSince, laterUntil } from '@/lib/admin/queue-later'
+import { URL_KEYS, listingLink } from '@/lib/admin/queue-link'
 import { LEFT_OUT_KEY, withLeftOut } from '@/lib/admin/queue-left-out'
 import {
   flagRevisedNote,
@@ -23,7 +24,11 @@ import {
   type FlagUpdate,
 } from '@/lib/admin/queue-flag'
 import { rejectReplyFor, shownDeclineChip } from '@/lib/admin/queue-decline'
-import { reopeningLabel, type Reopening } from '@/lib/admin/queue-reopen'
+import {
+  afterUndoFailed,
+  reopeningLabel,
+  type Reopening,
+} from '@/lib/admin/queue-reopen'
 import { discordAppLink, replyToCopy } from '@/lib/admin/queue-discord'
 import {
   alreadyRepliedOf,
@@ -444,7 +449,10 @@ function foundLink(text: string): string | null {
  *  source instead of Airtable"): the post Comb found the listing in, or
  *  the email or Discord message a request arrived in. A link to Airtable
  *  is not a source, so a Broom flag, or a Comb find with no post link,
- *  has none. */
+ *  has none. A form submission's link is its record in Airtable, so Q
+ *  opens the email the form arrived as instead, once the Mac has found it
+ *  (Bryce, 12 Nov 2026: "Q should open the original email with the
+ *  form"). */
 function sourceHref(item: QueueItem): string | null {
   const found =
     item.source === 'Comb' && item.sourceExcerpt
@@ -452,7 +460,8 @@ function sourceHref(item: QueueItem): string | null {
       : null
   if (found) return found
   const link = item.sourceLink
-  return link && hostOf(link) && !onHost(link, 'airtable.com') ? link : null
+  if (link && hostOf(link) && !onHost(link, 'airtable.com')) return link
+  return item.emailLink ?? null
 }
 
 function ago(iso: string | null): string {
@@ -767,33 +776,7 @@ function stashImage(key: string, stash: ImageStash): void {
 }
 
 const NAME_KEYS = /\b(name|title)\b|^organi[sz]ation$/i
-const URL_KEYS = /^(url|website|link|join link|apply link|application link)$/i
 const DESC_KEYS = /description/i
-
-/** The listing's own link: the row's, else the first link-like field of
- *  the record as read live (or as proposed). */
-function listingLink(
-  item: QueueItem,
-  fields: Record<string, unknown> | null | undefined,
-  overrides: Record<string, unknown> = {}
-): string | null {
-  // A Change that moves the listing's link (a rename, a new domain) means
-  // the NEW address, as the page shows it on the card – Bryce, 25 Sept 2026,
-  // Atlas Computing → Atlas Ignota: "S is going to the old link". So the
-  // proposed value and any edit typed on the page win over the stored one.
-  for (const [k, v] of Object.entries(overrides)) {
-    if (URL_KEYS.test(k) && typeof v === 'string' && /^https?:\/\//.test(v)) {
-      return v
-    }
-  }
-  if (item.url) return item.url
-  for (const [k, v] of Object.entries(fields ?? item.fields ?? {})) {
-    if (URL_KEYS.test(k) && typeof v === 'string' && /^https?:\/\//.test(v)) {
-      return v
-    }
-  }
-  return null
-}
 
 function linkLabel(url: string): string {
   if (hostOf(url) === 'mail.google.com') return 'Open email'
@@ -1416,6 +1399,8 @@ interface Toast {
     action: Action
     extra: Record<string, unknown>
     inPlace?: boolean
+    /** The button's word when it is not a plain Retry. */
+    label?: string
   }
   /** A Discord reply put on the clipboard with the decision. */
   copied?: string
@@ -3452,13 +3437,23 @@ export default function QueueAdmin({
                 : { action, extra, inPlace: opts.inPlace },
           })
         } else if (action === 'undo') {
+          // An Undo with nothing to take back never works a second time:
+          // a declined addition whose record is gone gets Reopen instead
+          // of Retry (Bryce, 12 Nov 2026: the toast said "Reopen brings it
+          // back" beside a Retry that could only fail again).
+          const next = afterUndoFailed(item, status)
           setToast({
             item,
             no: false,
             state: 'failed',
             text: `Undo failed · ${message}`,
             sub: 'The decision still stands',
-            retry: { action, extra },
+            retry:
+              next === 'reopen'
+                ? { action: 'reopen', extra: {}, label: 'Reopen' }
+                : next === 'retry'
+                  ? { action, extra }
+                  : undefined,
           })
         } else if (action === 'reopen') {
           setToast({
@@ -4621,7 +4616,7 @@ export default function QueueAdmin({
                   }
                 >
                   <Icon src={ICON.undo} size={12} className={styles.undoIcon} />
-                  Retry
+                  {toastRetry.label ?? 'Retry'}
                 </button>
               )}
               <button
@@ -5945,6 +5940,20 @@ function Detail({
             )}
             <span className={styles.when}>{ago(item.createdAt)}</span>
             <div className={styles.links}>
+              {/* A form's own link is its record in Airtable; the email it
+                  arrived as sits beside it, and is what Q opens. */}
+              {item.emailLink && sourceHref(item) === item.emailLink && (
+                <a
+                  href={item.emailLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={styles.withIcon}
+                >
+                  <Icon src={linkIcon(item.emailLink)} size={12} />
+                  {linkLabel(item.emailLink)}
+                  <kbd>Q</kbd>
+                </a>
+              )}
               {item.sourceLink && (
                 <a
                   href={item.sourceLink}

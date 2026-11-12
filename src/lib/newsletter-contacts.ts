@@ -169,6 +169,35 @@ export async function setListStatus(
   })
 }
 
+/** A signup needs no second click (since 12 November 2026): once a form has
+ *  taken the address, subscribe the reader to each of its lists that the
+ *  form left unconfirmed. Only an unconfirmed membership ('0') is changed:
+ *  one that is unsubscribed or bounced stays as it is, and so does a list
+ *  the form hasn't written yet, which comes back in `waiting` for another
+ *  try. Checked live on 12 November 2026: the change keeps the membership's
+ *  form number, so a site signup stays recognizable. Outside the live site
+ *  nothing is written (setListStatus logs instead), so `waiting` there
+ *  names every list still unconfirmed. */
+export async function subscribeUnconfirmed(
+  email: string,
+  lists: string[],
+  known: Contact | null = null
+): Promise<{ contact: Contact | null; waiting: string[] }> {
+  const contact = known ?? (await findContact(email))
+  if (!contact) return { contact: null, waiting: lists }
+  const statuses = await readStatuses(contact.id)
+  const waiting: string[] = []
+  for (const list of lists) {
+    const status = statuses[list]
+    if (status === undefined) waiting.push(list)
+    else if (status === '0') {
+      await setListStatus(contact.id, list, 1)
+      if (!liveWrites()) waiting.push(list)
+    }
+  }
+  return { contact, waiting }
+}
+
 /** Store the contact's settings key in their hidden field, so the next
  *  issue's link carries it. Writing it again only rewrites the same value
  *  (checked live, 26 October 2026: a second write updates the one value). */
