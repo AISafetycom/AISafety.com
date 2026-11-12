@@ -14,6 +14,13 @@
   text-align: center;
 }
 
+/* A whole-pixel line height (paragraph-small's is 24.75px), so the field
+   below always starts on a whole pixel. On a half pixel the submit icon's
+   1px lines smear across two pixel rows and look thick and soft. */
+.heading {
+  line-height: 24px;
+}
+
 .field {
   position: relative;
   z-index: 1;

@@ -93,7 +93,7 @@
   --green-800: color-mix(in srgb, var(--green-300) 12%, transparent);
 
   /* Transitions */
-  --hover-transition: 0.1s ease-in-out;
+  --hover-transition: 0.15s ease-in-out;
 
   /* Shadows */
   --shadow-light: 0 4px 12px color-mix(in srgb, var(--black) 10%, transparent);

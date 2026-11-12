@@ -511,7 +511,7 @@ export default function Assistant() {
             {hasMessages && (
               <Button
                 variant="clear"
-                size="small"
+                size="xs"
                 icon="/images/icons/trash.svg"
                 iconPosition="only"
                 onClick={handleClear}
@@ -520,7 +520,7 @@ export default function Assistant() {
             )}
             <Button
               variant="clear"
-              size="small"
+              size="xs"
               icon={
                 isExpanded
                   ? '/images/icons/shrink.svg'
@@ -533,7 +533,7 @@ export default function Assistant() {
             />
             <Button
               variant="clear"
-              size="small"
+              size="xs"
               icon="/images/icons/x.svg"
               iconPosition="only"
               onClick={handleClose}

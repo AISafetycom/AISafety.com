@@ -60,7 +60,7 @@ const Composer = forwardRef<HTMLTextAreaElement, Props>(function Composer(
           <Button
             variant="teal-alt"
             size="small"
-            icon="/images/icons/stop.svg"
+            icon="/images/icons/stop-large.svg"
             iconPosition="only"
             className={styles.composerButton}
             onClick={onStop}
@@ -70,7 +70,7 @@ const Composer = forwardRef<HTMLTextAreaElement, Props>(function Composer(
         ) : (
           <Button
             size="small"
-            icon="/images/icons/arrow-up.svg"
+            icon="/images/icons/arrow-up-large.svg"
             iconPosition="only"
             className={styles.composerButton}
             disabled={disabled || value.trim().length === 0}

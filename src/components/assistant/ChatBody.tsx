@@ -1030,7 +1030,7 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
                 <Button
                   variant="clear"
                   size="xs"
-                  icon="/images/icons/pencil-small.svg"
+                  icon="/images/icons/pencil.svg"
                   iconPosition="only"
                   className={styles.editButton}
                   onClick={() => handleEdit(m.id)}
@@ -1080,7 +1080,7 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
                   <div className={styles.feedbackRow}>
                     <Button
                       variant="clear"
-                      size="small"
+                      size="xs"
                       icon={
                         m.rating === 'up'
                           ? '/images/icons/thumbs-up-filled.svg'
@@ -1095,7 +1095,7 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
                     />
                     <Button
                       variant="clear"
-                      size="small"
+                      size="xs"
                       icon={
                         m.rating === 'down'
                           ? '/images/icons/thumbs-down-filled.svg'
