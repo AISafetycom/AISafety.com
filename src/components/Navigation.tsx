@@ -433,7 +433,9 @@ export default function Navigation({
               variant="clear"
               icon="/images/icons/search-large.svg"
               iconPosition="only"
-              aria-label="Search"
+              aria-label="Search this page or site-wide"
+              // Below, the long label would run past the right edge of the page.
+              tooltipPosition="left"
               className={styles['nav-search-button']}
             />
           </nav>

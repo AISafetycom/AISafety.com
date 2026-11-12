@@ -516,7 +516,6 @@ export default function Assistant() {
                 iconPosition="only"
                 onClick={handleClear}
                 aria-label="Clear conversation"
-                title="Clear conversation"
               />
             )}
             <Button
@@ -530,8 +529,7 @@ export default function Assistant() {
               iconPosition="only"
               className={styles.expandButton}
               onClick={() => setIsExpanded(v => !v)}
-              aria-label={isExpanded ? 'Shrink assistant' : 'Expand assistant'}
-              title={isExpanded ? 'Shrink' : 'Expand'}
+              aria-label={isExpanded ? 'Shrink chatbot' : 'Expand chatbot'}
             />
             <Button
               variant="clear"
@@ -539,7 +537,9 @@ export default function Assistant() {
               icon="/images/icons/x.svg"
               iconPosition="only"
               onClick={handleClose}
-              aria-label="Close assistant"
+              aria-label="Close chatbot"
+              // Below, it would run past the panel's right edge.
+              tooltipPosition="left"
             />
           </div>
         </header>

@@ -876,37 +876,6 @@
   margin-top: 2px;
 }
 
-/* The thumbs are <Button>s; this anchors their label tooltip. */
-.feedbackButton {
-  position: relative;
-}
-
-/* Label tooltip. A native `title` has a ~1s browser delay; this shows in one
-   hover-transition instead. Text comes from the button's aria-label, so the
-   string isn't duplicated. */
-.feedbackButton::after {
-  content: attr(aria-label);
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 0;
-  z-index: 1;
-  padding: 4px 8px;
-  background-color: var(--teal-900);
-  border: 1px solid var(--teal-800);
-  border-radius: 6px;
-  color: var(--white);
-  font-size: 11px;
-  line-height: 1.3;
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--hover-transition);
-}
-
-.feedbackButton:hover::after {
-  opacity: 1;
-}
-
 /* Selected state — the chosen thumb stays highlighted after the visitor
    rates the reply. Two classes so it beats the :hover colour and the accent
    persists while hovering the active button. */

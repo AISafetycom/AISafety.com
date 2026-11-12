@@ -1,5 +1,6 @@
 import type { ComponentPropsWithoutRef, ElementType, ReactNode } from 'react'
 import Icon from '@/components/Icon'
+import Tooltip, { tooltipAnchor, type TooltipPosition } from './Tooltip'
 import styles from './Button.module.css'
 
 /* The site's button, built from the Figma "Button" component set
@@ -33,14 +34,23 @@ type Look =
       icon?: string
       /** Where the icon sits. Default 'trailing'. */
       iconPosition?: 'preceding' | 'trailing'
+      tooltip?: never
+      tooltipPosition?: never
     }
   /** Just an icon, in a circle: a 24px icon at the default size, 16px at
-      small, 12px at xs. Needs an aria-label so screen readers can name it. The xs size (32px) exists only for the clear style. */
+      small, 12px at xs. Needs an aria-label so screen readers can name it,
+      and shows that label as a <Tooltip> on hover and keyboard focus. The
+      xs size (32px) exists only for the clear style. */
   | ({
       children?: never
       icon: string
       iconPosition: 'only'
       'aria-label': string
+      /** Tooltip text, if it should differ from the aria-label. false turns
+          the tooltip off. */
+      tooltip?: string | false
+      /** Which side the tooltip appears on. Default 'below'. */
+      tooltipPosition?: TooltipPosition
     } & ({ variant?: Variant; size?: Size } | { variant: 'clear'; size: 'xs' }))
 
 export type ButtonProps<C extends ElementType = 'button'> = Look & {
@@ -75,17 +85,24 @@ export default function Button<C extends ElementType = 'button'>(
     iconPosition = 'trailing',
     className = '',
     loading = false,
+    tooltip,
+    tooltipPosition = 'below',
     ...rest
   } = props
   const Component: ElementType = as ?? 'button'
 
   const iconOnly = iconPosition === 'only'
+  const tooltipText =
+    iconOnly && tooltip !== false
+      ? (tooltip ?? (props as { 'aria-label': string })['aria-label'])
+      : ''
   const classes = [
     styles.button,
     VARIANT_CLASS[variant],
     styles[size],
     iconOnly ? styles.iconOnly : '',
     loading ? styles.loading : '',
+    tooltipText ? tooltipAnchor : '',
     className,
   ]
     .filter(Boolean)
@@ -108,7 +125,16 @@ export default function Button<C extends ElementType = 'button'>(
   ) : null
 
   const content = iconOnly ? (
-    iconEl
+    <>
+      {iconEl}
+      {tooltipText && (
+        <Tooltip
+          text={tooltipText}
+          size={size === 'xs' ? 'small' : 'default'}
+          position={tooltipPosition}
+        />
+      )}
+    </>
   ) : (
     <>
       {iconPosition === 'preceding' && iconEl}
