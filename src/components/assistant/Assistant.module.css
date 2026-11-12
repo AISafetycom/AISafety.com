@@ -515,9 +515,12 @@
 
 .composerInput {
   flex: 1;
-  min-height: 36px;
+  /* One line is exactly 40px, the send button's height, so the text and the
+     button share a center line (9 + 22.4 line + 9, rounded by the auto-size
+     code in Composer.tsx). */
+  min-height: 40px;
   max-height: 120px;
-  padding: 8px 8px 8px 0;
+  padding: 9px 8px 9px 0;
   background-color: transparent;
   border: none;
   color: var(--white);

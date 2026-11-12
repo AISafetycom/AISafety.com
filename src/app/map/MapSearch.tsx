@@ -1,7 +1,7 @@
 'use client'
 
 import Image from 'next/image'
-import Icon from '@/components/Icon'
+import Button from '@/components/Button'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent, MutableRefObject } from 'react'
 import SearchBar from '@/components/SearchBar'
@@ -295,19 +295,14 @@ export default function MapSearch({
   if (!expanded) {
     return (
       <div ref={rootRef} className={className}>
-        <button
-          type="button"
-          className={`${styles['map-search-toggle']} border-plus-fill`}
-          title="Search the map"
+        <Button
+          variant="teal"
+          icon="/images/icons/magnifying-glass-large.svg"
+          iconPosition="only"
           aria-label="Search the map"
+          className={styles['map-search-toggle']}
           onClick={() => openSearch('button')}
-        >
-          <Icon
-            src="/images/icons/magnifying-glass.svg"
-            size={16}
-            className="color-white"
-          />
-        </button>
+        />
       </div>
     )
   }

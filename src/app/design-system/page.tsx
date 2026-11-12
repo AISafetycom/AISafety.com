@@ -57,41 +57,39 @@ export default function DesignSystemPage() {
                     >
                       Button
                     </Button>
-                    <Button
-                      variant={variant}
-                      size={size}
-                      icon={
-                        size === 'default'
-                          ? '/images/icons/arrow-right-large.svg'
-                          : ARROW
-                      }
-                      iconPosition="only"
-                      aria-label="Next"
-                      disabled={disabled}
-                    />
+                    {/* Icon-only buttons come in small and xs only. */}
+                    {size === 'small' && (
+                      <Button
+                        variant={variant}
+                        size="small"
+                        icon="/images/icons/arrow-right-large.svg"
+                        iconPosition="only"
+                        aria-label="Next"
+                        disabled={disabled}
+                      />
+                    )}
                   </div>
                 ))}
               </div>
             ))}
-            {variant === 'clear' && (
-              <div className="flex items-center gap-24px">
-                <Button
-                  variant="clear"
-                  size="xs"
-                  icon="/images/icons/arrow-up-right-small.svg"
-                  iconPosition="only"
-                  aria-label="Open"
-                />
-                <Button
-                  variant="clear"
-                  size="xs"
-                  icon="/images/icons/arrow-up-right-small.svg"
-                  iconPosition="only"
-                  aria-label="Open"
-                  disabled
-                />
-              </div>
-            )}
+            {/* xs (32px) is icon-only. */}
+            <div className="flex items-center gap-24px">
+              <Button
+                variant={variant}
+                size="xs"
+                icon="/images/icons/arrow-up-right.svg"
+                iconPosition="only"
+                aria-label="Open"
+              />
+              <Button
+                variant={variant}
+                size="xs"
+                icon="/images/icons/arrow-up-right.svg"
+                iconPosition="only"
+                aria-label="Open"
+                disabled
+              />
+            </div>
           </section>
         ))}
         <section className="flex flex-col gap-16px">
@@ -107,8 +105,8 @@ export default function DesignSystemPage() {
       <h2 className="padding-top-40px padding-bottom-12px">Tooltips</h2>
       <p className="paragraph-small color-teal-grey-300 padding-bottom-24px">
         Every icon-only button shows its label as a tooltip. Hover or tab to
-        each one. Small tooltips go with xs buttons, default tooltips with
-        everything bigger.
+        each one. Small tooltips go with xs buttons, default tooltips with small
+        (40px) ones.
       </p>
       <div className="flex flex-col gap-40px">
         {(['xs', 'small'] as const).map(size => (
@@ -121,7 +119,7 @@ export default function DesignSystemPage() {
                     key={position}
                     variant="clear"
                     size="xs"
-                    icon="/images/icons/arrow-up-right-small.svg"
+                    icon="/images/icons/arrow-up-right.svg"
                     iconPosition="only"
                     aria-label={`Tooltip ${position}`}
                     tooltipPosition={position}
@@ -131,7 +129,7 @@ export default function DesignSystemPage() {
                     key={position}
                     variant="clear"
                     size="small"
-                    icon="/images/icons/search.svg"
+                    icon="/images/icons/search-large.svg"
                     iconPosition="only"
                     aria-label={`Tooltip ${position}`}
                     tooltipPosition={position}

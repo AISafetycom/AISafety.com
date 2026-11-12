@@ -8,7 +8,8 @@ import styles from './Button.module.css'
    mirror the Figma properties so design and code use the same words:
 
      Style          → variant        white | teal | teal-alt | clear | clear-border
-     Small          → size           default | small | xs (xs: clear, icon only)
+     Small          → size           default | small | xs
+                                     (icon only: small or xs; xs: icon only)
      Icon position  → iconPosition   preceding | trailing | only
      State          → nothing to pass: hover, focus and disabled come from the
                       browser (:hover, :focus-visible, the `disabled` attribute)
@@ -37,11 +38,12 @@ type Look =
       tooltip?: never
       tooltipPosition?: never
     }
-  /** Just an icon, in a circle: a 24px icon at the default size, 16px at
-      small, 12px at xs. Needs an aria-label so screen readers can name it,
-      and shows that label as a <Tooltip> on hover and keyboard focus. The
-      xs size (32px) exists only for the clear style. */
-  | ({
+  /** Just an icon, in a circle: small (40px, the default here) with a 24px
+      icon, or xs (32px) with a 16px icon. There is no
+      48px icon-only button. Needs an aria-label so screen readers can name
+      it, and shows that label as a <Tooltip> on hover and keyboard focus
+      (not while disabled). */
+  | {
       children?: never
       icon: string
       iconPosition: 'only'
@@ -51,13 +53,16 @@ type Look =
       tooltip?: string | false
       /** Which side the tooltip appears on. Default 'below'. */
       tooltipPosition?: TooltipPosition
-    } & ({ variant?: Variant; size?: Size } | { variant: 'clear'; size: 'xs' }))
+      variant?: Variant
+      size?: 'small' | 'xs'
+    }
 
 export type ButtonProps<C extends ElementType = 'button'> = Look & {
   /** The element or component to render. Default 'button'. */
   as?: C
-  /** Spins the repeat icon in place of the icon while something is on its
-      way (a form sending, say). The button keeps its normal colors. */
+  /** Spins the repeat icon (at the button's icon size) in place of the
+      icon while something is on its way (a form sending, say). The button
+      keeps its normal colors. */
   loading?: boolean
   className?: string
 } & Omit<
@@ -80,7 +85,7 @@ export default function Button<C extends ElementType = 'button'>(
     as,
     children,
     variant = 'white',
-    size = 'default',
+    size: sizeProp,
     icon,
     iconPosition = 'trailing',
     className = '',
@@ -92,8 +97,11 @@ export default function Button<C extends ElementType = 'button'>(
   const Component: ElementType = as ?? 'button'
 
   const iconOnly = iconPosition === 'only'
+  const size = sizeProp ?? (iconOnly ? 'small' : 'default')
+  // No tooltip on a disabled (greyed-out) button: there's nothing to do.
+  const disabled = (props as { disabled?: boolean }).disabled === true
   const tooltipText =
-    iconOnly && tooltip !== false
+    iconOnly && tooltip !== false && !disabled
       ? (tooltip ?? (props as { 'aria-label': string })['aria-label'])
       : ''
   const classes = [
@@ -108,18 +116,19 @@ export default function Button<C extends ElementType = 'button'>(
     .filter(Boolean)
     .join(' ')
 
-  // Icon-only buttons get a bigger icon: 24px at the default size, 16px at
-  // small, 12px at xs. Buttons with a label always use 16px.
-  const iconSize = size === 'xs' ? 12 : iconOnly && size === 'default' ? 24 : 16
-  // The loading circle is the repeat icon, spinning. It exists only at
-  // 16px, so loading works on label buttons and small icon-only ones.
-  if (loading && iconSize !== 16) {
-    throw new Error(
-      `Button: loading needs a ${iconSize}px repeat icon, which doesn't exist yet`
-    )
-  }
+  // Icon-only buttons: a 24px icon at small (40px), 16px at xs (32px).
+  // Buttons with a label always use 16px.
+  const iconSize = iconOnly && size === 'small' ? 24 : 16
   const iconEl = loading ? (
-    <Icon src="/images/icons/repeat.svg" size={16} className={styles.spinner} />
+    <Icon
+      src={
+        iconSize === 24
+          ? '/images/icons/repeat-large.svg'
+          : '/images/icons/repeat.svg'
+      }
+      size={iconSize}
+      className={styles.spinner}
+    />
   ) : icon ? (
     <Icon src={icon} size={iconSize} />
   ) : null

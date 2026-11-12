@@ -170,7 +170,7 @@ function ActiveCampaignSignup({
             <Button
               type="submit"
               size="small"
-              icon="/images/icons/arrow-right.svg"
+              icon="/images/icons/arrow-right-large.svg"
               iconPosition="only"
               loading={sending}
               aria-label={sending ? 'Subscribing' : 'Subscribe'}

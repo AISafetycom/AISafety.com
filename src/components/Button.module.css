@@ -81,12 +81,44 @@
   color: var(--teal-grey-400);
 }
 
-.clear:hover {
+/* Clear: on hover the 8% white fill grows out from the center. The fill is
+   a layer behind the content (::before) so it can scale without moving the
+   icon or label. */
+.clear {
+  position: relative;
+}
+.clear::before {
+  content: '';
+  position: absolute;
+  inset: -1px; /* over the 1px transparent border, to the button's edge */
+  border-radius: inherit;
   background-color: color-mix(in srgb, var(--white) 8%, transparent);
+  opacity: 0;
+  transform: scale(0.6);
+  transition:
+    opacity var(--hover-transition),
+    transform var(--hover-transition);
+  pointer-events: none;
+}
+/* Lifts the icon and label above the fill. :where() keeps this at zero
+   specificity so the tooltip's own position: absolute still wins. */
+:where(.clear > *) {
+  position: relative;
+}
+.clear:hover::before {
+  opacity: 1;
+  transform: scale(1);
+}
+.clear:disabled::before {
+  display: none;
 }
 .clear:disabled {
-  background-color: transparent;
   color: var(--teal-grey-500);
+}
+@media (prefers-reduced-motion: reduce) {
+  .clear::before {
+    transform: none;
+  }
 }
 
 .clearBorder {

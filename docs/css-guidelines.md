@@ -164,8 +164,9 @@ Use these for visibility, opacity, and cursor styles.
 Never style a button. Use the `<Button>` component (`src/components/Button.tsx`). Its options use the same names as the Figma "Button" component:
 
 - `variant`: `white` (the default), `teal`, `teal-alt`, `clear`, `clear-border`
-- `size`: `default`, `small`, or `xs` (32px, for icon-only clear buttons)
-- `icon` with `iconPosition`: `preceding`, `trailing` (the default) or `only`. Icon-only buttons need an `aria-label`.
+- `size`: `default` (48px) or `small` (40px) for buttons with a label
+- `icon` with `iconPosition`: `preceding`, `trailing` (the default) or `only`. Label buttons use a 16px icon.
+- Icon-only buttons come in `small` (40px, the default, with a 24px icon) or `xs` (32px, with a 16px icon), never 48px. They need an `aria-label`, which also shows as a tooltip on hover and focus (not while disabled).
 
 Hover, focus and disabled styles come for free. The text uses the global `.paragraph-small-bold` / `.paragraph-xs-bold` classes, so never set fonts on a button.
 
