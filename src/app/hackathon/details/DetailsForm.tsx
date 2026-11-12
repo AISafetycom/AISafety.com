@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import base from '../page.module.css'
 import { FIELDS, OTHER_MAX, SECTIONS, maxLen, type Field } from './questions'
+import Button from '@/components/Button'
 
 /** Answers by field key. Checkbox groups hold the ticked options; their
  *  free-text "Other" box is stored under `${key}Other`. */
@@ -342,9 +343,9 @@ export default function DetailsForm() {
       </div>
 
       <div className={`${base.full} margin-top-16px`}>
-        <button type="submit" className="button-primary" disabled={busy}>
+        <Button type="submit" disabled={busy}>
           {busy ? 'Submitting…' : 'Submit'}
-        </button>
+        </Button>
         {error && (
           <p className="paragraph-small color-orange-300 margin-top-16px">
             {error}

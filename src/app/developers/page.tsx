@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import Button from '@/components/Button'
 import PageHeader from '@/components/PageHeader'
 import { ENDPOINTS } from '@/lib/api/registry'
 import {
@@ -79,20 +80,21 @@ export default function DevelopersPage() {
       />
 
       <div className={styles.heroActions}>
-        <a className="button-primary" href={`${API_BASE_PATH}/openapi.json`}>
+        <Button as="a" href={`${API_BASE_PATH}/openapi.json`}>
           OpenAPI spec
-        </a>
-        <a className="button-secondary" href={API_BASE_PATH}>
+        </Button>
+        <Button as="a" variant="clear-border" href={API_BASE_PATH}>
           API index
-        </a>
-        <a
-          className="button-secondary"
+        </Button>
+        <Button
+          as="a"
+          variant="clear-border"
           href={DATA_LICENSE_URL}
           target="_blank"
           rel="noopener noreferrer"
         >
           {DATA_LICENSE}
-        </a>
+        </Button>
       </div>
       <p className={styles.baseUrl}>
         <span>Base URL</span>

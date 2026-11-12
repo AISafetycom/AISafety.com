@@ -11,6 +11,7 @@ import ChatBody, {
   type ChatBodyHandle,
   type TurnLifecycleEvent,
 } from './ChatBody'
+import Button from '@/components/Button'
 import Icon from '@/components/Icon'
 import styles from './Assistant.module.css'
 
@@ -508,37 +509,38 @@ export default function Assistant() {
           </div>
           <div className={styles.headerActions}>
             {hasMessages && (
-              <button
-                type="button"
-                className={styles.iconButton}
+              <Button
+                variant="clear"
+                size="small"
+                icon="/images/icons/trash.svg"
+                iconPosition="only"
                 onClick={handleClear}
                 aria-label="Clear conversation"
                 title="Clear conversation"
-              >
-                <Icon src="/images/icons/trash.svg" size={16} />
-              </button>
+              />
             )}
-            <button
-              type="button"
-              className={`${styles.iconButton} ${styles.expandButton}`}
+            <Button
+              variant="clear"
+              size="small"
+              icon={
+                isExpanded
+                  ? '/images/icons/shrink.svg'
+                  : '/images/icons/expand.svg'
+              }
+              iconPosition="only"
+              className={styles.expandButton}
               onClick={() => setIsExpanded(v => !v)}
               aria-label={isExpanded ? 'Shrink assistant' : 'Expand assistant'}
               title={isExpanded ? 'Shrink' : 'Expand'}
-            >
-              {isExpanded ? (
-                <Icon src="/images/icons/shrink.svg" size={16} />
-              ) : (
-                <Icon src="/images/icons/expand.svg" size={16} />
-              )}
-            </button>
-            <button
-              type="button"
-              className={styles.iconButton}
+            />
+            <Button
+              variant="clear"
+              size="small"
+              icon="/images/icons/x.svg"
+              iconPosition="only"
               onClick={handleClose}
               aria-label="Close assistant"
-            >
-              <Icon src="/images/icons/x.svg" size={16} />
-            </button>
+            />
           </div>
         </header>
 

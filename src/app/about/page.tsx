@@ -1,5 +1,6 @@
 import Image from 'next/image'
 import Link from 'next/link'
+import Button from '@/components/Button'
 import Icon from '@/components/Icon'
 import styles from './page.module.css'
 
@@ -60,14 +61,15 @@ export default function AboutPage() {
             want to hear from you.
           </p>
           <div className="padding-top-24px">
-            <a
+            <Button
+              as="a"
+              variant="clear-border"
               href="https://airtable.com/appF8XfZUGXtfi40E/pagUmmzVb8OnVvTZS/form"
               target="_blank"
               rel="noopener noreferrer"
-              className="button-secondary"
             >
               Send us an email
-            </a>
+            </Button>
           </div>
           <p className="color-teal-grey-300 padding-top-24px paragraph-small">
             Journalist? Boilerplate, logos and a press contact are on the{' '}
@@ -232,14 +234,15 @@ export default function AboutPage() {
               typically in the domains of development, design, and user
               research.
             </p>
-            <a
+            <Button
+              as="a"
+              variant="clear-border"
               href="https://discord.gg/faamWzPcv8"
               target="_blank"
               rel="noopener noreferrer"
-              className="button-secondary"
             >
               Volunteer
-            </a>
+            </Button>
           </div>
 
           <div>
@@ -255,14 +258,15 @@ export default function AboutPage() {
               always looking to make it more useful. If you&apos;ve got
               thoughts, we&apos;re listening.
             </p>
-            <a
+            <Button
+              as="a"
+              variant="clear-border"
               href="https://airtable.com/appF8XfZUGXtfi40E/pageXZp18w3Sqm1Z7/form?prefill_Page=about&hide_Page=true"
               target="_blank"
               rel="noopener noreferrer"
-              className="button-secondary"
             >
               Give us your take
-            </a>
+            </Button>
           </div>
         </div>
 
@@ -279,14 +283,15 @@ export default function AboutPage() {
             through the ‘Suggest listing’ button on each resource page, or
             suggest corrections using the button below.
           </p>
-          <a
+          <Button
+            as="a"
+            variant="clear-border"
             href="https://airtable.com/appF8XfZUGXtfi40E/pagndDvdya1DSqoxN/form"
             target="_blank"
             rel="noopener noreferrer"
-            className="button-secondary"
           >
             Suggest a correction
-          </a>
+          </Button>
         </div>
       </div>
     </div>
