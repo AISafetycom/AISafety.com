@@ -106,6 +106,10 @@ export const INTERNAL_TABLES: { tableId: string; tableName: string }[] = [
   { tableId: 'tblKm44KngUDniaDR', tableName: 'Site corrections' },
   { tableId: 'tblHxEuvRUlQ5e3KQ', tableName: 'Contact' },
   { tableId: 'tblonlKwIFJ7Aa8QN', tableName: 'Queue' },
+  // Hiring work test (private). The bot must never search these.
+  { tableId: 'tblJgUZB3KDcHN9tH', tableName: 'Work test: items' },
+  { tableId: 'tblfxDG8OTPbOps3v', tableName: 'Work test: candidates' },
+  { tableId: 'tblEIeCOw1BxUBiCG', tableName: 'Work test: answers' },
   // The /projects page was retired on 19 October 2026 (it redirects to
   // /about), so the bot no longer searches the table. A rebuilt page moves it
   // back to RESOURCE_TABLES.
