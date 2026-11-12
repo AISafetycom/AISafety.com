@@ -293,6 +293,11 @@ const READ_TIMEOUT_MS = 20_000
  *  per email (render.hoist_type), so 15 Events cards fit (~96 KB). Keep
  *  SITE_MAX_HTML_BYTES in ~/Newsletter/issue.py in step. */
 const MAX_HTML_BYTES = 96 * 1024
+/** Issues allowed over MAX_HTML_BYTES, by campaign name: a one-off trial of
+ *  sending a whole issue even though Gmail clips its bottom (Bryce, 12
+ *  November 2026: "test it out this once and then decide what we do long
+ *  term afterwards"). Every other issue is still blocked. */
+const OVERSIZE_TRIAL = new Set(['Events · Week 46, 2026'])
 /** How many campaigns one read covers (AC's page maximum). */
 export const CAMPAIGN_READ_WINDOW = 100
 
@@ -647,6 +652,10 @@ export interface DraftSummary {
   /** The inbox preview line (the email's hidden preheader), as Gmail shows it
    *  after the subject. Null when the email has none. */
   preview: string | null
+  /** The last issue sent on its list ("Week 45, 2026") when the email's
+   *  design has changed since (designChangedSince): a Send test is worth it.
+   *  Null when it hasn't, or when that can't be told. */
+  designChangedSince: string | null
   /** The email's cards by section, in their current order — what the
    *  Reorder panel edits. Null for emails built before card markers existed. */
   cards: CardGroup[] | null
@@ -1973,7 +1982,7 @@ export function contentChecks(input: {
   }
 
   const bytes = Buffer.byteLength(html.replace(MARKER_RE, ''), 'utf8')
-  if (bytes > MAX_HTML_BYTES)
+  if (bytes > MAX_HTML_BYTES && !OVERSIZE_TRIAL.has(name))
     blocks.push(
       `the email is ${Math.round(bytes / 1024)} KB, over the ${MAX_HTML_BYTES / 1024} KB limit (Gmail cuts emails off at about 102 KB) – shorten the issue`
     )
@@ -2235,13 +2244,14 @@ export async function listDrafts(): Promise<DraftSummary[]> {
           o.c.id !== c.id && o.listIds.length === 1 && o.listIds[0] === listId
       )
       .map(o => ({ id: o.c.id, name: o.c.name }))
-    const [activeContacts, checks, sent] = listId
+    const [activeContacts, checks, sent, designSince] = listId
       ? await Promise.all([
           activeContactCount(listId),
           sendChecks({ name: c.name, listId }, msg, sameList, now),
           sentOnList(campaigns, c.id, c.name, listId, null),
+          designChangedSince(campaigns, c.name, listId, msg.html ?? ''),
         ])
-      : [null, { blocks: [], warnings: [] }, []]
+      : [null, { blocks: [], warnings: [] }, [], null]
     const refusal = listId ? listRefusal(listId) : null
     const waved = listId
       ? await wavePlanFor(listId, sent, activeContacts, offset, now)
@@ -2305,6 +2315,7 @@ export async function listDrafts(): Promise<DraftSummary[]> {
       deletable: deleteRefusal(listIds) == null && wavesStillToGo(sent) == null,
       editLock,
       preview: previewText(msg.html ?? ''),
+      designChangedSince: designSince,
       cards: cardGroups(msg.html ?? ''),
       removed: removedCards(msg.html ?? ''),
     }
@@ -2368,6 +2379,71 @@ export function previewText(html: string): string | null {
   if (!m) return null
   const text = stripHtml(m[1])
   return text || null
+}
+
+const DESIGN_RE = /<!--aisafety-design:([0-9a-f]{12})-->/
+
+/** The design fingerprint the pipeline stamps on each email since 12 Nov
+ *  2026 (~/Newsletter/design.py): the same sample issue drawn by the build's
+ *  code, so it changes only when the email is drawn differently (shell,
+ *  glow, footer, card layout), never with a week's listings or words. Null
+ *  for an email without one. */
+export function designOf(html: string): string | null {
+  return DESIGN_RE.exec(html)?.[1] ?? null
+}
+
+/** The newest issue, other than `draftName`'s own, that has reached readers
+ *  in the newsletter of the real list `listId`: its name without any wave
+ *  suffix ("Events · Week 45, 2026"), or null. */
+export function lastIssueSent(
+  campaigns: Array<{
+    id: string
+    name: string
+    status: string
+    send_amt?: string | null
+  }>,
+  draftName: string,
+  listId: string
+): string | null {
+  const real = REAL_LISTS[listId]
+  if (!real) return null
+  const prefix = `${real.prefix} · `
+  const own = baseIssueName(draftName)
+  const last = campaigns
+    .filter(c => {
+      const name = baseIssueName(c.name)
+      return reachedReaders(c) && name.startsWith(prefix) && name !== own
+    })
+    .sort((a, b) => Number(b.id) - Number(a.id))[0]
+  return last ? baseIssueName(last.name) : null
+}
+
+/** The last issue sent on the draft's list ("Week 45, 2026", without the
+ *  newsletter's name) when its design differs from the draft's: then a Send
+ *  test is worth it before approving (Bryce, 12 Nov 2026). Null when the
+ *  design is the same, when either email has no fingerprint (built before
+ *  12 Nov 2026), or when that issue can't be read just now: the note is a
+ *  hint, so it never holds the page up. */
+async function designChangedSince(
+  campaigns: RawCampaign[],
+  draftName: string,
+  listId: string,
+  html: string
+): Promise<string | null> {
+  const mine = designOf(html)
+  const last = mine ? lastIssueSent(campaigns, draftName, listId) : null
+  if (!mine || !last) return null
+  try {
+    const theirs = designOf(
+      (await sentIssueHtmlIn(campaigns, last, listId)) ?? ''
+    )
+    return theirs && theirs !== mine
+      ? last.slice(`${REAL_LISTS[listId].prefix} · `.length)
+      : null
+  } catch (err) {
+    console.warn(`[newsletter] design check skipped for ${draftName}`, err)
+    return null
+  }
 }
 
 /** An HTML fragment as one line of plain text: tags dropped, the entities
@@ -3854,6 +3930,15 @@ export async function sentIssueHtml(
   const campaigns = await sharedRead('web-campaigns', 30_000, () =>
     allCampaigns({ fresh: true })
   )
+  return sentIssueHtmlIn(campaigns, name, listId)
+}
+
+/** sentIssueHtml on a campaign list already read (the approval page's). */
+async function sentIssueHtmlIn(
+  campaigns: RawCampaign[],
+  name: string,
+  listId: string
+): Promise<string | null> {
   const candidates = campaigns
     .filter(c => baseIssueName(c.name) === name && reachedReaders(c))
     .sort((a, b) => Number(b.id) - Number(a.id))

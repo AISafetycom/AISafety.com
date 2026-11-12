@@ -2,8 +2,11 @@
   Newsletter signups through ActiveCampaign: the signup boxes on /events,
   /training and /funding (and their past issues pages, /newsletter/<key>)
   post to /api/subscribe, which hands the address to the list's
-  double opt-in form. ActiveCampaign then emails the reader a confirmation
-  link, and only a confirmed reader joins the list.
+  double opt-in form. ActiveCampaign then emails the reader, and
+  /api/subscribe subscribes them at once (since 12 November 2026; before
+  that only a reader who pressed the email's link joined the list, and the
+  link still works that way whenever the site doesn't subscribe them
+  itself).
 
   This module is the transport: which form each newsletter uses, how the
   address is checked, and the one request to ActiveCampaign's form endpoint
@@ -166,7 +169,7 @@ export function normalizeEmail(raw: unknown): string | null {
 // ─── ActiveCampaign's answer ────────────────────────────────────────────────
 
 /** What ActiveCampaign's answer means.
- *  - subscribed: a clear thank-you; the confirmation email is on its way.
+ *  - subscribed: a clear thank-you; the form's email is on its way.
  *  - already:    the address is already confirmed on the list, so the form
  *                skips the confirmation and sends the reader straight to its
  *                "you're subscribed" page (checked live, 8 October 2026);
@@ -278,7 +281,7 @@ export function logSnippet(text: string, email: string, max = 200): string {
 // ─── The request ────────────────────────────────────────────────────────────
 
 /** How one signup went.
- *  - subscribed:    ActiveCampaign took it; the confirmation email is sent.
+ *  - subscribed:    ActiveCampaign took it; the form's email is sent.
  *  - already_subscribed: the address is already confirmed on the list;
  *                   nothing was sent and nothing changed.
  *  - invalid_email: ActiveCampaign said the address isn't valid.

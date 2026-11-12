@@ -145,6 +145,9 @@ interface Draft {
   editLock: string | null
   /** The inbox preview line (hidden preheader), as Gmail shows it. */
   preview: string | null
+  /** The last issue sent on its list ("Week 45, 2026") when the email's
+   *  design has changed since: a Send test is worth it. */
+  designChangedSince: string | null
   /** Cards by section, current order; null for drafts built before the
    *  renderer stamped card markers (no Reorder button then). */
   cards: CardGroup[] | null
@@ -1486,6 +1489,16 @@ export default function NewsletterAdmin({
                   </p>
                   <WarningItems items={draft.warnings} />
                 </div>
+              )}
+              {/* Only on the weeks the email is drawn differently from the
+                  last issue sent (Bryce, 12 Nov 2026): the preview can't show
+                  how mail apps draw a new design, a test copy can. */}
+              {draft.designChangedSince && data.canSend && testTo && (
+                <p className={`${styles.notice} ${styles.testResult}`}>
+                  The email’s design has changed since{' '}
+                  {draft.designChangedSince} went out, so a Send test is worth
+                  it before you approve.
+                </p>
               )}
               <div className={styles.actions}>
                 <button
