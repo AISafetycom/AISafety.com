@@ -11,10 +11,13 @@
     retries never flood someone's inbox and an ActiveCampaign outage never
     uses up a real reader's tries; past that the route answers as usual
     without sending again;
-  - per UTC day, across both newsletters: the owner gets one email once 100
-    signups have gone through, and above 1,000 the boxes turn signups away
-    until midnight UTC (a flood of unconfirmed contacts would otherwise eat
-    into the account's contact limit);
+  - per UTC day, across the newsletters: the owner gets one email once 100
+    signups have gone through, and from there until midnight UTC a signup is
+    only subscribed once the reader presses the button in their email (as
+    every signup was before 12 November 2026), so a bot's addresses stay
+    off the lists; above 1,000 the boxes turn signups away until midnight
+    UTC (a flood of unconfirmed contacts would otherwise eat into the
+    account's contact limit);
   - per network on the newsletters page's settings (/api/newsletter/
     settings): 60 loads and saves an hour, far more than a reader needs,
     so nobody can work through keys or hammer ActiveCampaign.
