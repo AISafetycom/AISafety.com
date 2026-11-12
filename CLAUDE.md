@@ -53,9 +53,9 @@ docs/                    css-guidelines, api + changelog, architecture notes
 
 Read `docs/css-guidelines.md` (Melissa's rules) before writing any styles. In short:
 
-- `globals.css` is the design system: variables for every color, pre-styled `h1`–`h3` and `p`, and utility classes for typography, spacing, layout, color, and buttons. Use them first. Never hardcode a hex value or add a new variable.
+- `globals.css` is the design system: variables for every color, pre-styled `h1`–`h3` and `p`, and utility classes for typography, spacing, layout and color. Buttons are the `<Button>` component (`src/components/Button.tsx`). Use them first. Never hardcode a hex value or add a new variable.
 - New classes only when utilities can't do it, in `ComponentName.module.css` or `page.module.css`. Rarely `globals.css`, and only for something truly reusable.
-- If a shared component looks wrong, fix its shared definition (for example `.button-primary`) so every instance is fixed at once. No one-off overrides.
+- If a shared component looks wrong, fix its shared definition (for example `<Button>` in `src/components/Button.tsx`) so every instance is fixed at once. No one-off overrides.
 - Diagnose before fixing. The right CSS fix is usually fewer lines, not more.
 
 ## Errors: never silently fail

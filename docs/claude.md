@@ -45,7 +45,7 @@ src/
 - **CSS variables** for all colors — never hardcode hex values
 - **Base HTML elements** (`h1`–`h3`, `p`) are pre-styled — don't write heading/typography CSS
 - **Utility classes** for typography (`paragraph-small`, `paragraph-xs`), colors (`color-teal-grey-300`), spacing (`padding-bottom-24px`, `margin-top-16px`), layout (`flex`, `gap-16px`, `width-6-col`, `container-default`), display (`hide-mobile`, `cursor-pointer`), and shadows (`drop-shadow`)
-- **Pre-built components**: `.button-primary` / `.button-secondary` for buttons, `.text-field` / `.checkbox` for forms
+- **Pre-built components**: the `<Button>` component for buttons, `.text-field` / `.checkbox` for forms
 - **New classes only when utility classes can't solve the problem** — put them in `ComponentName.module.css` (one component), `page.module.css` (one page), or rarely `globals.css` (truly reusable)
 - **Never create one-off override classes** — if a component style needs adjusting for a common pattern (e.g. buttons with icons), fix it at the design system level in `globals.css` so all future instances work automatically
 - **Media queries** are handled in `globals.css` — only write custom breakpoint styles for explicit overrides
@@ -87,7 +87,7 @@ src/
 
 ### HTML Consistency
 
-- **Use the same HTML tag for shared classes.** When a utility class like `button-primary` is used across the site, prefer using the same element type (e.g. always `<a>`/`<Link>`) to avoid browser-default style differences (borders, padding, etc.).
+- **Use the same HTML tag for shared classes.** When a utility class like `text-field` is used across the site, prefer using the same element type (e.g. always `<a>`/`<Link>`) to avoid browser-default style differences (borders, padding, etc.).
 
 ### CSS Details
 
@@ -128,7 +128,7 @@ export default function Component({ prop }: Props) {
 // Use globals.css utility classes — only add custom classes when utilities can't solve it
 <div className="flex items-center gap-16px padding-bottom-24px">
 <p className="paragraph-small color-teal-grey-300">Muted small text</p>
-<a className="button-primary">Get Started</a>
+<Button as={Link} href="/events">Get Started</Button>
 ```
 
 ### Type Safety

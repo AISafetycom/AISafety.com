@@ -1,6 +1,7 @@
 'use client'
 
 import Image from 'next/image'
+import Button from './Button'
 import Icon from './Icon'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -427,11 +428,14 @@ export default function Navigation({
               )}
             </div>
 
-            <SearchButton
-              className={`${styles['nav-search-button']} flex items-center justify-center color-white`}
-            >
-              <Icon src="/images/icons/search-large.svg" size={24} />
-            </SearchButton>
+            <Button
+              as={SearchButton}
+              variant="clear"
+              icon="/images/icons/search-large.svg"
+              iconPosition="only"
+              aria-label="Search"
+              className={styles['nav-search-button']}
+            />
           </nav>
 
           <button

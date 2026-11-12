@@ -1,8 +1,8 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import Icon from '@/components/Icon'
 import { useState, useMemo, useRef, useLayoutEffect, useCallback } from 'react'
+import Button from '@/components/Button'
 import FilterGroup from '@/components/FilterGroup'
 import FilterSidebar from '@/components/FilterSidebar'
 import ContributeButtons from '@/components/ContributeButtons'
@@ -227,19 +227,16 @@ export default function MapClient({
       <div className="padding-bottom-24px">
         <div ref={mapWrapperRef} className={styles['map-wrapper']}>
           <D3Map orgs={mapOrgs} suggestEntryUrl={suggestEntryLink} />
-          <button
+          <Button
             onClick={() => {
               trackCardsButtonClick('Map', 'View cards')
               scrollToCards()
             }}
-            className={`button-primary ${styles['scroll-button']}`}
+            className={styles['scroll-button']}
+            icon="/images/icons/arrow-down.svg"
           >
             View cards
-            <Icon
-              src="/images/icons/arrow-down.svg"
-              className="color-teal-400"
-            />
-          </button>
+          </Button>
         </div>
       </div>
 

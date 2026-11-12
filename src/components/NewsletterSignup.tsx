@@ -1,7 +1,7 @@
 'use client'
 
 import { useId, useState } from 'react'
-import Icon from '@/components/Icon'
+import Button from '@/components/Button'
 import {
   trackNewsletterSignup,
   trackNewsletterSignupError,
@@ -164,24 +164,18 @@ function ActiveCampaignSignup({
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? statusId : undefined}
             />
-            <button
+            {/* A loading circle while the signup is on its way, so a
+                press of Enter visibly did something (Bryce, 8 Oct 2026).
+                handleSubmit ignores repeat presses while it sends. */}
+            <Button
               type="submit"
-              className={styles.submit}
+              size="small"
+              icon="/images/icons/arrow-right.svg"
+              iconPosition="only"
+              loading={sending}
               aria-label={sending ? 'Subscribing' : 'Subscribe'}
-              disabled={sending}
-            >
-              {/* A loading circle while the signup is on its way, so a
-                  press of Enter visibly did something (Bryce, 8 Oct 2026). */}
-              {sending ? (
-                <span className={styles.spinner} aria-hidden="true" />
-              ) : (
-                <Icon
-                  src="/images/icons/arrow-right.svg"
-                  size={16}
-                  className="color-white"
-                />
-              )}
-            </button>
+              className={`drop-shadow ${styles.submit}`}
+            />
           </label>
         )}
         {/* Always rendered, so screen readers announce what lands in it:

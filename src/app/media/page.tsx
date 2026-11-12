@@ -20,6 +20,7 @@ import {
 } from './content'
 import { NEWS } from './news'
 import styles from './page.module.css'
+import Button from '@/components/Button'
 
 export const metadata: Metadata = {
   title: 'Press and media – AISafety.com',
@@ -172,13 +173,14 @@ export default async function MediaPage() {
             </PressLink>
             .
           </p>
-          <JumpLink
+          <Button
+            as={JumpLink}
+            variant="clear-border"
             targetId="boilerplate"
             label="Jumped to the boilerplate"
-            className="button-secondary"
           >
             Start with the boilerplate
-          </JumpLink>
+          </Button>
         </div>
         <div className={styles.entryCard}>
           <p className="color-white paragraph-default-bold">
@@ -189,13 +191,14 @@ export default async function MediaPage() {
             explainers, open data, and the organizations we recommend for
             questions about AI risk itself.
           </p>
-          <JumpLink
+          <Button
+            as={JumpLink}
+            variant="clear-border"
             targetId="reporter-resources"
             label="Jumped to the reporter resources"
-            className="button-secondary"
           >
             Reporter resources
-          </JumpLink>
+          </Button>
         </div>
       </div>
 
@@ -575,15 +578,15 @@ export default async function MediaPage() {
         </div>
 
         <div className={styles.kitRow}>
-          <PressLink
+          <Button
+            as={PressLink}
             href={PRESS_KIT_ZIP}
             action="download"
             label="Downloaded press kit"
-            className="button-primary"
           >
             Download everything (zip
             {kit ? `, ${(kit.zipBytes / 1_000_000).toFixed(1)} MB` : ''})
-          </PressLink>
+          </Button>
           <span className="paragraph-xs color-teal-grey-300">
             All logos and screenshots above, in one file.
           </span>

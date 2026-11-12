@@ -3,6 +3,7 @@ import Image from 'next/image'
 import FooterLink from './FooterLink'
 import UpButton from './UpButton'
 import styles from './Footer.module.css'
+import Button from '@/components/Button'
 
 export default function Footer() {
   return (
@@ -28,9 +29,9 @@ export default function Footer() {
                 efforts through a centralized, comprehensive, and up-to-date
                 resource hub.
               </p>
-              <Link href="/about" className="button-secondary">
+              <Button as={Link} variant="clear-border" href="/about">
                 Learn more about us
-              </Link>
+              </Button>
             </div>
           </div>
 
