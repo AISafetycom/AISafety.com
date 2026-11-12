@@ -3,6 +3,7 @@
 import { Fragment, ReactNode, useMemo } from 'react'
 import type { CitationRef } from '@/lib/assistant/types'
 import { SUGGEST_TYPES } from '@/lib/assistant/constants'
+import { cleanCardNote } from '@/lib/assistant/card-note'
 import CitationCard from './CitationCard'
 import { cardTypePage } from './cardFallback'
 import Icon from '@/components/Icon'
@@ -127,17 +128,10 @@ interface CardSpec {
   note?: string
 }
 
-/** Card notes render as plain text, so a Markdown link the model smuggled
- *  into one (e.g. "find it on [Communities](/communities)") would show raw.
- *  Keep the link's label, drop its destination. */
-export function flattenNoteLinks(note: string): string {
-  return note.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-}
-
 function parseCardLine(line: string): CardSpec | null {
   const m = CARD_LINE.exec(line)
   if (!m) return null
-  const note = m[2] ? flattenNoteLinks(m[2]).trim() : ''
+  const note = m[2] ? cleanCardNote(m[2]) : ''
   return { id: normaliseListingId(m[1]), note: note || undefined }
 }
 
