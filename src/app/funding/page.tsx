@@ -43,7 +43,7 @@ export default async function FundingPage() {
         }
       />
 
-      <div className="flex flex-wrap gap-56px padding-bottom-80px">
+      <ul role="list" className="flex flex-wrap gap-56px padding-bottom-80px">
         {featured.map((funder, i) => (
           <FeaturedCard
             key={funder.id}
@@ -62,7 +62,7 @@ export default async function FundingPage() {
             count={featured.length}
           />
         ))}
-      </div>
+      </ul>
 
       <FundingClient funders={funders} />
     </div>

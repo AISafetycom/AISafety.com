@@ -126,7 +126,10 @@ export default function SelfStudyClient({ courses }: SelfStudyClientProps) {
       </FilterBar>
 
       <div className="flex gap-56px">
-        <div className="collection-list padding-bottom-40px width-9-col">
+        <ul
+          role="list"
+          className="collection-list padding-bottom-40px width-9-col"
+        >
           {gridCourses.map(course => (
             <ListingCard
               key={course.id}
@@ -137,11 +140,13 @@ export default function SelfStudyClient({ courses }: SelfStudyClientProps) {
             />
           ))}
           {filteredCourses.length === 0 && (
-            <p className="paragraph-small color-teal-grey-300">
-              Nothing found.
-            </p>
+            <li>
+              <p className="paragraph-small color-teal-grey-300">
+                Nothing found.
+              </p>
+            </li>
           )}
-        </div>
+        </ul>
 
         <div className="hide-mobile width-3-col">
           <ContributeButtons

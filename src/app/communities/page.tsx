@@ -51,7 +51,7 @@ export default async function CommunitiesPage() {
         {/* Featured Communities: two width-6-col cards fill the row; gap-56px
             must match GRID_GAP in FeaturedCard so the shared gradient lines up.
             (The "Related resources" links live in CommunitiesClient's sidebar.) */}
-        <div className="flex flex-wrap gap-56px padding-bottom-80px">
+        <ul role="list" className="flex flex-wrap gap-56px padding-bottom-80px">
           {featuredCommunities.map((community, i) => (
             <FeaturedCard
               key={community.id}
@@ -64,6 +64,7 @@ export default async function CommunitiesPage() {
               meta={[
                 {
                   icon: '/images/icons/computer.svg',
+                  label: 'Platform',
                   value:
                     community.platformText || community.platform.join(', '),
                 },
@@ -71,6 +72,7 @@ export default async function CommunitiesPage() {
                   ? [
                       {
                         icon: activityIcon(community.activityLevel),
+                        label: 'Activity level',
                         value: community.activityLevel,
                       },
                     ]
@@ -79,6 +81,7 @@ export default async function CommunitiesPage() {
                   ? [
                       {
                         icon: '/images/icons/target.svg',
+                        label: 'Focus',
                         value: community.focus,
                       },
                     ]
@@ -92,7 +95,7 @@ export default async function CommunitiesPage() {
               count={featuredCommunities.length}
             />
           ))}
-        </div>
+        </ul>
 
         {/* Main Content with Search, Cards, and Filters */}
         <CommunitiesClient communities={communities} />

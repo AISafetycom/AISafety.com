@@ -14,12 +14,14 @@ export function communityCardProps(community: Community): CardProps {
     meta: [
       {
         icon: '/images/icons/computer.svg',
+        label: 'Platform',
         value: community.platformText || community.platform.join(', '),
       },
       ...(community.activityLevel
         ? [
             {
               icon: activityIcon(community.activityLevel),
+              label: 'Activity level',
               value: community.activityLevel,
             },
           ]
@@ -28,6 +30,7 @@ export function communityCardProps(community: Community): CardProps {
         ? [
             {
               icon: '/images/icons/target.svg',
+              label: 'Focus',
               value: community.focus,
             },
           ]

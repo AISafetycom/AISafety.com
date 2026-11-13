@@ -198,7 +198,9 @@ export function prefetchPreview(
  *  site; the admin page loads no analytics, so clicks are not counted. */
 function Card({ kind, listing }: { kind: PreviewKind; listing: unknown }) {
   const listingCard = (props: CardProps) => (
-    <ListingCard {...props} trackingPage="admin-queue" />
+    <ul role="list">
+      <ListingCard {...props} trackingPage="admin-queue" />
+    </ul>
   )
   switch (kind) {
     case 'community':

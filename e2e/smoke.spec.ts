@@ -108,6 +108,11 @@ test.describe('public pages', () => {
       if (LISTING_PAGES.includes(path)) {
         await expect(page.locator(LISTING_LINK).first()).toBeVisible()
         expect(await page.locator(LISTING_LINK).count()).toBeGreaterThan(3)
+        // A card's link is its title alone, in a list item, so screen readers
+        // get a short link name and a list they can move through (#812).
+        expect(
+          await page.locator(`li h3 ${LISTING_LINK}`).count()
+        ).toBeGreaterThan(3)
       }
       if (path === '/map') {
         // The D3 map draws one <image> per organization logo.
