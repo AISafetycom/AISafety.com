@@ -2,11 +2,14 @@
   Queue card previews in bulk (sessions with the queue area only).
 
   POST /api/admin/queue/previews  body { targets: [{ table, record, edits? }] }
-    → { previews: { "<table>/<record>": { kind, listing } | null } }
+    → { cards: [{ kind, listing } | null, …] }   one per target, in order
 
   The page calls this once the list has loaded, so every open item's card is
   ready before it is opened. Same reads as the single preview route, batched
-  per table. Read-only. At most 400 targets a call.
+  per table. Read-only. At most 400 targets a call. The answer is a list,
+  not a map by record, since two items can share a record with different
+  edits (the key changed from "previews", so a tab still running the old
+  page falls back to the single-card route instead of misreading it).
 */
 
 import { NextRequest } from 'next/server'
@@ -46,9 +49,13 @@ export async function POST(req: NextRequest) {
   const targets: PreviewTarget[] = []
   if (Array.isArray(body.targets)) {
     for (const t of body.targets.slice(0, 400)) {
-      if (!t || typeof t !== 'object') continue
-      const o = t as Record<string, unknown>
-      if (typeof o.table !== 'string' || typeof o.record !== 'string') continue
+      const o = (t && typeof t === 'object' ? t : {}) as Record<string, unknown>
+      // A malformed target keeps its place (and gets null), so every card
+      // still lines up with the target it answers.
+      if (typeof o.table !== 'string' || typeof o.record !== 'string') {
+        targets.push({ table: '', record: '', edits: {} })
+        continue
+      }
       targets.push({
         table: o.table,
         record: o.record,
@@ -57,7 +64,7 @@ export async function POST(req: NextRequest) {
     }
   }
   try {
-    return json({ previews: await getPreviewListings(targets) })
+    return json({ cards: await getPreviewListings(targets) })
   } catch (e) {
     if (e instanceof QueueError) return json({ error: e.detail }, e.status)
     const msg = e instanceof Error ? e.message : String(e)
