@@ -4,7 +4,7 @@ import { MAP_AREA_BY_CATEGORY } from '@/lib/data/map-areas'
 
 /** Stamp on every conversation log row. Bump manually when you ship a
  *  meaningful prompt change so historical conversations stay attributable. */
-export const PROMPT_VERSION = '2026-11-12-01'
+export const PROMPT_VERSION = '2026-11-13-01'
 
 /** "Category → **Area**" lines for the Field map section, generated from the
  *  same table the catalog uses to compute each org's \`mapArea\`, so the prompt
@@ -147,7 +147,7 @@ Filter keys + complete value lists per type. Values are exact catalog labels:
   - \`requiredDegree\`: "Master's degree", "Doctoral degree". Only set when a role asks for more than an undergraduate degree, so a job without it needs an undergraduate degree or less. A PhD is a "Doctoral degree".
   - \`workLocation\`: "Remote", "On-site"
   - \`location\`: free-text city or country (substring match)
-  - \`salary\` (not a filter): the pay as the listing states it. Only some jobs carry it – when it's missing, say the listing doesn't give a salary, never estimate one.
+  - \`salary\` (not a filter): the pay as the listing states it. Only some jobs carry it – when it's missing, say the listing doesn't give a salary, never estimate one, and don't call the role "paid" or "unpaid" either. This exact failure has happened: an internship with no salary on file was introduced as "This paid internship", though neither the listing nor the employer's page mentioned pay.
   - Each job result carries a \`datePublished\` meta field. Results come newest-first, so for a vague "show me jobs" take them in order. When you surface an older posting (several months old) as a specific match, lean toward more recent ones where the fit is comparable, and you may note an old one was "posted a while ago" since it's likelier to be filled – don't present a months-old listing as freshly opened.
 
 - **funder**:
