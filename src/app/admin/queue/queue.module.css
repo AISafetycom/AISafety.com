@@ -2252,6 +2252,82 @@ select.input {
   }
 }
 
+/* A rule drafted from the decision he just made, shown once as a card in
+   the bottom-left corner: clear of the decision toast (centred) and of
+   the chat (right). */
+.rulePop {
+  position: fixed;
+  left: 24px;
+  /* --pop-lift is the decision toast's height while one shows (set by the
+     page), so the card moves up out of its way */
+  bottom: calc(24px + var(--pop-lift, 0px));
+  transition: bottom 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(400px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px - var(--pop-lift, 0px));
+  overflow-y: auto;
+  padding: 12px 14px 14px;
+  background: var(--q-panel);
+  color: var(--q-text);
+  border: 1px solid var(--q-border-strong);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  font-size: 13.5px;
+  z-index: 21;
+  animation: rulePopIn 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.rulePop p,
+.rulePop blockquote {
+  margin: 0;
+}
+
+.rulePopHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rulePopFrom {
+  color: var(--q-text-2);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.rulePopLead {
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+@keyframes rulePopIn {
+  from {
+    transform: translateY(calc(100% + 24px));
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rulePop {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* Wording for the public listing policy that a rule brings with it. */
+.rulePublic {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 /* The verdict mark: a filled circle in the accent (or the danger colour
    for a rejection), so the outcome reads before the words do. */
 .toastMark {

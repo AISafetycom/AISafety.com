@@ -1,8 +1,10 @@
 'use client'
 
+import { useEffect } from 'react'
 import Image from 'next/image'
 import Icon from './Icon'
 import { trackListingClick } from '@/lib/analytics'
+import { warmUpLogo } from '@/lib/logo-warm-up'
 import { withUtm } from '@/lib/utm'
 import styles from './ListingCard.module.css'
 
@@ -97,6 +99,12 @@ export default function ListingCard({
   placement,
   trackingSource,
 }: ListingCardProps) {
+  // The logo loads lazily below; fetch it in the background once the page has
+  // settled, so it's ready before a fast scroll reaches it.
+  useEffect(() => {
+    if (logo) warmUpLogo(logo)
+  }, [logo])
+
   return (
     <li
       id={listingId}

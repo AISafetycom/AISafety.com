@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useRef, useLayoutEffect, useEffect } from 'react'
+import { useState, useMemo, useRef, useLayoutEffect } from 'react'
 import FilterBar from '@/components/FilterBar'
 import FilterDropdown from '@/components/FilterDropdown'
 import ListingCard from '@/components/ListingCard'
@@ -131,26 +131,6 @@ export default function CommunitiesClient({
   )
 
   const savedScrollY = useRef<number | null>(null)
-
-  // Card images are below the map and load lazily as they scroll into view.
-  // After 7 s — by which time the map's tooltip logos should be done
-  // preloading — proactively warm the browser cache for every card logo so
-  // someone scrolling quickly down doesn't have to wait. The refs keep the
-  // preloaded Image objects alive so their decoded bitmaps stay cached.
-  const preloadedCardLogosRef = useRef<HTMLImageElement[]>([])
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      communities.forEach(c => {
-        if (!c.logo) return
-        const img = new window.Image()
-        img.decoding = 'async'
-        img.src = c.logo
-        img.decode().catch(() => {})
-        preloadedCardLogosRef.current.push(img)
-      })
-    }, 7000)
-    return () => clearTimeout(timer)
-  }, [communities])
 
   const toggleFilter = (
     value: string,

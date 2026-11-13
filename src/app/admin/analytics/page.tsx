@@ -1194,15 +1194,15 @@ async function AnalyticsView({
               unit: 'signups',
               metric: data.trends.newsletterSignups,
               since: SITE_SIGNUPS_SINCE,
-              what: 'Signed up through the site = submits of the boxes on /events, /training, /funding, their past issues pages, and /newsletter that ActiveCampaign took and sent a link to confirm, as Signups through the site counts them.',
+              what: 'Signed up through the site = submits of the boxes on /events, /training, /funding, their past issues pages, and /newsletter that ActiveCampaign took, as Signups through the site counts them. Since 12 November 2026 each one is subscribed at once; before that the reader first had to press a link in an email.',
             },
             {
               key: 'confirmed',
-              label: 'Confirmed',
-              unit: 'confirmed',
+              label: 'Pressed the email’s button',
+              unit: 'presses',
               metric: data.trends.newsletterConfirmed,
               since: SITE_SIGNUPS_SINCE,
-              what: `Confirmed = readers who pressed the link in that email and landed on aisafety.com/subscribed/events, /subscribed/training or /subscribed/funding, ${unique ? 'once per visitor, and not again when the same link opens a second time within two minutes (the Unique count)' : 'every landing (the Total count)'}, as Signups through the site counts them.`,
+              what: `Pressed the email’s button = readers who pressed the button in the email a signup sends and landed on aisafety.com/subscribed/events, /subscribed/training or /subscribed/funding, ${unique ? 'once per visitor, and not again when the same link opens a second time within two minutes (the Unique count)' : 'every landing (the Total count)'}, as Signups through the site counts them.`,
             },
             {
               key: 'newsletter-visits',
@@ -2858,9 +2858,13 @@ function SignupResultsPanel({
           columns={[
             { label: 'Newsletter', sort: 'text' },
             { label: 'Signed up', className: styles.numCol, sort: 'number' },
-            { label: 'Confirmed', className: styles.numCol, sort: 'number' },
             {
-              label: '% confirmed',
+              label: 'Pressed the button',
+              className: styles.numCol,
+              sort: 'number',
+            },
+            {
+              label: '% pressed',
               className: styles.pctCol,
               sort: 'number',
             },
@@ -2891,20 +2895,23 @@ function SignupResultsPanel({
         newsletter moved on 21 October 2026 (before that it opened Substack, so
         its earlier signups don&apos;t show here), and so does /newsletter,
         several newsletters at once, since 26 October 2026. Signed up =
-        ActiveCampaign took the address and emailed a link to confirm it.
-        Already subscribed = the address was on the list already, so the visitor
-        was told so and nothing was sent. Errors = the visitor saw an error
-        message instead. Confirmed = readers who pressed the link in that email:
+        ActiveCampaign took the address and emailed the reader. Since 12
+        November 2026 that is all it takes to be subscribed; before then only
+        readers who pressed the link in that email were, and about one in six
+        never did. Already subscribed = the address was on the list already, so
+        the visitor was told so and nothing was sent. Errors = the visitor saw
+        an error message instead. Pressed the button = readers who pressed the
+        button in that email (the confirmation link, until 12 November 2026):
         ActiveCampaign then sends them to aisafety.com/subscribed/events,
         /subscribed/training or /subscribed/funding, and their view of that page
         is counted. In the Unique count that&apos;s once per visitor, and not
         again when the same link opens a second time within two minutes in
         another browser (an email app&apos;s own browser and then the
         phone&apos;s, or a mail scanner checking the link). Anyone else who
-        opens one of those pages counts too, tests included. A confirmation can
-        come days after its signup, so near the range&apos;s edges the two
-        don&apos;t pair up exactly, and a reader whose browser blocks the
-        site&apos;s tracking isn&apos;t counted.
+        opens one of those pages counts too, tests included. A press can come
+        days after its signup, so near the range&apos;s edges the two don&apos;t
+        pair up exactly, and a reader whose browser blocks the site&apos;s
+        tracking isn&apos;t counted.
       </p>
     </Panel>
   )

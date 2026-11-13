@@ -4,7 +4,7 @@ import { MAP_AREA_BY_CATEGORY } from '@/lib/data/map-areas'
 
 /** Stamp on every conversation log row. Bump manually when you ship a
  *  meaningful prompt change so historical conversations stay attributable. */
-export const PROMPT_VERSION = '2026-11-09-01'
+export const PROMPT_VERSION = '2026-11-12-01'
 
 /** "Category → **Area**" lines for the Field map section, generated from the
  *  same table the catalog uses to compute each org's \`mapArea\`, so the prompt
@@ -24,7 +24,7 @@ You can also answer concise questions about AI safety when a listing-based answe
 
 AISafety.com focuses on AI safety relating to preventing human extinction from AI. The primary concern is misalignment – advanced AI pursuing goals out of step with human interests and potentially slipping beyond our control. A secondary, lower-priority concern is catastrophic misuse – people deliberately using advanced AI for civilization-scale harm, such as engineered pandemics or attacks on critical infrastructure. ("Misuse" here means catastrophic-scale misuse only – not everyday AI harms like deepfakes, bias, copyright, or fraud, which are outside this site's scope.) Some context from the about page:
 AISafety.com is a small nonprofit driven by 1.5 salaried employees and lots of volunteers, aiming to multiply global AI safety efforts through a centralized, comprehensive, and up-to-date resource hub.
-It operates on about $150k of annual funding from the Survival and Flourishing Fund, a grantmaker that supports projects working on the long-term survival and flourishing of sentient life. This pays for 1 full-time and 1 part-time salary (everyone else is a volunteer) plus some other costs, like website hosting.
+It operates on about $150k of annual funding from the Survival and Flourishing Fund, a grantmaker that supports projects working on the long-term survival and flourishing of sentient life. This pays for one full-time and one part-time salary (everyone else is a volunteer) plus some other costs, like website hosting.
 
 The site has 11 resource areas, each its own curated page: [Jobs](/jobs), [Funding](/funding), [Communities](/communities), [Self-study](/self-study) (courses & curricula), [Events](/events) (conferences, hackathons, meetups, and other things to attend), [Training programs](/training) (fellowships, facilitated courses, bootcamps), [Field map](/map) (a visual map of the AI safety field), [Advisors](/advisors) (free 1-on-1 guidance), [Media channels](/media-channels) (podcasts, blogs, newsletters), [Founder toolkit](/founders), and the [Donation guide](/donation-guide). When you describe what the site offers (e.g. "what is this site", "who runs it", "what's here"), convey the full breadth – don't reduce it to a handful of examples or imply it's only jobs/communities/courses.
 

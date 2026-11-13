@@ -11,6 +11,7 @@ import ChatBody, {
   type ChatBodyHandle,
   type TurnLifecycleEvent,
 } from './ChatBody'
+import Button from '@/components/Button'
 import Icon from '@/components/Icon'
 import styles from './Assistant.module.css'
 
@@ -470,7 +471,7 @@ export default function Assistant() {
     <>
       <button
         type="button"
-        className={`${styles.pill} drop-shadow-dark`}
+        className={`${styles.pill} border-plus-fill drop-shadow-dark`}
         onClick={handleTogglePill}
         aria-label={
           isOpen ? 'Close the assistant' : 'Open the AISafety.com assistant'
@@ -491,7 +492,7 @@ export default function Assistant() {
       />
 
       <aside
-        className={`${styles.panel} ${isOpen ? styles.panelOpen : ''} ${isExpanded ? styles.panelExpanded : ''}`}
+        className={`${styles.panel} border-plus-fill ${isOpen ? styles.panelOpen : ''} ${isExpanded ? styles.panelExpanded : ''}`}
         role="dialog"
         aria-modal={isExpanded}
         aria-label="AISafety.com directory assistant"
@@ -508,37 +509,38 @@ export default function Assistant() {
           </div>
           <div className={styles.headerActions}>
             {hasMessages && (
-              <button
-                type="button"
-                className={styles.iconButton}
+              <Button
+                variant="clear"
+                size="xs"
+                icon="/images/icons/trash.svg"
+                iconPosition="only"
                 onClick={handleClear}
                 aria-label="Clear conversation"
-                title="Clear conversation"
-              >
-                <Icon src="/images/icons/trash.svg" size={16} />
-              </button>
+              />
             )}
-            <button
-              type="button"
-              className={`${styles.iconButton} ${styles.expandButton}`}
+            <Button
+              variant="clear"
+              size="xs"
+              icon={
+                isExpanded
+                  ? '/images/icons/shrink.svg'
+                  : '/images/icons/expand.svg'
+              }
+              iconPosition="only"
+              className={styles.expandButton}
               onClick={() => setIsExpanded(v => !v)}
-              aria-label={isExpanded ? 'Shrink assistant' : 'Expand assistant'}
-              title={isExpanded ? 'Shrink' : 'Expand'}
-            >
-              {isExpanded ? (
-                <Icon src="/images/icons/shrink.svg" size={16} />
-              ) : (
-                <Icon src="/images/icons/expand.svg" size={16} />
-              )}
-            </button>
-            <button
-              type="button"
-              className={styles.iconButton}
+              aria-label={isExpanded ? 'Shrink chatbot' : 'Expand chatbot'}
+            />
+            <Button
+              variant="clear"
+              size="xs"
+              icon="/images/icons/x.svg"
+              iconPosition="only"
               onClick={handleClose}
-              aria-label="Close assistant"
-            >
-              <Icon src="/images/icons/x.svg" size={16} />
-            </button>
+              aria-label="Close chatbot"
+              // Below, it would run past the panel's right edge.
+              tooltipPosition="left"
+            />
           </div>
         </header>
 

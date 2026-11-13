@@ -9,8 +9,9 @@
  *  notes) is never needed. A field the site draws only in some cases is
  *  needed only in those: Location once the Mode is in person, a deadline's
  *  type once there is a deadline, coordinates once a community is Local, a
- *  Featured tagline once the record is Featured. A dated training program
- *  needs a start date, exact or approximate; a recurring one has no dates
+ *  Featured tagline once the record is Featured. An event whose sign-up is
+ *  not open yet has a deadline type and no deadline, and needs none. A
+ *  dated training program needs a start date, exact or approximate; a recurring one has no dates
  *  and needs its typical length instead. Field names are Airtable's own,
  *  matched without regard to case. */
 
@@ -59,6 +60,19 @@ function isLocal(f: Fields): boolean {
   return list.some(p => String(p).trim().toLowerCase() === 'local')
 }
 
+/** Sign-up that has not opened: the event's "not yet open" box is ticked,
+ *  under either name the column has had. */
+const NOT_YET_OPEN = [
+  'Applications/registrations not yet open?',
+  'Applications not yet open?',
+]
+function notYetOpen(f: Fields): boolean {
+  return NOT_YET_OPEN.some(n => {
+    const v = valueOf(f, n)
+    return v === true || String(v).trim().toLowerCase() === 'true'
+  })
+}
+
 const FEATURED_TAGLINE: Need = {
   field: 'Featured tagline',
   when: filled('Featured'),
@@ -77,7 +91,13 @@ const NEEDED: Record<string, Need[]> = {
     'Cost',
     'Logo',
     { field: 'Location', when: inPerson },
-    { field: 'Deadline', when: filled('Deadline type') },
+    // A deadline type with no date is right while sign-up has not opened:
+    // there is no closing date yet, and the site's card says so (Bryce, 12
+    // Nov 2026, on AI Safety Forum 2027).
+    {
+      field: 'Deadline',
+      when: f => filled('Deadline type')(f) && !notYetOpen(f),
+    },
     { field: 'Deadline type', when: filled('Deadline') },
   ],
   '/training': [

@@ -3,6 +3,7 @@
 import Image from 'next/image'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import Button from '@/components/Button'
 import Icon from '@/components/Icon'
 import { trackSearchClick, trackSearchQuery } from '@/lib/analytics'
 import type { SearchEntry, SearchType } from '@/lib/data/search-index'
@@ -240,7 +241,9 @@ export default function SearchModal({
       aria-modal="true"
       aria-label="Search AISafety.com"
     >
-      <div className={`${styles.modal} drop-shadow-dark flex flex-col`}>
+      <div
+        className={`${styles.modal} border-plus-fill drop-shadow-dark flex flex-col`}
+      >
         <div
           className={`${styles['input-row']} flex items-center gap-12px padding-top-16px padding-bottom-16px padding-left-24px padding-right-24px`}
         >
@@ -298,13 +301,9 @@ export default function SearchModal({
               <p className="paragraph-small color-teal-grey-300">
                 Search is temporarily unavailable.
               </p>
-              <button
-                type="button"
-                onClick={onRetry}
-                className="button-secondary"
-              >
+              <Button variant="clear-border" onClick={onRetry}>
                 Try again
-              </button>
+              </Button>
             </div>
           )}
 

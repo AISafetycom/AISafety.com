@@ -235,19 +235,9 @@
   border-color: var(--teal-300);
 }
 
+/* The search <Button> keeps its size when the nav row gets tight. */
 .nav-search-button {
-  width: 40px;
-  height: 40px;
-  background: transparent;
-  border: none;
-  border-radius: 20px;
-  cursor: pointer;
   flex: none;
-  transition: background-color var(--hover-transition);
-}
-
-.nav-search-button:hover {
-  background-color: var(--teal-grey-850);
 }
 
 .nav-item-icon {
@@ -300,7 +290,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: color-mix(in srgb, var(--teal-grey-900) 80%, transparent);
+    background-color: color-mix(in srgb, var(--teal-900) 80%, transparent);
     backdrop-filter: blur(16px);
     z-index: 2147483647;
     display: flex;

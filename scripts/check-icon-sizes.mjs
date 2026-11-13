@@ -25,7 +25,8 @@ function walk(dir) {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, e.name)
     if (e.isDirectory()) out.push(...walk(p))
-    else if (/\.(tsx?|)$/.test(e.name) && /\.(tsx|ts)$/.test(e.name)) out.push(p)
+    else if (/\.(tsx?|)$/.test(e.name) && /\.(tsx|ts)$/.test(e.name))
+      out.push(p)
   }
   return out
 }
@@ -56,14 +57,62 @@ for (const file of walk(SRC_DIR)) {
   }
 }
 
+// <Button icon="…"> draws its icon at 24px when it is icon-only at the small
+// size (the icon-only default), and 16px otherwise (src/components/Button.tsx),
+// so the same rule applies to the file it gets.
+// Props may hold arrow functions, so read each opening tag up to the first
+// `>` outside braces.
+for (const file of walk(SRC_DIR)) {
+  const src = readFileSync(file, 'utf8')
+  for (const m of src.matchAll(/<Button\b/g)) {
+    let depth = 0
+    let end = m.index
+    while (end < src.length) {
+      const c = src[end]
+      if (c === '{') depth++
+      else if (c === '}') depth--
+      else if (c === '>' && depth === 0) break
+      end++
+    }
+    const props = src.slice(m.index, end)
+    if (!/\bicon=/.test(props)) continue
+    const line = src.slice(0, m.index).split('\n').length
+    const iconLit = props.match(/\bicon="([^"]+)"/)
+    if (!iconLit) {
+      dynamic.push(
+        `${file}:${line}  <Button icon={…}> (dynamic — verify by hand)`
+      )
+      continue
+    }
+    const path = iconLit[1]
+    const nat = native[path]
+    if (nat === undefined) continue
+    const iconOnly = /\biconPosition="only"/.test(props)
+    const sizeProp =
+      props.match(/\bsize="(\w+)"/)?.[1] ?? (iconOnly ? 'small' : 'default')
+    const size = iconOnly && sizeProp === 'small' ? 24 : 16
+    if (size !== nat) {
+      mismatches.push(
+        `${file}:${line}  ${path} is ${nat}px but this <Button> shows it at ${size}px`
+      )
+    }
+  }
+}
+
 if (dynamic.length) {
-  console.log(`\nℹ ${dynamic.length} dynamic-src <Icon> usage(s) (not auto-checkable):`)
+  console.log(
+    `\nℹ ${dynamic.length} dynamic-src <Icon> usage(s) (not auto-checkable):`
+  )
   for (const d of dynamic) console.log('   ' + d)
 }
 if (mismatches.length) {
-  console.error(`\n✖ ${mismatches.length} icon size mismatch(es) — a file's native size IS its display size:`)
+  console.error(
+    `\n✖ ${mismatches.length} icon size mismatch(es) — a file's native size IS its display size:`
+  )
   for (const x of mismatches) console.error('   ' + x)
-  console.error('\nFix: display the icon at its native size, or use the correctly-sized file (e.g. x-small.svg for 12px).')
+  console.error(
+    '\nFix: display the icon at its native size, or use the correctly-sized file (e.g. x-small.svg for 12px).'
+  )
   process.exit(1)
 }
-console.log('\n✓ every static <Icon> renders at its file\'s native size')
+console.log("\n✓ every static <Icon> renders at its file's native size")

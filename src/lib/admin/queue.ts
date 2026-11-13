@@ -57,6 +57,15 @@ import { fillFirst, neededLeft } from './queue-needed'
 import type { ListingDates } from './queue-urgent'
 import { reviewAgainAt } from './queue-later'
 import { ruleTestOf, type RuleTest } from './queue-rule-test'
+import {
+  PUBLIC_KEY,
+  publicChoiceOf,
+  ruleInstantOf,
+  rulePublicOf,
+  type PublicChoice,
+  type RuleInstant,
+  type RulePublic,
+} from './queue-rule-instant'
 import { alreadyRepliedOf, type AlreadyReplied } from './queue-already'
 import { replyAlsoOf } from './queue-also'
 import { reasonsText, type FlagUpdate } from './queue-flag'
@@ -71,6 +80,7 @@ import {
 import {
   declinedBeforeOf,
   pushbackOf,
+  rejectIsCurrent,
   reopenedOf,
   reopeningOf,
   wasDeclined,
@@ -156,6 +166,12 @@ export interface QueueItem {
   targetRecord: string | null
   issueRow: string | null
   sourceLink: string | null
+  /** Form: the "Airtable forms: someone has responded to …" email the
+   *  submission arrived as, in Gmail (the proposal's `notification.link`,
+   *  written by the Mac's forms duty). A Form row's Source link is the
+   *  record in Airtable, so this is what Q opens (Bryce, 12 Nov 2026: "Q
+   *  should open the original email with the form"). */
+  emailLink?: string | null
   sourceExcerpt: string | null
   /** The record's logo as the site shows it (from the site's own listing
    *  catalog for published records, else the Add snapshot), for the list. */
@@ -183,6 +199,15 @@ export interface QueueItem {
    *  policy check, proposal `public_policy`), which no bot reads, so it is
    *  never tested on past decisions. */
   rulePublicPolicy: boolean
+  /** Rule: drafted minutes after one decision, and where that was
+   *  (proposal `instant`, ~/Queue/teach.py --instant); null for a rule from
+   *  the nightly pass. */
+  ruleInstant: RuleInstant | null
+  /** Rule: the wording for the public listing policy that goes in with it
+   *  (proposal `public`), and what the owner chose for it at Apply. The Mac
+   *  writes it only on "apply". */
+  rulePublic: RulePublic | null
+  rulePublicChoice: PublicChoice | null
   verdict: Verdict | null
   reasons: string[]
   rejectChips: string[]
@@ -550,11 +575,7 @@ export function rejectReplyOf(
   v: unknown,
   decidedAt: string | null
 ): RejectReply | null {
-  if (!isRecord(v)) return null
-  const since = Date.parse(str(v.since) ?? '')
-  const decided = Date.parse(decidedAt ?? '')
-  if (!Number.isFinite(since) || (Number.isFinite(decided) && since < decided))
-    return null
+  if (!isRecord(v) || !rejectIsCurrent(v, decidedAt)) return null
   const text = str(v.text)
   if (str(v.draft)) return { text, state: 'saved', error: null }
   if (str(v.ready) && text) return { text, state: 'ready', error: null }
@@ -572,6 +593,24 @@ export function noReplyOf(proposal: Record<string, unknown>): NoReply | null {
   if (NO_REPLY.includes(why)) return why as NoReply
   console.warn(`Queue: unknown no_reply "${why}"`)
   return null
+}
+
+/** The Gmail link to the email a Form row's submission arrived as (the
+ *  proposal's `notification.link`, written by the Mac's forms duty), or
+ *  null. The Mac builds the link, as this code is public and never names
+ *  the mailbox; only an https link on mail.google.com itself is passed on. */
+export function emailLinkOf(proposal: Record<string, unknown>): string | null {
+  if (!isRecord(proposal.notification)) return null
+  const link = str(proposal.notification.link)
+  if (!link) return null
+  try {
+    const u = new URL(link)
+    return u.protocol === 'https:' && u.hostname === 'mail.google.com'
+      ? link
+      : null
+  } catch {
+    return null
+  }
 }
 
 function rowToItem(
@@ -595,9 +634,13 @@ function rowToItem(
   let ruleWas: string | null = null
   let ruleTest: RuleTest | null = null
   let rulePublicPolicy = false
+  let ruleInstant: RuleInstant | null = null
+  let rulePublic: RulePublic | null = null
+  let rulePublicChoice: PublicChoice | null = null
   let replyTo: string | null = null
   let replyAlso: string[] = []
   let noReply: NoReply | null = null
+  let emailLink: string | null = null
   let alreadyReplied: AlreadyReplied | null = null
   let rejectReply: RejectReply | null = null
   let saidBy: SaidBy | null = null
@@ -611,10 +654,11 @@ function rowToItem(
     pushback = pushbackOf(proposal.pushback)
     reopened = reopenedOf(proposal.reopened)
     declinedBefore = declinedBeforeOf(proposal.reply, pushback)
+    // Only this decision's reject block: one left by a Reject that was
+    // undone must not make a later Publish read as a decline.
     rejectReplied =
       isRecord(proposal.reply) &&
-      isRecord(proposal.reply.reject) &&
-      Boolean(str(proposal.reply.reject.since))
+      rejectIsCurrent(proposal.reply.reject, str(f[F.decidedAt]))
     changes = toChanges(proposal.changes)
     diff = str(proposal.diff)
     summary = str(proposal.summary)
@@ -623,6 +667,8 @@ function rowToItem(
     ruleWas = str(proposal.was)
     ruleTest = ruleTestOf(proposal.replay)
     rulePublicPolicy = proposal.public_policy === true
+    ruleInstant = ruleInstantOf(proposal.instant)
+    rulePublic = rulePublicOf(proposal.public)
     name = str(proposal.name)
     url = str(proposal.url)
     if (isRecord(proposal.reply)) {
@@ -649,6 +695,7 @@ function rowToItem(
       }
     }
     noReply = noReplyOf(proposal)
+    emailLink = emailLinkOf(proposal)
     if (isRecord(proposal.fields)) {
       fields = proposal.fields
     } else if (changes.length === 0 && !diff) {
@@ -658,6 +705,7 @@ function rowToItem(
           k !== 'name' &&
           k !== 'url' &&
           k !== 'no_reply' &&
+          k !== 'notification' &&
           k !== FLAG_BEFORE_KEY &&
           k !== 'reopen' &&
           k !== 'pushback' &&
@@ -680,9 +728,11 @@ function rowToItem(
       [KEPT_KEY]: kept,
       [LEFT_OUT_KEY]: left,
       [GONE_KEY]: deleted,
+      [PUBLIC_KEY]: publicChoice,
       ...rest
     } = saved
     edits = rest
+    rulePublicChoice = publicChoiceOf(publicChoice)
     const goneNames = goneOf(deleted)
     gone = goneNames.length ? goneNames : null
     before = isRecord(was) ? was : null
@@ -716,6 +766,7 @@ function rowToItem(
     targetRecord: str(f[F.targetRecord]),
     issueRow: str(f[F.issueRow]),
     sourceLink: str(f[F.sourceLink]),
+    emailLink,
     sourceExcerpt: str(f[F.sourceExcerpt]),
     logo:
       (str(f[F.targetRecord]) && logos.get(str(f[F.targetRecord]) ?? '')) ||
@@ -731,6 +782,9 @@ function rowToItem(
     ruleWas,
     ruleTest,
     rulePublicPolicy,
+    ruleInstant,
+    rulePublic,
+    rulePublicChoice,
     verdict: str(f[F.verdict]) as Verdict | null,
     reasons: lines(f[F.reasons]),
     rejectChips: lines(f[F.rejectChips]),
@@ -1923,10 +1977,32 @@ export async function acceptItem(
   item: QueueItem,
   pageEdits: Record<string, unknown>,
   replyDraft: string | null = null,
-  keep: string[] = []
+  keep: string[] = [],
+  publicWording: { choice: PublicChoice; seen: string | null } | null = null
 ): Promise<string[]> {
   requireOpen(item)
   const stamp = now()
+  // A rule that brings wording for the public listing policy: the page says
+  // what he chose for it, and which wording it showed him. Before the try,
+  // so a refusal leaves the rule open, not Failed. 412, not 409: the rule is
+  // still open, and the page re-reads it so the wording he must see shows.
+  if (item.type === 'Rule' && item.rulePublic) {
+    if (!publicWording) {
+      throw new QueueError(
+        'This rule comes with wording for the public listing policy, which this page had not shown you. Read it on the rule, then apply again.',
+        412
+      )
+    }
+    if (
+      publicWording.choice === 'apply' &&
+      publicWording.seen !== item.rulePublic.wording
+    ) {
+      throw new QueueError(
+        'The wording for the public listing policy has changed since this page loaded it. Read the new wording, then apply again.',
+        412
+      )
+    }
+  }
   // The proposed fields left out with the cross come with the page's edits
   // under their own key, which is never a field to write.
   const { [LEFT_OUT_KEY]: left, ...edits } = pageEdits
@@ -2058,12 +2134,19 @@ export async function acceptItem(
         await deleteRecord(BROOM_ISSUES_TABLE_ID, item.issueRow)
       }
     } else {
-      // Rule: the file lives on the Mac; the worker applies it.
+      // Rule: the file lives on the Mac; the worker applies it. With public
+      // wording, his choice goes on the row for the worker to read: it puts
+      // the wording on the public page only on "apply".
       await patchQueueRow(item.id, {
         ...draftFields,
         [F.status]: 'Accepted',
         [F.decidedAt]: stamp,
         [F.error]: null,
+        ...(item.rulePublic && publicWording
+          ? {
+              [F.edits]: JSON.stringify({ [PUBLIC_KEY]: publicWording.choice }),
+            }
+          : {}),
       })
       return []
     }

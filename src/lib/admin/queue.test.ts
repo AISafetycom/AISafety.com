@@ -40,6 +40,7 @@ import {
   handledOutside,
   mergeEdits,
   queueTargets,
+  emailLinkOf,
   noReplyOf,
   rejectItem,
   rejectReplyOf,
@@ -87,6 +88,9 @@ function item(over: Partial<QueueItem>): QueueItem {
     ruleWas: null,
     ruleTest: null,
     rulePublicPolicy: false,
+    ruleInstant: null,
+    rulePublic: null,
+    rulePublicChoice: null,
     verdict: null,
     reasons: [],
     rejectChips: [],
@@ -1150,6 +1154,37 @@ describe('rejectReplyOf', () => {
   })
 })
 
+describe('emailLinkOf', () => {
+  const link =
+    'https://mail.google.com/mail/?authuser=someone@example.com#all/1a1c1e17276b5143'
+
+  it("reads the form's email from the proposal's notification block", () => {
+    expect(
+      emailLinkOf({
+        kind: 'add',
+        notification: { thread: '1a1c', message: '1a1c1e17276b5143', link },
+      })
+    ).toBe(link)
+  })
+
+  it('is null until the Mac has found the email', () => {
+    expect(emailLinkOf({ kind: 'add' })).toBeNull()
+    expect(emailLinkOf({ notification: 'soon' })).toBeNull()
+    expect(emailLinkOf({ notification: { thread: '1a1c' } })).toBeNull()
+  })
+
+  it('passes on nothing but an https link to Gmail itself', () => {
+    for (const bad of [
+      'javascript:alert(1)',
+      'http://mail.google.com/mail/#all/1a1c',
+      'https://mail.google.com.example.org/mail/#all/1a1c',
+      'https://example.org/?to=mail.google.com',
+      'not a link',
+    ])
+      expect(emailLinkOf({ notification: { link: bad } })).toBeNull()
+  })
+})
+
 describe('noReplyOf', () => {
   it('reads why a Form row has no reply draft', () => {
     expect(noReplyOf({ kind: 'add', no_reply: 'no email' })).toBe('no email')
@@ -1448,6 +1483,50 @@ describe('reopenItem', () => {
       status: 409,
       detail: expect.stringContaining('Reopen brings it back'),
     })
+  })
+
+  it('undoes a publish made after a Reject that was undone (The Gentle Romance)', async () => {
+    // Rejected at 09:13 (the Mac saved its decline), undone, published at
+    // 09:18. Undo leaves the reject block on the proposal, and it used to
+    // make the publish read as "declined, record deleted": Undo refused.
+    const EVENT = rid('romance')
+    row = {
+      ...deleted,
+      [FLD.proposal]: JSON.stringify({
+        ...proposal,
+        record: EVENT,
+        reply: {
+          ...proposal.reply,
+          reject: {
+            since: '2026-11-12T09:13:41.246Z',
+            text: 'Thanks for submitting this.',
+            draft: 'r1',
+          },
+        },
+      }),
+      [FLD.targetRecord]: EVENT,
+      [FLD.decidedAt]: '2026-11-12T09:18:26.163Z',
+      [FLD.appliedAt]: '2026-11-12T09:18:26.163Z',
+    }
+    delete row[FLD.rejectReason]
+    const listing: unknown[] = []
+    const queueRow = mocks.airtableRequest.getMockImplementation()
+    mocks.airtableRequest.mockImplementation(
+      async (path: string, init?: RequestInit) => {
+        if (path === `${TRAINING}/${EVENT}` && init?.method === 'PATCH') {
+          listing.push(JSON.parse(String(init.body)).fields)
+          return new Response('{}', { status: 200 })
+        }
+        return queueRow?.(path, init)
+      }
+    )
+    const item = await current()
+    expect(item.declined).toBe(false)
+    await expect(reopenItem(item)).rejects.toMatchObject({ status: 409 })
+    await undoItem(item)
+    expect(listing).toEqual([{ 'Publish?': false }])
+    expect(row[FLD.status]).toBe('Pending')
+    expect(row[FLD.decidedAt]).toBeUndefined()
   })
 
   it('saves no second decline after a reopen with no reply from them', async () => {

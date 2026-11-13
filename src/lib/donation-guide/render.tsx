@@ -111,7 +111,7 @@ export function TabContent({ tab }: { tab: Tab }) {
       <p className="padding-bottom-56px width-7-col">{tab.lead}</p>
       {tab.sections.map((section, i) => (
         <Fragment key={section.id}>
-          {i > 0 && <div className={styles.divider} />}
+          {i > 0 && <div className="divider margin-bottom-40px" />}
           <TimeSection time={section.time} last={i === last}>
             <RichTextBlocks text={section.body} />
           </TimeSection>

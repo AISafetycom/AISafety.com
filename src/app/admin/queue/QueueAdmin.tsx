@@ -16,6 +16,7 @@ import type {
 import { fillFirst, neededLeft } from '@/lib/admin/queue-needed'
 import { replyWho } from '@/lib/admin/queue-also'
 import { backSince, laterSince, laterUntil } from '@/lib/admin/queue-later'
+import { URL_KEYS, listingLink } from '@/lib/admin/queue-link'
 import { LEFT_OUT_KEY, withLeftOut } from '@/lib/admin/queue-left-out'
 import {
   flagRevisedNote,
@@ -23,7 +24,11 @@ import {
   type FlagUpdate,
 } from '@/lib/admin/queue-flag'
 import { rejectReplyFor, shownDeclineChip } from '@/lib/admin/queue-decline'
-import { reopeningLabel, type Reopening } from '@/lib/admin/queue-reopen'
+import {
+  afterUndoFailed,
+  reopeningLabel,
+  type Reopening,
+} from '@/lib/admin/queue-reopen'
 import { discordAppLink, replyToCopy } from '@/lib/admin/queue-discord'
 import {
   alreadyRepliedOf,
@@ -35,6 +40,11 @@ import {
   ruleTestShort,
   type RuleTestResult,
 } from '@/lib/admin/queue-rule-test'
+import {
+  rememberClosed,
+  ruleToPopUp,
+  type RulePublic,
+} from '@/lib/admin/queue-rule-instant'
 import {
   itemParts,
   markRanges,
@@ -332,6 +342,8 @@ function linkIcon(url: string): string {
 const COLLAPSED_KEY = 'aisafety-admin-queue:collapsed'
 const FOLDED_PAGES_KEY = 'aisafety-admin-queue:folded-pages'
 const KIND_KEY = 'aisafety-admin-queue:kind'
+// The rules that have popped up here and been closed (ids, newest last).
+const POP_CLOSED_KEY = 'aisafety-admin-queue:rule-popups-closed'
 // Per chat thread, the time of Fable's newest reply already seen here.
 const CHAT_SEEN_KEY = 'aisafety-admin-queue:chat-seen'
 const CHAT_STATUS_MS = 3000
@@ -437,7 +449,10 @@ function foundLink(text: string): string | null {
  *  source instead of Airtable"): the post Comb found the listing in, or
  *  the email or Discord message a request arrived in. A link to Airtable
  *  is not a source, so a Broom flag, or a Comb find with no post link,
- *  has none. */
+ *  has none. A form submission's link is its record in Airtable, so Q
+ *  opens the email the form arrived as instead, once the Mac has found it
+ *  (Bryce, 12 Nov 2026: "Q should open the original email with the
+ *  form"). */
 function sourceHref(item: QueueItem): string | null {
   const found =
     item.source === 'Comb' && item.sourceExcerpt
@@ -445,7 +460,8 @@ function sourceHref(item: QueueItem): string | null {
       : null
   if (found) return found
   const link = item.sourceLink
-  return link && hostOf(link) && !onHost(link, 'airtable.com') ? link : null
+  if (link && hostOf(link) && !onHost(link, 'airtable.com')) return link
+  return item.emailLink ?? null
 }
 
 function ago(iso: string | null): string {
@@ -760,33 +776,7 @@ function stashImage(key: string, stash: ImageStash): void {
 }
 
 const NAME_KEYS = /\b(name|title)\b|^organi[sz]ation$/i
-const URL_KEYS = /^(url|website|link|join link|apply link|application link)$/i
 const DESC_KEYS = /description/i
-
-/** The listing's own link: the row's, else the first link-like field of
- *  the record as read live (or as proposed). */
-function listingLink(
-  item: QueueItem,
-  fields: Record<string, unknown> | null | undefined,
-  overrides: Record<string, unknown> = {}
-): string | null {
-  // A Change that moves the listing's link (a rename, a new domain) means
-  // the NEW address, as the page shows it on the card – Bryce, 25 Sept 2026,
-  // Atlas Computing → Atlas Ignota: "S is going to the old link". So the
-  // proposed value and any edit typed on the page win over the stored one.
-  for (const [k, v] of Object.entries(overrides)) {
-    if (URL_KEYS.test(k) && typeof v === 'string' && /^https?:\/\//.test(v)) {
-      return v
-    }
-  }
-  if (item.url) return item.url
-  for (const [k, v] of Object.entries(fields ?? item.fields ?? {})) {
-    if (URL_KEYS.test(k) && typeof v === 'string' && /^https?:\/\//.test(v)) {
-      return v
-    }
-  }
-  return null
-}
 
 function linkLabel(url: string): string {
   if (hostOf(url) === 'mail.google.com') return 'Open email'
@@ -1363,6 +1353,10 @@ interface Draft {
   /** The reason the pointer or keyboard is on while the reasons are open:
    *  the rejection reply follows it, so what is shown is what is sent. */
   focusChip: string | null
+  /** A rule that brings wording for the public listing policy: true = the
+   *  rule applies and the public page stays as it is, false = the wording
+   *  goes on it (null = as saved on the row, which starts as "goes on"). */
+  keepInternal: boolean | null
   busy: boolean
   error: string | null
 }
@@ -1379,6 +1373,7 @@ const FRESH: Draft = {
   decline: null,
   editingDecline: false,
   focusChip: null,
+  keepInternal: null,
   busy: false,
   error: null,
 }
@@ -1398,8 +1393,15 @@ interface Toast {
   text: string
   /** A second line that fills in later: what happened to the reply draft. */
   sub?: string
-  /** What Retry sends again after a failure. */
-  retry?: { action: Action; extra: Record<string, unknown> }
+  /** What Retry sends again after a failure (`inPlace`: decided from the
+   *  rule pop-up, so the page stays where it is). */
+  retry?: {
+    action: Action
+    extra: Record<string, unknown>
+    inPlace?: boolean
+    /** The button's word when it is not a plain Retry. */
+    label?: string
+  }
   /** A Discord reply put on the clipboard with the decision. */
   copied?: string
   /** Reopen on a declined addition: no Undo, the mark is its arrow. */
@@ -1558,6 +1560,22 @@ export default function QueueAdmin({
   const [toast, setToast] = useState<Toast | null>(null)
   // True for the last moments of a toast, while it slides back down.
   const [toastLeaving, setToastLeaving] = useState(false)
+  // How tall the toast is while it shows, so the rule pop-up can sit above
+  // it instead of over its left edge.
+  const [toastHeight, setToastHeight] = useState(0)
+  const toastRef = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return
+    // Watched, not read once: the toast grows when its text does (a
+    // failure says more than "Applying").
+    const measure = () => setToastHeight(el.offsetHeight)
+    measure()
+    const watch = new ResizeObserver(measure)
+    watch.observe(el)
+    return () => {
+      watch.disconnect()
+      setToastHeight(0)
+    }
+  }, [])
   // The decision that emptied a tab: fireworks once it lands. `at` tells
   // one round from the next.
   const [cheer, setCheer] = useState<{
@@ -1565,6 +1583,11 @@ export default function QueueAdmin({
     id: string
     at: number
   } | null>(null)
+  // Rules that have popped up and been closed (decided, opened or
+  // dismissed), kept in this browser so each one pops up once.
+  const [popClosed, setPopClosed] = useState<string[]>([])
+  // The rule whose pop-up had Reject pressed: its reasons are showing.
+  const [popRejecting, setPopRejecting] = useState<string | null>(null)
   // The last decision, kept for U after the toast has gone.
   const [undoable, setUndoable] = useState<QueueItem | null>(null)
   // Decisions still being written to Airtable, by item id. The page moves
@@ -1592,7 +1615,8 @@ export default function QueueAdmin({
     (
       item: QueueItem,
       action: Action,
-      extra?: Record<string, unknown>
+      extra?: Record<string, unknown>,
+      opts?: { inPlace?: boolean }
     ) => Promise<void>
   >(async () => {})
   // The local agent on the owner's Mac: its port + a token from the API
@@ -1739,6 +1763,12 @@ export default function QueueAdmin({
       }
       const k = localStorage.getItem(KIND_KEY)
       if (k === 'additions' || k === 'changes' || k === 'rules') setKind(k)
+      const shown: unknown = JSON.parse(
+        localStorage.getItem(POP_CLOSED_KEY) ?? '[]'
+      )
+      if (Array.isArray(shown)) {
+        setPopClosed(shown.filter((x): x is string => typeof x === 'string'))
+      }
     } catch {
       // storage refused: stay on the defaults
     }
@@ -3088,10 +3118,27 @@ export default function QueueAdmin({
     async (
       item: QueueItem,
       action: Action,
-      extra: Record<string, unknown> = {}
+      extra: Record<string, unknown> = {},
+      // inPlace: decided from the rule pop-up, so the page stays on the item
+      // he is reading (no move to the next one, no fireworks).
+      opts: { inPlace?: boolean } = {}
     ) => {
       if (!canEdit) return
       setDraft(item.id, { busy: true, error: null })
+      // A rule that brings wording for the public listing policy: what he
+      // chose for it, and the wording this page showed him. The site refuses
+      // the accept when that wording has changed since (queue-rule-instant).
+      const publicWording =
+        action === 'accept' && item.type === 'Rule' && item.rulePublic
+          ? {
+              public:
+                (drafts[item.id]?.keepInternal ??
+                item.rulePublicChoice === 'internal')
+                  ? 'internal'
+                  : 'apply',
+              publicSeen: item.rulePublic.wording,
+            }
+          : {}
       // The reply draft as it reads on the page goes with the accept, so
       // what reaches Gmail is what was approved.
       const reply = drafts[item.id]?.reply ?? null
@@ -3123,6 +3170,7 @@ export default function QueueAdmin({
         // The last item on the open tab: fireworks (Bryce, 13 Oct 2026).
         const k = kindOf(item)
         if (
+          !opts.inPlace &&
           k === kind &&
           !searching &&
           !(itemsRef.current ?? []).some(
@@ -3161,12 +3209,14 @@ export default function QueueAdmin({
         const i = walk.findIndex(x => x.id === item.id)
         const free = (x: QueueItem) =>
           x.id !== item.id && !pendingRef.current[x.id]
-        const next = fableFirst(
-          item.id,
-          walk.slice(i + 1).find(free) ??
-            walk.slice(0, Math.max(0, i)).reverse().find(free),
-          free
-        )
+        const next = opts.inPlace
+          ? undefined
+          : fableFirst(
+              item.id,
+              walk.slice(i + 1).find(free) ??
+                walk.slice(0, Math.max(0, i)).reverse().find(free),
+              free
+            )
         if (next) reveal(next)
       } else if (action === 'undo') {
         // The write takes a second or two: the toast says so straight away,
@@ -3197,6 +3247,7 @@ export default function QueueAdmin({
             id: item.id,
             action,
             ...replyDraft,
+            ...publicWording,
             ...extra,
           }),
         })
@@ -3360,8 +3411,13 @@ export default function QueueAdmin({
         // read again first and the item moves to Done, with its own note
         // on why.
         const closed = decision && status === 409
+        // 412: a rule's wording for the public listing policy is not what
+        // this page showed him (or it showed none). The rule is still open;
+        // the list is read again so the wording he must see is on the card,
+        // and there is no Retry, which would apply it unread.
+        const reread = decision && status === 412
         setDraft(item.id, { busy: false, error: closed ? null : message })
-        if (closed) await load()
+        if (closed || reread) await load()
         if (decision) {
           forget()
           undoAfterRef.current.delete(item.id)
@@ -3375,16 +3431,29 @@ export default function QueueAdmin({
             state: 'failed',
             text: `${action === 'reject' ? 'Reject' : action === 'delete' ? 'Delete' : action === 'later' ? 'Review again in a week' : acceptLabel(item)} failed · ${closed ? message.replace(/\s*Reload the page\.$/, '') : message}`,
             sub: closed ? 'Moved to Done today' : 'Still in the list',
-            retry: closed ? undefined : { action, extra },
+            retry:
+              closed || reread
+                ? undefined
+                : { action, extra, inPlace: opts.inPlace },
           })
         } else if (action === 'undo') {
+          // An Undo with nothing to take back never works a second time:
+          // a declined addition whose record is gone gets Reopen instead
+          // of Retry (Bryce, 12 Nov 2026: the toast said "Reopen brings it
+          // back" beside a Retry that could only fail again).
+          const next = afterUndoFailed(item, status)
           setToast({
             item,
             no: false,
             state: 'failed',
             text: `Undo failed · ${message}`,
             sub: 'The decision still stands',
-            retry: { action, extra },
+            retry:
+              next === 'reopen'
+                ? { action: 'reopen', extra: {}, label: 'Reopen' }
+                : next === 'retry'
+                  ? { action, extra }
+                  : undefined,
           })
         } else if (action === 'reopen') {
           setToast({
@@ -3418,6 +3487,49 @@ export default function QueueAdmin({
     ]
   )
   actRef.current = act
+
+  // A rule drafted minutes after one of his decisions pops up once, as a
+  // small card over whatever he is on, while the listing is still on his
+  // mind (Bryce, 10 Nov 2026; queue-rule-instant.ts). Not while its own
+  // decision is on its way, and not over the shortcut list.
+  const popCandidate =
+    canEdit && !showHelp
+      ? ruleToPopUp(
+          items ?? [],
+          new Set([...popClosed, ...Object.keys(pending)]),
+          Date.now()
+        )
+      : null
+  // In focus on the Rules tab it is already being read: no card on top.
+  const popUp =
+    popCandidate && popCandidate.id !== selectedId ? popCandidate : null
+  const popSeenId =
+    popCandidate && popCandidate.id === selectedId ? popCandidate.id : null
+  const closePop = useCallback((id: string) => {
+    setPopRejecting(null)
+    setPopClosed(prev => {
+      const next = rememberClosed(prev, id)
+      try {
+        localStorage.setItem(POP_CLOSED_KEY, JSON.stringify(next))
+      } catch {
+        // storage refused: the card may come up once more after a reload
+      }
+      return next
+    })
+  }, [])
+  // Read in the detail pane, it has been shown: it does not pop up when he
+  // moves on.
+  useEffect(() => {
+    if (popSeenId) closePop(popSeenId)
+  }, [popSeenId, closePop])
+  /** The pop-up's rule in full: the Rules tab, with it in focus. */
+  const openPop = (item: QueueItem) => {
+    closePop(item.id)
+    setQuery('')
+    setKind('rules')
+    foldPage(`${sectionOf(item)}:${pageLabel(item) ?? ''}`, false)
+    select(item.id)
+  }
 
   // Undo pressed on a decision still on its way: undone the moment it lands.
   const queueUndo = useCallback((id: string) => {
@@ -3807,6 +3919,21 @@ export default function QueueAdmin({
             void act(item, 'reopen')
           }
           break
+        case 'g':
+          // Apply the rule that popped up, where he is (Bryce, 10 Nov
+          // 2026). G and V are the left-hand keys still free.
+          if (popUp && !draft(popUp.id).busy) {
+            e.preventDefault()
+            void act(popUp, 'accept', {}, { inPlace: true })
+          }
+          break
+        case 'v':
+          // View the rule that popped up in full, on the Rules tab.
+          if (popUp) {
+            e.preventDefault()
+            openPop(popUp)
+          }
+          break
         case 't':
           // Today's decisions and back to the queue, as the "done today"
           // link up top does (Bryce, 21 Oct 2026).
@@ -3861,6 +3988,7 @@ export default function QueueAdmin({
     searching,
     clearSearch,
     ordered.done,
+    popUp,
   ])
 
   // Enter or the down arrow in the search box goes to the first match, so
@@ -4405,6 +4533,7 @@ export default function QueueAdmin({
         // (Bryce, 21 Oct 2026: "let's make the toast clickable").
         <div
           key={toast.item.id}
+          ref={toastRef}
           className={`${styles.toast} ${toastLeaving ? styles.toastLeaving : ''}`}
           role="status"
           onClick={e => {
@@ -4481,11 +4610,13 @@ export default function QueueAdmin({
                 <button
                   className={styles.toastUndo}
                   onClick={() =>
-                    void act(toast.item, toastRetry.action, toastRetry.extra)
+                    void act(toast.item, toastRetry.action, toastRetry.extra, {
+                      inPlace: toastRetry.inPlace,
+                    })
                   }
                 >
                   <Icon src={ICON.undo} size={12} className={styles.undoIcon} />
-                  Retry
+                  {toastRetry.label ?? 'Retry'}
                 </button>
               )}
               <button
@@ -4528,6 +4659,25 @@ export default function QueueAdmin({
             </button>
           )}
         </div>
+      )}
+
+      {popUp && (
+        <RulePopUp
+          // not the bare row id: the toast beside it is keyed by that
+          key={`pop-${popUp.id}`}
+          item={popUp}
+          draft={draft(popUp.id)}
+          rejecting={popRejecting === popUp.id}
+          lift={toastHeight ? toastHeight + 12 : 0}
+          onRejecting={on => setPopRejecting(on ? popUp.id : null)}
+          onInternal={keepInternal => setDraft(popUp.id, { keepInternal })}
+          onApply={() => void act(popUp, 'accept', {}, { inPlace: true })}
+          onReject={reason =>
+            void act(popUp, 'reject', { reason }, { inPlace: true })
+          }
+          onOpen={() => openPop(popUp)}
+          onClose={() => closePop(popUp.id)}
+        />
       )}
 
       {helpShown && (
@@ -4645,6 +4795,13 @@ export default function QueueAdmin({
                 on a declined addition opened from the search, bring it back:
                 the listing is rebuilt if it was deleted, and the item is open
                 again
+              </dd>
+              <dt>
+                <kbd>G</kbd> / <kbd>V</kbd>
+              </dt>
+              <dd>
+                when a new rule pops up, apply it where you are / view it in
+                full on the Rules tab
               </dd>
               <dt>
                 <kbd>⌘</kbd> <kbd>Z</kbd>
@@ -5783,6 +5940,20 @@ function Detail({
             )}
             <span className={styles.when}>{ago(item.createdAt)}</span>
             <div className={styles.links}>
+              {/* A form's own link is its record in Airtable; the email it
+                  arrived as sits beside it, and is what Q opens. */}
+              {item.emailLink && sourceHref(item) === item.emailLink && (
+                <a
+                  href={item.emailLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={styles.withIcon}
+                >
+                  <Icon src={linkIcon(item.emailLink)} size={12} />
+                  {linkLabel(item.emailLink)}
+                  <kbd>Q</kbd>
+                </a>
+              )}
               {item.sourceLink && (
                 <a
                   href={item.sourceLink}
@@ -6144,7 +6315,13 @@ function Detail({
         )}
 
         {item.type === 'Rule' && (
-          <RuleCard key={`rule:${item.id}`} item={item} />
+          <RuleCard
+            key={`rule:${item.id}`}
+            item={item}
+            internal={d.keepInternal ?? item.rulePublicChoice === 'internal'}
+            onInternal={keepInternal => setD({ keepInternal })}
+            disabled={d.busy || !isOpen(item)}
+          />
         )}
 
         {(hasCard || !excerptBlock) && replyBlock}
@@ -7914,10 +8091,22 @@ function ReplyDraft({
  *  against him, can't tell) spelled out. The rest of the summary, Fable's
  *  take on the test, every other result, where it applies and the exact
  *  wording wait behind one Details fold. */
-function RuleCard({ item }: { item: QueueItem }) {
+function RuleCard({
+  item,
+  internal,
+  onInternal,
+  disabled,
+}: {
+  item: QueueItem
+  /** The wording for the public listing policy stays off the page. */
+  internal: boolean
+  onInternal: (internal: boolean) => void
+  disabled: boolean
+}) {
   const { lead, rest } = leadSentence(
     item.summary ?? 'No summary was written for this rule.'
   )
+  const from = item.ruleInstant
   const test = item.ruleTest
   const needsYou =
     test?.results.filter(
@@ -7935,6 +8124,13 @@ function RuleCard({ item }: { item: QueueItem }) {
     Boolean(item.ruleWording)
   return (
     <section className={styles.block}>
+      {from?.listing && (
+        // Drafted minutes after one decision: the listing it came from.
+        <p className={styles.note}>
+          From your decision on {from.listing}
+          {from.page ? ` (${from.page})` : ''}
+        </p>
+      )}
       <p className={styles.summary}>{lead}</p>
       {item.rulePublicPolicy ? (
         // The policy check's rows change aisafety.com/listing-policy only;
@@ -7964,6 +8160,16 @@ function RuleCard({ item }: { item: QueueItem }) {
             <RuleTestLine key={r.row} result={r} />
           ))}
         </ul>
+      )}
+      {item.rulePublic && (
+        // Outside the fold: Apply puts these words on the public page, so
+        // they are always read first.
+        <PublicWording
+          wording={item.rulePublic}
+          internal={internal}
+          onInternal={onInternal}
+          disabled={disabled}
+        />
       )}
       {hasDetails && (
         <details className={styles.findingMore}>
@@ -8007,6 +8213,167 @@ function RuleCard({ item }: { item: QueueItem }) {
 }
 
 const RULE_OUTCOMES = ['breaks', 'unclear', 'fixes', 'keeps'] as const
+
+/** A rule drafted minutes after one decision, as it pops up over the page:
+ *  the listing it came from, the rule in a line, its test, any wording for
+ *  the public listing policy (always in view, as Apply publishes it), and
+ *  the decision. Anything more is a click away on the Rules tab. */
+function RulePopUp({
+  item,
+  draft,
+  rejecting,
+  lift,
+  onRejecting,
+  onInternal,
+  onApply,
+  onReject,
+  onOpen,
+  onClose,
+}: {
+  item: QueueItem
+  draft: Draft
+  rejecting: boolean
+  /** How far to sit above the corner, in px: the decision toast's height
+   *  while one shows, so the two never overlap. */
+  lift: number
+  onRejecting: (on: boolean) => void
+  onInternal: (internal: boolean) => void
+  onApply: () => void
+  onReject: (reason: string) => void
+  onOpen: () => void
+  onClose: () => void
+}) {
+  const from = item.ruleInstant
+  const { lead } = leadSentence(
+    item.summary ?? 'No summary was written for this rule.'
+  )
+  const test = item.ruleTest
+  const against = test?.counts.breaks ?? 0
+  return (
+    <aside
+      className={styles.rulePop}
+      aria-label="New rule from your decision"
+      style={{ '--pop-lift': `${lift}px` } as React.CSSProperties}
+    >
+      <div className={styles.rulePopHead}>
+        <span className={styles.rulePopFrom}>
+          New rule from {from?.listing ?? 'your decision'}
+          {from?.page ? ` (${from.page})` : ''}
+        </span>
+        <button
+          className={styles.toastClose}
+          aria-label="Dismiss"
+          title="Dismiss. It stays on the Rules tab."
+          onClick={onClose}
+        >
+          <Icon src={ICON.x} size={12} />
+        </button>
+      </div>
+      <p className={styles.rulePopLead}>{lead}</p>
+      <p className={styles.note}>
+        {test
+          ? against
+            ? `${ruleTestShort(test)}, against you on ${against}`
+            : ruleTestShort(test)
+          : 'Not tested yet'}
+      </p>
+      {item.rulePublic && (
+        <PublicWording
+          wording={item.rulePublic}
+          internal={draft.keepInternal ?? item.rulePublicChoice === 'internal'}
+          onInternal={onInternal}
+          disabled={draft.busy}
+        />
+      )}
+      {draft.error && <p className={styles.error}>{draft.error}</p>}
+      {rejecting ? (
+        <div className={styles.chips}>
+          {item.rejectChips.map(chip => (
+            <button
+              key={chip}
+              className={styles.chip}
+              disabled={draft.busy}
+              onClick={() => onReject(chip)}
+            >
+              <span>{chip}</span>
+            </button>
+          ))}
+          <button className={styles.ghost} onClick={() => onRejecting(false)}>
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <div className={styles.buttons}>
+          <button
+            className={`${styles.button} ${styles.primary}`}
+            disabled={draft.busy}
+            onClick={onApply}
+          >
+            <Icon src={ICON.check} size={12} />
+            Apply <kbd>G</kbd>
+          </button>
+          <button
+            className={`${styles.button} ${styles.danger}`}
+            disabled={draft.busy}
+            onClick={() => onRejecting(true)}
+          >
+            <Icon src={ICON.x} size={12} />
+            Reject
+          </button>
+          <button className={styles.ghost} onClick={onOpen}>
+            View <kbd>V</kbd>
+          </button>
+        </div>
+      )}
+    </aside>
+  )
+}
+
+/** The sentence a rule brings for aisafety.com/listing-policy, shown in
+ *  full wherever the rule can be applied (its card and the pop-up): one
+ *  Apply covers the rule and these words, so they are never behind a fold.
+ *  The tick keeps the rule and leaves the public page as it is. */
+function PublicWording({
+  wording,
+  internal,
+  onInternal,
+  disabled,
+}: {
+  wording: RulePublic
+  internal: boolean
+  onInternal: (internal: boolean) => void
+  disabled: boolean
+}) {
+  return (
+    <div className={styles.rulePublic}>
+      <h3 className={styles.h3}>
+        {internal
+          ? 'Stays off the public listing policy'
+          : 'Also goes on the public listing policy'}
+      </h3>
+      <blockquote className={`${styles.quote} ${internal ? styles.from : ''}`}>
+        {wording.wording}
+      </blockquote>
+      {wording.was && !internal && (
+        <>
+          <h3 className={styles.h3}>Replaces</h3>
+          <blockquote className={`${styles.quote} ${styles.from}`}>
+            {wording.was}
+          </blockquote>
+        </>
+      )}
+      <label className={styles.check}>
+        <input
+          type="checkbox"
+          checked={internal}
+          disabled={disabled}
+          onChange={e => onInternal(e.target.checked)}
+        />
+        <span>Keep it internal</span>
+      </label>
+    </div>
+  )
+}
 
 /** The aside's bullets on a rule: what it came from, open to begin with
  *  and folded on a click (Bryce, 18 Oct 2026: "make the where it came from

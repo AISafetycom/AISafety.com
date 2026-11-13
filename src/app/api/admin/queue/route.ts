@@ -34,6 +34,10 @@
        addition already published or a change already applied, from Done
        today). An undo that could not put a field back (a picture with no
        copy to write, queue-before-picture.ts) adds { notPutBack: [names] }.
+       Accepting a rule that brings wording for the public listing policy
+       also takes { public: 'apply' | 'internal', publicSeen: <the wording
+       the page showed> } – queue-rule-instant.ts; without them, or with
+       wording that has changed since, the accept is refused.
 
   `agent` is { port, token } for the local agent on the owner's Mac (null
   when QUEUE_AGENT_SECRET is not set): the page calls it after an accept so
@@ -70,6 +74,7 @@ import {
   unflagItem,
 } from '@/lib/admin/queue'
 import { parseFlag } from '@/lib/admin/queue-flag'
+import { publicChoiceOf } from '@/lib/admin/queue-rule-instant'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -179,6 +184,7 @@ export async function POST(req: NextRequest) {
     const me = await currentAdmin()
     let notPutBack: string[] = []
     if (action === 'accept') {
+      const choice = publicChoiceOf(body.public)
       await acceptItem(
         item,
         sanitiseEdits(body.edits),
@@ -186,7 +192,16 @@ export async function POST(req: NextRequest) {
         // Proposed fields Fable has already changed on the record.
         Array.isArray(body.keep)
           ? body.keep.filter((k): k is string => typeof k === 'string')
-          : []
+          : [],
+        // A rule's wording for the public listing policy: what he chose,
+        // and the wording the page showed him.
+        choice
+          ? {
+              choice,
+              seen:
+                typeof body.publicSeen === 'string' ? body.publicSeen : null,
+            }
+          : null
       )
     } else if (action === 'reject') {
       await rejectItem(

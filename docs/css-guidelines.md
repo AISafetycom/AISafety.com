@@ -161,15 +161,26 @@ Use these for visibility, opacity, and cursor styles.
 
 ### 9. Buttons
 
-Never style a button. Just reference `.button-primary` or `.button-secondary`.
+Never style a button. Use the `<Button>` component (`src/components/Button.tsx`). Its options use the same names as the Figma "Button" component:
+
+- `variant`: `white` (the default), `teal`, `teal-alt`, `clear`, `clear-border`
+- `size`: `default` (48px) or `small` (40px) for buttons with a label
+- `icon` with `iconPosition`: `preceding`, `trailing` (the default) or `only`. Label buttons use a 16px icon.
+- Icon-only buttons come in `small` (40px, the default, with a 24px icon) or `xs` (32px, with a 16px icon), never 48px. They need an `aria-label`, which also shows as a tooltip on hover and focus (not while disabled).
+
+Hover, focus and disabled styles come for free. The text uses the global `.paragraph-small-bold` / `.paragraph-xs-bold` classes, so never set fonts on a button.
+
+It renders a `<button>`. For a link that looks like a button, pass the link with `as`: `as={Link}` for pages on this site, `as="a"` for other sites, or a tracking wrapper like `as={TrackedLink}`.
 
 ```tsx
 // Good
-<a className="button-primary">Get Started</a>
-<a className="button-secondary">Learn More</a>
+<Button type="submit">Subscribe</Button>
+<Button as={Link} href="/events" icon="/images/icons/arrow-right.svg">View all events</Button>
+<Button as="a" href="https://example.org" variant="clear-border">Learn more</Button>
 
 // Bad
-.new-class-with-button-styling {
+<a className="my-button">Get Started</a>
+.my-button {
   [styling]
 }
 ```

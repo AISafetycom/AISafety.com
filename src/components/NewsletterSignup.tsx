@@ -1,7 +1,7 @@
 'use client'
 
 import { useId, useState } from 'react'
-import Icon from '@/components/Icon'
+import Button from '@/components/Button'
 import {
   trackNewsletterSignup,
   trackNewsletterSignupError,
@@ -12,8 +12,9 @@ import styles from './NewsletterSignup.module.css'
 
 /** The newsletter signup box beside a resource page's header (/events,
  *  /training, /funding): signs the reader up on the site, through
- *  /api/subscribe and the newsletter's ActiveCampaign form, and asks them to
- *  confirm from their inbox. (Until the Funding move, /funding's box opened
+ *  /api/subscribe and the newsletter's ActiveCampaign form, which subscribes
+ *  them at once (since 12 November 2026; before that they confirmed from
+ *  their inbox). (Until the Funding move, /funding's box opened
  *  Substack's subscribe page instead.) */
 export default function NewsletterSignup({
   heading,
@@ -39,7 +40,11 @@ export default function NewsletterSignup({
   )
 }
 
-const SUCCESS = 'Check your inbox to confirm your subscription.'
+const SUCCESS = "You're subscribed. A welcome email is on its way."
+// Only when the site couldn't subscribe the reader itself: the button in
+// the email still does.
+const CONFIRM =
+  'Almost done. Press the button in the email we just sent you to finish signing up.'
 const ALREADY = "You're already subscribed."
 const SOMETHING_WRONG =
   'Something went wrong. Please try again in a few minutes.'
@@ -63,8 +68,10 @@ function ActiveCampaignSignup({
   const [hp, setHp] = useState('')
   const [state, setState] = useState<'idle' | 'sending' | 'done'>('idle')
   const [error, setError] = useState('')
-  // Set when the address was already confirmed on the list: no email comes.
+  // Set when the address was already subscribed to the list: no email comes.
   const [already, setAlready] = useState(false)
+  // Set when the reader still has to press the button in the email.
+  const [confirm, setConfirm] = useState(false)
   const statusId = useId()
   const sending = state === 'sending'
 
@@ -77,6 +84,7 @@ function ActiveCampaignSignup({
     setError('')
     let failure: { message: string; reason: string } | null = null
     let wasAlready = false
+    let needsConfirm = false
     try {
       const res = await fetch('/api/subscribe', {
         method: 'POST',
@@ -87,10 +95,12 @@ function ActiveCampaignSignup({
       const answer = (body ?? {}) as {
         ok?: unknown
         already?: unknown
+        confirm?: unknown
         error?: unknown
         reason?: unknown
       }
       wasAlready = answer.already === true
+      needsConfirm = answer.confirm === true
       if (!res.ok || answer.ok !== true) {
         failure = {
           message:
@@ -111,6 +121,7 @@ function ActiveCampaignSignup({
       if (trackingPage) trackNewsletterSignupError(trackingPage, failure.reason)
     } else {
       setAlready(wasAlready)
+      setConfirm(needsConfirm)
       setState('done')
       // An address already on the list isn't a new signup: it's counted
       // under its own reason on the dashboard, not as a success.
@@ -122,7 +133,8 @@ function ActiveCampaignSignup({
     }
   }
 
-  const status = state === 'done' ? (already ? ALREADY : SUCCESS) : error
+  const status =
+    state === 'done' ? (already ? ALREADY : confirm ? CONFIRM : SUCCESS) : error
   const statusStyle =
     state === 'done'
       ? 'paragraph-small color-teal-300'
@@ -152,24 +164,18 @@ function ActiveCampaignSignup({
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? statusId : undefined}
             />
-            <button
+            {/* A loading circle while the signup is on its way, so a
+                press of Enter visibly did something (Bryce, 8 Oct 2026).
+                handleSubmit ignores repeat presses while it sends. */}
+            <Button
               type="submit"
-              className={styles.submit}
+              size="small"
+              icon="/images/icons/arrow-right-large.svg"
+              iconPosition="only"
+              loading={sending}
               aria-label={sending ? 'Subscribing' : 'Subscribe'}
-              disabled={sending}
-            >
-              {/* A loading circle while the signup is on its way, so a
-                  press of Enter visibly did something (Bryce, 8 Oct 2026). */}
-              {sending ? (
-                <span className={styles.spinner} aria-hidden="true" />
-              ) : (
-                <Icon
-                  src="/images/icons/arrow-right.svg"
-                  size={16}
-                  className="color-white"
-                />
-              )}
-            </button>
+              className={`drop-shadow ${styles.submit}`}
+            />
           </label>
         )}
         {/* Always rendered, so screen readers announce what lands in it:

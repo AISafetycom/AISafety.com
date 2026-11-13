@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Script from 'next/script'
-import Icon from '@/components/Icon'
+import Button from '@/components/Button'
 import MapControls from '@/components/MapControls'
 import styles from './page.module.css'
 import { Community } from '@/lib/data/communities'
@@ -657,17 +657,13 @@ export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
             <p className="paragraph-small">Loading map…</p>
           </div>
         )}
-        <button
+        <Button
           onClick={handleViewOnline}
-          className={`button-primary ${styles.mapButton}`}
+          className={styles.mapButton}
+          icon="/images/icons/arrow-down.svg"
         >
-          <p>View online communities</p>
-          <Icon
-            src="/images/icons/arrow-down.svg"
-            size={16}
-            className="color-teal-400"
-          />
-        </button>
+          View online communities
+        </Button>
         <MapControls
           className={styles.mapControls}
           onZoomIn={handleZoomIn}
@@ -678,7 +674,7 @@ export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
       <div
         ref={tooltipRef}
         id="mapbox-tooltip"
-        className="paragraph-xs"
+        className="paragraph-xs border-plus-fill"
         style={{ display: 'none', position: 'fixed' }}
       />
     </>

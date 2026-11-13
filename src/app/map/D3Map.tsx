@@ -737,7 +737,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
       {/* Tooltip — always in DOM for measuring, visibility toggled via ref */}
       <div
         ref={tooltipRef}
-        className={styles['map-tooltip']}
+        className={`${styles['map-tooltip']} border-plus-fill`}
         style={{ visibility: 'hidden', opacity: 0 }}
       >
         <strong></strong>

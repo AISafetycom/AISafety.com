@@ -432,9 +432,9 @@ export async function runAssistantStream(
           max_tokens: thinkingAlwaysOn(model) ? MAX_TOKENS * 4 : MAX_TOKENS,
           // Off wherever the API allows it: the assistant does its reasoning in
           // visible text ending with the [[/thinking]] marker. Fable-tier
-          // models and Opus 5.5 can't have it off (a 400), so for them the
-          // field is left out and the thinking blocks they return are echoed
-          // back below.
+          // models, Opus 5.5 and Sonnet 5.5 reject `disabled` (a 400), so for
+          // them the field is left out and the thinking blocks they return
+          // are echoed back below.
           thinking: thinkingParam(model),
           // A visitor is waiting on a live reply, so the production model runs
           // at medium effort: enough thinking for a good answer without a long

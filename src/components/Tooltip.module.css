@@ -1,0 +1,93 @@
+/* <Tooltip> — values from the Figma "tooltip" component (node 11665:24766).
+   Text type comes from the global .paragraph-small / .paragraph-xs classes
+   and the shadow from the global .drop-shadow-dark, both set in Tooltip.tsx. */
+
+/* Put on the element the tooltip labels. */
+.anchor {
+  position: relative;
+}
+
+/* Hidden with display: none rather than opacity, so a tooltip near the edge
+   of the page can't widen it and cause sideways scrolling while hidden. */
+.tooltip {
+  position: absolute;
+  z-index: 10;
+  display: none;
+  align-items: center;
+  border: 1px solid var(--teal-800);
+  border-radius: 8px;
+  background-color: var(--teal-850);
+  color: var(--white);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  /* The site's standard fade. allow-discrete keeps it shown while it fades
+     out, instead of vanishing the moment display goes back to none. */
+  transition:
+    opacity var(--hover-transition),
+    display var(--hover-transition) allow-discrete;
+}
+
+.anchor:focus-visible > .tooltip {
+  display: flex;
+  opacity: 1;
+  /* A short wait before it appears, so passing over a button doesn't flash
+     it. It still hides straight away. */
+  transition-delay: 0.15s;
+}
+
+/* Only on devices with a real pointer: on touch screens a tap would leave
+   the tooltip stuck open. */
+@media (hover: hover) {
+  .anchor:hover > .tooltip {
+    display: flex;
+    opacity: 1;
+    transition-delay: 0.15s;
+  }
+}
+
+/* Where it fades in from as it appears. */
+@starting-style {
+  .anchor:focus-visible > .tooltip,
+  .anchor:hover > .tooltip {
+    opacity: 0;
+  }
+}
+
+/* Sizes */
+.default {
+  height: 40px;
+  padding: 0 11px; /* + the 1px border = Figma's 12px */
+}
+
+.small {
+  height: 32px;
+  padding: 0 7px; /* + the 1px border = Figma's 8px */
+}
+
+/* Positions: 8px from the element, centered along that side. 9px in the
+   code because offsets start inside the anchor's border, and every <Button>
+   has a 1px one. */
+.below {
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.above {
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.left {
+  right: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.right {
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+}

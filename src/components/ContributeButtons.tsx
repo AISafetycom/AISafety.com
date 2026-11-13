@@ -52,7 +52,7 @@ function ActionRow({
       target="_blank"
       rel="noopener noreferrer"
       onClick={onClick}
-      className={`flex items-center gap-8px color-teal-300 hover-white ${styles.row}`}
+      className={`flex items-center gap-8px link ${styles.row}`}
     >
       <span className={`bg-teal-850 ${styles.badge}`}>
         <Icon src={icon} size={12} />
@@ -129,7 +129,7 @@ export default function ContributeButtons({
           unoptimized
           className={styles.airtableImg}
         />
-        <span className={`${styles.badge} ${styles.airtableArrow}`}>
+        <span className={`bg-teal-800 ${styles.badge} ${styles.airtableArrow}`}>
           <Icon
             src="/images/icons/arrow-up-right-figma.svg"
             size={16}
