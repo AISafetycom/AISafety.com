@@ -45,6 +45,9 @@ Every collection endpoint returns a wrapped envelope:
 - IDs are stable Airtable record IDs.
 - Image fields (`logo`, `image`, `mapLogo`) are permanent Vercel Blob URLs
   (`*.public.blob.vercel-storage.com`), not Airtable's expiring attachment URLs.
+  Job logos are 256-pixel WebP copies of images hosted by 80,000 Hours; a logo
+  whose source can't be reached when it first appears keeps the source address
+  until a later refresh copies it.
 - Dates are ISO-8601 strings.
 
 ## Filtering
@@ -55,6 +58,21 @@ Every collection endpoint returns a wrapped envelope:
 - `?q=text` does a free-text search across all fields.
 
 Whitelisted filter fields per endpoint live in `src/lib/api/registry.ts`.
+
+## Deprecated fields
+
+These stay in v1 responses and filters, with the same kind of values, until v2
+drops them. New code should use the newer fields instead.
+
+| Endpoint   | Field                   | Use instead                        | Since           |
+| ---------- | ----------------------- | ---------------------------------- | --------------- |
+| `funding`  | `recipientType`         | `whoCanApply`                      | 27 October 2026 |
+| `funding`  | `acceptingApplications` | `applicationStatus` and `deadline` | 28 October 2026 |
+| `advisors` | `focus`                 | `focusAreas`                       | 28 October 2026 |
+
+`recipientType` is an empty string on every record. `acceptingApplications` is
+worked out from `applicationStatus` and `deadline`, and `focus` from
+`focusAreas`; see `docs/api-changelog.md`.
 
 ## Endpoints
 

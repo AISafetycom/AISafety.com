@@ -481,7 +481,7 @@ export default function TrainingClient({
                 className={i === 0 ? undefined : 'padding-top-32px'}
               >
                 {sections.length > 1 && (
-                  <p className="paragraph-small color-teal-300 padding-bottom-24px">
+                  <p className="paragraph-small color-teal-grey-300 padding-bottom-24px">
                     {SECTION_LABELS[section.key]}
                   </p>
                 )}
@@ -496,7 +496,7 @@ export default function TrainingClient({
             </div>
           )}
           {filtered.length === 0 && (
-            <p className="paragraph-small color-teal-300">
+            <p className="paragraph-small color-teal-grey-300">
               {anyFilterActive
                 ? 'No results found based on these filters. Try adjusting them.'
                 : mode === 'upcoming'

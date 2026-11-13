@@ -1,9 +1,10 @@
 import Image from 'next/image'
-import Icon from '@/components/Icon'
 import Link from 'next/link'
+import Button from '@/components/Button'
 import RelativeDate from '@/components/RelativeDate'
 import TrackedLink from '@/components/TrackedLink'
 import CardLogo from '@/components/CardLogo'
+import { getCommunities } from '@/lib/data/communities'
 import { fetchAllLastUpdated } from '@/lib/data/last-updated'
 import { getTrainingPrograms, type TrainingProgram } from '@/lib/data/training'
 import { selectFeatured, withRandomStandIns } from '@/lib/featured'
@@ -107,12 +108,26 @@ function leadSentences(text: string, max = 125): string {
   return out
 }
 
+// The AI Alignment Slack record on /communities. Its invite link is renewed
+// every time one fills up (Slack caps a link at 400 joins), so the home card
+// reads it from Airtable rather than holding its own copy.
+const SLACK_COMMUNITY_ID = 'recUK7qaYdSXNHfoc'
+
 export default async function Home() {
-  const [dates, programs] = await Promise.all([
+  const [dates, programs, communities] = await Promise.all([
     fetchAllLastUpdated(),
     getTrainingPrograms(),
+    getCommunities(),
   ])
   const featuredProgram = pickFeaturedProgram(programs)
+  const slackJoinLink = communities.find(
+    c => c.id === SLACK_COMMUNITY_ID
+  )?.joinLink
+  if (!slackJoinLink || slackJoinLink === '#') {
+    throw new Error(
+      `Home: the AI Alignment Slack record (${SLACK_COMMUNITY_ID}) is unpublished or has no Link in Communities`
+    )
+  }
 
   return (
     <div className="container-default home-page">
@@ -153,9 +168,9 @@ export default async function Home() {
             Conferences, talks, workshops, meetups, and competitions in AI
             safety – online and in person
           </h2>
-          <Link href="/events" className="button-primary drop-shadow">
+          <Button as={Link} href="/events" className="drop-shadow">
             View all events
-          </Link>
+          </Button>
           {dates.events && (
             <RelativeDate
               iso={dates.events}
@@ -197,17 +212,18 @@ export default async function Home() {
             Talks, 1-1s, and structured networking for people working to make
             transformative AI go well, and those well-positioned to join them.
           </p>
-          <TrackedLink
+          <Button
+            as={TrackedLink}
+            variant="clear-border"
             href="https://www.aihorizonsforum.org/"
             target="_blank"
             rel="noopener noreferrer"
-            className="button-secondary"
             trackingPage="Home"
             trackingName="AI Horizons Forum"
             trackingId="rec53p2JXaFG6dsEO"
           >
             Learn more
-          </TrackedLink>
+          </Button>
         </div>
       </div>
 
@@ -222,9 +238,9 @@ export default async function Home() {
             A visual overview of the key organizations, programs, and projects
             in AI safety
           </h2>
-          <Link href="/map" className="button-primary drop-shadow-light">
+          <Button as={Link} href="/map" className="drop-shadow-light">
             View map
-          </Link>
+          </Button>
           {dates.map && (
             <RelativeDate
               iso={dates.map}
@@ -245,9 +261,9 @@ export default async function Home() {
             Fellowships, bootcamps, and courses to build skills and career
             capital in AI safety – online and in person
           </h2>
-          <Link href="/training" className="button-primary drop-shadow">
+          <Button as={Link} href="/training" className="drop-shadow">
             View all training programs
-          </Link>
+          </Button>
           {dates.training && (
             <RelativeDate
               iso={dates.training}
@@ -285,17 +301,18 @@ export default async function Home() {
               {homepageBlurb(featuredProgram)}
             </p>
             {featuredProgram.url !== '#' && (
-              <TrackedLink
+              <Button
+                as={TrackedLink}
+                variant="clear-border"
                 href={featuredProgram.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="button-secondary"
                 trackingPage="Home"
                 trackingName={featuredProgram.name}
                 trackingId={featuredProgram.id}
               >
                 Learn more
-              </TrackedLink>
+              </Button>
             )}
           </div>
         )}
@@ -310,12 +327,9 @@ export default async function Home() {
             Groups dedicated to discussing and contributing to AI safety, both
             online and in-person
           </h2>
-          <Link
-            href="/communities"
-            className="button-primary drop-shadow-light"
-          >
+          <Button as={Link} href="/communities" className="drop-shadow-light">
             View all communities
-          </Link>
+          </Button>
           {dates.communities && (
             <RelativeDate
               iso={dates.communities}
@@ -350,16 +364,17 @@ export default async function Home() {
             Join thousands of AI safety folks ready to answer questions, share
             opportunities, and connect.
           </p>
-          <TrackedLink
-            href="https://join.slack.com/t/ai-alignment/shared_invite/zt-46igeclhz-5mzaevYc__pKUIGX6Fe4lQ"
+          <Button
+            as={TrackedLink}
+            variant="clear-border"
+            href={slackJoinLink}
             target="_blank"
             rel="noopener noreferrer"
-            className="button-secondary"
             trackingPage="Home"
             trackingName="AI Alignment Slack"
           >
             Join
-          </TrackedLink>
+          </Button>
         </div>
       </div>
 
@@ -373,9 +388,9 @@ export default async function Home() {
               Self-study courses and curated study guides to deepen your
               expertise
             </h2>
-            <Link href="/self-study" className="button-primary drop-shadow">
+            <Button as={Link} href="/self-study" className="drop-shadow">
               View all self-study options
-            </Link>
+            </Button>
             {dates['self-study'] && (
               <RelativeDate
                 iso={dates['self-study']}
@@ -395,33 +410,34 @@ export default async function Home() {
               height={32}
             />
             <p className="paragraph-small-bold padding-bottom-12px">
-              Standard intro course
+              Recommended intro course
             </p>
             <div className={`${styles['icon-row']} padding-bottom-24px`}>
               <Image
                 loading="lazy"
-                src="/images/blue-dot-impact.svg"
+                src="/images/lens-academy.svg"
                 alt=""
                 width={56}
                 height={56}
               />
-              <h3>BlueDot Impact: Technical &amp; Governance</h3>
+              <h3>Lens Academy: AI Risk Fundamentals</h3>
             </div>
             <p className="padding-bottom-24px">
-              Learn key concepts and research perspectives in AI safety, split
-              into two main tracks.
+              Learn the core case for why superintelligent AI could be
+              catastrophic, and what should be done about it.
             </p>
             <div className="block">
-              <TrackedLink
-                href="https://bluedot.org/courses"
+              <Button
+                as={TrackedLink}
+                variant="clear-border"
+                href="https://lensacademy.org/courses/ai-risk-fundamentals"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="button-secondary"
                 trackingPage="Home"
-                trackingName="BlueDot Impact: Technical & Governance"
+                trackingName="Lens Academy: AI Risk Fundamentals"
               >
-                View curricula
-              </TrackedLink>
+                View course
+              </Button>
             </div>
           </div>
         </div>
@@ -439,9 +455,9 @@ export default async function Home() {
           <h2 className="width-4-col padding-bottom-40px">
             Open positions in research, policy, operations, and more
           </h2>
-          <Link href="/jobs" className="button-primary drop-shadow">
+          <Button as={Link} href="/jobs" className="drop-shadow">
             View all jobs
-          </Link>
+          </Button>
           {dates.jobs && (
             <RelativeDate
               iso={dates.jobs}
@@ -459,9 +475,9 @@ export default async function Home() {
               Podcasts, newsletters, and more to keep you up to date in AI
               safety
             </h2>
-            <Link href="/media-channels" className="button-primary drop-shadow">
+            <Button as={Link} href="/media-channels" className="drop-shadow">
               View all media channels
-            </Link>
+            </Button>
             {dates['media-channels'] && (
               <RelativeDate
                 iso={dates['media-channels']}
@@ -479,9 +495,9 @@ export default async function Home() {
             <h2 className="width-4-col padding-bottom-40px">
               Organizations offering financial support to AI safety projects
             </h2>
-            <Link href="/funding" className="button-primary drop-shadow-light">
+            <Button as={Link} href="/funding" className="drop-shadow-light">
               View all funders
-            </Link>
+            </Button>
             {dates.funding && (
               <RelativeDate
                 iso={dates.funding}
@@ -515,16 +531,17 @@ export default async function Home() {
               New grantmaking platform coordinating large-scale philanthropy in
               quarterly rounds.
             </p>
-            <TrackedLink
+            <Button
+              as={TrackedLink}
+              variant="clear-border"
               href="https://www.lightconecommons.com/"
               target="_blank"
               rel="noopener noreferrer"
-              className="button-secondary"
               trackingPage="Home"
               trackingName="Lightcone Commons"
             >
               Learn more
-            </TrackedLink>
+            </Button>
           </div>
         </div>
       </div>
@@ -539,9 +556,9 @@ export default async function Home() {
               Free 1-1 calls to help you contribute most effectively to AI
               safety
             </h3>
-            <Link href="/advisors" className="button-primary drop-shadow">
+            <Button as={Link} href="/advisors" className="drop-shadow">
               View all advisors
-            </Link>
+            </Button>
             {dates.advisors && (
               <RelativeDate
                 iso={dates.advisors}
@@ -559,9 +576,9 @@ export default async function Home() {
             <h3 className="padding-bottom-32px">
               Resources for starting and growing an AI safety organization
             </h3>
-            <Link href="/founders" className="button-primary drop-shadow">
+            <Button as={Link} href="/founders" className="drop-shadow">
               View founder toolkit
-            </Link>
+            </Button>
             {dates.founders && (
               <RelativeDate
                 iso={dates.founders}
@@ -585,16 +602,17 @@ export default async function Home() {
               <h3>Ashgro</h3>
             </div>
             <div className="block">
-              <TrackedLink
+              <Button
+                as={TrackedLink}
+                variant="clear-border"
                 href="https://www.ashgro.org/"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="button-secondary"
                 trackingPage="Home"
                 trackingName="Ashgro"
               >
                 Learn more
-              </TrackedLink>
+              </Button>
             </div>
           </div>
         </div>
@@ -607,9 +625,9 @@ export default async function Home() {
             <h3 className="padding-bottom-32px">
               How to donate effectively to the AI safety field
             </h3>
-            <Link href="/donation-guide" className="button-primary drop-shadow">
+            <Button as={Link} href="/donation-guide" className="drop-shadow">
               View guide
-            </Link>
+            </Button>
             {dates['donation-guide'] && (
               <RelativeDate
                 iso={dates['donation-guide']}
@@ -622,27 +640,24 @@ export default async function Home() {
 
       <div className={styles['aisafety-info']}>
         <div className="width-6-col">
-          <p className="color-teal paragraph-small-bold padding-bottom-12px">
+          <p className="color-teal-400 paragraph-small-bold padding-bottom-12px">
             Visit AISafety.info
           </p>
           <h2 className="shadow-text">
             Learn what AI safety is, why it matters, and what you can do to help
           </h2>
         </div>
-        <TrackedLink
+        <Button
+          as={TrackedLink}
           href="https://aisafety.info/"
           target="_blank"
           rel="noopener noreferrer"
-          className="button-primary"
           trackingPage="Home"
           trackingName="AISafety.info"
+          icon="/images/icons/arrow-up-right.svg"
         >
-          <span>AISafety.info</span>
-          <Icon
-            src="/images/icons/arrow-up-right.svg"
-            className="color-teal-bright-400"
-          />
-        </TrackedLink>
+          AISafety.info
+        </Button>
       </div>
     </div>
   )

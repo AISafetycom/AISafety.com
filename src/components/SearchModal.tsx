@@ -3,6 +3,7 @@
 import Image from 'next/image'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import Button from '@/components/Button'
 import Icon from '@/components/Icon'
 import { trackSearchClick, trackSearchQuery } from '@/lib/analytics'
 import type { SearchEntry, SearchType } from '@/lib/data/search-index'
@@ -240,7 +241,9 @@ export default function SearchModal({
       aria-modal="true"
       aria-label="Search AISafety.com"
     >
-      <div className={`${styles.modal} drop-shadow-dark flex flex-col`}>
+      <div
+        className={`${styles.modal} border-plus-fill drop-shadow-dark flex flex-col`}
+      >
         <div
           className={`${styles['input-row']} flex items-center gap-12px padding-top-16px padding-bottom-16px padding-left-24px padding-right-24px`}
         >
@@ -277,7 +280,7 @@ export default function SearchModal({
           <button
             type="button"
             onClick={onClose}
-            className={`${styles['shortcut-hint']} paragraph-xs color-teal-400`}
+            className={`${styles['shortcut-hint']} paragraph-xs color-teal-grey-300`}
             aria-label="Close search"
           >
             <span className={styles['shortcut-hint-esc']}>esc</span>
@@ -295,16 +298,12 @@ export default function SearchModal({
             <div
               className={`${styles.empty} flex flex-col items-center gap-16px padding-top-32px padding-bottom-32px padding-left-24px padding-right-24px`}
             >
-              <p className="paragraph-small color-teal-400">
+              <p className="paragraph-small color-teal-grey-300">
                 Search is temporarily unavailable.
               </p>
-              <button
-                type="button"
-                onClick={onRetry}
-                className="button-secondary"
-              >
+              <Button variant="clear-border" onClick={onRetry}>
                 Try again
-              </button>
+              </Button>
             </div>
           )}
 
@@ -325,11 +324,7 @@ export default function SearchModal({
                       className={`${styles['browse-card-icon']} drop-shadow-light flex items-center justify-center`}
                     >
                       {icon && (
-                        <Icon
-                          src={icon}
-                          size={16}
-                          className="color-teal-bright-800"
-                        />
+                        <Icon src={icon} size={16} className="color-teal-800" />
                       )}
                     </div>
                     <span
@@ -359,7 +354,7 @@ export default function SearchModal({
                   <Icon
                     src="/images/icons/heart.svg"
                     size={16}
-                    className="color-teal-300"
+                    className="color-teal-grey-300"
                   />
                 </div>
                 <span
@@ -375,7 +370,7 @@ export default function SearchModal({
             <div
               className={`${styles.empty} padding-top-32px padding-bottom-32px padding-left-24px padding-right-24px`}
             >
-              <p className="paragraph-small color-teal-400">
+              <p className="paragraph-small color-teal-grey-300">
                 {activeType
                   ? `No ${TYPE_LABEL[activeType].toLowerCase()} match “${query}”.`
                   : `No results for “${query}”.`}
@@ -445,7 +440,7 @@ export default function SearchModal({
                       )}
                       {entry.description && (
                         <p
-                          className={`${styles['result-description']} paragraph-xs color-teal-300 margin-top-4px`}
+                          className={`${styles['result-description']} paragraph-xs color-teal-grey-300 margin-top-4px`}
                         >
                           {entry.description}
                         </p>
@@ -478,7 +473,7 @@ function ResultIcon({ entry }: { entry: SearchEntry }) {
       <div
         className={`${styles['result-icon']} ${styles['result-icon-page']} drop-shadow-light flex items-center justify-center`}
       >
-        <Icon src={entry.logo} size={16} className="color-teal-bright-800" />
+        <Icon src={entry.logo} size={16} className="color-teal-800" />
       </div>
     )
   }
@@ -521,7 +516,7 @@ function SearchIcon() {
     <Icon
       src="/images/icons/search.svg"
       size={16}
-      className={`${styles['input-icon']} color-teal-400`}
+      className={`${styles['input-icon']} color-teal-grey-300`}
     />
   )
 }

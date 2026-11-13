@@ -1,9 +1,12 @@
 /*
-  Newsletter signups through ActiveCampaign: the signup boxes on /events and
-  /training (and their past issues pages, /newsletter/events and
-  /newsletter/training) post to /api/subscribe, which hands the address to the list's
-  double opt-in form. ActiveCampaign then emails the reader a confirmation
-  link, and only a confirmed reader joins the list.
+  Newsletter signups through ActiveCampaign: the signup boxes on /events,
+  /training and /funding (and their past issues pages, /newsletter/<key>)
+  post to /api/subscribe, which hands the address to the list's
+  double opt-in form. ActiveCampaign then emails the reader, and
+  /api/subscribe subscribes them at once (since 12 November 2026; before
+  that only a reader who pressed the email's link joined the list, and the
+  link still works that way whenever the site doesn't subscribe them
+  itself).
 
   This module is the transport: which form each newsletter uses, how the
   address is checked, and the one request to ActiveCampaign's form endpoint
@@ -12,12 +15,12 @@
   live endpoint ever refuses server-side posts, swap `postSignup` here and
   nothing else changes. Pure: no Next, no Upstash.
 
-  /funding's box still opens Substack (the Funding newsletter moves later)
-  and never comes through here.
+  Funding joined on its move day (its first ActiveCampaign issue); the
+  Updates newsletter is still on Substack and never comes through here.
 */
 
 /** The newsletters whose boxes sign people up on the site. */
-export const SIGNUP_NEWSLETTERS = ['events', 'training'] as const
+export const SIGNUP_NEWSLETTERS = ['events', 'training', 'funding'] as const
 export type SignupNewsletter = (typeof SIGNUP_NEWSLETTERS)[number]
 
 export function isSignupNewsletter(v: unknown): v is SignupNewsletter {
@@ -34,7 +37,8 @@ export interface AcForm {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  THE TWO ACTIVECAMPAIGN FORMS (made 8 October 2026).
+//  THE ACTIVECAMPAIGN FORMS (Events and Training made 8 October 2026,
+//  Funding 12 October 2026).
 //
 //  One double opt-in form per list, made in ActiveCampaign (Website → Forms).
 //  Open the form's hosted page, https://alignment23684.activehosted.com/f/<id>,
@@ -51,6 +55,62 @@ export const AC_FORMS: Record<SignupNewsletter, AcForm> = {
   events: { formId: 4, orKey: '6a982046-09ff-443b-9e8a-2f5d5dde2ae6' },
   // AI Safety Training (list 7): form 6, "AI Safety Training signup (aisafety.com)".
   training: { formId: 6, orKey: 'baffe016-955b-42bc-be9e-711a2d0d44bf' },
+  // AI Safety Funding (list 8): form 8, "AI Safety Funding signup (aisafety.com)".
+  funding: { formId: 8, orKey: 'c895d3e7-eb90-4022-a904-01f90a9fa8c0' },
+}
+
+/** Two or three newsletters at once, from the newsletters page
+ *  (/newsletter): their keys in the usual order, joined with "-". */
+export const COMBO_KEYS = [
+  'events-training',
+  'events-funding',
+  'training-funding',
+  'events-training-funding',
+] as const
+export type ComboKey = (typeof COMBO_KEYS)[number]
+/** A form: one newsletter's, or a combination's. */
+export type SignupFormKey = SignupNewsletter | ComboKey
+
+// One double opt-in form per combination (made 26 October 2026 as copies of
+// the Events and Training forms), each subscribing to all of its lists, so a
+// reader who ticks several newsletters gets ONE confirmation email that names
+// them all (its message is written by ~/Newsletter/confirm_email.py), and one
+// click confirms every list. Same values to copy as above; the hosted page
+// shows a fresh `or` on every load, and ActiveCampaign takes any of them (the
+// forms above have used one copied value since October). A combination left
+// at 0 / '' answers 503 for it without contacting ActiveCampaign.
+export const COMBO_FORMS: Record<ComboKey, AcForm> = {
+  // Lists 6 + 7: form 12, "AI Safety Events + Training signup (aisafety.com)".
+  'events-training': {
+    formId: 12,
+    orKey: 'cd78e7f7-a353-445b-b615-220f40a6d0f4',
+  },
+  // Lists 6 + 8: form 10, "AI Safety Events + Funding signup (aisafety.com)".
+  'events-funding': {
+    formId: 10,
+    orKey: '029df6d9-9e07-4ac1-b34f-07da40035879',
+  },
+  // Lists 7 + 8: form 14, "AI Safety Training + Funding signup (aisafety.com)".
+  'training-funding': {
+    formId: 14,
+    orKey: 'f270922d-768c-4def-85c4-9413fc90ad1c',
+  },
+  // Lists 6 + 7 + 8: form 16, "AI Safety Events + Training + Funding signup
+  // (aisafety.com)".
+  'events-training-funding': {
+    formId: 16,
+    orKey: '344131d3-3de9-48c4-a91f-c5b5e18f854a',
+  },
+}
+
+/** The form that signs up to exactly these newsletters (one or more,
+ *  known, each once). */
+export function formKeyFor(newsletters: SignupNewsletter[]): SignupFormKey {
+  const ordered = SIGNUP_NEWSLETTERS.filter(n => newsletters.includes(n))
+  if (ordered.length === 0 || ordered.length !== new Set(newsletters).size) {
+    throw new Error(`no form for ${newsletters.join(', ') || 'nothing'}`)
+  }
+  return ordered.length === 1 ? ordered[0] : (ordered.join('-') as ComboKey)
 }
 
 /** The account's form endpoint. `jsonp=true` asks for the short JavaScript
@@ -109,7 +169,7 @@ export function normalizeEmail(raw: unknown): string | null {
 // ─── ActiveCampaign's answer ────────────────────────────────────────────────
 
 /** What ActiveCampaign's answer means.
- *  - subscribed: a clear thank-you; the confirmation email is on its way.
+ *  - subscribed: a clear thank-you; the form's email is on its way.
  *  - already:    the address is already confirmed on the list, so the form
  *                skips the confirmation and sends the reader straight to its
  *                "you're subscribed" page (checked live, 8 October 2026);
@@ -139,9 +199,10 @@ const ERROR_CALL = new RegExp(
 const HTML_PAGE = /<(?:!doctype|html|head|body)\b/i
 /** The jump to the form's confirmation page that ActiveCampaign answers for an
  *  address already confirmed on the list:
- *  `window.top.location.href = "https://aisafety.com/subscribed/events";` */
+ *  `window.top.location.href = "https://aisafety.com/subscribed/events";`
+ *  (a combination's form: /subscribed/events-funding). */
 const ALREADY_REDIRECT =
-  /location\.href\s*=\s*["']https:\/\/(?:www\.)?aisafety\.com\/subscribed\/(?:events|training)\/?["']/
+  /location\.href\s*=\s*["']https:\/\/(?:www\.)?aisafety\.com\/subscribed\/(?:events|training|funding)(?:-(?:training|funding))*\/?["']/
 const CLOUDFLARE =
   /cf-chl|challenge-platform|cf_chl_opt|cdn-cgi\/challenge|Just a moment\.\.\.|Attention Required! \| Cloudflare/i
 
@@ -220,7 +281,7 @@ export function logSnippet(text: string, email: string, max = 200): string {
 // ─── The request ────────────────────────────────────────────────────────────
 
 /** How one signup went.
- *  - subscribed:    ActiveCampaign took it; the confirmation email is sent.
+ *  - subscribed:    ActiveCampaign took it; the form's email is sent.
  *  - already_subscribed: the address is already confirmed on the list;
  *                   nothing was sent and nothing changed.
  *  - invalid_email: ActiveCampaign said the address isn't valid.
@@ -249,10 +310,11 @@ export function signupFields(form: AcForm, email: string): URLSearchParams {
   })
 }
 
-/** Sign one address up through the newsletter's form. Logs what happened
- *  (the HTTP status and the start of the answer), never the address. */
+/** Sign one address up through the newsletter's form (or a combination's).
+ *  Logs what happened (the HTTP status and the start of the answer), never
+ *  the address. */
 export async function postSignup(
-  newsletter: SignupNewsletter,
+  newsletter: SignupFormKey,
   form: AcForm,
   email: string,
   {

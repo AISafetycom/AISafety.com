@@ -18,5 +18,5 @@
 
 .modeTabActive {
   /* Same translucent border treatment as the global .border-only */
-  border-color: color-mix(in srgb, var(--teal-bright-500) 30%, transparent);
+  border-color: color-mix(in srgb, var(--teal-500) 30%, transparent);
 }

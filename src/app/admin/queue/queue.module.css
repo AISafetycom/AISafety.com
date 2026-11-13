@@ -239,10 +239,6 @@
   font-size: 13.5px;
 }
 
-.searchInput::placeholder {
-  color: var(--q-muted);
-}
-
 .searchKey {
   flex: none;
   margin: 0;
@@ -288,6 +284,81 @@
   background: var(--q-warn-soft);
   color: inherit;
   box-shadow: inset 0 -1px 0 var(--q-warn);
+}
+
+/* Past decisions in the search results (20 Oct 2026): quieter than the
+   live matches – a small muted heading, one muted line per decision, the
+   matched words underlined only. */
+.earlierGroup {
+  padding: 6px 0 8px;
+  border-top: 1px solid var(--q-border);
+}
+
+.earlierHead {
+  padding: 6px 16px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--q-muted);
+}
+
+.earlierRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 4px 16px 4px 14px;
+  border: none;
+  border-left: 3px solid transparent;
+  background: none;
+  text-align: left;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--q-muted);
+  cursor: pointer;
+}
+
+.earlierRow:hover {
+  background: var(--q-sel);
+  color: var(--q-text-2);
+}
+
+.earlierRowActive,
+.earlierRowActive:hover {
+  background: var(--q-sel);
+  border-left-color: var(--q-border-strong);
+  color: var(--q-text-2);
+}
+
+.earlierName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  mask-image: linear-gradient(to right, #000 85%, transparent);
+}
+
+.earlierName .mark {
+  background: none;
+  box-shadow: inset 0 -1px 0 var(--q-border-strong);
+}
+
+.earlierWhat {
+  flex: none;
+  font-size: 11.5px;
+}
+
+.earlierMore {
+  display: block;
+  padding: 4px 16px 0 17px;
+  font-size: 12px;
+  color: var(--q-muted);
+}
+
+button.earlierMore {
+  padding: 4px 16px 0 17px;
+  color: var(--q-accent);
 }
 
 /* Where the search found a word that is not on the row itself: one line,
@@ -680,6 +751,14 @@
   color: inherit;
 }
 
+/* Under a verdict the chat updated: says the messages below came first. */
+.verdictRevised {
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.4;
+  color: var(--q-muted);
+}
+
 .detailAside .reasons {
   font-size: 13.5px;
   line-height: 1.5;
@@ -785,25 +864,67 @@ p.tabDoneTitle {
   flex-wrap: wrap;
 }
 
-.pill {
+/* Where the item came from (Comb, Broom, a form…): plain icon and text. */
+.source {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 2px 9px;
-  border-radius: 999px;
   font-size: 12px;
   font-weight: 500;
   color: var(--q-text-2);
-  border: 1px solid var(--q-border-strong);
 }
 
-/* The page, in the top row: the same small caps as the section headings. */
+/* The page, in the top row: the same small caps as the section headings.
+   Kept for a page the site does not list. */
 .pageTag {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--q-muted);
+}
+
+/* A page the site lists: a smaller copy of its item in the site's nav
+   (Navigation.module.css .nav-item and .nav-item-icon, scaled from 40px to
+   28px tall), without the count (Bryce, 29 Oct 2026). Named with its a,
+   so it outweighs the Queue's teal, underlined links. */
+a.pageNav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px 0 2px;
+  border: 1px solid color-mix(in srgb, var(--teal-300) 30%, transparent);
+  border-radius: 14px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  color: var(--white);
+  text-decoration: none;
+  transition: all var(--hover-transition);
+}
+
+a.pageNav:hover {
+  background-color: var(--teal-grey-850);
+  box-shadow: var(--shadow-dark);
+  text-decoration: none;
+}
+
+.pageTagIcon {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 22px;
+  height: 22px;
+  background-color: var(--white);
+  border-radius: 11px;
+  box-shadow: var(--shadow-dark);
+}
+
+/* Where the nav shows its count: "recurring" for Training (recurring). */
+.pageTagNote {
+  font-weight: 400;
+  color: var(--teal-grey-300);
 }
 
 .when {
@@ -821,6 +942,19 @@ p.tabDoneTitle {
 
 .foundLabel {
   font-weight: 600;
+}
+
+/* The Source line links to the post itself when Comb kept its address;
+   underlined so it reads as a link in the verdict's colored panel. */
+.queue .foundLink {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 50%, transparent);
+  text-underline-offset: 2px;
+}
+
+.queue .foundLink:hover {
+  text-decoration-color: currentColor;
 }
 
 .title {
@@ -1217,10 +1351,12 @@ p.tabDoneTitle {
 /* One flex item holds the whole value as running text: the box's baseline
    is then the value's first line, so a row's label stays level with it,
    while inside, the icon, text, "edited" mark and pencil wrap like a
-   paragraph. */
+   paragraph. The box reaches 8px past its column on each side, so the text
+   inside gets the column's full width and wraps exactly like the old value
+   beside it (Bryce, 9 Nov 2026: "so that it's easy to compare the changes"). */
 .editable {
   display: inline-flex;
-  max-width: 100%;
+  max-width: calc(100% + 16px);
   padding: 2px 8px;
   margin: -2px -8px;
   border-radius: 6px;
@@ -1379,6 +1515,48 @@ p.tabDoneTitle {
   color: var(--q-muted);
 }
 
+/* Their reply to a decline, on top of the item it brought back, with
+   Fable's one line on it (20 Oct 2026). Amber like Unsure: it waits on a
+   decision. */
+.pushback {
+  padding: 12px 14px;
+  border: 1px solid var(--q-border-strong);
+  border-left: 3px solid var(--q-warn);
+  border-radius: 6px;
+  background: var(--q-panel);
+}
+
+.pushback .h3 {
+  flex-wrap: wrap;
+}
+
+.pushbackLink {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--q-muted);
+}
+
+.pushbackText {
+  margin: 0;
+  color: var(--q-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.pushbackTake {
+  margin: 0;
+  font-size: 13px;
+  color: var(--q-text-2);
+}
+
+/* Brought back after a decline, or back from "Review again in a week". */
+.returnNote {
+  display: flex;
+}
+
 .summary {
   margin: 0;
   font-size: 15px;
@@ -1467,7 +1645,7 @@ p.tabDoneTitle {
   max-width: 100%;
   padding: 20px;
   border-radius: 12px;
-  background: var(--teal-900);
+  background: var(--teal-grey-900);
   color: var(--white);
 }
 
@@ -1758,6 +1936,23 @@ p.tabDoneTitle {
   color: var(--q-muted);
 }
 
+/* A pressed while something is still missing: the note saying what goes
+   red, holds, then fades back. A colour change only, so it stays on with
+   reduced motion. */
+.noteFlash {
+  animation: noteFlash 1.4s ease-out;
+}
+
+@keyframes noteFlash {
+  0%,
+  55% {
+    color: var(--q-danger);
+  }
+  100% {
+    color: var(--q-muted);
+  }
+}
+
 .error {
   margin: 0;
   padding: 8px 12px;
@@ -2016,6 +2211,12 @@ select.input {
   z-index: 20;
   /* slides up from below the window edge, and back down at the end */
   animation: toastIn 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  /* a click outside its buttons opens the item, as a list row does */
+  cursor: pointer;
+}
+
+.toast:hover {
+  background: var(--q-sel);
 }
 
 .toastLeaving {
@@ -2049,6 +2250,82 @@ select.input {
   .toastLeaving {
     animation: none;
   }
+}
+
+/* A rule drafted from the decision he just made, shown once as a card in
+   the bottom-left corner: clear of the decision toast (centred) and of
+   the chat (right). */
+.rulePop {
+  position: fixed;
+  left: 24px;
+  /* --pop-lift is the decision toast's height while one shows (set by the
+     page), so the card moves up out of its way */
+  bottom: calc(24px + var(--pop-lift, 0px));
+  transition: bottom 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(400px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px - var(--pop-lift, 0px));
+  overflow-y: auto;
+  padding: 12px 14px 14px;
+  background: var(--q-panel);
+  color: var(--q-text);
+  border: 1px solid var(--q-border-strong);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  font-size: 13.5px;
+  z-index: 21;
+  animation: rulePopIn 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.rulePop p,
+.rulePop blockquote {
+  margin: 0;
+}
+
+.rulePopHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rulePopFrom {
+  color: var(--q-text-2);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.rulePopLead {
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+@keyframes rulePopIn {
+  from {
+    transform: translateY(calc(100% + 24px));
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rulePop {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* Wording for the public listing policy that a rule brings with it. */
+.rulePublic {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 /* The verdict mark: a filled circle in the accent (or the danger colour
@@ -2636,6 +2913,142 @@ select.input {
 .chatAttach:hover {
   background: var(--q-border);
   color: var(--q-text);
+}
+
+/* F, beside the paperclip, as the search box shows / (29 Oct 2026). */
+.chatBoxKeyed .chatInput {
+  padding-right: 62px;
+}
+
+.chatKey {
+  position: absolute;
+  right: 36px;
+  bottom: 10px;
+  margin: 0;
+  pointer-events: none;
+}
+
+.chatInput:focus ~ .chatKey,
+.chatInput:not(:placeholder-shown) ~ .chatKey {
+  display: none;
+}
+
+/* Stop, beside the paperclip while Fable answers. */
+.chatBoxAnswering .chatInput {
+  padding-right: 68px;
+}
+
+.chatStop {
+  position: absolute;
+  right: 35px;
+  bottom: 5px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--q-accent);
+  cursor: pointer;
+}
+
+.chatStop:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.chatStopSquare {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--q-accent-text);
+}
+
+/* Dictation (5 Nov 2026): the mic left of the paperclip, a red dot whose
+   ring grows with his voice while it listens, a spinner while the Mac turns
+   it into words, and the keys under the box. */
+.chatBoxMic.chatBoxKeyed .chatInput {
+  padding-right: 92px;
+}
+
+.chatBoxMic.chatBoxAnswering .chatInput {
+  padding-right: 98px;
+}
+
+.chatBoxMic .chatKey {
+  right: 66px;
+}
+
+.chatBoxMic .chatStop {
+  right: 65px;
+}
+
+.chatMic {
+  position: absolute;
+  right: 35px;
+  bottom: 5px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--q-muted);
+  cursor: pointer;
+}
+
+.chatMic:hover {
+  background: var(--q-border);
+  color: var(--q-text);
+}
+
+.chatMic:disabled {
+  cursor: default;
+}
+
+.chatMicOn,
+.chatMicOn:hover {
+  border-radius: 50%;
+  background: var(--q-danger-soft);
+}
+
+.chatMicDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--q-danger);
+  box-shadow: 0 0 0 calc(var(--level, 0) * 6px) var(--q-danger-soft);
+  transition: box-shadow 80ms linear;
+}
+
+.chatMicBusy {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--q-muted);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.chatDictating {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--q-muted);
+}
+
+.chatDictating::before {
+  content: '';
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-right: 2px;
+  border-radius: 50%;
+  background: var(--q-danger);
+  animation: chatPulse 1.2s ease-in-out infinite;
 }
 
 .chatFiles,

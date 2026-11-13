@@ -1,6 +1,7 @@
 'use client'
 
 import Image from 'next/image'
+import Button from './Button'
 import Icon from './Icon'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -358,13 +359,13 @@ export default function Navigation({
               >
                 <div className={styles['nav-item-icon']}>
                   <Icon
-                    className="color-teal-bright-800"
+                    className="color-teal-900"
                     src={`/images/icons/${item.icon}`}
                   />
                 </div>
                 <p className="paragraph-small-bold">{item.label}</p>
                 {counts[item.href] && (
-                  <p className="paragraph-xs color-teal-300">
+                  <p className="paragraph-xs color-teal-grey-300">
                     {counts[item.href]}
                   </p>
                 )}
@@ -411,13 +412,13 @@ export default function Navigation({
                     >
                       <div className={styles['nav-item-icon']}>
                         <Icon
-                          className="color-teal-bright-800"
+                          className="color-teal-900"
                           src={`/images/icons/${item.icon}`}
                         />
                       </div>
                       <p className="paragraph-small-bold">{item.label}</p>
                       {counts[item.href] && (
-                        <p className="paragraph-xs color-teal-300">
+                        <p className="paragraph-xs color-teal-grey-300">
                           {counts[item.href]}
                         </p>
                       )}
@@ -427,11 +428,16 @@ export default function Navigation({
               )}
             </div>
 
-            <SearchButton
-              className={`${styles['nav-search-button']} flex items-center justify-center color-white`}
-            >
-              <Icon src="/images/icons/search-large.svg" size={24} />
-            </SearchButton>
+            <Button
+              as={SearchButton}
+              variant="clear"
+              icon="/images/icons/search-large.svg"
+              iconPosition="only"
+              aria-label="Search this page or site-wide"
+              // Below, the long label would run past the right edge of the page.
+              tooltipPosition="left"
+              className={styles['nav-search-button']}
+            />
           </nav>
 
           <button
@@ -485,13 +491,13 @@ export default function Navigation({
             >
               <div className={styles['nav-item-icon']}>
                 <Icon
-                  className="color-teal-bright-800"
+                  className="color-teal-900"
                   src={`/images/icons/${item.icon}`}
                 />
               </div>
               <p className="paragraph-default-bold">{item.label}</p>
               {counts[item.href] && (
-                <p className="paragraph-small color-teal-300">
+                <p className="paragraph-small color-teal-grey-300">
                   {counts[item.href]}
                 </p>
               )}
@@ -502,10 +508,7 @@ export default function Navigation({
             onClick={() => setIsMenuOpen(false)}
           >
             <div className={styles['nav-item-icon']}>
-              <Icon
-                className="color-teal-bright-800"
-                src="/images/icons/search.svg"
-              />
+              <Icon className="color-teal-900" src="/images/icons/search.svg" />
             </div>
             <p className="paragraph-default-bold">Search</p>
           </SearchButton>

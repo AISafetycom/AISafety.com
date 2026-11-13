@@ -10,17 +10,34 @@
        Airtable itself – what the Mac worker does every five minutes, done
        now for the page's refreshes. A write, so it takes the edit grant;
        a viewer gets the plain list.
+  GET  /api/admin/queue?decided=1              → { items } – every decided row,
+       newest decision first, for the search's "Earlier" group (read only
+       while a search is typed)
+  GET  /api/admin/queue?id=<rec>               → { item } – one row as it is now
+       (the page follows a Reopen with it until the Mac is done)
   GET  /api/admin/queue?target=<tbl>/<rec>     → { fields, attachments, schema } (live)
   GET  /api/admin/queue?order=<tbl>            → { order } – the page's published
        listings by Sort, for placing an addition (null for a table with no Sort)
   POST /api/admin/queue  body { id, action, edits?, reason?, replyDraft? } → { item }
-       action: accept | reject | edit | later | undo | flag
+       action: accept | reject | edit | later | undo | flag | reopen | fix
+       | delete
        (later sets the item aside for a week, Fable reviews it again then;
+       delete discards an open item silently: an addition's unpublished
+       record goes too, the row closes, no reply, no Undo – deleteItem;
        undo also brings back an item set aside; edit keeps the page's pending edits, and the reply draft as
        edited, on the row – nothing more; flag writes the verdict, reasons
        and reject buttons Fable gave in the chat onto the row, body
        { flag } – or { undo: true } to put back what it replaced –
-       queue-flag.ts)
+       queue-flag.ts; reopen brings a declined addition back, however
+       old: the Mac rebuilds a deleted record from the row's saved copy –
+       queue-reopen.ts; fix writes edits straight onto the listing of an
+       addition already published or a change already applied, from Done
+       today). An undo that could not put a field back (a picture with no
+       copy to write, queue-before-picture.ts) adds { notPutBack: [names] }.
+       Accepting a rule that brings wording for the public listing policy
+       also takes { public: 'apply' | 'internal', publicSeen: <the wording
+       the page showed> } – queue-rule-instant.ts; without them, or with
+       wording that has changed since, the accept is refused.
 
   `agent` is { port, token } for the local agent on the owner's Mac (null
   when QUEUE_AGENT_SECRET is not set): the page calls it after an accept so
@@ -38,21 +55,26 @@ import {
   acceptItem,
   agentInfo,
   closeHandledRows,
+  deleteItem,
+  fixItem,
   flagItem,
   getPageOrder,
   getQueueItem,
   getTableSchema,
   getTargetFields,
   laterItem,
+  listDecided,
   listQueue,
   QueueError,
   rejectItem,
+  reopenItem,
   sanitiseEdits,
   saveEdits,
   undoItem,
   unflagItem,
 } from '@/lib/admin/queue'
 import { parseFlag } from '@/lib/admin/queue-flag'
+import { publicChoiceOf } from '@/lib/admin/queue-rule-instant'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -89,6 +111,15 @@ export async function GET(req: NextRequest) {
   const auth = await ensureAuth(false)
   if (auth) return auth
   try {
+    if (req.nextUrl.searchParams.get('decided') === '1') {
+      return json({ items: await listDecided() })
+    }
+    const one = req.nextUrl.searchParams.get('id')
+    if (one) {
+      const item = await getQueueItem(one)
+      if (!item) return json({ error: 'That item no longer exists.' }, 404)
+      return json({ item })
+    }
     const orderOf = req.nextUrl.searchParams.get('order')
     if (orderOf) return json({ order: await getPageOrder(orderOf) })
     const target = req.nextUrl.searchParams.get('target')
@@ -120,7 +151,17 @@ export async function GET(req: NextRequest) {
   }
 }
 
-const ACTIONS = new Set(['accept', 'reject', 'edit', 'later', 'undo', 'flag'])
+const ACTIONS = new Set([
+  'accept',
+  'reject',
+  'edit',
+  'later',
+  'undo',
+  'flag',
+  'reopen',
+  'fix',
+  'delete',
+])
 
 export async function POST(req: NextRequest) {
   const auth = await ensureAuth(true)
@@ -141,7 +182,9 @@ export async function POST(req: NextRequest) {
     const item = await getQueueItem(id)
     if (!item) return json({ error: 'That item no longer exists.' }, 404)
     const me = await currentAdmin()
+    let notPutBack: string[] = []
     if (action === 'accept') {
+      const choice = publicChoiceOf(body.public)
       await acceptItem(
         item,
         sanitiseEdits(body.edits),
@@ -149,7 +192,16 @@ export async function POST(req: NextRequest) {
         // Proposed fields Fable has already changed on the record.
         Array.isArray(body.keep)
           ? body.keep.filter((k): k is string => typeof k === 'string')
-          : []
+          : [],
+        // A rule's wording for the public listing policy: what he chose,
+        // and the wording the page showed him.
+        choice
+          ? {
+              choice,
+              seen:
+                typeof body.publicSeen === 'string' ? body.publicSeen : null,
+            }
+          : null
       )
     } else if (action === 'reject') {
       await rejectItem(
@@ -167,8 +219,14 @@ export async function POST(req: NextRequest) {
           : undefined
       )
       return json({ item: await getQueueItem(id) })
+    } else if (action === 'fix') {
+      await fixItem(item, sanitiseEdits(body.edits))
     } else if (action === 'later') {
       await laterItem(item)
+    } else if (action === 'delete') {
+      await deleteItem(item)
+    } else if (action === 'reopen') {
+      await reopenItem(item)
     } else if (action === 'flag') {
       if (body.undo === true) {
         await unflagItem(item)
@@ -178,12 +236,15 @@ export async function POST(req: NextRequest) {
         await flagItem(item, parsed.flag)
       }
     } else {
-      await undoItem(item)
+      notPutBack = await undoItem(item)
     }
     console.log(
-      `[admin-queue] ${action} ${item.type} ${item.id} "${item.title}" by ${me?.name ?? me?.email ?? '?'}`
+      `[admin-queue] ${action} ${item.type} ${item.id} "${item.title}" by ${me?.name ?? me?.email ?? '?'}${notPutBack.length ? ` – not put back: ${notPutBack.join(', ')}` : ''}`
     )
-    return json({ item: await getQueueItem(id) })
+    return json({
+      item: await getQueueItem(id),
+      ...(notPutBack.length ? { notPutBack } : {}),
+    })
   } catch (e) {
     return failure(e)
   }

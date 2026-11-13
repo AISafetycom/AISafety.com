@@ -5,6 +5,6 @@
 }
 
 .pick:focus-within {
-  outline: 2px solid var(--bright-teal-500);
+  outline: 2px solid var(--teal-400);
   outline-offset: 2px;
 }

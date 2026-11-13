@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  flagRevisedNote,
   flagShown,
   parseFlag,
   reasonsText,
@@ -160,5 +161,38 @@ describe('flagShown', () => {
         }
       )
     ).toBe(true)
+  })
+})
+
+describe('flagRevisedNote', () => {
+  it('says nothing when the chat did not update the flag', () => {
+    expect(
+      flagRevisedNote({ verdict: 'Publish', flagUndo: false, flagWas: null })
+    ).toBe(null)
+  })
+
+  it('names the verdict the chat replaced', () => {
+    expect(
+      flagRevisedNote({
+        verdict: "Don't publish",
+        flagUndo: true,
+        flagWas: 'Publish',
+      })
+    ).toBe('Changed from “Publish it” in the chat below')
+    expect(
+      flagRevisedNote({ verdict: 'Fix', flagUndo: true, flagWas: 'Dismiss' })
+    ).toBe('Changed from “Dismiss the flag” in the chat below')
+  })
+
+  it('says the reasons changed when the verdict stayed', () => {
+    expect(
+      flagRevisedNote({ verdict: 'Fix', flagUndo: true, flagWas: 'Fix' })
+    ).toBe('Reasons updated in the chat below')
+  })
+
+  it('says the chat set it when there was no verdict before', () => {
+    expect(
+      flagRevisedNote({ verdict: 'Unsure', flagUndo: true, flagWas: null })
+    ).toBe('Set in the chat below')
   })
 })

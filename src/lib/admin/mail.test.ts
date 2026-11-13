@@ -232,7 +232,7 @@ describe('signupAlertMail', () => {
     for (const body of [m.text, m.html]) {
       expect(body).toContain('More than 100 signups')
       expect(body).toContain('8 October 2026, UTC')
-      expect(body).toContain('/events and /training')
+      expect(body).toContain('/events, /training and /funding')
       expect(body).toContain('Above 1,000 signups in a day')
       expect(body).toContain(
         'https://aisafety.com/admin/analytics?tab=newsletters'

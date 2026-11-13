@@ -3,6 +3,7 @@ import Image from 'next/image'
 import FooterLink from './FooterLink'
 import UpButton from './UpButton'
 import styles from './Footer.module.css'
+import Button from '@/components/Button'
 
 export default function Footer() {
   return (
@@ -23,26 +24,28 @@ export default function Footer() {
                 className="margin-bottom-24px"
               />
               <p className="paragraph-small padding-bottom-32px">
-                We&apos;re a small nonprofit driven by 1.25 salaried employees
+                We&apos;re a small nonprofit driven by 1.5 salaried employees
                 and lots of volunteers. We aim to multiply global AI safety
                 efforts through a centralized, comprehensive, and up-to-date
                 resource hub.
               </p>
-              <Link href="/about" className="button-secondary">
+              <Button as={Link} variant="clear-border" href="/about">
                 Learn more about us
-              </Link>
+              </Button>
             </div>
           </div>
 
+          {/* The column headings are h2s so screen readers list them as
+              sections of their own, not as sub-points of the last heading on
+              the page (issue #749). Their look comes from the
+              paragraph-small-bold class, not the h2 default. */}
           <div className="flex flex-col-mobile gap-56px">
             {/* Second footer column */}
             <div>
-              <h4 className="paragraph-small-bold padding-bottom-16px">
+              <h2 className="paragraph-small-bold padding-bottom-16px">
                 Help us out
-              </h4>
-              <div
-                className={`paragraph-small flex flex-col gap-8px opacity-80 ${styles.links}`}
-              >
+              </h2>
+              <div className="paragraph-small flex flex-col gap-8px link-group">
                 <FooterLink
                   href="https://airtable.com/appF8XfZUGXtfi40E/pagndDvdya1DSqoxN/form"
                   section="Help us out"
@@ -62,29 +65,35 @@ export default function Footer() {
               </div>
             </div>
 
-            {/* Third footer column */}
+            {/* Third footer column. Its heading leads to the page with every
+                newsletter on it (/newsletter), where visitors sign up to
+                several at once. */}
             <div>
-              <h4 className="paragraph-small-bold padding-bottom-16px">
-                Newsletters
-              </h4>
-              <div
-                className={`paragraph-small flex flex-col gap-8px opacity-80 ${styles.links}`}
+              <h2
+                className={`paragraph-small-bold padding-bottom-16px ${styles.headingLink}`}
               >
-                {/* Events and Training sign up through the box at the top
-                    of their pages; Funding and Updates are still on
-                    Substack. */}
                 <FooterLink
-                  href="/events"
+                  href="/newsletter"
+                  section="Newsletters"
+                  label="Newsletters"
+                />
+              </h2>
+              <div className="paragraph-small flex flex-col gap-8px link-group">
+                {/* Events, Training and Funding each have a page of their
+                    own (signup box, past issues, feed: /newsletter/<key>);
+                    Updates is still on Substack. */}
+                <FooterLink
+                  href="/newsletter/events"
                   section="Newsletters"
                   label="AI Safety Events"
                 />
                 <FooterLink
-                  href="/training"
+                  href="/newsletter/training"
                   section="Newsletters"
                   label="AI Safety Training"
                 />
                 <FooterLink
-                  href="https://aisafetyfunding.substack.com/"
+                  href="/newsletter/funding"
                   section="Newsletters"
                   label="AI Safety Funding"
                 />
@@ -100,12 +109,10 @@ export default function Footer() {
                 AISafety.com in their own work (journalists, developers),
                 which "Help us out" never fit. */}
             <div>
-              <h4 className="paragraph-small-bold padding-bottom-16px">
+              <h2 className="paragraph-small-bold padding-bottom-16px">
                 For press and developers
-              </h4>
-              <div
-                className={`paragraph-small flex flex-col gap-8px opacity-80 ${styles.links}`}
-              >
+              </h2>
+              <div className="paragraph-small flex flex-col gap-8px link-group">
                 <FooterLink
                   href="/media"
                   section="For press and developers"
@@ -134,7 +141,7 @@ export default function Footer() {
               Maintained by AI safety community-builders
             </p>
           </div>
-          <p className={`paragraph-xs opacity-80 ${styles.links}`}>
+          <p className="paragraph-xs color-teal-grey-300 link-group">
             (ɔ) 2026 · This site is released under a CC BY-SA license ·{' '}
             <Link href="/privacy">Privacy</Link>
           </p>

@@ -5,14 +5,8 @@
   gap: 16px;
   height: fit-content;
   padding: 16px;
-  border: 1px solid color-mix(in srgb, var(--bright-teal-300) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--teal-300) 30%, transparent);
   border-radius: 16px;
-}
-
-/* Hovering the card link (anywhere outside the pill) brightens the border,
-   matching the pill's own focus treatment. */
-.card:has(.headingLink:hover) {
-  border-color: color-mix(in srgb, var(--bright-teal-500) 60%, transparent);
 }
 
 .heading,
@@ -20,14 +14,11 @@
   text-align: center;
 }
 
-/* Substack mode: stretch the heading link's click area over the whole card,
-   so the space around the email pill opens the newsletter too. -1px reaches
-   over the card's border, which inset: 0 stops just inside. */
-.headingLink::after {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  border-radius: 16px;
+/* A whole-pixel line height (paragraph-small's is 24.75px), so the field
+   below always starts on a whole pixel. On a half pixel the submit icon's
+   1px lines smear across two pixel rows and look thick and soft. */
+.heading {
+  line-height: 24px;
 }
 
 .field {
@@ -41,12 +32,12 @@
   padding: 4px;
   border: 1px solid transparent;
   border-radius: 999px;
-  background-color: color-mix(in srgb, var(--bright-teal-500) 20%, transparent);
+  background-color: color-mix(in srgb, var(--teal-400) 20%, transparent);
   cursor: text;
 }
 
 .field:focus-within {
-  border-color: color-mix(in srgb, var(--bright-teal-500) 60%, transparent);
+  border-color: color-mix(in srgb, var(--teal-400) 60%, transparent);
 }
 
 .input {
@@ -61,10 +52,6 @@
   color: var(--white);
 }
 
-.input::placeholder {
-  color: var(--teal-400);
-}
-
 .input:-webkit-autofill,
 .input:-webkit-autofill:hover,
 .input:-webkit-autofill:focus {
@@ -73,44 +60,9 @@
   transition: background-color 9999s ease-in-out 0s;
 }
 
+/* Shape and colors come from <Button>; this only keeps it from shrinking. */
 .submit {
   flex: none;
-  display: flex;
-  padding: 0;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border: 1px solid var(--white);
-  border-radius: 999px;
-  background-color: transparent;
-  cursor: pointer;
-}
-
-/* While a signup is on its way: the arrow becomes a loading circle. */
-.submit:disabled {
-  cursor: progress;
-}
-
-.spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid color-mix(in srgb, var(--white) 30%, transparent);
-  border-top-color: var(--white);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .spinner {
-    animation-duration: 2.4s;
-  }
 }
 
 /* Honeypot field: moved off-screen rather than display:none so naive bots

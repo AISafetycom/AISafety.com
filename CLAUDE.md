@@ -32,7 +32,7 @@ docs/                    css-guidelines, api + changelog, architecture notes
 ## Airtable is the database
 
 - **Reference fields by permanent field ID, never by name.** Each data file has a `FIELD` map of IDs with the field name as a comment, and records are fetched with `returnFieldsByFieldId`. Renames in Airtable then cannot break the site. If you change a helper's signature, grep every call site.
-- **Only records with Publish? checked and Hide? unchecked are live** (`publishedFormula` in `src/lib/data/airtable.ts`). Code never sets those two fields. The site's only Airtable writes are the admin map editor (x and y, or Scale), the chatbot conversation log, the admin's annotations on that log, the Queue's decisions (also made from /admin/newsletter, when the owner presses Fix on a listing in a waiting email that Broom flagged), a listing's Description when the owner edits a newsletter card and presses "Use this description on the site too", and a listing's Newsletter tick (cleared) when the owner removes its card from a newsletter draft.
+- **Only records with Publish? checked and Hide? unchecked are live** (`publishedFormula` in `src/lib/data/airtable.ts`). Code never sets those two fields. The site's only Airtable writes are the admin map editor (x and y, or Scale), the chatbot conversation log, the admin's annotations on that log, the Queue's decisions (also made from /admin/newsletter, when the owner presses Fix on a listing in a waiting email that Broom flagged) and fields the owner fixes on a listing after the Queue has published or changed it, a listing's Name or Description when the owner edits a newsletter card's title or description and presses "Use this title / description on the site too", and a listing's Newsletter tick (cleared) when the owner removes its card from a newsletter draft.
 - **Never put a raw Airtable attachment URL in a page or API response.** They expire within hours. Attachments are mirrored to Vercel Blob and the Blob URL is what gets served.
 - **Pages are prerendered at build time; runtime readers use an hourly cache** (`unstable_cache`, tag `airtable-records`). A Vercel cron calls `/api/check-rebuild` every minute; when a published row has changed it clears that cache and triggers a redeploy through a deploy hook, so an Airtable edit reaches the live site in about two to three minutes. Preview mode (`/admin/preview`, Next Draft Mode) bypasses the caches for that admin only.
 - **Airtable allows five requests per second per base.** Don't add uncached Airtable reads on request paths; go through `fetchAirtableRecords` and the existing data functions.
@@ -53,9 +53,9 @@ docs/                    css-guidelines, api + changelog, architecture notes
 
 Read `docs/css-guidelines.md` (Melissa's rules) before writing any styles. In short:
 
-- `globals.css` is the design system: variables for every color, pre-styled `h1`–`h3` and `p`, and utility classes for typography, spacing, layout, color, and buttons. Use them first. Never hardcode a hex value or add a new variable.
+- `globals.css` is the design system: variables for every color, pre-styled `h1`–`h3` and `p`, and utility classes for typography, spacing, layout and color. Buttons are the `<Button>` component (`src/components/Button.tsx`). Use them first. Never hardcode a hex value or add a new variable.
 - New classes only when utilities can't do it, in `ComponentName.module.css` or `page.module.css`. Rarely `globals.css`, and only for something truly reusable.
-- If a shared component looks wrong, fix its shared definition (for example `.button-primary`) so every instance is fixed at once. No one-off overrides.
+- If a shared component looks wrong, fix its shared definition (for example `<Button>` in `src/components/Button.tsx`) so every instance is fixed at once. No one-off overrides.
 - Diagnose before fixing. The right CSS fix is usually fewer lines, not more.
 
 ## Errors: never silently fail

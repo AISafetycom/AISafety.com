@@ -25,6 +25,7 @@ import {
   type NewsletterLinkRow,
   type NewsletterSignupResults,
   type NewsletterVisits,
+  type NewslettersPageStats,
   type DateRange,
   type VisitorShare,
   DASHBOARD_TZ,
@@ -78,8 +79,9 @@ import { issueName } from '@/lib/newsletter-web'
 import { MAX_QUERY, normText, parseLeftOut } from '@/lib/analytics/org-lookup'
 import { readIssueClicks } from '@/lib/analytics/org-newsletter'
 import {
-  listShares,
   sameLeftOut,
+  jobsShareOf,
+  listShares,
   shareForQuery,
 } from '@/lib/analytics/org-shares'
 import { canEdit } from '@/lib/admin/access'
@@ -136,6 +138,10 @@ import {
   type SearchParams,
 } from './range'
 import admin from '../admin.module.css'
+import {
+  type CardEditCounts,
+  readCardEdits,
+} from '@/lib/admin/newsletter-edit-counts'
 import styles from './analytics.module.css'
 import { displayFilterGroup, displayFilterValue } from '@/lib/filter-tracking'
 
@@ -630,6 +636,7 @@ async function AnalyticsView({
     feeds,
     issueClicks,
     shares,
+    cardEdits,
   ] = await Promise.all([
     saved
       ? saved.data
@@ -671,8 +678,9 @@ async function AnalyticsView({
     // (Upstash, live site only). Never rejects.
     orgSearch ? readIssueClicks(range) : null,
     // The org pages already made, for the Org lookup's share box and its
-    // list of them. 'failed' = couldn't read them; the box says so.
-    tabReq === 'orgs' && canShare
+    // list of them, and the Jobs tab's box for the job board's page.
+    // 'failed' = couldn't read them; the box says so.
+    (tabReq === 'orgs' || tabReq === 'Jobs') && canShare
       ? listShares().catch(err => {
           console.warn(
             `[analytics] org pages unavailable: ${err instanceof Error ? err.message : String(err)}`
@@ -680,6 +688,9 @@ async function AnalyticsView({
           return 'failed' as const
         })
       : null,
+    // Remove and Put back on /admin/newsletter (Upstash; null = couldn't
+    // read them).
+    tabReq === 'newsletters' ? readCardEdits(range) : null,
   ])
 
   // Which of those newsletter links are the searched org's.
@@ -703,6 +714,34 @@ async function AnalyticsView({
             opened: openedWords(shared.views, shared.lastViewedAt),
           }
         : null
+  // The Jobs tab's box: the job board's page, if it has one.
+  const jobsShared =
+    shares && shares !== 'failed' ? jobsShareOf(shares) : undefined
+  const jobsShareBox =
+    tabReq === 'Jobs' && shares != null ? (
+      <ShareOrgLink
+        kind="jobs"
+        query=""
+        orgName={jobsShared?.orgName ?? '80,000 Hours'}
+        leftOut={[]}
+        origin={shareOrigin}
+        share={
+          shares === 'failed'
+            ? 'unknown'
+            : jobsShared
+              ? {
+                  token: jobsShared.token,
+                  orgName: jobsShared.orgName,
+                  leftOutDiffers: false,
+                  opened: openedWords(
+                    jobsShared.views,
+                    jobsShared.lastViewedAt
+                  ),
+                }
+              : null
+        }
+      />
+    ) : null
   const shareBox: OrgAdmin['shareBox'] =
     shares == null
       ? null
@@ -729,6 +768,16 @@ async function AnalyticsView({
     if (leftOut.length) q.set('x', leftOut.join(','))
     return `?${q.toString()}`
   }
+  // The job board's page opens the Jobs tab, in the current dates and
+  // count mode.
+  const jobsTabHref = () => {
+    const q = new URLSearchParams()
+    for (const [k, v] of Object.entries(sp))
+      if (k !== 'q' && k !== 'x' && k !== 'tab' && typeof v === 'string')
+        q.set(k, v)
+    q.set('tab', 'Jobs')
+    return `?${q.toString()}`
+  }
   // Leave out and Put back keep this search's shared page in step, for
   // someone who may change it.
   const shareSync: ShareSync | null = shared
@@ -745,8 +794,9 @@ async function AnalyticsView({
         origin={shareOrigin}
         pages={shares.map(s => ({
           token: s.token,
-          orgName: s.orgName,
-          lookupHref: lookupHref(s.query, s.leftOut),
+          orgName: s.kind === 'jobs' ? `${s.orgName} (jobs)` : s.orgName,
+          lookupHref:
+            s.kind === 'jobs' ? jobsTabHref() : lookupHref(s.query, s.leftOut),
           note: `${openedWords(s.views, s.lastViewedAt)} · made by ${s.createdBy}`,
         }))}
       />
@@ -1144,15 +1194,15 @@ async function AnalyticsView({
               unit: 'signups',
               metric: data.trends.newsletterSignups,
               since: SITE_SIGNUPS_SINCE,
-              what: 'Signed up through the site = submits on /events and /training that ActiveCampaign took and sent a link to confirm, as Signups through the site counts them.',
+              what: 'Signed up through the site = submits of the boxes on /events, /training, /funding, their past issues pages, and /newsletter that ActiveCampaign took, as Signups through the site counts them. Since 12 November 2026 each one is subscribed at once; before that the reader first had to press a link in an email.',
             },
             {
               key: 'confirmed',
-              label: 'Confirmed',
-              unit: 'confirmed',
+              label: 'Pressed the email’s button',
+              unit: 'presses',
               metric: data.trends.newsletterConfirmed,
               since: SITE_SIGNUPS_SINCE,
-              what: `Confirmed = readers who pressed the link in that email and landed on aisafety.com/subscribed/events or /subscribed/training, ${unique ? 'once per visitor per newsletter per day (the Unique count)' : 'every landing (the Total count)'}, as Signups through the site counts them.`,
+              what: `Pressed the email’s button = readers who pressed the button in the email a signup sends and landed on aisafety.com/subscribed/events, /subscribed/training or /subscribed/funding, ${unique ? 'once per visitor, and not again when the same link opens a second time within two minutes (the Unique count)' : 'every landing (the Total count)'}, as Signups through the site counts them.`,
             },
             {
               key: 'newsletter-visits',
@@ -1351,15 +1401,17 @@ async function AnalyticsView({
                       totalShare={data.siteNewsletterShare ?? undefined}
                     />
                     <p className={styles.caption}>
-                      Submits of the newsletter email box on /events, /training
-                      and /funding, and on the past issues pages
-                      (/newsletter/events, /newsletter/training, listed by their
-                      address) – not every submit ends in a signup (how the
-                      ActiveCampaign ones ended is below). % of visitors = the
-                      share of the page&apos;s visitors who submitted it; the
-                      Total row divides by visitors to the pages with the box
-                      combined. Recording since 29 July 2026; the past issues
-                      pages since October 2026.
+                      Submits of the newsletter email box on /events, /training,
+                      and /funding, on the past issues pages
+                      (/newsletter/events, /newsletter/training, and
+                      /newsletter/funding, listed by their address), and of the
+                      several-newsletters form on /newsletter – not every submit
+                      ends in a signup (how the ActiveCampaign ones ended is
+                      below). % of visitors = the share of the page&apos;s
+                      visitors who submitted it; the Total row divides by
+                      visitors to the pages with the box combined. Recording
+                      since 29 July 2026; the past issues pages since October
+                      2026.
                     </p>
                   </Panel>
                   <SignupResultsPanel
@@ -1379,10 +1431,12 @@ async function AnalyticsView({
                     rows={data.newsletterArchive}
                     feeds={feeds}
                   />
+                  <NewslettersPagePanel stats={data.newslettersPage} />
                   <NewsletterLinksPanel
                     rows={data.newsletterLinks}
                     unique={unique}
                   />
+                  <CardEditsPanel counts={cardEdits} />
                 </>
               }
             />
@@ -1500,6 +1554,7 @@ async function AnalyticsView({
 
           {onResourceView && (
             <div className={styles.pageSection}>
+              {jobsShareBox}
               <Panel title="Over time">
                 <TrendChart
                   tiles={pageTiles}
@@ -1861,14 +1916,16 @@ async function AnalyticsView({
                   totalShare={data.siteNewsletterShare ?? undefined}
                 />
                 <p className={styles.caption}>
-                  Submits of the newsletter email box on /events, /training and
-                  /funding, and on the past issues pages (/newsletter/events,
-                  /newsletter/training) – not every submit ends in a signup (the
-                  Newsletters tab shows how the ActiveCampaign ones ended). % of
-                  visitors = the share of the page&apos;s visitors who submitted
-                  it; the Total row divides by visitors to the pages with the
-                  box combined, since only they have it. Recording since 29 July
-                  2026; the past issues pages since October 2026.
+                  Submits of the newsletter email box on /events, /training, and
+                  /funding, on the past issues pages (/newsletter/events,
+                  /newsletter/training, and /newsletter/funding), and of the
+                  several-newsletters form on /newsletter – not every submit
+                  ends in a signup (the Newsletters tab shows how the
+                  ActiveCampaign ones ended). % of visitors = the share of the
+                  page&apos;s visitors who submitted it; the Total row divides
+                  by visitors to the pages with the box combined, since only
+                  they have it. Recording since 29 July 2026; the past issues
+                  pages since October 2026.
                 </p>
               </Panel>
               <Panel title="Footer clicks">
@@ -2177,7 +2234,7 @@ function DashboardTabs({
             {t.icon && (
               <span className={styles.pageTabIcon}>
                 <Icon
-                  className="color-teal-bright-800"
+                  className="color-teal-800"
                   src={`/images/icons/${t.icon}`}
                   size={12}
                 />
@@ -2222,9 +2279,127 @@ async function readFeeds(range: DateRange): Promise<{
   }
 }
 
-/** The Newsletters tab's past issues pages (/newsletter/events, /training)
- *  and feeds: the pages' views and clicks in the range, and the feeds'
- *  readers yesterday and today. */
+/** /newsletter: visits, the settings readers open from the "Manage
+ *  subscriptions" link in an issue, and which newsletters they added or
+ *  dropped there. Its signups are in "How the signups went" under their
+ *  own page row. */
+function NewslettersPagePanel({ stats }: { stats: NewslettersPageStats }) {
+  const summary = [
+    { name: 'Visits', count: stats.views },
+    {
+      name: 'Opened from an email’s Manage subscriptions link',
+      count: stats.opened,
+    },
+    {
+      name: 'Links that didn’t work (old or broken key)',
+      count: stats.brokenLinks,
+    },
+    {
+      name: 'Couldn’t load (ActiveCampaign or connection)',
+      count: stats.openFailures,
+    },
+    { name: 'Saved changes', count: stats.saves },
+    { name: 'Saves that failed', count: stats.saveFailures },
+  ].filter((r, i) => i < 2 || i === 4 || r.count > 0)
+  const any = summary.some(r => r.count > 0) || stats.rows.length > 0
+  return (
+    <Panel title="Newsletters page">
+      {!any ? (
+        <p className={styles.dim}>No visits to /newsletter in this range.</p>
+      ) : (
+        <>
+          <CountTable rows={summary} labelHead="What" countHead="Count" />
+          {stats.rows.length > 0 && (
+            <SortableTable
+              columns={[
+                { label: 'Newsletter', sort: 'text' },
+                {
+                  label: 'Added in settings',
+                  className: styles.numCol,
+                  sort: 'number',
+                },
+                {
+                  label: 'Dropped in settings',
+                  className: styles.numCol,
+                  sort: 'number',
+                },
+                {
+                  label: 'Clicks to its page',
+                  className: styles.numCol,
+                  sort: 'number',
+                },
+              ]}
+              values={stats.rows.map(r => [
+                r.name,
+                r.added,
+                r.dropped,
+                r.clicks,
+              ])}
+            >
+              {stats.rows.map(r => (
+                <tr key={r.name}>
+                  <td>{r.name}</td>
+                  <td className={styles.numCol}>{r.added.toLocaleString()}</td>
+                  <td className={styles.numCol}>
+                    {r.dropped.toLocaleString()}
+                  </td>
+                  <td className={styles.numCol}>{r.clicks.toLocaleString()}</td>
+                </tr>
+              ))}
+            </SortableTable>
+          )}
+        </>
+      )}
+      <p className={styles.caption}>
+        The page that lists every newsletter (/newsletter), where visitors sign
+        up to several at once (those signups are under its own row in the signup
+        results above) and readers change theirs from the Manage subscriptions
+        link at the bottom of each issue. Clicks to its page are clicks through
+        to the newsletter&apos;s past issues page (for Updates, to its
+        Substack). Recording since the page went live in October 2026.
+      </p>
+    </Panel>
+  )
+}
+
+/** The Newsletters tab's count of cards taken out of drafts on
+ *  /admin/newsletter, and put back. */
+function CardEditsPanel({ counts }: { counts: CardEditCounts | null }) {
+  return (
+    <Panel title="Cards removed from drafts">
+      {counts === null ? (
+        <p className={styles.dim}>
+          Couldn&apos;t read the counts just now — try refreshing in a moment.
+        </p>
+      ) : (
+        <CountTable
+          rows={[
+            { name: 'Removed', count: counts.remove },
+            {
+              name: 'Put back with Undo, right after removing',
+              count: counts['put-back-undo'],
+            },
+            {
+              name: 'Put back later, from the list of removed cards',
+              count: counts['put-back'],
+            },
+          ]}
+          labelHead="What"
+          countHead="Count"
+        />
+      )}
+      <p className={styles.caption}>
+        Cards taken out of a newsletter draft with the trash button on
+        /admin/newsletter, and how many were put back, test lists included.
+        Counted per day (UTC), since Put back arrived on 29 October 2026.
+      </p>
+    </Panel>
+  )
+}
+
+/** The Newsletters tab's newsletter pages (/newsletter/events, /training,
+ *  /funding) and feeds: the pages' views and clicks in the range, and the
+ *  feeds' readers yesterday and today. */
 function PastIssuesPanel({
   rows,
   feeds,
@@ -2255,6 +2430,7 @@ function PastIssuesPanel({
       issueClicks: 0,
       feedClicks: 0,
       substackClicks: 0,
+      resourceClicks: 0,
     }
   const feedCell = (list: FeedReaders[] | undefined, name: string) =>
     list ? readers(list, name).toLocaleString() : '—'
@@ -2272,6 +2448,11 @@ function PastIssuesPanel({
             { label: 'To an issue', className: styles.numCol, sort: 'number' },
             { label: 'To the feed', className: styles.numCol, sort: 'number' },
             { label: 'To Substack', className: styles.numCol, sort: 'number' },
+            {
+              label: 'To resource page',
+              className: styles.numCol,
+              sort: 'number',
+            },
             {
               label: 'Feed readers yesterday',
               className: styles.numCol,
@@ -2291,6 +2472,7 @@ function PastIssuesPanel({
               r.issueClicks,
               r.feedClicks,
               r.substackClicks,
+              r.resourceClicks,
               feeds ? readers(feeds.yesterday, name) : null,
               feeds ? readers(feeds.today, name) : null,
             ]
@@ -2312,6 +2494,9 @@ function PastIssuesPanel({
                   {r.substackClicks.toLocaleString()}
                 </td>
                 <td className={styles.numCol}>
+                  {r.resourceClicks.toLocaleString()}
+                </td>
+                <td className={styles.numCol}>
                   {feedCell(feeds?.yesterday, name)}
                 </td>
                 <td className={styles.numCol}>
@@ -2323,16 +2508,18 @@ function PastIssuesPanel({
         </SortableTable>
       )}
       <p className={styles.caption}>
-        Each newsletter&apos;s past issues page (aisafety.com/newsletter/events,
-        /newsletter/training) lists its issues sent since the move to
-        ActiveCampaign on 8 October 2026, with an RSS feed (…/feed). Page views
-        and clicks follow the range; a click to an issue opens its web version.
-        Feed readers aren&apos;t for the range: they&apos;re the people
-        following the feed on one day (UTC). A feed service such as Feedly
-        fetches once for all its users and reports how many; a reader app
-        fetches for one person. Opening the feed in a browser, search engines,
-        AI assistants and scripts aren&apos;t counted. Recording since October
-        2026.
+        Each newsletter&apos;s page (aisafety.com/newsletter/events,
+        /newsletter/training, /newsletter/funding) lists its issues sent since
+        the move to ActiveCampaign (Events and Training 8 October 2026, Funding
+        21 October 2026), with an RSS feed (…/feed). Page views and clicks
+        follow the range; a click to an issue opens its web version, and
+        &ldquo;To resource page&rdquo; counts the link on to /events, /training,
+        or /funding (since 23 October 2026). Feed readers aren&apos;t for the
+        range: they&apos;re the people following the feed on one day (UTC). A
+        feed service such as Feedly fetches once for all its users and reports
+        how many; a reader app fetches for one person. Opening the feed in a
+        browser, search engines, AI assistants and scripts aren&apos;t counted.
+        Recording since October 2026.
       </p>
     </Panel>
   )
@@ -2459,12 +2646,12 @@ function NewsletterVisitsPanel({
         those tags and lasts until the visitor has been away for 30 minutes;
         reloading the page within it isn&apos;t a new visit. Events &amp;
         Training = the two together on Substack, before 8 October 2026; Funding
-        still sends from Substack, with the same tags. Saw another page = the
-        share of visits that went on to another page of the site; Clicked a
-        listing = the share with a click on a listing. Every visit counts,
-        whatever the count mode. Links to other sites in the emails go straight
-        there and are under Most-clicked links. A visitor whose browser blocks
-        the site&apos;s tracking isn&apos;t counted.
+        sent from Substack with the same tags until it moved on 21 October 2026.
+        Saw another page = the share of visits that went on to another page of
+        the site; Clicked a listing = the share with a click on a listing. Every
+        visit counts, whatever the count mode. Links to other sites in the
+        emails go straight there and are under Most-clicked links. A visitor
+        whose browser blocks the site&apos;s tracking isn&apos;t counted.
       </p>
     </Panel>
   )
@@ -2541,8 +2728,8 @@ function IssueCopiesPanel({
 }
 
 /** The Newsletters tab's other ways to the newsletters on the site: the
- *  signup box's card link where the box still hands off to Substack, and
- *  the footer's Newsletters column. */
+ *  signup box's card link from when /funding's box handed off to Substack
+ *  (before the Funding move), and the footer's Newsletters column. */
 function NewsletterLinksPanel({
   rows,
   unique,
@@ -2587,11 +2774,12 @@ function NewsletterLinksPanel({
       )}
       <p className={styles.caption}>
         Funding page&apos;s box = clicks on the Funding signup box outside its
-        email field, which open the newsletter on Substack to read first; the
-        box&apos;s submits are under Signup box on the site and finish on
-        Substack. Footer = the links in the site footer&apos;s Newsletters
-        column, on every page: Events and Training go to their pages, whose box
-        signs people up; Funding and Updates go to Substack.{' '}
+        email field, which opened the newsletter on Substack to read first until
+        the Funding newsletter moved on 21 October 2026; since then the box
+        signs people up on the site like the others. Footer = the links in the
+        site footer&apos;s Newsletters column, on every page: Events, Training
+        and Funding go to their pages, whose box signs people up; Updates goes
+        to Substack (Funding did too before its move).{' '}
         {unique
           ? 'Once per visitor per link per day (the Unique count).'
           : 'Every click (the Total count).'}
@@ -2601,8 +2789,8 @@ function NewsletterLinksPanel({
 }
 
 /** The Newsletters tab's results of the signups made on the site: the
- *  /events and /training boxes sign people up through ActiveCampaign (from 8
- *  October 2026). Per page, how many went through and how many showed the
+ *  boxes sign people up through ActiveCampaign (/events and /training from 8
+ *  October 2026, /funding from its move day). Per page, how many went through and how many showed the
  *  visitor an error, then what the errors were. */
 function SignupResultsPanel({
   results,
@@ -2670,9 +2858,13 @@ function SignupResultsPanel({
           columns={[
             { label: 'Newsletter', sort: 'text' },
             { label: 'Signed up', className: styles.numCol, sort: 'number' },
-            { label: 'Confirmed', className: styles.numCol, sort: 'number' },
             {
-              label: '% confirmed',
+              label: 'Pressed the button',
+              className: styles.numCol,
+              sort: 'number',
+            },
+            {
+              label: '% pressed',
               className: styles.pctCol,
               sort: 'number',
             },
@@ -2699,18 +2891,27 @@ function SignupResultsPanel({
       <p className={styles.caption}>
         Since 8 October 2026 the boxes on /events and /training (and, since
         October 2026, on their past issues pages) sign people up on the site,
-        through ActiveCampaign. Signed up = ActiveCampaign took the address and
-        emailed a link to confirm it. Already subscribed = the address was on
-        the list already, so the visitor was told so and nothing was sent.
-        Errors = the visitor saw an error message instead. Confirmed = readers
-        who pressed the link in that email: ActiveCampaign then sends them to
-        aisafety.com/subscribed/events or /subscribed/training, and their view
-        of that page is counted, once per visitor per newsletter per day in the
-        Unique count. A confirmation can come days after its signup, so near the
-        range&apos;s edges the two don&apos;t pair up exactly, and a reader
-        whose browser blocks the site&apos;s tracking isn&apos;t counted.
-        /funding&apos;s box still opens Substack, so its signups finish there
-        and don&apos;t show here.
+        through ActiveCampaign; /funding&apos;s box does too since the Funding
+        newsletter moved on 21 October 2026 (before that it opened Substack, so
+        its earlier signups don&apos;t show here), and so does /newsletter,
+        several newsletters at once, since 26 October 2026. Signed up =
+        ActiveCampaign took the address and emailed the reader. Since 12
+        November 2026 that is all it takes to be subscribed; before then only
+        readers who pressed the link in that email were, and about one in six
+        never did. Already subscribed = the address was on the list already, so
+        the visitor was told so and nothing was sent. Errors = the visitor saw
+        an error message instead. Pressed the button = readers who pressed the
+        button in that email (the confirmation link, until 12 November 2026):
+        ActiveCampaign then sends them to aisafety.com/subscribed/events,
+        /subscribed/training or /subscribed/funding, and their view of that page
+        is counted. In the Unique count that&apos;s once per visitor, and not
+        again when the same link opens a second time within two minutes in
+        another browser (an email app&apos;s own browser and then the
+        phone&apos;s, or a mail scanner checking the link). Anyone else who
+        opens one of those pages counts too, tests included. A press can come
+        days after its signup, so near the range&apos;s edges the two don&apos;t
+        pair up exactly, and a reader whose browser blocks the site&apos;s
+        tracking isn&apos;t counted.
       </p>
     </Panel>
   )
@@ -2910,9 +3111,9 @@ function NewsletterView({
           Issues sent through ActiveCampaign to the Events, Training and Funding
           lists, by the day each first went out. Test lists, and practice sends
           to fewer than 50 people, are left out. Events and Training moved from
-          Substack on 8 October 2026, so their earlier issues aren&apos;t here,
-          and Funding still sends from Substack. An issue sent in waves is one
-          row with all its waves added up. Sent to = emails sent, bounced ones
+          Substack on 8 October 2026 and Funding on 21 October 2026, so their
+          earlier issues aren&apos;t here. An issue sent in waves is one row
+          with all its waves added up. Sent to = emails sent, bounced ones
           included. Opened = unique opens ÷ emails sent, from ActiveCampaign.
           Apple Mail opens every email it receives, so this reads high, and the
           send watcher&apos;s verified opens, which leave those out, read lower.

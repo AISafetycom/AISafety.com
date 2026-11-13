@@ -40,8 +40,12 @@ vi.mock('@/lib/admin/airtable', async importOriginal => ({
   },
 }))
 
-const { untickNewsletter, updateListingDescription } =
-  await import('./newsletter-listing')
+const {
+  retickNewsletter,
+  untickNewsletter,
+  updateListingDescription,
+  updateListingName,
+} = await import('./newsletter-listing')
 
 const EVENTS = 'tblXbN9swwldwq8f7'
 const TRAINING = 'tbli1YSCpIuNY2DvL'
@@ -112,6 +116,49 @@ describe('untickNewsletter (a card removed from a draft)', () => {
   })
 })
 
+describe('retickNewsletter (a removed card put back into a draft)', () => {
+  it('ticks an Events listing again and says so on the record', async () => {
+    await untickNewsletter('recEventTicked001')
+    writes.length = 0
+    expect(await retickNewsletter('recEventTicked001')).toEqual({
+      status: 'ticked',
+    })
+    const record = base.get('recEventTicked001')!
+    expect(record.fields.fldRdDbcWhCsoLrQj).toBe(true)
+    expect(record.comments.at(-1)).toBe(
+      'Newsletter ticked again: its card was put back into a newsletter draft'
+    )
+    expect(writes).toEqual([
+      `PATCH ${EVENTS}/recEventTicked001`,
+      `POST ${EVENTS}/recEventTicked001/comments`,
+    ])
+  })
+  it('writes through the listing’s own table (a Training one here)', async () => {
+    expect(await retickNewsletter('recTrainingClear1')).toEqual({
+      status: 'ticked',
+    })
+    expect(writes[0]).toBe(`PATCH ${TRAINING}/recTrainingClear1`)
+  })
+  it('leaves a listing alone when there is nothing to set', async () => {
+    for (const id of [
+      'recTrainingTick01', // ticked already
+      'recFundingRecord1', // Funding has no tick
+      'recMapOrganizat01', // a callout card's /map organization
+      'u1a2b3c4d5e', // a card with no record id
+    ])
+      expect((await retickNewsletter(id)).status).toBe('none')
+    expect(writes).toEqual([])
+  })
+  it('reports a listing it can’t find or can’t write', async () => {
+    expect((await retickNewsletter('recMissingRecord1')).status).toBe('failed')
+    refuseWrites = 422
+    expect((await retickNewsletter('recTrainingClear1')).status).toBe('failed')
+    expect(
+      base.get('recTrainingClear1')!.fields.fldirVkgSCVk726Di
+    ).toBeUndefined()
+  })
+})
+
 describe('updateListingDescription (still the same after the shared lookup)', () => {
   it('writes the Description through the listing’s own table', async () => {
     expect(
@@ -134,5 +181,41 @@ describe('updateListingDescription (still the same after the shared lookup)', ()
       reason: 'the listing isn’t in the Events, Training or Funding table',
     })
     expect(writes).toEqual([])
+  })
+})
+
+describe('updateListingName (a card title passed on to the site, 6 Nov 2026)', () => {
+  it('writes the Name through the listing’s own table and says so on the record', async () => {
+    expect(
+      await updateListingName('recTrainingClear1', 'AGI Strategy')
+    ).toEqual({ ok: true, table: TRAINING })
+    const record = base.get('recTrainingClear1')!
+    expect(record.fields.fldNq08J2QqQ8SreD).toBe('AGI Strategy')
+    expect(record.fields.fldIRngvk0vjSwjh8).toBeUndefined()
+    expect(record.comments).toEqual(['Name updated from the newsletter editor'])
+    expect(writes).toEqual([
+      `PATCH ${TRAINING}/recTrainingClear1`,
+      `POST ${TRAINING}/recTrainingClear1/comments`,
+    ])
+  })
+  it('uses each table’s own Name field (Events and Funding here)', async () => {
+    await updateListingName('recEventTicked001', 'New event name')
+    await updateListingName('recFundingRecord1', 'New fund name')
+    expect(base.get('recEventTicked001')!.fields.fldHDwWtiBFYN9fgf).toBe(
+      'New event name'
+    )
+    expect(base.get('recFundingRecord1')!.fields.fldsFpgVduYnNuYkN).toBe(
+      'New fund name'
+    )
+  })
+  it('refuses cards that aren’t a newsletter listing, and reports a refused write', async () => {
+    expect((await updateListingName('recMapOrganizat01', 'x')).ok).toBe(false)
+    expect(writes).toEqual([])
+    refuseWrites = 422
+    const refused = await updateListingName('recTrainingClear1', 'x')
+    expect(refused.ok).toBe(false)
+    expect(base.get('recTrainingClear1')!.fields.fldNq08J2QqQ8SreD).toBe(
+      'A course'
+    )
   })
 })

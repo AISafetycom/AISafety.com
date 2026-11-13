@@ -2,15 +2,20 @@
  *  site's card draws or its filters run on. The Queue names any of these
  *  that is still empty in an amber strip at the top of the record instead
  *  of folding it into the quiet "Not set" line (Bryce, 17 Sept 2026: IASEAI
- *  and PauseAI South Korea went out with no Cost, "I had missed that").
+ *  and PauseAI South Korea went out with no Cost, "I had missed that"), and
+ *  an addition cannot be published until none is (29 Oct 2026).
  *
  *  Housekeeping (Publish?, Hide?, Featured, Sort, Newsletter, Internal
  *  notes) is never needed. A field the site draws only in some cases is
  *  needed only in those: Location once the Mode is in person, a deadline's
  *  type once there is a deadline, coordinates once a community is Local, a
- *  Featured tagline once the record is Featured. A dated training program
- *  needs a start date, exact or approximate. Field names are Airtable's own,
+ *  Featured tagline once the record is Featured. An event whose sign-up is
+ *  not open yet has a deadline type and no deadline, and needs none. A
+ *  dated training program needs a start date, exact or approximate; a recurring one has no dates
+ *  and needs its typical length instead. Field names are Airtable's own,
  *  matched without regard to case. */
+
+import { listed } from './queue-fable'
 
 type Fields = Record<string, unknown>
 
@@ -55,6 +60,19 @@ function isLocal(f: Fields): boolean {
   return list.some(p => String(p).trim().toLowerCase() === 'local')
 }
 
+/** Sign-up that has not opened: the event's "not yet open" box is ticked,
+ *  under either name the column has had. */
+const NOT_YET_OPEN = [
+  'Applications/registrations not yet open?',
+  'Applications not yet open?',
+]
+function notYetOpen(f: Fields): boolean {
+  return NOT_YET_OPEN.some(n => {
+    const v = valueOf(f, n)
+    return v === true || String(v).trim().toLowerCase() === 'true'
+  })
+}
+
 const FEATURED_TAGLINE: Need = {
   field: 'Featured tagline',
   when: filled('Featured'),
@@ -73,7 +91,13 @@ const NEEDED: Record<string, Need[]> = {
     'Cost',
     'Logo',
     { field: 'Location', when: inPerson },
-    { field: 'Deadline', when: filled('Deadline type') },
+    // A deadline type with no date is right while sign-up has not opened:
+    // there is no closing date yet, and the site's card says so (Bryce, 12
+    // Nov 2026, on AI Safety Forum 2027).
+    {
+      field: 'Deadline',
+      when: f => filled('Deadline type')(f) && !notYetOpen(f),
+    },
     { field: 'Deadline type', when: filled('Deadline') },
   ],
   '/training': [
@@ -125,13 +149,16 @@ const NEEDED: Record<string, Need[]> = {
     'Created by',
     FEATURED_TAGLINE,
   ],
+  // Grant size (display) and Deadline are left out on purpose: an empty Grant
+  // size hides the card's line and an empty Deadline means rolling. Type and
+  // Accepting applications? are no longer on the card (27 Oct 2026).
   '/funding': [
     'Name',
     'Website',
     'Description',
     'Logo',
-    'Type',
-    'Accepting applications?',
+    'Application status',
+    'Who can apply',
     FEATURED_TAGLINE,
   ],
   '/media-channels': [
@@ -142,12 +169,15 @@ const NEEDED: Record<string, Need[]> = {
     'Type',
     FEATURED_TAGLINE,
   ],
+  // Focus areas replaced the old Focus on the card (27 Oct 2026).
   '/advisors': [
     'Name',
     'Link',
     'Description',
     'Logo',
-    'Focus',
+    "Who it's for",
+    'Focus areas',
+    'Applications',
     'Status',
     FEATURED_TAGLINE,
   ],
@@ -170,10 +200,26 @@ const NEEDED: Record<string, Need[]> = {
 }
 NEEDED['/founder-toolkit'] = NEEDED['/founders']
 
+/** Training (recurring) shares /training with the dated programs but has no
+ *  date fields: its card shows Typical length (Bryce, 24 Oct 2026, on LASST
+ *  Summer Fellowship asking for a Start date: "Look, there's a date field"). */
+const RECURRING_TRAINING_TABLE = 'tblEEIbj6dW5oS4cX'
+const NEEDED_RECURRING: Need[] = NEEDED['/training'].map(n =>
+  typeof n !== 'string' && 'any' in n ? 'Typical length' : n
+)
+
 /** The names of the page's needed fields that the record leaves empty, in
- *  the page's order. Nothing for a page the Queue does not know. */
-export function missingFields(page: string | null, fields: Fields): string[] {
-  const needs = NEEDED[page?.trim().toLowerCase() ?? ''] ?? []
+ *  the page's order. Nothing for a page the Queue does not know. `table` is
+ *  the record's table, for a page fed by two (/training). */
+export function missingFields(
+  page: string | null,
+  fields: Fields,
+  table?: string | null
+): string[] {
+  const needs =
+    table === RECURRING_TRAINING_TABLE
+      ? NEEDED_RECURRING
+      : (NEEDED[page?.trim().toLowerCase() ?? ''] ?? [])
   const out: string[] = []
   for (const need of needs) {
     if (typeof need === 'string') {
@@ -187,4 +233,33 @@ export function missingFields(page: string | null, fields: Fields): string[] {
     }
   }
   return out
+}
+
+/** What an addition still lacks before it can be published: the needed
+ *  fields `fields` leaves empty once `edits` are in (an edit of "false" is
+ *  an unticked box), leaving out any the table does not have, as it could
+ *  not be set (a recurring program was asked for a Start date, 24 Oct
+ *  2026). With no `schema` yet, every needed field counts. Accept waits
+ *  until this is empty (Bryce, 29 Oct 2026: "accepting something with a
+ *  field missing should be blocked from being accepted"). */
+export function neededLeft(
+  page: string | null,
+  table: string | null | undefined,
+  fields: Fields,
+  edits: Fields,
+  schema: readonly { name: string }[]
+): string[] {
+  const current: Fields = { ...fields }
+  for (const [k, v] of Object.entries(edits)) {
+    current[k] = v === 'false' ? false : v
+  }
+  const columns = new Set(schema.map(f => f.name.trim().toLowerCase()))
+  return missingFields(page, current, table).filter(
+    k => columns.size === 0 || columns.has(k.toLowerCase())
+  )
+}
+
+/** What Accept says while an addition lacks `missing`. */
+export function fillFirst(missing: string[]): string {
+  return `Fill in ${listed(missing)} first`
 }

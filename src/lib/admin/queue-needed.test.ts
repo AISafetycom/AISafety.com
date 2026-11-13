@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { isEmptyValue, missingFields } from './queue-needed'
+import {
+  fillFirst,
+  isEmptyValue,
+  missingFields,
+  neededLeft,
+} from './queue-needed'
 
 // An event as Comb writes one, every needed field filled.
 const EVENT = {
@@ -59,6 +64,41 @@ describe('missingFields', () => {
     ).toEqual(['Deadline type'])
   })
 
+  it('wants no deadline while sign-up has not opened', () => {
+    const typed = { ...EVENT, 'Deadline type': 'Register' }
+    expect(
+      missingFields('/events', {
+        ...typed,
+        'Applications/registrations not yet open?': true,
+      })
+    ).toEqual([])
+    expect(
+      missingFields('/events', {
+        ...typed,
+        'Applications/registrations not yet open?': false,
+      })
+    ).toEqual(['Deadline'])
+    // Ticked in the Queue, not yet saved; then unticked again.
+    expect(
+      neededLeft(
+        '/events',
+        null,
+        typed,
+        { 'Applications/registrations not yet open?': 'true' },
+        []
+      )
+    ).toEqual([])
+    expect(
+      neededLeft(
+        '/events',
+        null,
+        { ...typed, 'Applications/registrations not yet open?': true },
+        { 'Applications/registrations not yet open?': 'false' },
+        []
+      )
+    ).toEqual(['Deadline'])
+  })
+
   it('lists every gap in the page’s order, matching names loosely', () => {
     expect(
       missingFields('/events', {
@@ -103,6 +143,43 @@ describe('missingFields', () => {
     ).toEqual([])
   })
 
+  it('wants a typical length, never a date, for a recurring program', () => {
+    const recurring = {
+      Name: 'x',
+      URL: 'https://x.org',
+      Description: 'y',
+      Type: 'Fellowship',
+      Mode: 'Hybrid',
+      Location: 'Online & USA',
+      Focus: ['Governance'],
+      'Entry bar': 'Mid',
+      'Time commitment': 'Full-time',
+      Stipend: 'Stipend included',
+      Logo: ['https://example.com/logo.png'],
+    }
+    expect(missingFields('/training', recurring, 'tblEEIbj6dW5oS4cX')).toEqual([
+      'Typical length',
+    ])
+    expect(
+      missingFields(
+        '/training',
+        { ...recurring, 'Typical length': '2 months' },
+        'tblEEIbj6dW5oS4cX'
+      )
+    ).toEqual([])
+    expect(
+      missingFields(
+        '/training',
+        { ...recurring, Mode: 'In person', Location: '' },
+        'tblEEIbj6dW5oS4cX'
+      )
+    ).toEqual(['Typical length', 'Location'])
+    // The dated table still wants its start date.
+    expect(missingFields('/training', recurring, 'tbli1YSCpIuNY2DvL')).toEqual([
+      'Start date',
+    ])
+  })
+
   it('wants a place and coordinates only for a local community', () => {
     const community = {
       Name: 'x',
@@ -135,13 +212,63 @@ describe('missingFields', () => {
       Website: 'https://x.org',
       Description: 'y',
       Logo: ['https://example.com/logo.png'],
-      Type: ['Grant'],
-      'Accepting applications?': 'Yes',
+      'Application status': 'Applications open',
+      'Who can apply': ['Individuals'],
     }
     expect(missingFields('/funding', funding)).toEqual([])
     expect(missingFields('/funding', { ...funding, Featured: '1' })).toEqual([
       'Featured tagline',
     ])
+  })
+
+  it('asks a funder for the fields its card draws, not the old ones', () => {
+    // Nondualism and AI alignment microgrants, as Comb wrote it before the
+    // October 2026 redesign: only the old status text and Type.
+    const oldShape = {
+      Name: 'x',
+      Website: 'https://x.org',
+      Description: 'y',
+      Logo: ['https://example.com/logo.png'],
+      Type: ['Grant program'],
+      'Accepting applications?': 'Applications on a rolling basis',
+    }
+    expect(missingFields('/funding', oldShape)).toEqual([
+      'Application status',
+      'Who can apply',
+    ])
+    // No Grant size or Deadline: the card hides the line, and rolling is fine.
+    expect(
+      missingFields('/funding', {
+        ...oldShape,
+        'Application status': 'Invite only, no applications',
+        'Who can apply': ['Nonprofits', 'Universities'],
+      })
+    ).toEqual([])
+  })
+
+  it('asks an advisor for who it is for, focus areas and applications', () => {
+    const advisor = {
+      Name: 'x',
+      Link: 'https://x.org',
+      Description: 'y',
+      Logo: ['https://example.com/logo.png'],
+      Focus: ['Career/contribution'],
+      Status: 'Active',
+    }
+    expect(missingFields('/advisors', advisor)).toEqual([
+      "Who it's for",
+      'Focus areas',
+      'Applications',
+    ])
+    expect(
+      missingFields('/advisors', {
+        ...advisor,
+        Focus: null,
+        "Who it's for": ['Newcomers'],
+        'Focus areas': ['Career', 'Well-being'],
+        Applications: 'Accepts everyone',
+      })
+    ).toEqual([])
   })
 
   it('counts zero as a value, for the map’s x and y', () => {
@@ -162,5 +289,61 @@ describe('missingFields', () => {
         y: 12.5,
       })
     ).toEqual([])
+  })
+})
+
+describe('neededLeft', () => {
+  const columns = Object.keys(EVENT).map(name => ({ name }))
+  const noCostNoLogo: Record<string, unknown> = { ...EVENT }
+  delete noCostNoLogo.Cost
+  delete noCostNoLogo.Logo
+
+  it('goes by the record with the edits in', () => {
+    expect(neededLeft('/events', null, noCostNoLogo, {}, columns)).toEqual([
+      'Cost',
+      'Logo',
+    ])
+    expect(
+      neededLeft('/events', null, noCostNoLogo, { Cost: 'Free' }, columns)
+    ).toEqual(['Logo'])
+    expect(neededLeft('/events', null, EVENT, { Cost: '' }, columns)).toEqual([
+      'Cost',
+    ])
+  })
+
+  it('reads an edit of "false" as an unticked box', () => {
+    expect(
+      neededLeft(
+        '/communities',
+        null,
+        { Featured: true },
+        { Featured: 'false' },
+        [{ name: 'Featured' }, { name: 'Featured tagline' }]
+      )
+    ).toEqual([])
+  })
+
+  it('never asks for a field the table does not have', () => {
+    const noCost = columns.filter(c => c.name !== 'Cost')
+    expect(neededLeft('/events', null, noCostNoLogo, {}, noCost)).toEqual([
+      'Logo',
+    ])
+  })
+
+  it('counts every needed field until the field list is known', () => {
+    expect(neededLeft('/events', null, noCostNoLogo, {}, [])).toEqual([
+      'Cost',
+      'Logo',
+    ])
+  })
+})
+
+describe('fillFirst', () => {
+  it('names what is left, with an Oxford comma', () => {
+    expect(fillFirst(['Cost'])).toBe('Fill in Cost first')
+    expect(fillFirst(['Cost', 'Logo'])).toBe('Fill in Cost and Logo first')
+    expect(fillFirst(['Cost', 'Logo', 'Mode'])).toBe(
+      'Fill in Cost, Logo, and Mode first'
+    )
   })
 })

@@ -2,6 +2,7 @@ import path from 'path'
 import { list, put } from '@vercel/blob'
 import { unstable_cache } from 'next/cache'
 import { isPreviewRequest, shareLiveRead } from '@/lib/preview'
+import { LOGO_PREFIX, mirrorLogoFields } from './logo-mirror'
 
 export interface AirtableRawRecord {
   id: string
@@ -25,6 +26,9 @@ interface FetchOptions {
   fields?: string[]
   /** Key record fields by permanent field ID instead of name (rename-proof). */
   returnFieldsByFieldId?: boolean
+  /** Fields whose text is a logo's web address on another site, to be served
+   *  from a copy in Blob instead (see logo-mirror.ts). */
+  logoUrlFields?: string[]
 }
 
 // ---- Field-value helpers ---------------------------------------------
@@ -209,21 +213,22 @@ interface MirrorTask {
 
 // Listing the store (some 1,400 files, two pages, well over half a second) is
 // the slowest step of a request-time fetch, and preview mode paid it once per
-// table per page view. Outside the build the listing is remembered for a
-// minute: nothing is ever deleted from the store, and a listing that predates
-// a file mirrored moments ago only costs one redundant, idempotent re-upload.
-// The build always lists afresh — it must see the store exactly as it is.
+// table per page view. Outside the build each prefix's listing is remembered
+// for a minute: nothing is ever deleted from the store, and a listing that
+// predates a file mirrored moments ago only costs one redundant, idempotent
+// re-upload. The build always lists afresh — it must see the store exactly as
+// it is.
 const BLOB_LISTING_MEMO_MS = 60_000
-let blobListingMemo: {
-  at: number
-  listing: Promise<Map<string, string>>
-} | null = null
+const blobListingMemo = new Map<
+  string,
+  { at: number; listing: Promise<Map<string, string>> }
+>()
 
-async function listMirroredBlobs(): Promise<Map<string, string>> {
+async function listMirroredBlobs(prefix: string): Promise<Map<string, string>> {
   const existing = new Map<string, string>()
   let cursor: string | undefined
   do {
-    const page = await list({ prefix: BLOB_PREFIX, cursor })
+    const page = await list({ prefix, cursor })
     for (const blob of page.blobs) {
       existing.set(blob.pathname, blob.url)
     }
@@ -232,17 +237,20 @@ async function listMirroredBlobs(): Promise<Map<string, string>> {
   return existing
 }
 
-function mirroredBlobs(): Promise<Map<string, string>> {
-  if (isBuildPhase()) return listMirroredBlobs()
+function mirroredBlobs(prefix: string): Promise<Map<string, string>> {
+  if (isBuildPhase()) return listMirroredBlobs(prefix)
   const now = Date.now()
-  if (blobListingMemo && now - blobListingMemo.at < BLOB_LISTING_MEMO_MS) {
-    return blobListingMemo.listing
+  const memo = blobListingMemo.get(prefix)
+  if (memo && now - memo.at < BLOB_LISTING_MEMO_MS) {
+    return memo.listing
   }
-  const listing = listMirroredBlobs()
-  blobListingMemo = { at: now, listing }
+  const listing = listMirroredBlobs(prefix)
+  blobListingMemo.set(prefix, { at: now, listing })
   // A failed listing is not the store's contents — forget it straight away.
   listing.catch(() => {
-    if (blobListingMemo?.listing === listing) blobListingMemo = null
+    if (blobListingMemo.get(prefix)?.listing === listing) {
+      blobListingMemo.delete(prefix)
+    }
   })
   return listing
 }
@@ -296,7 +304,7 @@ async function mirrorAttachments(records: AirtableRawRecord[]): Promise<void> {
   // the new file is uploaded on the next fetch.
   let existing: Map<string, string>
   try {
-    existing = await mirroredBlobs()
+    existing = await mirroredBlobs(BLOB_PREFIX)
   } catch (error) {
     // A Blob outage (or revoked token) must not take down every consumer of
     // the shared data cache — degrade to signed URLs at runtime, but fail the
@@ -370,6 +378,41 @@ async function mirrorAttachments(records: AirtableRawRecord[]): Promise<void> {
     }
     console.warn(message)
   }
+}
+
+// Time one fetch may spend copying new logos. Next gives each page 60 s to
+// build and the Airtable fetch shares it; at request time (preview, the hourly
+// refresh) less, so a dead source site holds a page up at most this long.
+const LOGO_BUDGET_MS = { build: 25_000, request: 8_000 }
+
+// Serves the logo addresses in `fieldIds` from thumbnails in Blob
+// (logo-mirror.ts). It runs inside the cached fetch, so logos are copied once
+// per data refresh, never per visitor, and it makes no Airtable requests.
+function mirrorLogoUrls(
+  records: AirtableRawRecord[],
+  fieldIds: string[]
+): Promise<void> {
+  return mirrorLogoFields(records, fieldIds, {
+    store: process.env.BLOB_READ_WRITE_TOKEN
+      ? {
+          list: () => mirroredBlobs(LOGO_PREFIX),
+          put: async (pathname, body) => {
+            const blob = await put(pathname, body, {
+              access: 'public',
+              addRandomSuffix: false,
+              // Same address, same bytes: concurrent refreshes racing to copy
+              // the same logo overwrite harmlessly.
+              allowOverwrite: true,
+              contentType: 'image/webp',
+              cacheControlMaxAge: 31536000,
+            })
+            return blob.url
+          },
+        }
+      : null,
+    budgetMs: isBuildPhase() ? LOGO_BUDGET_MS.build : LOGO_BUDGET_MS.request,
+    concurrency: CONCURRENCY,
+  })
 }
 
 // Airtable's documented rate limit is 5 req/sec per base. Every request from
@@ -534,6 +577,9 @@ async function fetchAirtableRecordsImpl(
   } while (offset)
 
   await mirrorAttachments(allRecords)
+  if (options.logoUrlFields) {
+    await mirrorLogoUrls(allRecords, options.logoUrlFields)
+  }
 
   return allRecords
 }

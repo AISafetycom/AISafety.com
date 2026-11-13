@@ -147,6 +147,7 @@ export function itemParts(
     add('From', item.saidBy.handle)
   }
   add('Reply to', item.replyTo)
+  for (const who of item.replyAlso) add('Reply to', who)
   add(
     item.source === 'Email' ||
       item.source === 'Discord' ||

@@ -34,3 +34,25 @@ export function laterSince(reviewAgainOn: string): string {
     Date.parse(reviewAgainOn) - REVIEW_AGAIN_DAYS * DAY_MS
   ).toISOString()
 }
+
+/** Pure: when an open item that came back from "Review again in a week"
+ *  was set aside, else null (Bryce, 20 Oct 2026: "I need to know if
+ *  something is coming back a week later"). The Mac worker writes Came back
+ *  on (the date it was due) as it clears Review again on; until it gets
+ *  there, a date that has passed says the same. */
+export function backSince(
+  item: {
+    status: string
+    reviewAgainOn: string | null
+    cameBackOn: string | null
+  },
+  now: number
+): string | null {
+  if (!['Pending', 'Revising', 'Failed'].includes(item.status)) return null
+  const due = item.reviewAgainOn ? Date.parse(item.reviewAgainOn) : NaN
+  if (Number.isFinite(due)) {
+    return due > now ? null : laterSince(item.reviewAgainOn as string)
+  }
+  const back = item.cameBackOn ? Date.parse(item.cameBackOn) : NaN
+  return Number.isFinite(back) ? laterSince(item.cameBackOn as string) : null
+}

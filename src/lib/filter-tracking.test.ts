@@ -8,25 +8,42 @@ import {
 
 describe('relabelled filter options', () => {
   it('logs the original label for a relabelled option', () => {
-    expect(trackedFilterValue('Funding', 'Application status', 'Open')).toBe(
-      'Yes'
-    )
-    expect(trackedFilterValue('Funding', 'Application status', 'Closed')).toBe(
-      'No'
-    )
+    expect(
+      trackedFilterValue('Funding', 'Application status', 'Applications open')
+    ).toBe('Yes')
+    expect(
+      trackedFilterValue(
+        'Funding',
+        'Application status',
+        'Not currently accepting applications'
+      )
+    ).toBe('No')
   })
 
   it('shows the current label for a logged value', () => {
     expect(displayFilterValue('Funding', 'Application status', 'Yes')).toBe(
-      'Open'
+      'Applications open'
     )
     expect(displayFilterValue('Funding', 'Application status', 'No')).toBe(
-      'Closed'
+      'Not currently accepting applications'
     )
   })
 
+  it('logs an option added since under its own name', () => {
+    expect(
+      trackedFilterValue(
+        'Funding',
+        'Application status',
+        'Invite only, no applications'
+      )
+    ).toBe('Invite only, no applications')
+  })
+
   it('round-trips every relabelled option', () => {
-    for (const option of ['Open', 'Closed']) {
+    for (const option of [
+      'Applications open',
+      'Not currently accepting applications',
+    ]) {
       const logged = trackedFilterValue('Funding', 'Application status', option)
       expect(displayFilterValue('Funding', 'Application status', logged)).toBe(
         option

@@ -7,6 +7,8 @@ import { getFunders } from './funding'
 import { getJobs, type Job } from './jobs'
 import { getMapData } from './map'
 import { getMediaChannels } from './media-channels'
+import { applicationLabel } from '@/lib/funding-meta'
+import { focusLabel } from '@/lib/advisor-meta'
 import {
   getTrainingPrograms,
   getRecurringPrograms,
@@ -347,7 +349,12 @@ async function getAdvisorEntries(): Promise<SearchEntry[]> {
     title: a.name,
     subtitle: '',
     description: a.description,
-    category: a.focus,
+    // The card's lines: Focus as the row shows it, who it's for and
+    // applications as words search matches.
+    category: focusLabel(a.focusAreas) ?? '',
+    keywords: [a.whoItsFor.join(', '), a.applications]
+      .filter(Boolean)
+      .join(' · '),
     url: a.url || '/advisors',
     logo: a.logo,
   }))
@@ -403,7 +410,12 @@ async function getFunderEntries(): Promise<SearchEntry[]> {
     title: f.name,
     subtitle: '',
     description: f.description,
-    category: [f.type, f.acceptingApplications].filter(Boolean).join(' · '),
+    // The card's lines: the status as the row shows it, who can apply and
+    // grant size as words search matches.
+    category: applicationLabel(f.applicationStatus, f.deadline) ?? '',
+    keywords: [f.whoCanApply.join(', '), f.grantSize]
+      .filter(Boolean)
+      .join(' · '),
     url: f.url || '/funding',
     logo: f.logo,
   }))

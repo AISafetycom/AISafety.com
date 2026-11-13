@@ -2,6 +2,7 @@ import { fetchLastUpdated } from '@/lib/data/last-updated'
 import PageHeader from '@/components/PageHeader'
 import FeaturedCard from '@/components/FeaturedCard'
 import AdvisorsClient from './AdvisorsClient'
+import { advisorMeta } from './card'
 import { getAdvisors } from '@/lib/data/advisors'
 import { pageMetadata } from '@/lib/page-metadata'
 import { SITE_PAGES } from '@/lib/site-pages'
@@ -26,7 +27,7 @@ export default async function AdvisorsPage() {
         lastUpdatedIso={lastUpdated.lastUpdated}
         description={
           <>
-            <span className="color-light-teal">
+            <span className="color-teal-300">
               Connecting with human experts can be invaluable.
             </span>{' '}
             These advisors offer free guidance calls to help you most
@@ -45,11 +46,7 @@ export default async function AdvisorsPage() {
             name={advisor.name}
             description={advisor.description}
             logo={advisor.logo ?? undefined}
-            meta={
-              advisor.focus
-                ? [{ icon: '/images/icons/target.svg', value: advisor.focus }]
-                : []
-            }
+            meta={advisorMeta(advisor)}
             trackingPage="Advisors"
             trackingId={advisor.id}
             trackingPosition={`F${advisor.featured}`}

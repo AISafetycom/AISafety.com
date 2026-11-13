@@ -19,6 +19,9 @@
                       review it again when it is due (queue-later.ts)
     undo            → reverse an accept or reject made in the last day, or
                       bring back an item set aside
+    reopen          → bring a declined addition back, however old: marks the
+                      row and the Mac rebuilds the record if it was deleted,
+                      then reopens the row (queue-reopen.ts)
     flag            → the verdict, reasons and reject buttons Fable gave in
                       the chat onto the row ("Update flag", queue-flag.ts);
                       its Undo puts back what they replaced
@@ -41,13 +44,52 @@ import {
 import { sealToken } from './session'
 import { parseRejectDrafts } from './queue-decline'
 import { isExpiredAttachment } from './attachment-url'
-import { roomFor, SORT_FIELD, type Placed } from './queue-place'
+import { isSpent, keepPictures } from './queue-before-picture'
+import {
+  keepsOrder,
+  NO_PLACE,
+  roomFor,
+  SORT_FIELD,
+  sortValue,
+  type Placed,
+} from './queue-place'
+import { fillFirst, neededLeft } from './queue-needed'
 import type { ListingDates } from './queue-urgent'
 import { reviewAgainAt } from './queue-later'
 import { ruleTestOf, type RuleTest } from './queue-rule-test'
+import {
+  PUBLIC_KEY,
+  publicChoiceOf,
+  ruleInstantOf,
+  rulePublicOf,
+  type PublicChoice,
+  type RuleInstant,
+  type RulePublic,
+} from './queue-rule-instant'
 import { alreadyRepliedOf, type AlreadyReplied } from './queue-already'
+import { replyAlsoOf } from './queue-also'
 import { reasonsText, type FlagUpdate } from './queue-flag'
 import { LEFT_OUT_KEY, leftOutOf, withLeftOut } from './queue-left-out'
+import {
+  GONE_KEY,
+  goneFields,
+  goneNote,
+  goneOf,
+  isRetired,
+} from './queue-retired'
+import {
+  declinedBeforeOf,
+  pushbackOf,
+  rejectIsCurrent,
+  reopenedOf,
+  reopeningOf,
+  wasDeclined,
+  withReopenMarker,
+  type DeclinedBefore,
+  type Pushback,
+  type Reopened,
+  type Reopening,
+} from './queue-reopen'
 
 export const QUEUE_TABLE_ID = 'tblonlKwIFJ7Aa8QN'
 const BROOM_ISSUES_TABLE_ID = 'tblntD3WITPEgjHRK'
@@ -83,6 +125,9 @@ const F = {
   rejectReply: 'fldUQqwJn7btv6EBP',
   // "Review again in a week": when the item comes back (queue-later.ts).
   reviewAgainOn: 'fldm9eFBj0iWuN23P',
+  // When it came back: the date it was due, written by the Mac worker as it
+  // clears Review again on, so the page can say it is back (queue-later.ts).
+  cameBackOn: 'fldAaN9yEat8xWq00',
 } as const
 
 export type QueueType = 'Add' | 'Change' | 'Rule'
@@ -121,6 +166,12 @@ export interface QueueItem {
   targetRecord: string | null
   issueRow: string | null
   sourceLink: string | null
+  /** Form: the "Airtable forms: someone has responded to …" email the
+   *  submission arrived as, in Gmail (the proposal's `notification.link`,
+   *  written by the Mac's forms duty). A Form row's Source link is the
+   *  record in Airtable, so this is what Q opens (Bryce, 12 Nov 2026: "Q
+   *  should open the original email with the form"). */
+  emailLink?: string | null
   sourceExcerpt: string | null
   /** The record's logo as the site shows it (from the site's own listing
    *  catalog for published records, else the Add snapshot), for the list. */
@@ -148,6 +199,15 @@ export interface QueueItem {
    *  policy check, proposal `public_policy`), which no bot reads, so it is
    *  never tested on past decisions. */
   rulePublicPolicy: boolean
+  /** Rule: drafted minutes after one decision, and where that was
+   *  (proposal `instant`, ~/Queue/teach.py --instant); null for a rule from
+   *  the nightly pass. */
+  ruleInstant: RuleInstant | null
+  /** Rule: the wording for the public listing policy that goes in with it
+   *  (proposal `public`), and what the owner chose for it at Apply. The Mac
+   *  writes it only on "apply". */
+  rulePublic: RulePublic | null
+  rulePublicChoice: PublicChoice | null
   verdict: Verdict | null
   reasons: string[]
   rejectChips: string[]
@@ -161,6 +221,12 @@ export interface QueueItem {
   /** Email/Discord: who the reply draft goes to (from the proposal's
    *  `reply` block, written at intake by the Secretary). */
   replyTo: string | null
+  /** Email/Form: everyone else the decision answers – a second person
+   *  behind the same listing (the proposal's `also_reply`, written by the
+   *  Mac). Accept and Reject save each of them a draft in their own thread
+   *  (Bryce, 24 Oct 2026, Mercial Research Fellowship: a correction and the
+   *  listing's own form shared one item, and only one person got a reply). */
+  replyAlso: string[]
   /** Form: why the Mac wrote no reply draft – the form came in without an
    *  email, or its Airtable notification isn't in Gmail to reply in. From
    *  the proposal's `no_reply` (worker duty f); shown where the draft would
@@ -197,15 +263,36 @@ export interface QueueItem {
    *  (queue-left-out.ts) – a draft while the item is open; once applied,
    *  the fields Accept did not write, which Undo leaves alone too. */
   leftOut?: string[] | null
+  /** Applied: the proposed fields Apply left out because their column was
+   *  no longer in Airtable (queue-retired.ts); Undo leaves them too. */
+  gone?: string[] | null
   decidedAt: string | null
   appliedAt: string | null
   error: string | null
   /** Set aside with "Review again in a week": when it comes back. The Mac
    *  worker clears it once Fable has looked again. */
   reviewAgainOn: string | null
+  /** It came back from being set aside: the date it was due. */
+  cameBackOn: string | null
   /** The flag was updated from the chat (queue-flag.ts) and what it said
    *  before is kept, so Undo can put it back. */
   flagUndo: boolean
+  /** The verdict the chat's update replaced (null when it had none, or the
+   *  flag was not updated), so the card can say it changed. */
+  flagWas: Verdict | null
+  /** The decision was a Reject of an addition – also once the Mac deleted
+   *  the record and marked the row Applied (queue-reopen.ts). */
+  declined: boolean
+  /** Reopen pressed (or their reply to the decline came): the Mac is
+   *  bringing it back, or could not (`error`). */
+  reopening: Reopening | null
+  /** Their reply to the decline, which brought the item back. */
+  pushback: Pushback | null
+  /** When and how it came back. */
+  reopened: Reopened | null
+  /** Brought back with no word from them since: the decline they already
+   *  have, so Reject saves no second one. */
+  declinedBefore: DeclinedBefore | null
 }
 
 export type NoReply = 'no email' | 'no notification'
@@ -488,11 +575,7 @@ export function rejectReplyOf(
   v: unknown,
   decidedAt: string | null
 ): RejectReply | null {
-  if (!isRecord(v)) return null
-  const since = Date.parse(str(v.since) ?? '')
-  const decided = Date.parse(decidedAt ?? '')
-  if (!Number.isFinite(since) || (Number.isFinite(decided) && since < decided))
-    return null
+  if (!isRecord(v) || !rejectIsCurrent(v, decidedAt)) return null
   const text = str(v.text)
   if (str(v.draft)) return { text, state: 'saved', error: null }
   if (str(v.ready) && text) return { text, state: 'ready', error: null }
@@ -510,6 +593,24 @@ export function noReplyOf(proposal: Record<string, unknown>): NoReply | null {
   if (NO_REPLY.includes(why)) return why as NoReply
   console.warn(`Queue: unknown no_reply "${why}"`)
   return null
+}
+
+/** The Gmail link to the email a Form row's submission arrived as (the
+ *  proposal's `notification.link`, written by the Mac's forms duty), or
+ *  null. The Mac builds the link, as this code is public and never names
+ *  the mailbox; only an https link on mail.google.com itself is passed on. */
+export function emailLinkOf(proposal: Record<string, unknown>): string | null {
+  if (!isRecord(proposal.notification)) return null
+  const link = str(proposal.notification.link)
+  if (!link) return null
+  try {
+    const u = new URL(link)
+    return u.protocol === 'https:' && u.hostname === 'mail.google.com'
+      ? link
+      : null
+  } catch {
+    return null
+  }
 }
 
 function rowToItem(
@@ -533,12 +634,31 @@ function rowToItem(
   let ruleWas: string | null = null
   let ruleTest: RuleTest | null = null
   let rulePublicPolicy = false
+  let ruleInstant: RuleInstant | null = null
+  let rulePublic: RulePublic | null = null
+  let rulePublicChoice: PublicChoice | null = null
   let replyTo: string | null = null
+  let replyAlso: string[] = []
   let noReply: NoReply | null = null
+  let emailLink: string | null = null
   let alreadyReplied: AlreadyReplied | null = null
   let rejectReply: RejectReply | null = null
   let saidBy: SaidBy | null = null
+  let rejectReplied = false
+  let reopening: Reopening | null = null
+  let pushback: Pushback | null = null
+  let reopened: Reopened | null = null
+  let declinedBefore: DeclinedBefore | null = null
   if (isRecord(proposal)) {
+    reopening = reopeningOf(proposal.reopen)
+    pushback = pushbackOf(proposal.pushback)
+    reopened = reopenedOf(proposal.reopened)
+    declinedBefore = declinedBeforeOf(proposal.reply, pushback)
+    // Only this decision's reject block: one left by a Reject that was
+    // undone must not make a later Publish read as a decline.
+    rejectReplied =
+      isRecord(proposal.reply) &&
+      rejectIsCurrent(proposal.reply.reject, str(f[F.decidedAt]))
     changes = toChanges(proposal.changes)
     diff = str(proposal.diff)
     summary = str(proposal.summary)
@@ -547,12 +667,15 @@ function rowToItem(
     ruleWas = str(proposal.was)
     ruleTest = ruleTestOf(proposal.replay)
     rulePublicPolicy = proposal.public_policy === true
+    ruleInstant = ruleInstantOf(proposal.instant)
+    rulePublic = rulePublicOf(proposal.public)
     name = str(proposal.name)
     url = str(proposal.url)
     if (isRecord(proposal.reply)) {
       const to = str(proposal.reply.to)
       const who = str(proposal.reply.name)
       replyTo = to ? (who ? `${who} <${to}>` : to) : null
+      replyAlso = replyAlsoOf(proposal.also_reply)
       rejectReply = rejectReplyOf(proposal.reply.reject, str(f[F.decidedAt]))
       alreadyReplied = alreadyRepliedOf(proposal.reply.already)
       if (proposal.reply.platform === 'discord' && who) {
@@ -572,6 +695,7 @@ function rowToItem(
       }
     }
     noReply = noReplyOf(proposal)
+    emailLink = emailLinkOf(proposal)
     if (isRecord(proposal.fields)) {
       fields = proposal.fields
     } else if (changes.length === 0 && !diff) {
@@ -581,7 +705,11 @@ function rowToItem(
           k !== 'name' &&
           k !== 'url' &&
           k !== 'no_reply' &&
-          k !== FLAG_BEFORE_KEY
+          k !== 'notification' &&
+          k !== FLAG_BEFORE_KEY &&
+          k !== 'reopen' &&
+          k !== 'pushback' &&
+          k !== 'reopened'
         )
           rest[k] = v
       }
@@ -593,14 +721,20 @@ function rowToItem(
   let before: Record<string, unknown> | null = null
   let keptByFable: string[] | null = null
   let leftOut: string[] | null = null
+  let gone: string[] | null = null
   if (isRecord(saved)) {
     const {
       [BEFORE_KEY]: was,
       [KEPT_KEY]: kept,
       [LEFT_OUT_KEY]: left,
+      [GONE_KEY]: deleted,
+      [PUBLIC_KEY]: publicChoice,
       ...rest
     } = saved
     edits = rest
+    rulePublicChoice = publicChoiceOf(publicChoice)
+    const goneNames = goneOf(deleted)
+    gone = goneNames.length ? goneNames : null
     before = isRecord(was) ? was : null
     keptByFable = Array.isArray(kept)
       ? kept.filter((k): k is string => typeof k === 'string')
@@ -632,6 +766,7 @@ function rowToItem(
     targetRecord: str(f[F.targetRecord]),
     issueRow: str(f[F.issueRow]),
     sourceLink: str(f[F.sourceLink]),
+    emailLink,
     sourceExcerpt: str(f[F.sourceExcerpt]),
     logo:
       (str(f[F.targetRecord]) && logos.get(str(f[F.targetRecord]) ?? '')) ||
@@ -647,12 +782,16 @@ function rowToItem(
     ruleWas,
     ruleTest,
     rulePublicPolicy,
+    ruleInstant,
+    rulePublic,
+    rulePublicChoice,
     verdict: str(f[F.verdict]) as Verdict | null,
     reasons: lines(f[F.reasons]),
     rejectChips: lines(f[F.rejectChips]),
     replyDraft: str(f[F.replyDraft]),
     replyStatus: str(f[F.replyStatus]),
     replyTo,
+    replyAlso,
     noReply,
     alreadyReplied,
     rejectReply,
@@ -664,11 +803,30 @@ function rowToItem(
     before,
     keptByFable,
     leftOut,
+    gone,
     decidedAt: str(f[F.decidedAt]),
     appliedAt: str(f[F.appliedAt]),
     error: str(f[F.error]),
     reviewAgainOn: str(f[F.reviewAgainOn]),
+    cameBackOn: str(f[F.cameBackOn]),
     flagUndo: isRecord(proposal) && isRecord(proposal[FLAG_BEFORE_KEY]),
+    flagWas:
+      isRecord(proposal) && isRecord(proposal[FLAG_BEFORE_KEY])
+        ? (str(proposal[FLAG_BEFORE_KEY].verdict) as Verdict | null)
+        : null,
+    declined: wasDeclined({
+      type: str(f[F.type]) ?? 'Add',
+      status: str(f[F.status]) ?? 'Pending',
+      decidedAt: str(f[F.decidedAt]),
+      appliedAt: str(f[F.appliedAt]),
+      rejectReason: str(f[F.rejectReason]),
+      rejectReplied: rejectReplied || Boolean(str(f[F.rejectReply])),
+      error: str(f[F.error]),
+    }),
+    reopening,
+    pushback,
+    reopened,
+    declinedBefore,
   }
 }
 
@@ -692,6 +850,27 @@ export async function listQueue(): Promise<QueueItem[]> {
   params.set('filterByFormula', LIST_FORMULA)
   const rows = await listAll<RawFields>(QUEUE_TABLE_ID, params)
   return rows.map(r => rowToItem(r))
+}
+
+// Every decision ever made, newest first, for the search's "Earlier" group
+// (Bryce, 20 Oct 2026: a decline from a week before could not be found).
+// Only read while a search is typed, once per page visit.
+const DECIDED_FORMULA = 'NOT({Decided at} = BLANK())'
+
+/** Every decided row, newest decision first. The rejection replies written
+ *  in advance are left off: nobody decides from this list. */
+export async function listDecided(): Promise<QueueItem[]> {
+  const params = new URLSearchParams()
+  params.set('returnFieldsByFieldId', 'true')
+  params.set('filterByFormula', DECIDED_FORMULA)
+  params.set('sort[0][field]', F.decidedAt)
+  params.set('sort[0][direction]', 'desc')
+  const rows = await listAll<RawFields>(QUEUE_TABLE_ID, params)
+  return rows.map(r => {
+    const fields = { ...r.fields }
+    delete fields[F.rejectDrafts]
+    return rowToItem({ ...r, fields })
+  })
 }
 
 /** Logo and link by target record for the rows that came without one:
@@ -772,14 +951,21 @@ const SCHEMA_TTL_MS = 10 * 60 * 1000
 /** Each table's name column (Projects calls it "Project Name"), filled
  *  with the schema. */
 const primaryNames = new Map<string, string>()
+/** Each table's formula fields and the fields each one is built from,
+ *  filled with the schema (see mapPreview). */
+const formulaInputs = new Map<string, { id: string; inputs: string[] }[]>()
 
 /** Every field of a resource table, in Airtable's column order, so the page
  *  can list what is EMPTY on a record (a missing logo, an empty location)
- *  and not only what is filled. Read from the base's metadata, cached. */
-export async function getTableSchema(table: string): Promise<FieldInfo[]> {
+ *  and not only what is filled. Read from the base's metadata, cached for
+ *  `maxAgeMs` (ten minutes unless asked for fresher). */
+export async function getTableSchema(
+  table: string,
+  maxAgeMs: number = SCHEMA_TTL_MS
+): Promise<FieldInfo[]> {
   if (!TABLE_ID_RE.test(table)) return []
   const hit = schemaCache.get(table)
-  if (hit && Date.now() - hit.at < SCHEMA_TTL_MS) return hit.fields
+  if (hit && Date.now() - hit.at < maxAgeMs) return hit.fields
   const token = process.env.AIRTABLE_TOKEN
   const base = process.env.AIRTABLE_BASE_ID
   if (!token || !base) return []
@@ -799,13 +985,22 @@ export async function getTableSchema(table: string): Promise<FieldInfo[]> {
         id: string
         name: string
         type: string
-        options?: { choices?: { name: string }[] }
+        options?: {
+          choices?: { name: string }[]
+          referencedFieldIds?: string[]
+        }
       }[]
     }[]
   }
   for (const t of data.tables) {
     const primary = t.fields.find(f => f.id === t.primaryFieldId)
     if (primary) primaryNames.set(t.id, primary.name)
+    formulaInputs.set(
+      t.id,
+      t.fields
+        .filter(f => f.type === 'formula')
+        .map(f => ({ id: f.id, inputs: f.options?.referencedFieldIds ?? [] }))
+    )
     schemaCache.set(t.id, {
       at: Date.now(),
       fields: t.fields
@@ -922,9 +1117,7 @@ export async function getTargetFields(
 export async function getPageOrder(table: string): Promise<Placed[] | null> {
   if (!TABLE_ID_RE.test(table)) return null
   const schema = await getTableSchema(table)
-  if (!schema.some(f => f.name === SORT_FIELD && f.type === 'number')) {
-    return null
-  }
+  if (!keepsOrder(schema)) return null
   const name = primaryNames.get(table) ?? 'Name'
   const featured = schema.some(f => f.name === 'Featured')
   const params = new URLSearchParams({
@@ -951,6 +1144,33 @@ export async function getPageOrder(table: string): Promise<Placed[] | null> {
       typeof r.fields[SORT_FIELD] === 'number' ? r.fields[SORT_FIELD] : null,
     featured: Boolean(str(r.fields.Featured)),
   }))
+}
+
+/** Refuses to publish an addition its page could not show whole (the
+ *  page's Accept guards, checked again here), going by the record with the
+ *  edits in (an emptied field counts as empty): one with no place on a page
+ *  kept in a manual order (Bryce, 28 Oct 2026: "make it impossible to
+ *  accept a Queue suggestion if no sort is picked"), or with a field its
+ *  page needs still empty (queue-needed.ts; Bryce, 29 Oct 2026: "accepting
+ *  something with a field missing should be blocked from being accepted").
+ *  A 422, not a 409: the item is still open, and Accept works once it is
+ *  filled in. A record no longer in Airtable is left to the write, which
+ *  says so. */
+async function requireReady(
+  item: QueueItem,
+  table: string,
+  record: string,
+  edits: Record<string, unknown>
+): Promise<void> {
+  const schema = await getTableSchema(table)
+  const read = await getTargetFields(table, record)
+  if (!read) return
+  const sort = SORT_FIELD in edits ? edits[SORT_FIELD] : read.fields[SORT_FIELD]
+  if (keepsOrder(schema) && sortValue(sort) === null) {
+    throw new QueueError(NO_PLACE, 422)
+  }
+  const missing = neededLeft(item.page, table, read.fields, edits, schema)
+  if (missing.length > 0) throw new QueueError(fillFirst(missing), 422)
 }
 
 /** Frees a Sort value for the addition being published: the listing that
@@ -1143,11 +1363,22 @@ function mapPreview(
   schema: FieldInfo[]
 ): PreviewListing | null {
   const byName = new Map(schema.map(f => [f.name, f]))
+  const edited = new Set<string>()
   for (const [name, value] of Object.entries(edits)) {
     const f = byName.get(name)
     if (!f) continue
     raw.fields[f.id] =
       f.type === 'multipleAttachments' ? asAttachmentPreview(value) : value
+    edited.add(f.id)
+  }
+  // A formula built from an edited field still holds Airtable's old answer
+  // until Accept saves the edit, and a card that reads it first kept showing
+  // the old value (Bryce, 28 Oct 2026: a /map Category edit left the card on
+  // "Research support, Resource" – the card reads Category (text), as
+  // /communities reads Platform wrangled). Dropping the formula makes the
+  // card fall back to the field itself, which carries the edit.
+  for (const f of formulaInputs.get(table) ?? []) {
+    if (f.inputs.some(id => edited.has(id))) delete raw.fields[f.id]
   }
   const rec = raw as unknown as AirtableRawRecord
   const wrap = (kind: PreviewKind, listing: unknown): PreviewListing | null =>
@@ -1470,20 +1701,50 @@ export function asAttachmentWrite(v: unknown): unknown[] | null {
   return out
 }
 
+/** The retired columns (queue-retired.ts) among these fields that the
+ *  table no longer has. Only a write that names one reads the schema
+ *  afresh, so a column deleted in the last few minutes already counts.
+ *  The newsletter's Fix reads it too, so such a field is not taken for one
+ *  someone changed by hand (it reads as empty once the column is gone). */
+export async function deletedColumns(
+  table: string,
+  fields: string[]
+): Promise<string[]> {
+  if (!fields.some(f => isRetired(table, f))) return []
+  return goneFields(table, fields, await getTableSchema(table, 0))
+}
+
 /** The fields of one write, with every attachment field of the table put
- *  in the shape Airtable takes (asAttachmentWrite). Other fields pass
- *  through, and so does everything when the table's schema cannot be read.
- *  A value that is not a picture either stops the write (`throw`, for an
- *  Apply the admin is watching) or leaves that one field as it is (`skip`,
- *  for an Undo that should still put the other fields back). */
+ *  in the shape Airtable takes (asAttachmentWrite), and without any retired
+ *  column the table no longer has (`gone`): Airtable would refuse the whole
+ *  write over it. Other fields pass through, and so does everything when
+ *  the table's schema cannot be read. A value that is not a picture either
+ *  stops the write (`throw`, for an Apply the admin is watching) or leaves
+ *  that one field as it is (`skip`, for an Undo that should still put the
+ *  other fields back, and say which it could not: `skipped`). `pictures`
+ *  names the attachment fields the write holds. */
 async function withAttachmentShapes(
   table: string,
   fields: Record<string, unknown>,
   onText: 'throw' | 'skip'
-): Promise<Record<string, unknown>> {
+): Promise<{
+  fields: Record<string, unknown>
+  gone: string[]
+  pictures: string[]
+  skipped: string[]
+}> {
+  const gone = await deletedColumns(table, Object.keys(fields))
   const schema = await getTableSchema(table)
   const out: Record<string, unknown> = {}
+  const pictures: string[] = []
+  const skipped: string[] = []
   for (const [k, v] of Object.entries(fields)) {
+    if (gone.includes(k)) {
+      console.warn(
+        `[admin-queue] ${table}: left "${k}" out – the column is no longer in Airtable`
+      )
+      continue
+    }
     if (schema.find(f => f.name === k)?.type !== 'multipleAttachments') {
       out[k] = v
       continue
@@ -1491,6 +1752,7 @@ async function withAttachmentShapes(
     const files = asAttachmentWrite(v)
     if (files) {
       out[k] = files
+      pictures.push(k)
       continue
     }
     const shown = (typeof v === 'string' ? v : JSON.stringify(v)).slice(0, 80)
@@ -1501,8 +1763,9 @@ async function withAttachmentShapes(
       )
     }
     console.warn(`[admin-queue] ${table}: left "${k}" alone – "${shown}"`)
+    skipped.push(k)
   }
-  return out
+  return { fields: out, gone, pictures, skipped }
 }
 
 export function sanitiseEdits(input: unknown): Record<string, unknown> {
@@ -1669,7 +1932,8 @@ export function extraEdits(
       proposed.has(k) ||
       k === BEFORE_KEY ||
       k === KEPT_KEY ||
-      k === LEFT_OUT_KEY
+      k === LEFT_OUT_KEY ||
+      k === GONE_KEY
     ) {
       continue
     }
@@ -1706,14 +1970,39 @@ async function currentValues(
   return out
 }
 
+/** Carries out an Accept. Answers with the proposed or edited fields it
+ *  left out because their column is no longer in Airtable (GONE_KEY), so a
+ *  caller can say so; the row keeps them too. */
 export async function acceptItem(
   item: QueueItem,
   pageEdits: Record<string, unknown>,
   replyDraft: string | null = null,
-  keep: string[] = []
-): Promise<void> {
+  keep: string[] = [],
+  publicWording: { choice: PublicChoice; seen: string | null } | null = null
+): Promise<string[]> {
   requireOpen(item)
   const stamp = now()
+  // A rule that brings wording for the public listing policy: the page says
+  // what he chose for it, and which wording it showed him. Before the try,
+  // so a refusal leaves the rule open, not Failed. 412, not 409: the rule is
+  // still open, and the page re-reads it so the wording he must see shows.
+  if (item.type === 'Rule' && item.rulePublic) {
+    if (!publicWording) {
+      throw new QueueError(
+        'This rule comes with wording for the public listing policy, which this page had not shown you. Read it on the rule, then apply again.',
+        412
+      )
+    }
+    if (
+      publicWording.choice === 'apply' &&
+      publicWording.seen !== item.rulePublic.wording
+    ) {
+      throw new QueueError(
+        'The wording for the public listing policy has changed since this page loaded it. Read the new wording, then apply again.',
+        412
+      )
+    }
+  }
   // The proposed fields left out with the cross come with the page's edits
   // under their own key, which is never a field to write.
   const { [LEFT_OUT_KEY]: left, ...edits } = pageEdits
@@ -1734,10 +2023,31 @@ export async function acceptItem(
       : null
   const draftFields: Record<string, unknown> =
     draft !== null && draft !== item.replyDraft ? { [F.replyDraft]: draft } : {}
+  // Before the try: an addition with no place or an empty needed field
+  // stays open, not Failed.
+  if (
+    item.type === 'Add' &&
+    item.targetTable &&
+    isRecordId(item.targetRecord ?? '')
+  ) {
+    await requireReady(
+      item,
+      item.targetTable,
+      item.targetRecord as string,
+      edits
+    )
+  }
   try {
     if (item.type === 'Add') {
       const t = target(item)
-      const fields = await withAttachmentShapes(t.table, edits, 'throw')
+      const { fields, gone } = await withAttachmentShapes(
+        t.table,
+        edits,
+        'throw'
+      )
+      // An edit to a column no longer in Airtable did not go out.
+      for (const k of gone) delete saved[k]
+      if (gone.length > 0) saved[GONE_KEY] = gone
       // A place picked on the page whose Sort a listing already holds:
       // that one and the run after it move down one first.
       const sort = fields[SORT_FIELD]
@@ -1781,27 +2091,38 @@ export async function acceptItem(
         fields[c.field] =
           c.field in edits ? edits[c.field] : (asAttachments(c.to) ?? c.to)
       }
-      // Fields edited beyond the proposal go in the same write; what they
-      // held is kept on the row so Undo can put it back.
+      // Fields edited beyond the proposal go in the same write.
       const extra = t
         ? extraEdits(item, edits, await getTableSchema(t.table))
         : {}
-      if (t && Object.keys(extra).length > 0) {
-        const before = await currentValues(
-          t.table,
-          t.record,
-          Object.keys(extra)
-        )
-        Object.assign(fields, extra)
-        saved[BEFORE_KEY] = before
-      }
+      if (t) Object.assign(fields, extra)
       if (Object.keys(fields).length > 0) {
         const to = t ?? target(item) // fields but no listing: the usual error
-        await patchRecord(
-          to.table,
-          to.record,
-          await withAttachmentShapes(to.table, fields, 'throw')
+        // A field whose column is no longer in Airtable (an old row's
+        // proposal, queue-retired.ts) is left out and the rest still land;
+        // the row keeps which, for the Done view and for Undo.
+        const shaped = await withAttachmentShapes(to.table, fields, 'throw')
+        if (shaped.gone.length > 0) {
+          for (const k of shaped.gone) delete saved[k]
+          saved[GONE_KEY] = shaped.gone
+        }
+        // What the write replaces is kept on the row so Undo can put it
+        // back: the fields edited beyond the proposal, and every picture,
+        // as a lasting copy – a proposal names the old one only by its file
+        // name (queue-before-picture.ts).
+        const keep = Object.keys(shaped.fields).filter(
+          k => k in extra || shaped.pictures.includes(k)
         )
+        if (keep.length > 0) {
+          const was = await currentValues(to.table, to.record, keep)
+          for (const k of shaped.pictures) {
+            if (k in was) was[k] = await keepPictures(was[k])
+          }
+          saved[BEFORE_KEY] = was
+        }
+        if (Object.keys(shaped.fields).length > 0) {
+          await patchRecord(to.table, to.record, shaped.fields)
+        }
       }
       // The Broom flag row goes either way: an applied fix clears it, and
       // so does accepting a flag with nothing to apply – the flag was right
@@ -1813,14 +2134,21 @@ export async function acceptItem(
         await deleteRecord(BROOM_ISSUES_TABLE_ID, item.issueRow)
       }
     } else {
-      // Rule: the file lives on the Mac; the worker applies it.
+      // Rule: the file lives on the Mac; the worker applies it. With public
+      // wording, his choice goes on the row for the worker to read: it puts
+      // the wording on the public page only on "apply".
       await patchQueueRow(item.id, {
         ...draftFields,
         [F.status]: 'Accepted',
         [F.decidedAt]: stamp,
         [F.error]: null,
+        ...(item.rulePublic && publicWording
+          ? {
+              [F.edits]: JSON.stringify({ [PUBLIC_KEY]: publicWording.choice }),
+            }
+          : {}),
       })
-      return
+      return []
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
@@ -1839,6 +2167,7 @@ export async function acceptItem(
     [F.error]: null,
   })
   refreshCache()
+  return goneOf(saved[GONE_KEY])
 }
 
 // ─── The local agent on the owner's Mac ─────────────────────────────────────
@@ -1886,7 +2215,12 @@ export async function rejectItem(
   const stamp = now()
   // The rejection reply as the page showed it, saved by the Mac as it
   // reads; none (a typed reason) and Fable writes it from the reason.
-  const words = item.replyTo ? (reply ?? '').trim().slice(0, 5000) : ''
+  // None for an item brought back after a decline with no word from them
+  // since: they have the first one (queue-reopen.ts).
+  const words =
+    item.replyTo && !item.declinedBefore
+      ? (reply ?? '').trim().slice(0, 5000)
+      : ''
   const fields: Record<string, unknown> = {
     [F.status]: 'Rejected',
     [F.rejectReason]: why || null,
@@ -1908,6 +2242,57 @@ export async function rejectItem(
 export async function laterItem(item: QueueItem): Promise<void> {
   requireOpen(item)
   await patchQueueRow(item.id, { [F.reviewAgainOn]: reviewAgainAt(Date.now()) })
+}
+
+/** The row's Error once Delete has closed it. */
+export const DELETED_NOTE = 'Deleted in the Queue'
+
+/** Delete (Bryce, 6 Nov 2026: "Need a delete button", on an /advisors
+ *  suggestion Comb had picked up from a Discord yes to his own invitation):
+ *  a silent discard for an item that should not be in the Queue at all.
+ *  It does what deleting the suggestion in Airtable by hand does: an
+ *  addition's unpublished record goes at once, a Broom flag's issue row
+ *  with it, and the row closes the way the sync closes one whose record
+ *  was deleted outside the Queue. No reply is drafted or copied, Fable
+ *  learns nothing from it (the Mac's teach loop skips Closed rows), Comb
+ *  leaves a closed row alone, and it gets no Decided at, so it is not a
+ *  decision: it shows in neither Done today nor the search's Earlier
+ *  group. There is no Undo, so the page asks first. A live listing is
+ *  never deleted: an addition published outside the Queue is refused, and
+ *  one hidden there keeps its record. A change never touches its listing. */
+export async function deleteItem(item: QueueItem): Promise<void> {
+  requireOpen(item)
+  const table = item.targetTable ?? ''
+  const record = item.targetRecord ?? ''
+  if (
+    item.type === 'Add' &&
+    SUGGESTION_TABLES.has(table) &&
+    isRecordId(record)
+  ) {
+    const res = await airtableRequest(`${table}/${record}`)
+    if (res.ok) {
+      const { fields } = (await res.json()) as { fields: RawFields }
+      if (fields['Publish?']) {
+        throw new QueueError(
+          'It is live on the site, so Delete leaves it alone. Reload the page.',
+          409
+        )
+      }
+      if (!fields['Hide?']) await deleteRecord(table, record)
+    } else if (res.status !== 404 && res.status !== 403) {
+      throw new QueueError(
+        `Airtable read failed: ${res.status} ${await res.text()}`,
+        502
+      )
+    }
+  }
+  if (item.type === 'Change' && item.issueRow && isRecordId(item.issueRow)) {
+    await deleteRecord(BROOM_ISSUES_TABLE_ID, item.issueRow)
+  }
+  await patchQueueRow(item.id, {
+    [F.status]: 'Closed',
+    [F.error]: DELETED_NOTE,
+  })
 }
 
 /** The row's fields as Airtable holds them, for a write that must keep
@@ -2050,14 +2435,153 @@ export async function saveEdits(
   await patchQueueRow(item.id, fields)
 }
 
-export async function undoItem(item: QueueItem): Promise<void> {
+/** A field fixed after the decision, from Done today (Bryce, 21 Oct 2026:
+ *  "make fields in the today view editable", for every kind). The listing
+ *  is live, so the edit goes straight onto it, and onto the row's edits as
+ *  if it had been made before Accept: the Done view reads what the
+ *  decision wrote from there, and Undo treats it the same way – an
+ *  addition's Undo only unpublishes, a change's puts back what it
+ *  replaced. A declined addition is left alone (the Mac deletes its
+ *  record), and a rule has no fields. */
+export function isFixable(item: QueueItem): boolean {
+  if (item.status !== 'Applied' || item.declined) return false
+  if (item.type === 'Add') return true
+  return (
+    item.type === 'Change' && Boolean(item.targetTable && item.targetRecord)
+  )
+}
+
+export async function fixItem(
+  item: QueueItem,
+  edits: Record<string, unknown>
+): Promise<void> {
+  if (!isFixable(item)) {
+    throw new QueueError(
+      'Only a published addition or an applied change can be edited after the decision.',
+      409
+    )
+  }
+  const keys = Object.keys(edits)
+  if (keys.length === 0) throw new QueueError('Nothing to save.', 400)
+  if (keys.includes(LEFT_OUT_KEY)) {
+    throw new QueueError('A field is left out only before the decision.', 400)
+  }
+  const t = target(item)
+  // The write as Airtable takes it, worked out before anything is written:
+  // a column no longer in Airtable (an old row's field, queue-retired.ts)
+  // cannot take a fix, and the admin is told so.
+  const shaped = await withAttachmentShapes(t.table, edits, 'throw')
+  if (shaped.gone.length > 0) {
+    throw new QueueError(
+      `${goneNote(t.table, shaped.gone)} Nothing was saved.`,
+      409
+    )
+  }
+  const raw = parseJson((await rawQueueFields(item.id))[F.edits])
+  const saved: Record<string, unknown> = isRecord(raw) ? { ...raw } : {}
+  if (item.type === 'Change') {
+    // A field beyond the proposal keeps what it held before, for Undo, as
+    // one edited before Accept does.
+    const proposed = new Set(item.changes.map(c => c.field))
+    const before = isRecord(saved[BEFORE_KEY]) ? { ...saved[BEFORE_KEY] } : {}
+    // So does a proposed picture Accept did not write (Fable had changed
+    // it, or it was left out): the listing still holds the one from
+    // before, and the proposal names it only by its file name.
+    const unwritten = new Set(
+      [saved[KEPT_KEY], saved[LEFT_OUT_KEY]].flatMap(l =>
+        Array.isArray(l) ? l : []
+      )
+    )
+    const fresh = keys.filter(
+      k =>
+        !(k in before) &&
+        (!proposed.has(k) || (shaped.pictures.includes(k) && unwritten.has(k)))
+    )
+    if (fresh.length > 0) {
+      const was = await currentValues(t.table, t.record, fresh)
+      for (const k of shaped.pictures) {
+        if (k in was) was[k] = await keepPictures(was[k])
+      }
+      Object.assign(before, was)
+    }
+    if (Object.keys(before).length > 0) saved[BEFORE_KEY] = before
+    // A proposed field Fable had changed, or that was left out, is now
+    // written as edited here.
+    for (const key of [KEPT_KEY, LEFT_OUT_KEY]) {
+      const list = saved[key]
+      if (!Array.isArray(list)) continue
+      const rest = list.filter(k => !keys.includes(k))
+      if (rest.length > 0) saved[key] = rest
+      else delete saved[key]
+    }
+  } else {
+    // A new place on the page moves the listings after it down one, as
+    // Accept does.
+    const sort = edits[SORT_FIELD]
+    if (typeof sort === 'number') await makeRoom(t.table, t.record, sort)
+  }
+  await patchRecord(t.table, t.record, shaped.fields)
+  await patchQueueRow(item.id, {
+    [F.edits]: JSON.stringify({ ...saved, ...edits }),
+  })
+  refreshCache()
+}
+
+/** A picture dropped on a published addition: from then on the Done view
+ *  shows the listing's own, not the one the decision wrote over it (an
+ *  attachment link expires within hours, so the new one is not kept). */
+export async function forgetRowEdit(
+  item: QueueItem,
+  field: string
+): Promise<void> {
+  const saved = parseJson((await rawQueueFields(item.id))[F.edits])
+  if (!isRecord(saved) || !(field in saved)) return
+  const rest = { ...saved }
+  delete rest[field]
+  await patchQueueRow(item.id, {
+    [F.edits]: Object.keys(rest).length ? JSON.stringify(rest) : null,
+  })
+}
+
+/** Reopen a declined addition, however old (queue-reopen.ts): the row gets
+ *  the marker and stays decided until the Mac has the record back – the
+ *  same one when it still exists, else one rebuilt from the row's saved
+ *  copy – and then reopens it in one write. The page asks the Mac's agent
+ *  to do that at once; the worker is the fallback. */
+export async function reopenItem(item: QueueItem): Promise<void> {
+  if (item.type !== 'Add') {
+    throw new QueueError('Only an addition can be reopened.', 400)
+  }
+  if (!item.declined) {
+    throw new QueueError(
+      `Only a declined addition can be reopened; this one is ${item.status.toLowerCase()}.`,
+      409
+    )
+  }
+  if (item.reopening && !item.reopening.error) {
+    throw new QueueError('It is on its way back already.', 409)
+  }
+  const raw = parseJson((await rawQueueFields(item.id))[F.proposal])
+  if (!isRecord(raw)) {
+    throw new QueueError('This item has no saved copy to bring back.', 409)
+  }
+  await patchQueueRow(item.id, {
+    [F.proposal]: JSON.stringify(withReopenMarker(raw, now()), null, 1),
+    [F.error]: null,
+  })
+}
+
+/** Takes a decision back. Answers with the fields of an applied change it
+ *  could not put back (a picture with no copy to write), so the page can
+ *  say the listing still holds what Accept wrote there. */
+export async function undoItem(item: QueueItem): Promise<string[]> {
   // An item set aside: back in the list now.
   if (
     (item.status === 'Pending' || item.status === 'Failed') &&
     item.reviewAgainOn
   ) {
     await patchQueueRow(item.id, { [F.reviewAgainOn]: null })
-    return
+    return []
   }
   const reopen: Record<string, unknown> = {
     [F.status]: 'Pending',
@@ -2080,58 +2604,83 @@ export async function undoItem(item: QueueItem): Promise<void> {
   ) {
     reopen[F.issueRow] = null
   }
+  // A rejected suggestion the Mac has deleted is marked Applied, but there
+  // is no publish to take back: Reopen brings it back instead.
+  if (item.declined && item.status !== 'Rejected') {
+    throw new QueueError(
+      'Too late to undo: the record was deleted after the decline. Reopen brings it back.',
+      409
+    )
+  }
   if (item.status === 'Applied' && item.type === 'Add') {
     const t = target(item)
     await patchRecord(t.table, t.record, { 'Publish?': false })
     await patchQueueRow(item.id, reopen)
     refreshCache()
-    return
+    return []
   }
   if (item.status === 'Applied' && item.type === 'Change') {
     const t = target(item)
     const fields: Record<string, unknown> = {}
     for (const c of item.changes) {
-      // Accept did not write it (Fable had changed it, or it was left
-      // out), so it stays.
+      // Accept did not write it (Fable had changed it, it was left out,
+      // or its column was no longer in Airtable), so it stays.
       if (
         item.keptByFable?.includes(c.field) ||
-        item.leftOut?.includes(c.field)
+        item.leftOut?.includes(c.field) ||
+        item.gone?.includes(c.field)
       ) {
         continue
       }
+      // A picture goes back as the copy Accept kept: the proposal names
+      // the old one only by its file name.
       fields[c.field] = PROTECTED_FIELDS.has(c.field)
         ? asBox(c.from)
-        : (c.from ?? null)
+        : item.before && c.field in item.before
+          ? item.before[c.field]
+          : (c.from ?? null)
     }
     // The fields edited beyond the proposal, as they were before Accept.
     for (const [k, v] of Object.entries(item.before ?? {})) {
       if (PROTECTED_FIELDS.has(k) || k in fields) continue
       fields[k] = v
     }
-    const back = await withAttachmentShapes(t.table, fields, 'skip')
+    // A column deleted since Accept wrote it cannot be put back; the other
+    // fields still are. So are they when a picture cannot be: one named
+    // only by its file name (accepted before 3 Nov 2026), or one Accept
+    // could keep only by Airtable's link, which has run out. Those are
+    // named back to the admin, so the listing is not taken for undone.
+    const shaped = await withAttachmentShapes(t.table, fields, 'skip')
+    const back = shaped.fields
+    const notBack = [...shaped.skipped]
+    for (const k of shaped.pictures) {
+      if (!isSpent(back[k])) continue
+      delete back[k]
+      notBack.push(k)
+    }
     if (Object.keys(back).length) await patchRecord(t.table, t.record, back)
     // The edits stay as the page's draft, the fields left out too; what
-    // they replaced is spent.
-    if (item.before || item.keptByFable) {
+    // they replaced is spent, and so is the list of deleted columns.
+    if (item.before || item.keptByFable || item.gone) {
       const kept = withLeftOut(item.edits ?? {}, item.leftOut ?? [])
       reopen[F.edits] = Object.keys(kept).length ? JSON.stringify(kept) : null
     }
     await patchQueueRow(item.id, reopen)
     refreshCache()
-    return
+    return notBack
   }
   if (item.status === 'Rejected') {
     if (item.type === 'Add') {
       const t = target(item)
       if (!(await recordExists(t.table, t.record))) {
         throw new QueueError(
-          'Too late: the record has already been deleted.',
+          'Too late to undo: the record has already been deleted. Reopen brings it back.',
           409
         )
       }
     }
     await patchQueueRow(item.id, reopen)
-    return
+    return []
   }
   if (
     item.status === 'Accepted' &&
@@ -2142,7 +2691,7 @@ export async function undoItem(item: QueueItem): Promise<void> {
     // is enough. A flag cleared since then cannot come back – its Broom row
     // is gone – but the item reopens like any applied change.
     await patchQueueRow(item.id, reopen)
-    return
+    return []
   }
   throw new QueueError(
     `Nothing to undo: the item is ${item.status.toLowerCase()}.`,

@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AC_FORMS,
   AC_PROC_URL,
+  COMBO_FORMS,
+  COMBO_KEYS,
+  formKeyFor,
   SIGNUP_USER_AGENT,
   isFormConfigured,
   isSignupNewsletter,
@@ -57,10 +60,11 @@ afterEach(() => {
 })
 
 describe('which newsletters sign up here', () => {
-  it('takes Events and Training only', () => {
+  it('takes Events, Training and Funding only', () => {
     expect(isSignupNewsletter('events')).toBe(true)
     expect(isSignupNewsletter('training')).toBe(true)
-    for (const other of ['funding', 'updates', 'Events', '', null, 6]) {
+    expect(isSignupNewsletter('funding')).toBe(true)
+    for (const other of ['updates', 'Events', '', null, 6]) {
       expect(isSignupNewsletter(other)).toBe(false)
     }
   })
@@ -75,8 +79,12 @@ describe('which newsletters sign up here', () => {
     expect(isFormConfigured({ ...FORM, u: 3 })).toBe(true)
   })
 
-  it('ships with both forms keyed, however they are filled in', () => {
-    expect(Object.keys(AC_FORMS).sort()).toEqual(['events', 'training'])
+  it('ships with every form keyed, however they are filled in', () => {
+    expect(Object.keys(AC_FORMS).sort()).toEqual([
+      'events',
+      'funding',
+      'training',
+    ])
   })
 })
 
@@ -159,11 +167,23 @@ describe('readAcAnswer', () => {
         "window.top.location.href = 'https://www.aisafety.com/subscribed/training';"
       )
     ).toEqual({ kind: 'already' })
+    expect(
+      readAcAnswer(
+        200,
+        'window.top.location.href = "https://aisafety.com/subscribed/funding";'
+      )
+    ).toEqual({ kind: 'already' })
   })
 
   it('treats a jump anywhere else as unclear', () => {
     expect(
       readAcAnswer(200, 'window.top.location.href = "https://example.com/";')
+    ).toEqual({ kind: 'unknown' })
+    expect(
+      readAcAnswer(
+        200,
+        'window.top.location.href = "https://aisafety.com/subscribed/updates";'
+      )
     ).toEqual({ kind: 'unknown' })
     expect(
       readAcAnswer(
@@ -376,5 +396,42 @@ describe('postSignup', () => {
     })
     expect(result).toEqual({ outcome: 'failed', mayHaveSent: false })
     expect(logs.join('\n')).toContain('ECONNREFUSED')
+  })
+})
+
+describe('formKeyFor', () => {
+  it('names a newsletter, or a combination in the usual order', () => {
+    expect(formKeyFor(['funding'])).toBe('funding')
+    expect(formKeyFor(['funding', 'events'])).toBe('events-funding')
+    expect(formKeyFor(['training', 'funding', 'events'])).toBe(
+      'events-training-funding'
+    )
+    // Every combination has a form entry, filled in or not.
+    for (const key of COMBO_KEYS) expect(COMBO_FORMS[key]).toBeDefined()
+  })
+
+  it('has no form for nothing, or for a newsletter it does not know', () => {
+    expect(() => formKeyFor([])).toThrow(/no form/)
+    expect(() =>
+      formKeyFor(['events', 'updates' as unknown as 'funding'])
+    ).toThrow(/no form/)
+  })
+})
+
+describe('readAcAnswer for a combination form', () => {
+  it("reads its jump to the combination's confirmation page as already subscribed", () => {
+    expect(
+      readAcAnswer(
+        200,
+        'window.top.location.href = "https://aisafety.com/subscribed/events-training-funding";'
+      )
+    ).toEqual({ kind: 'already' })
+    // Another site's page is no such answer.
+    expect(
+      readAcAnswer(
+        200,
+        'window.top.location.href = "https://example.org/subscribed/events-funding";'
+      )
+    ).toEqual({ kind: 'unknown' })
   })
 })

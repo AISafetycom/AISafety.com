@@ -131,6 +131,10 @@ import {
   readClicks,
 } from '@/lib/newsletter-clicks'
 import { MIN_READERS } from '@/lib/newsletter-archive'
+import {
+  keepRemovalCopy,
+  readRemovalCopy,
+} from '@/lib/admin/newsletter-removed'
 
 /** Re-exported for callers that already import them from here. */
 export {
@@ -144,11 +148,13 @@ export {
 }
 
 const MARKER_RE = /<!--aisafety-issue:([0-9a-f]{16})-->/
-/** Minutes between approval and the send. On the real lists that is time to
- *  notice a mistake and cancel the send under Recent sends before anyone gets
- *  it; the test lists keep two, the practical minimum (AC rejects sdates in
- *  the past and runs its scheduler about once a minute). */
-const SEND_DELAY_MINUTES_REAL = 5
+/** Minutes between approval and the send. On the real lists that is a short
+ *  window to cancel the send under Recent sends before anyone gets it (one
+ *  since 23 Oct 2026, the owner's call; it was five). The test lists keep two
+ *  (AC rejects sdates in the past and runs its scheduler about once a
+ *  minute); a real-list time AC reads as past just sends at once
+ *  (`sendingNow`). */
+const SEND_DELAY_MINUTES_REAL = 1
 const SEND_DELAY_MINUTES_TEST = 2
 
 export function sendDelayMinutes(listId: string): number {
@@ -287,6 +293,11 @@ const READ_TIMEOUT_MS = 20_000
  *  per email (render.hoist_type), so 15 Events cards fit (~96 KB). Keep
  *  SITE_MAX_HTML_BYTES in ~/Newsletter/issue.py in step. */
 const MAX_HTML_BYTES = 96 * 1024
+/** Issues allowed over MAX_HTML_BYTES, by campaign name: a one-off trial of
+ *  sending a whole issue even though Gmail clips its bottom (Bryce, 12
+ *  November 2026: "test it out this once and then decide what we do long
+ *  term afterwards"). Every other issue is still blocked. */
+const OVERSIZE_TRIAL = new Set(['Events · Week 46, 2026'])
 /** How many campaigns one read covers (AC's page maximum). */
 export const CAMPAIGN_READ_WINDOW = 100
 
@@ -641,9 +652,15 @@ export interface DraftSummary {
   /** The inbox preview line (the email's hidden preheader), as Gmail shows it
    *  after the subject. Null when the email has none. */
   preview: string | null
+  /** The last issue sent on its list ("Week 45, 2026") when the email's
+   *  design has changed since (designChangedSince): a Send test is worth it.
+   *  Null when it hasn't, or when that can't be told. */
+  designChangedSince: string | null
   /** The email's cards by section, in their current order — what the
    *  Reorder panel edits. Null for emails built before card markers existed. */
   cards: CardGroup[] | null
+  /** Cards taken out of it on this page, oldest first (Put back). */
+  removed: RemovedCard[]
 }
 
 export interface SentSummary {
@@ -1811,6 +1828,9 @@ const KNOWN_TAGS = new Set([
   'UNSUBSCRIBELINK',
   'WEBCOPY',
   'SENDER-INFO-SINGLELINE',
+  // The reader's settings key in the footer's "Manage subscriptions" link
+  // (src/lib/newsletter-manage.ts).
+  'MANAGE_KEY',
 ])
 /** Words a finished issue never contains (the 28 Sept 2026 Training
  *  rehearsal went out with "TEST" and "test" typed into two cards).
@@ -1962,7 +1982,7 @@ export function contentChecks(input: {
   }
 
   const bytes = Buffer.byteLength(html.replace(MARKER_RE, ''), 'utf8')
-  if (bytes > MAX_HTML_BYTES)
+  if (bytes > MAX_HTML_BYTES && !OVERSIZE_TRIAL.has(name))
     blocks.push(
       `the email is ${Math.round(bytes / 1024)} KB, over the ${MAX_HTML_BYTES / 1024} KB limit (Gmail cuts emails off at about 102 KB) – shorten the issue`
     )
@@ -2224,13 +2244,14 @@ export async function listDrafts(): Promise<DraftSummary[]> {
           o.c.id !== c.id && o.listIds.length === 1 && o.listIds[0] === listId
       )
       .map(o => ({ id: o.c.id, name: o.c.name }))
-    const [activeContacts, checks, sent] = listId
+    const [activeContacts, checks, sent, designSince] = listId
       ? await Promise.all([
           activeContactCount(listId),
           sendChecks({ name: c.name, listId }, msg, sameList, now),
           sentOnList(campaigns, c.id, c.name, listId, null),
+          designChangedSince(campaigns, c.name, listId, msg.html ?? ''),
         ])
-      : [null, { blocks: [], warnings: [] }, []]
+      : [null, { blocks: [], warnings: [] }, [], null]
     const refusal = listId ? listRefusal(listId) : null
     const waved = listId
       ? await wavePlanFor(listId, sent, activeContacts, offset, now)
@@ -2294,7 +2315,9 @@ export async function listDrafts(): Promise<DraftSummary[]> {
       deletable: deleteRefusal(listIds) == null && wavesStillToGo(sent) == null,
       editLock,
       preview: previewText(msg.html ?? ''),
+      designChangedSince: designSince,
       cards: cardGroups(msg.html ?? ''),
+      removed: removedCards(msg.html ?? ''),
     }
     return row
   })
@@ -2356,6 +2379,71 @@ export function previewText(html: string): string | null {
   if (!m) return null
   const text = stripHtml(m[1])
   return text || null
+}
+
+const DESIGN_RE = /<!--aisafety-design:([0-9a-f]{12})-->/
+
+/** The design fingerprint the pipeline stamps on each email since 12 Nov
+ *  2026 (~/Newsletter/design.py): the same sample issue drawn by the build's
+ *  code, so it changes only when the email is drawn differently (shell,
+ *  glow, footer, card layout), never with a week's listings or words. Null
+ *  for an email without one. */
+export function designOf(html: string): string | null {
+  return DESIGN_RE.exec(html)?.[1] ?? null
+}
+
+/** The newest issue, other than `draftName`'s own, that has reached readers
+ *  in the newsletter of the real list `listId`: its name without any wave
+ *  suffix ("Events · Week 45, 2026"), or null. */
+export function lastIssueSent(
+  campaigns: Array<{
+    id: string
+    name: string
+    status: string
+    send_amt?: string | null
+  }>,
+  draftName: string,
+  listId: string
+): string | null {
+  const real = REAL_LISTS[listId]
+  if (!real) return null
+  const prefix = `${real.prefix} · `
+  const own = baseIssueName(draftName)
+  const last = campaigns
+    .filter(c => {
+      const name = baseIssueName(c.name)
+      return reachedReaders(c) && name.startsWith(prefix) && name !== own
+    })
+    .sort((a, b) => Number(b.id) - Number(a.id))[0]
+  return last ? baseIssueName(last.name) : null
+}
+
+/** The last issue sent on the draft's list ("Week 45, 2026", without the
+ *  newsletter's name) when its design differs from the draft's: then a Send
+ *  test is worth it before approving (Bryce, 12 Nov 2026). Null when the
+ *  design is the same, when either email has no fingerprint (built before
+ *  12 Nov 2026), or when that issue can't be read just now: the note is a
+ *  hint, so it never holds the page up. */
+async function designChangedSince(
+  campaigns: RawCampaign[],
+  draftName: string,
+  listId: string,
+  html: string
+): Promise<string | null> {
+  const mine = designOf(html)
+  const last = mine ? lastIssueSent(campaigns, draftName, listId) : null
+  if (!mine || !last) return null
+  try {
+    const theirs = designOf(
+      (await sentIssueHtmlIn(campaigns, last, listId)) ?? ''
+    )
+    return theirs && theirs !== mine
+      ? last.slice(`${REAL_LISTS[listId].prefix} · `.length)
+      : null
+  } catch (err) {
+    console.warn(`[newsletter] design check skipped for ${draftName}`, err)
+    return null
+  }
 }
 
 /** An HTML fragment as one line of plain text: tags dropped, the entities
@@ -2512,6 +2600,11 @@ export interface CardInfo {
    *  email shows it (title, lines under it, description, rows at the
    *  bottom). Empty for drafts built before 25 Sept 2026. */
   fields: CardField[]
+  /** The manifest says the site's own card code drew this card: Funding
+   *  cards since 28 Oct 2026, unless PEN_CARDS switched them back to Pen's
+   *  wording. Events and Training cards never carry the flag (it would
+   *  change their emails); theirs come from the site since 2 Oct 2026. */
+  site: boolean
 }
 
 export interface CardField {
@@ -2548,6 +2641,9 @@ interface ManifestCard {
   logo?: string | null
   /** Funding cards: Pen's "Consider applying if" HTML ('' when none). */
   fit?: string
+  /** Funding cards drawn by the site's funderCardProps (render.py, since
+   *  28 Oct 2026); absent on Pen-worded cards. */
+  site?: boolean
   /** Text as built, per field, recorded on the field's first edit. */
   o?: Record<string, string>
 }
@@ -2559,7 +2655,20 @@ interface Manifest {
   text: Array<{ t: string; c?: string }>
   /** Cards taken out on this page, oldest first; a rebuild leaves them out
    *  too (render.py `merge_removals()`). */
-  removed?: Array<{ g: string; key: string; title: string }>
+  removed?: RemovedEntry[]
+}
+
+/** A card on the manifest's `removed` list. `p` (its place in Pen's order,
+ *  null when the manifest had no entry for it), `d` (its place in the email)
+ *  and `b` (the name of its removal copy) since 29 Oct 2026: an older entry
+ *  can't be put back from this page. */
+interface RemovedEntry {
+  g: string
+  key: string
+  title: string
+  p?: number | null
+  d?: number
+  b?: string
 }
 
 function readManifest(html: string): Manifest | null {
@@ -2614,6 +2723,7 @@ export function cardGroups(html: string): CardGroup[] | null {
       title: string
       logo: string | null
       fit: string | null
+      site: boolean
       o: Record<string, string>
     }
   >()
@@ -2623,6 +2733,7 @@ export function cardGroups(html: string): CardGroup[] | null {
         title: c.title,
         logo: typeof c.logo === 'string' && c.logo ? c.logo : null,
         fit: typeof c.fit === 'string' ? c.fit : null,
+        site: c.site === true,
         o: c.o && typeof c.o === 'object' ? c.o : {},
       })
   const groups = new Map<string, CardGroup>(
@@ -2641,6 +2752,7 @@ export function cardGroups(html: string): CardGroup[] | null {
       fit: fit ? stripHtml(fit[1]) : pipelineFit != null ? '' : null,
       pipelineFit: pipelineFit != null ? stripHtml(pipelineFit) : null,
       fields: cardFields(b.raw, meta?.o ?? {}, meta?.fit != null),
+      site: meta?.site ?? false,
     })
   }
   const out = [...groups.values()].filter(g => g.cards.length > 0)
@@ -2699,12 +2811,99 @@ export class RemoveCardError extends Error {
   }
 }
 
+/** What Put back needs to bring a removed card back, kept off the email (the
+ *  manifest goes to every reader, and an Events email is close to its 96 KB
+ *  limit): its block, its manifest entry and its text segment, as one JSON
+ *  file on the Blob store named by its content, like the link lists. */
+export interface RemovalCopy {
+  /** Where it is stored: `newsletter/removed/<b>.json`. */
+  path: string
+  /** The JSON, exactly as stored. */
+  body: string
+  /** Its name: the first 16 hex characters of its SHA-256. */
+  b: string
+}
+
+/** The JSON a removal copy holds. */
+export interface RemovedCopy {
+  v: number
+  g: string
+  key: string
+  block: string
+  card: ManifestCard | null
+  text: string | null
+}
+
+/** The i-th place (from 0) that isn't in `taken`: a card's place with the
+ *  section's removed cards still in it. */
+function fullPlace(i: number, taken: Set<number>): number {
+  for (let p = 0; ; p++) {
+    if (taken.has(p)) continue
+    if (i === 0) return p
+    i--
+  }
+}
+
+function placesOf(
+  removals: RemovedEntry[],
+  gid: string,
+  field: 'p' | 'd'
+): Set<number> {
+  const out = new Set<number>()
+  for (const r of removals) {
+    const v = r[field]
+    if (r.g === gid && typeof v === 'number' && Number.isInteger(v)) out.add(v)
+  }
+  return out
+}
+
+/** The manifest's `removed` list, as render.py `card_removals()` reads it. */
+function removalsOf(manifest: Manifest): RemovedEntry[] {
+  const removed = manifest.removed as unknown
+  return Array.isArray(removed)
+    ? removed.filter(
+        (r): r is RemovedEntry =>
+          !!r && typeof r === 'object' && !!(r as RemovedEntry).key
+      )
+    : []
+}
+
+/** Pure: the copy Put back needs, from the email before the card goes.
+ *  Mirrors render.py `removal_copy()` byte for byte (fixture
+ *  newsletter-card-put-back.json). */
+export function removalCopy(
+  html: string,
+  gid: string,
+  key: string
+): RemovalCopy {
+  const manifest = readManifest(html)
+  if (!manifest) throw new RemoveCardError('no card manifest in this email')
+  const block = cardBlocks(html).find(b => b.gid === gid && b.key === key)
+  if (!block) throw new RemoveCardError(`unknown card ${gid}:${key}`)
+  const group = manifest.groups.find(g => g.id === gid)
+  const card = group?.cards.find(c => c.key === key) ?? null
+  const seg = manifest.text.find(s => s.c === `${gid}:${key}`)
+  const copy: RemovedCopy = {
+    v: 1,
+    g: gid,
+    key,
+    block: block.raw,
+    card,
+    text: seg ? seg.t : null,
+  }
+  const body = JSON.stringify(copy)
+  const b = createHash('sha256').update(body, 'utf8').digest('hex').slice(0, 16)
+  return { path: `newsletter/removed/${b}.json`, body, b }
+}
+
 /** Pure: the email without one card — its block, its plain-text segment and
  *  its manifest entry — with the plain text rebuilt in the cards' current
  *  order, and the card added to the manifest's `removed` list so a rebuild
  *  leaves it out too. The last card of a section can't go: its heading (or
- *  the whole email) would have nothing under it. Mirrors render.py
- *  `remove_card()` byte for byte (fixture newsletter-card-remove.json). */
+ *  the whole email) would have nothing under it. The entry names the card's
+ *  removal copy (`removalCopy()` on the same email), which must be stored
+ *  before this email goes anywhere. Mirrors render.py `remove_card()` byte
+ *  for byte (fixtures newsletter-card-remove.json, …-put-back.json). */
 export function removeCardHtml(
   html: string,
   gid: string,
@@ -2719,15 +2918,25 @@ export function removeCardHtml(
     throw new RemoveCardError(
       'it’s the only card in its section, so it can’t be removed on its own'
     )
+  const removals = removalsOf(manifest)
   let title = key
+  let p: number | null = null
   for (const g of manifest.groups) {
     if (g.id !== gid) continue
-    const card = g.cards.find(c => c.key === key)
-    if (card) title = card.title || key
+    const i = g.cards.findIndex(c => c.key === key)
+    if (i >= 0) {
+      title = g.cards[i].title || key
+      p = fullPlace(i, placesOf(removals, gid, 'p'))
+    }
     g.cards = g.cards.filter(c => c.key !== key)
   }
+  const d = fullPlace(mine.indexOf(block), placesOf(removals, gid, 'd'))
+  const { b } = removalCopy(html, gid, key)
   manifest.text = manifest.text.filter(seg => seg.c !== `${gid}:${key}`)
-  manifest.removed = [...(manifest.removed ?? []), { g: gid, key, title }]
+  manifest.removed = [
+    ...(manifest.removed ?? []),
+    { g: gid, key, title, p, d, b },
+  ]
   const encoded = Buffer.from(JSON.stringify(manifest), 'utf8').toString(
     'base64'
   )
@@ -2738,6 +2947,174 @@ export function removeCardHtml(
   const order: Record<string, string[]> = {}
   for (const b of cardBlocks(out)) (order[b.gid] ??= []).push(b.key)
   return { html: out, text: rebuildText(manifest, order) }
+}
+
+/** A card the page can't put back; `detail` is written for the page. */
+export class PutBackError extends Error {
+  readonly detail: string
+  constructor(detail: string) {
+    super(detail)
+    this.detail = detail
+  }
+}
+
+/** Exactly one card block, nothing around it. */
+const ONE_CARD_RE = /^<!--card:(g\d+):([^>]+?)-->([\s\S]*?)<!--\/card-->$/
+
+/** Pure: the email with a removed card back where it was — its block in the
+ *  email, its manifest entry in Pen's order, its text segment — off the
+ *  `removed` list, and the plain text rebuilt in the cards' current order.
+ *  `copy` is its removal copy as read back (the caller checks it against the
+ *  entry's `b`). Mirrors render.py `restore_card()` byte for byte (fixture
+ *  newsletter-card-put-back.json). */
+export function restoreCardHtml(
+  html: string,
+  copy: RemovedCopy
+): { html: string; text: string } {
+  const manifest = readManifest(html)
+  if (!manifest) throw new PutBackError('no card manifest in this email')
+  const { g: gid, key } = copy
+  const removals = removalsOf(manifest)
+  const entry = removals.find(r => r.g === gid && r.key === key)
+  if (!entry)
+    throw new PutBackError(
+      `${gid}:${key} isn’t on this email’s list of removed cards`
+    )
+  const d = entry.d
+  if (typeof d !== 'number' || !Number.isInteger(d))
+    throw new PutBackError(
+      'it was removed before Put back existed, so its place wasn’t recorded'
+    )
+  const one = ONE_CARD_RE.exec(copy.block ?? '')
+  if (
+    !one ||
+    [...copy.block.matchAll(CARD_RE)].length !== 1 ||
+    one[1] !== gid ||
+    one[2] !== key
+  )
+    throw new PutBackError(`the saved copy isn’t the card ${gid}:${key}`)
+  const group = manifest.groups.find(g => g.id === gid)
+  const mine = cardBlocks(html).filter(b => b.gid === gid)
+  if (!group || mine.length === 0)
+    throw new PutBackError(`the section ${gid} isn’t in this email any more`)
+  if (mine.some(b => b.key === key))
+    throw new PutBackError('it’s in the email already')
+  const others = removals.filter(r => !(r.g === gid && r.key === key))
+  // Where the card goes among the `n` there now: its place minus the
+  // section's cards still out before it.
+  const place = (field: 'p' | 'd', at: number, n: number) => {
+    let ahead = 0
+    for (const v of placesOf(others, gid, field)) if (v < at) ahead++
+    return Math.min(Math.max(at - ahead, 0), n)
+  }
+  const at = place('d', d, mine.length)
+  const pos = at < mine.length ? mine[at].start : mine[mine.length - 1].end
+  let out = html.slice(0, pos) + copy.block + html.slice(pos)
+  if (copy.card != null) {
+    const cards = group.cards
+    const p = entry.p
+    const i =
+      typeof p === 'number' && Number.isInteger(p)
+        ? place('p', p, cards.length)
+        : cards.length
+    group.cards = [...cards.slice(0, i), copy.card, ...cards.slice(i)]
+  }
+  if (copy.text != null) {
+    const segs = manifest.text
+    const segAt = (k: string) => {
+      const n = segs.findIndex(s => s.c === `${gid}:${k}`)
+      return n >= 0 ? n : null
+    }
+    const keys = group.cards.map(c => c.key)
+    let where: number | null = null
+    const i = keys.indexOf(key)
+    if (i >= 0) {
+      // Beside its neighbour in Pen's order: after the one before it, else
+      // before the next one.
+      for (const k of keys.slice(0, i).reverse()) {
+        const n = segAt(k)
+        if (n != null) {
+          where = n + 1
+          break
+        }
+      }
+      if (where == null)
+        for (const k of keys.slice(i + 1)) {
+          const n = segAt(k)
+          if (n != null) {
+            where = n
+            break
+          }
+        }
+    }
+    if (where == null) {
+      const ns = segs.flatMap((s, n) =>
+        (s.c ?? '').split(':', 1)[0] === gid ? [n] : []
+      )
+      if (ns.length === 0)
+        throw new PutBackError(
+          `the text version has nothing for the section ${gid}`
+        )
+      where = ns[ns.length - 1] + 1
+    }
+    manifest.text = [
+      ...segs.slice(0, where),
+      { c: `${gid}:${key}`, t: copy.text },
+      ...segs.slice(where),
+    ]
+  }
+  const rest = (manifest.removed ?? []).filter(
+    r => !(r && typeof r === 'object' && r.g === gid && r.key === key)
+  )
+  if (rest.length > 0) manifest.removed = rest
+  else delete manifest.removed
+  const encoded = Buffer.from(JSON.stringify(manifest), 'utf8').toString(
+    'base64'
+  )
+  out = out.replace(MANIFEST_RE, () => `<!--aisafety-cards:${encoded}-->`)
+  const order: Record<string, string[]> = {}
+  for (const b of cardBlocks(out)) (order[b.gid] ??= []).push(b.key)
+  return { html: out, text: rebuildText(manifest, order) }
+}
+
+/** A card taken out of the email on this page, for the Removed list under
+ *  the Reorder panel. */
+export interface RemovedCard {
+  group: string
+  key: string
+  title: string
+  /** Its place and copy were recorded (removed since 29 Oct 2026, or kept
+   *  out of a rebuild since then), so Put back can bring it back. */
+  canPutBack: boolean
+}
+
+/** The cards on the manifest's `removed` list, oldest first. */
+export function removedCards(html: string): RemovedCard[] {
+  const manifest = readManifest(html)
+  if (!manifest) return []
+  return removalsOf(manifest).map(r => ({
+    group: r.g,
+    key: r.key,
+    title: r.title || r.key,
+    canPutBack:
+      typeof r.d === 'number' &&
+      Number.isInteger(r.d) &&
+      typeof r.b === 'string' &&
+      /^[0-9a-f]{16}$/.test(r.b),
+  }))
+}
+
+/** The `b` of a card's entry on the `removed` list, or null. */
+export function removalName(
+  html: string,
+  gid: string,
+  key: string
+): string | null {
+  const manifest = readManifest(html)
+  const r = manifest
+    ? removalsOf(manifest).find(e => e.g === gid && e.key === key)
+    : null
+  return r && typeof r.b === 'string' && /^[0-9a-f]{16}$/.test(r.b) ? r.b : null
 }
 
 /** The plain-text email from the manifest's segments, with each listed
@@ -2764,8 +3141,9 @@ function rebuildText(
 
 /* ─── "Consider applying if" on funding cards ────────────────────────── */
 
-// Exactly what render.py funding_card() writes under the description, and
-// the matching plain-text line — change both sides together.
+// Exactly what render.py writes under the description (fit_div(), on the
+// site's funder cards and on Pen-worded ones alike), and the matching
+// plain-text line — change both sides together.
 const FIT_HTML_RE =
   /<div style="margin-top:12px;"><span style="font-weight:600;">Consider applying if<\/span>: ([\s\S]*?)<\/div>/
 const FIT_TEXT_PREFIX = '  Consider applying if: '
@@ -2903,14 +3281,21 @@ const ICON_LABELS: Record<string, string> = {
   'entry-high': 'Entry bar',
   paper: 'Applications',
   'paper-closed': 'Applications',
+  // A funder's status row (funding/card.ts STATUS_ICONS). All three keep the
+  // one label, which DATE_FIELD_LABELS checks for a passed deadline.
   'form-check': 'Accepting applications',
   'form-pause': 'Accepting applications',
+  'paper-with-x': 'Accepting applications',
+  team: 'Who can apply',
+  'grant-size': 'Grant size',
   target: 'Detail',
 }
 
 function fieldLabel(name: string, icon: string | undefined, funding: boolean) {
   if (name === 'title') return 'Title'
   if (name === 'desc') return 'Description'
+  // Funding drafts built before 28 Oct 2026 have a Type row; the site's
+  // funder card, and Pen's fallback since (PEN_CARDS), have none.
   if (icon === 'tag') return funding ? 'Type' : 'Cost'
   // A timer line under an event's title is its time of day ("18:00 – 20:30",
   // events/card.ts); a training program's timer rows sit at the bottom (b…).
@@ -3134,20 +3519,60 @@ export async function reorderDraft(
   )
 }
 
+/** A draft's cards after an edit, and the cards taken out of it. */
+export interface DraftCards {
+  cards: CardGroup[]
+  removed: RemovedCard[]
+}
+
 /** Take one card out of a draft, the same way as a reorder: verify, rewrite
- *  HTML + text, re-stamp, write back, re-check. Returns the cards left. The
- *  listing's Newsletter tick is the route's job (newsletter-listing.ts), once
- *  this has gone through. */
+ *  HTML + text, re-stamp, write back, re-check. The copy Put back needs is
+ *  stored first (newsletter-removed.ts), so the email never names a copy
+ *  that isn't there; when it can't be, the card stays in. Returns the cards
+ *  left. The listing's Newsletter tick is the route's job
+ *  (newsletter-listing.ts), once this has gone through. */
 export async function removeDraftCard(
   draftId: string,
   gid: string,
   key: string,
   knownMessageId?: string
-): Promise<{ cards: CardGroup[] }> {
+): Promise<DraftCards> {
   return rewriteDraft(
     draftId,
-    body => removeCardHtml(body, gid, key),
+    async body => {
+      const out = removeCardHtml(body, gid, key)
+      await keepRemovalCopy(removalCopy(body, gid, key))
+      return out
+    },
     `card ${gid}:${key} removed`,
+    knownMessageId
+  )
+}
+
+/** Bring a removed card back into a draft where it was (Put back, 29 Oct
+ *  2026), the same way as a reorder: verify, read the card's removal copy
+ *  back, rewrite HTML + text, re-stamp, write back, re-check. The edit locks
+ *  apply as to every edit. Returns the cards. The listing's Newsletter tick
+ *  is the route's job, once this has gone through. */
+export async function putBackDraftCard(
+  draftId: string,
+  gid: string,
+  key: string,
+  knownMessageId?: string
+): Promise<DraftCards> {
+  return rewriteDraft(
+    draftId,
+    async body => {
+      const b = removalName(body, gid, key)
+      if (!b)
+        throw new PutBackError(
+          removedCards(body).some(r => r.group === gid && r.key === key)
+            ? 'it was removed before Put back existed, so this page can’t bring it back; a rebuild with --put-back can'
+            : 'it isn’t on this email’s list of removed cards (put back already?)'
+        )
+      return restoreCardHtml(body, await readRemovalCopy(b, gid, key))
+    },
+    `card ${gid}:${key} put back`,
     knownMessageId
   )
 }
@@ -3174,10 +3599,12 @@ export async function editDraftFit(
  *  answers with. Two round trips when the page passes the message id. */
 async function rewriteDraft(
   draftId: string,
-  change: (body: string) => { html: string; text: string },
+  change: (
+    body: string
+  ) => { html: string; text: string } | Promise<{ html: string; text: string }>,
   logLine: string,
   knownMessageId?: string
-): Promise<{ cards: CardGroup[] }> {
+): Promise<DraftCards> {
   // The campaigns are read alongside the draft (uncached: an approval may
   // have scheduled a wave a moment ago).
   const [{ campaign, problems, messageId, msg, listIds }, campaigns] =
@@ -3211,7 +3638,7 @@ async function rewriteDraft(
   )
   if (approving) throw new DraftProblemError([approving])
   const body = (msg.html ?? '').replace(MARKER_RE, '')
-  const { html, text } = change(body)
+  const { html, text } = await change(body)
   const stamped = `<!--aisafety-issue:${contentDigest(html)}-->` + html
   const stored = await v3put<{ message?: RawMessage }>(
     `messages/${acId(messageId)}`,
@@ -3230,7 +3657,7 @@ async function rewriteDraft(
   const cards = cardGroups(liveHtml)
   if (!cards) throw new Error('card markers missing after the edit')
   console.info(`[newsletter] draft ${draftId} ${logLine}`)
-  return { cards }
+  return { cards, removed: removedCards(liveHtml) }
 }
 
 /* ─── Analytics: sends in a date range ────────────────────────────────── */
@@ -3503,6 +3930,15 @@ export async function sentIssueHtml(
   const campaigns = await sharedRead('web-campaigns', 30_000, () =>
     allCampaigns({ fresh: true })
   )
+  return sentIssueHtmlIn(campaigns, name, listId)
+}
+
+/** sentIssueHtml on a campaign list already read (the approval page's). */
+async function sentIssueHtmlIn(
+  campaigns: RawCampaign[],
+  name: string,
+  listId: string
+): Promise<string | null> {
   const candidates = campaigns
     .filter(c => baseIssueName(c.name) === name && reachedReaders(c))
     .sort((a, b) => Number(b.id) - Number(a.id))
@@ -3584,11 +4020,16 @@ export async function previewHtml(
   if (!msg) return null
   const html = msg.html ?? ''
   if (!MARKER_RE.test(html)) return null
-  return html
-    .replace(MARKER_RE, '')
-    .replace(/%UNSUBSCRIBELINK%/g, '#')
-    .replace(/%WEBCOPY%/g, '#')
-    .replace(/%SENDER-INFO-SINGLELINE%/g, SENDER_INFO)
+  return (
+    html
+      .replace(MARKER_RE, '')
+      .replace(/%UNSUBSCRIBELINK%/g, '#')
+      .replace(/%WEBCOPY%/g, '#')
+      .replace(/%SENDER-INFO-SINGLELINE%/g, SENDER_INFO)
+      // A preview has no reader: "Manage subscriptions" opens the plain page.
+      .replace(/#k=%MANAGE_KEY%/g, '')
+      .replace(/%MANAGE_KEY%/g, '')
+  )
 }
 
 /** AC stores sdate in the account's local time. Read the current UTC offset

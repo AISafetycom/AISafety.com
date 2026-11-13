@@ -215,7 +215,7 @@ describe('subscriberTiles', () => {
 
   it('joins Substack’s issues to the list since the move', () => {
     const [events, training, ...rest] = subscriberTiles(subs(), range)
-    // Funding is still on Substack and has no export: no tile.
+    // Funding has no export and its list isn't read yet: no tile.
     expect(rest).toEqual([])
     expect(events.label).toBe('Events subscribers')
     expect(events.value).toBe(3010)
@@ -242,17 +242,41 @@ describe('subscriberTiles', () => {
     expect(events.note).toContain('add its export below')
   })
 
-  it('charts a newsletter still on Substack from its export', () => {
+  it('charts Funding from its own move day', () => {
     const funding = new Map(subs().substack)
     funding.set('aisafetyfunding', {
       ...subs().substack.get('aisafetyeventsandtraining')!,
       publication: 'aisafetyfunding',
     })
-    const tiles = subscriberTiles(subs({ substack: funding }), range)
+    const later = NOW + 10 * DAY_MS
+    const tiles = subscriberTiles(
+      subs({
+        substack: funding,
+        history: {
+          ...subs().history!,
+          days: {
+            ...subs().history!.days,
+            // Test addresses before the move don't count.
+            '8': [
+              { t: day('2026-10-20'), n: 3 },
+              { t: day('2026-10-21'), n: 807 },
+              { t: day('2026-10-22'), n: 809 },
+            ],
+          },
+        },
+        live: { '6': 3010, '7': 3031, '8': 811 },
+        liveAt: later,
+      }),
+      { startMs: later - 30 * DAY_MS, endMs: null }
+    )
     const f = tiles.find(t => t.key === 'subscribers-funding')!
-    expect(f.label).toBe('Funding (Substack)')
-    expect(f.value).toBe(2957)
-    expect(f.note).toContain('still on Substack')
+    expect(f.label).toBe('Funding subscribers')
+    expect(f.value).toBe(811)
+    expect(f.points.map(p => p.v)).toEqual([2800, 2957, 807, 809, 811])
+    expect(f.markers).toEqual([
+      { t: day('2026-10-21'), label: 'Moved to ActiveCampaign' },
+    ])
+    expect(f.note).toContain('it was on Substack')
   })
 
   it('shows a range in the past as it ended', () => {

@@ -171,7 +171,18 @@ export const ENDPOINTS: EndpointDef[] = [
     slug: 'funding',
     title: 'Funding',
     description: 'Funders and grant programs for AI safety work.',
-    filterFields: ['type', 'recipientType', 'acceptingApplications'],
+    // recipientType is '' on every record (deprecated, see the changelog) but
+    // stays a filter until v2, so ?recipientType= keeps answering as before.
+    // acceptingApplications is deprecated too: worked out from
+    // applicationStatus and deadline since its Airtable field was retired
+    // (28 Oct 2026), with the same values, so its filter answers as before.
+    filterFields: [
+      'type',
+      'recipientType',
+      'acceptingApplications',
+      'applicationStatus',
+      'whoCanApply',
+    ],
     fields: [
       'id',
       'name',
@@ -180,6 +191,12 @@ export const ENDPOINTS: EndpointDef[] = [
       'type',
       'recipientType',
       'acceptingApplications',
+      'applicationStatus',
+      'deadline',
+      'whoCanApply',
+      'grantSize',
+      'grantMinUsd',
+      'grantMaxUsd',
       'url',
       'featured',
       'featuredTagline',
@@ -211,13 +228,25 @@ export const ENDPOINTS: EndpointDef[] = [
     slug: 'advisors',
     title: 'Advisors',
     description: 'People offering AI safety career and research advice.',
-    filterFields: ['focus', 'status'],
+    // focus is deprecated: worked out from focusAreas since its Airtable
+    // field was retired (28 Oct 2026), with the same values, so ?focus=
+    // answers as before until v2 drops it.
+    filterFields: [
+      'focus',
+      'status',
+      'whoItsFor',
+      'focusAreas',
+      'applications',
+    ],
     fields: [
       'id',
       'name',
       'description',
       'logo',
       'focus',
+      'whoItsFor',
+      'focusAreas',
+      'applications',
       'status',
       'url',
       'featured',

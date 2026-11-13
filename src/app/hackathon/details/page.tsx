@@ -21,16 +21,16 @@ export default function HackathonDetailsPage() {
 
           <h2 className="padding-bottom-40px">
             You&apos;re in! We just need{' '}
-            <span className="color-light-teal">a few more details</span>.
+            <span className="color-teal-300">a few more details</span>.
           </h2>
 
-          <p className="color-teal-300 padding-bottom-16px">
+          <p className="color-teal-grey-300 padding-bottom-16px">
             Congratulations on your place at the hackathon at{' '}
             <a
               href="https://www.ceealar.org"
               target="_blank"
               rel="noopener noreferrer"
-              className="color-light-teal"
+              className="color-teal-300"
             >
               CEEALAR
             </a>{' '}
@@ -38,7 +38,7 @@ export default function HackathonDetailsPage() {
             September to all day Sunday 20 September, so ideally arrive on
             Wednesday evening and leave on Sunday evening or Monday morning.
           </p>
-          <p className="color-teal-300 padding-bottom-40px">
+          <p className="color-teal-grey-300 padding-bottom-40px">
             All the details below are required by either us or CEEALAR in order
             to run the hackathon.{' '}
             <strong>Please submit the form by 24 August.</strong>
@@ -46,20 +46,20 @@ export default function HackathonDetailsPage() {
 
           <DetailsForm />
 
-          <p className="color-teal-300 padding-bottom-56px">
+          <p className="color-teal-grey-300 padding-bottom-56px">
             Questions? Message Bryce on the{' '}
             <a
               href="https://discord.gg/WQG8FAGqun"
               target="_blank"
               rel="noopener noreferrer"
-              className="color-light-teal"
+              className="color-teal-300"
             >
               AISafety.com Discord server
             </a>{' '}
             at @bryceerobertson, or email{' '}
             <a
               href="mailto:bryceerobertson@gmail.com"
-              className="color-light-teal"
+              className="color-teal-300"
             >
               bryceerobertson@gmail.com
             </a>

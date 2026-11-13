@@ -18,7 +18,7 @@
   text-decoration: none;
 }
 
-/* Circular icon badge. Fill comes from the .bg-teal-bright-850 utility. */
+/* Circular icon badge. Fill comes from the .bg-teal-850 utility. */
 .badge {
   flex: 0 0 auto;
   width: 24px;
@@ -52,9 +52,9 @@
   position: absolute;
   top: 8px;
   right: 8px;
-  /* A --teal-800 circle over the illustration's top-right corner, with the
-     white hairline arrow (the Figma arrow SVG bakes in its proportions). */
-  background-color: var(--teal-800);
+  /* A circle over the illustration's top-right corner, with the white hairline
+     arrow (the Figma arrow SVG bakes in its proportions). Fill comes from the
+     .bg-teal-800 utility. */
 }
 
 /* Push the label down past the illustration's rows into the faded area —

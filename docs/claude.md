@@ -44,8 +44,8 @@ src/
 - **Constraint-based design system** — always use utility classes from `globals.css` first
 - **CSS variables** for all colors — never hardcode hex values
 - **Base HTML elements** (`h1`–`h3`, `p`) are pre-styled — don't write heading/typography CSS
-- **Utility classes** for typography (`paragraph-small`, `paragraph-xs`), colors (`color-teal-300`), spacing (`padding-bottom-24px`, `margin-top-16px`), layout (`flex`, `gap-16px`, `width-6-col`, `container-default`), display (`hide-mobile`, `cursor-pointer`), and shadows (`drop-shadow`)
-- **Pre-built components**: `.button-primary` / `.button-secondary` for buttons, `.text-field` / `.checkbox` for forms
+- **Utility classes** for typography (`paragraph-small`, `paragraph-xs`), colors (`color-teal-grey-300`), spacing (`padding-bottom-24px`, `margin-top-16px`), layout (`flex`, `gap-16px`, `width-6-col`, `container-default`), display (`hide-mobile`, `cursor-pointer`), and shadows (`drop-shadow`)
+- **Pre-built components**: the `<Button>` component for buttons, `.text-field` / `.checkbox` for forms
 - **New classes only when utility classes can't solve the problem** — put them in `ComponentName.module.css` (one component), `page.module.css` (one page), or rarely `globals.css` (truly reusable)
 - **Never create one-off override classes** — if a component style needs adjusting for a common pattern (e.g. buttons with icons), fix it at the design system level in `globals.css` so all future instances work automatically
 - **Media queries** are handled in `globals.css` — only write custom breakpoint styles for explicit overrides
@@ -87,12 +87,12 @@ src/
 
 ### HTML Consistency
 
-- **Use the same HTML tag for shared classes.** When a utility class like `button-primary` is used across the site, prefer using the same element type (e.g. always `<a>`/`<Link>`) to avoid browser-default style differences (borders, padding, etc.).
+- **Use the same HTML tag for shared classes.** When a utility class like `text-field` is used across the site, prefer using the same element type (e.g. always `<a>`/`<Link>`) to avoid browser-default style differences (borders, padding, etc.).
 
 ### CSS Details
 
 - **Hover transitions:** All hover transitions use `var(--hover-transition)` defined in `:root` (`0.1s ease-in-out`). Never hardcode transition values.
-- **Card hover color:** Uses `color-mix(in srgb, var(--teal-850) 60%, var(--teal-800))` — subtle shift using existing palette colors.
+- **Card hover color:** Uses `color-mix(in srgb, var(--teal-grey-850) 60%, var(--teal-grey-800))` — subtle shift using existing palette colors.
 - **White button hover:** Darkens to `var(--off-white)` — never use opacity reduction.
 
 ### Key File Locations
@@ -127,8 +127,8 @@ export default function Component({ prop }: Props) {
 ```typescript
 // Use globals.css utility classes — only add custom classes when utilities can't solve it
 <div className="flex items-center gap-16px padding-bottom-24px">
-<p className="paragraph-small color-teal-300">Muted small text</p>
-<a className="button-primary">Get Started</a>
+<p className="paragraph-small color-teal-grey-300">Muted small text</p>
+<Button as={Link} href="/events">Get Started</Button>
 ```
 
 ### Type Safety

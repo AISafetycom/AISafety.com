@@ -6,6 +6,10 @@ import { notFound } from 'next/navigation'
 // newsletters (each list's "Public Pages" redirect points at its own path),
 // in place of ActiveCampaign's unbranded page and its "report this as abuse"
 // survey. Unsubscribing has already happened by the time they land here.
+// One link takes a reader off several newsletters at once: "unsubscribe from
+// all of them here" in the welcome email for a signup to several
+// (ActiveCampaign then lands them on the first one's page), so the line
+// about other newsletters only speaks of ones they haven't unsubscribed from.
 const NEWSLETTERS = {
   events: { name: 'AI Safety Events', page: '/events' },
   training: { name: 'AI Safety Training', page: '/training' },
@@ -43,15 +47,16 @@ export default async function UnsubscribedPage({
           </h1>
           <h2 className="padding-bottom-40px">
             You won&apos;t get any more emails from{' '}
-            <span className="color-light-teal">{name}</span>.
+            <span className="color-teal-300">{name}</span>.
           </h2>
-          <p className="color-teal-300 padding-bottom-16px">
-            Any other AISafety.com newsletters you get will keep coming – each
-            one has its own unsubscribe link at the bottom of its emails.
+          <p className="color-teal-grey-300 padding-bottom-16px">
+            Any other AISafety.com newsletters you haven&apos;t unsubscribed
+            from will keep coming – each one has its own unsubscribe link at the
+            bottom of its emails.
           </p>
-          <p className="color-teal-300">
+          <p className="color-teal-grey-300">
             Unsubscribed by mistake? You can sign up again on{' '}
-            <Link href={page} className="color-light-teal">
+            <Link href={page} className="color-teal-300">
               AISafety.com{page}
             </Link>
             .

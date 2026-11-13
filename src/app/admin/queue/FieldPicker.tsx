@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Icon from '@/components/Icon'
 import styles from './queue.module.css'
 import own from './FieldPicker.module.css'
+import motion from '../motion.module.css'
 
 export interface PickableField {
   name: string
@@ -100,7 +101,7 @@ export default function FieldPicker({
         Edit another field <kbd>E</kbd>
       </button>
       {open && (
-        <div className={own.panel}>
+        <div className={`${own.panel} ${motion.pop}`}>
           <input
             ref={inputRef}
             className={styles.input}

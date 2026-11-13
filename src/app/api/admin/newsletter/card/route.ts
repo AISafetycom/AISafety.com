@@ -1,7 +1,7 @@
 /*
   POST /api/admin/newsletter/card
        body { campaign, group, key, message?, fields?: { name: text },
-              fit?: text, listing?: text }
+              fit?: text, listing?: text, listingField?: 'desc' | 'title' }
 
   Edits text on one card inside a pipeline draft in ActiveCampaign: any of
   its fields (`title`, `m0`… lines under the title, `desc`, `b0`… rows at the
@@ -9,9 +9,10 @@
   applying if" line (`fit`; empty removes it). Rebuilds the plain-text
   version and re-stamps the content marker so the draft still verifies.
   The page saves by itself as Bryce types (25 Sept 2026), one card at a
-  time. `listing` writes that text to the listing's Description in Airtable
-  instead — his "Use this description on the site too" button, a separate
-  call so typing never touches the site. `message` (the id the page listed)
+  time. `listing` writes that text to the listing in Airtable instead — his
+  "Use this description on the site too" button (its Description) or, with
+  `listingField: 'title'`, "Use this title on the site too" (its Name; 6 Nov
+  2026) — a separate call so typing never touches the site. `message` (the id the page listed)
   lets the draft's message be read alongside the checks: one round trip
   less on every save.
   Approvers only (canSendNewsletter) — it edits the email but sends nothing,
@@ -33,7 +34,10 @@ import {
   FitError,
   isNewsletterConfigured,
 } from '@/lib/admin/newsletter'
-import { updateListingDescription } from '@/lib/admin/newsletter-listing'
+import {
+  updateListingDescription,
+  updateListingName,
+} from '@/lib/admin/newsletter-listing'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -69,8 +73,8 @@ export async function POST(req: NextRequest) {
   } catch {
     return json({ error: 'body must be JSON' }, 400)
   }
-  const { campaign, group, key, fields, fit, listing, message } = (body ??
-    {}) as Record<string, unknown>
+  const { campaign, group, key, fields, fit, listing, listingField, message } =
+    (body ?? {}) as Record<string, unknown>
   const campaignId = String(campaign ?? '')
   const values: Record<string, string> = {}
   let fieldsOk = fields === undefined
@@ -97,21 +101,25 @@ export async function POST(req: NextRequest) {
     (listing === undefined ||
       (typeof listing === 'string' &&
         listing.trim() !== '' &&
-        listing.length <= MAX_LENGTH))
+        listing.length <= MAX_LENGTH)) &&
+    (listingField === undefined ||
+      (typeof listing === 'string' &&
+        (listingField === 'desc' || listingField === 'title')))
   if (!valid) {
     return json(
       {
         error:
-          'body must be { campaign: id, group: gN, key, fields?: { name: text }, fit?: text } or { campaign, group, key, listing: text }',
+          'body must be { campaign: id, group: gN, key, fields?: { name: text }, fit?: text } or { campaign, group, key, listing: text, listingField?: desc | title }',
       },
       400
     )
   }
   if (typeof listing === 'string') {
-    const result = await updateListingDescription(
-      key as string,
-      listing.replace(/\s+/g, ' ').trim()
-    )
+    const text = listing.replace(/\s+/g, ' ').trim()
+    const result =
+      listingField === 'title'
+        ? await updateListingName(key as string, text)
+        : await updateListingDescription(key as string, text)
     if (!result.ok)
       console.error(
         `[newsletter] listing update ${key} failed: ${result.reason}`

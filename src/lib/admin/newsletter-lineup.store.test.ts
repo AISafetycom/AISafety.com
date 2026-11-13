@@ -33,17 +33,32 @@ vi.mock('@/lib/data/funding', () => ({
     {
       id: 'recRolling',
       name: 'Rolling',
-      acceptingApplications: 'Applications on a rolling basis',
+      applicationStatus: 'Applications open',
+      deadline: null,
     },
     {
       id: 'recDated',
       name: 'Dated',
-      acceptingApplications: 'Applications close 1 December 2026',
+      applicationStatus: 'Applications open',
+      deadline: '2099-12-01',
+    },
+    {
+      id: 'recPassed',
+      name: 'Deadline passed',
+      applicationStatus: 'Applications open',
+      deadline: '2020-01-31',
     },
     {
       id: 'recClosed',
       name: 'Closed',
-      acceptingApplications: 'Not accepting applications',
+      applicationStatus: 'Not currently accepting applications',
+      deadline: null,
+    },
+    {
+      id: 'recInvite',
+      name: 'Invite only',
+      applicationStatus: 'Invite only, no applications',
+      deadline: null,
     },
   ],
 }))

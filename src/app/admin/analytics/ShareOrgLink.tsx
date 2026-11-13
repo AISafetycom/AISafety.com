@@ -8,7 +8,8 @@ import styles from './analytics.module.css'
 
 // The Org lookup's org pages (/stats/<token>, src/lib/analytics/org-shares.ts):
 // the "Share with the org" box above a search's panels, and the list of
-// every page shared so far before a search. Only rendered for people with
+// every page shared so far before a search. The Jobs tab shows the same box
+// for the job board's page (kind 'jobs'). Only rendered for people with
 // Admin admin's edit grant; /api/admin/org-shares checks the same.
 
 /** The search's shared page, when it has one. */
@@ -69,7 +70,7 @@ function useShareRequest() {
   return { busy: sending || refreshing, error, send }
 }
 
-function CopyLinkButton({ url }: { url: string }) {
+export function CopyLinkButton({ url }: { url: string }) {
   const [copy, setCopy] = useState<'idle' | 'copied' | 'failed'>('idle')
   const copyLink = async () => {
     try {
@@ -150,14 +151,18 @@ function StopSharing({ token }: { token: string }) {
   )
 }
 
-/** The "Share with the org" box above a search's panels. */
+/** The "Share with the org" box above a search's panels, or (kind 'jobs')
+ *  the job board's on the Jobs tab. */
 export default function ShareOrgLink({
+  kind,
   query,
   orgName,
   leftOut,
   origin,
   share,
 }: {
+  /** 'jobs' for the job board's page, which has no search. */
+  kind?: 'jobs'
   query: string
   /** What the lookup calls the org; the name field starts from it. */
   orgName: string
@@ -176,8 +181,11 @@ export default function ShareOrgLink({
     return (
       <div className={styles.shareBox}>
         <p className={styles.shareText}>
-          Couldn&apos;t check whether {orgName} already has a page of their own.
-          Reload the page to try again.
+          Couldn&apos;t check whether {orgName} already{' '}
+          {kind === 'jobs'
+            ? 'has a page for its jobs'
+            : 'has a page of their own'}
+          . Reload the page to try again.
         </p>
       </div>
     )
@@ -189,8 +197,9 @@ export default function ShareOrgLink({
       {!share ? (
         <>
           <p className={styles.shareText}>
-            Give them a page of their own with these figures. They can pick the
-            dates, but not the search or what&apos;s left out.
+            {kind === 'jobs'
+              ? 'Every job here comes from the 80,000 Hours Job Board. Give them a page of their own with how their jobs do: clicks per job and employer, where the clicks came from, and what job seekers filter for. They pick the dates.'
+              : 'Give them a page of their own with these figures. They can pick the dates, but not the search or what’s left out.'}
           </p>
           <label className={styles.shareName}>
             Their name
@@ -208,7 +217,9 @@ export default function ShareOrgLink({
             onClick={() =>
               send(
                 'POST',
-                { query, leftOut, orgName: name.trim() },
+                kind === 'jobs'
+                  ? { kind, orgName: name.trim() }
+                  : { query, leftOut, orgName: name.trim() },
                 'Couldn’t make the link just now. Try again in a moment.'
               )
             }
@@ -239,7 +250,9 @@ export default function ShareOrgLink({
           </a>
           <StopSharing token={share.token} />
           <p className={styles.shareNote}>
-            {share.opened}. Leave out and Put back here update their page too.
+            {share.opened}.
+            {kind !== 'jobs' &&
+              ' Leave out and Put back here update their page too.'}
             {share.leftOutDiffers && (
               <>
                 {' '}

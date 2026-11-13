@@ -72,6 +72,11 @@ export default async function RootLayout({
               // never its token (trackedPath in src/lib/analytics.ts).
               if (location.pathname.indexOf('/stats/') === 0)
                 _paq.push(['setCustomUrl', location.origin + '/stats']);
+              // The newsletters page opened from an issue's "Manage
+              // subscriptions" link carries the reader's key in its
+              // #fragment (src/lib/newsletter-manage-link.ts): never send it.
+              if (location.pathname === '/newsletter')
+                _paq.push(['setCustomUrl', location.origin + '/newsletter']);
               _paq.push(['trackPageView']);
               _paq.push(['enableLinkTracking']);
             }

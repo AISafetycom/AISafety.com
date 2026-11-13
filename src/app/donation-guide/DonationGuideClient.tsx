@@ -46,7 +46,7 @@ export default function DonationGuideClient({
         <h1 className="padding-top-56px padding-bottom-8px">Donation guide</h1>
         <RelativeDate
           iso={lastUpdated}
-          className="padding-bottom-40px paragraph-small color-teal-300"
+          className="padding-bottom-40px paragraph-small color-teal-grey-300"
         />
         <IntroHeading intro={guide.intro} />
         <p className="padding-bottom-32px">Choose a donation amount:</p>
@@ -56,7 +56,7 @@ export default function DonationGuideClient({
             {guide.tabs.map(tab => (
               <button
                 key={tab.id}
-                className={`${styles.tabLink} ${activeTab === tab.id ? styles.tabLinkActive : ''}`}
+                className={`${styles.tabLink} border-plus-fill ${activeTab === tab.id ? styles.tabLinkActive : ''}`}
                 onClick={() => handleTabClick(tab.id)}
               >
                 <p>{tab.amount}</p>

@@ -130,17 +130,18 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   // A submit of the newsletter signup box (Events, Training, Funding).
   // Counts the attempt. Never carries the email address.
   'newsletter_signup',
-  // How a submit on Events or Training ended: those boxes sign the reader up
-  // on the site, through ActiveCampaign (from 8 October 2026). Success = the
-  // confirmation email went out; error = the visitor saw an error, `source`
-  // saying which (/api/subscribe's reason code, 'network', or
-  // 'http_<status>'). Funding's box still opens Substack, so its signups
-  // finish off-site and record neither. Never carry the email address.
+  // How a submit ended: the boxes sign the reader up on the site, through
+  // ActiveCampaign (Events and Training from 8 October 2026, Funding from its
+  // move day; before that Funding's box opened Substack and recorded
+  // neither). Success = the confirmation email went out; error = the visitor
+  // saw an error, `source` saying which (/api/subscribe's reason code,
+  // 'network', or 'http_<status>'). Never carry the email address.
   'newsletter_signup_success',
   'newsletter_signup_error',
-  // A click on the newsletter signup box outside the email pill — in the
-  // Substack mode (Funding) the card doubles as a link to the newsletter's
-  // own page, so visitors can read it before subscribing.
+  // A click on the newsletter signup box outside the email pill, while
+  // /funding's box was in Substack mode (the card doubled as a link to the
+  // newsletter's own page). No longer sent since the Funding move; kept for
+  // the events already recorded.
   'newsletter_view',
   // A click on a newsletter's past issues page (/newsletter/events,
   // /newsletter/training): `page` is the newsletter ('Events'), `source`
@@ -148,6 +149,18 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   // RSS feed, 'substack' = the Substack archive), `label` the issue's
   // address on an issue click. The pages' own views are page_views.
   'newsletter_archive_click',
+  // The newsletters page (/newsletter, `page`) opened from the "Manage
+  // subscriptions" link in an issue: `source` says how it went ('ok', or
+  // the settings route's reason: 'link_invalid', 'not_found', 'upstream',
+  // …, 'network'). Never carries the key or the address.
+  'newsletter_settings_open',
+  // A save there: `label` the changes ('+funding -training'), `source`
+  // 'saved' or the reason it failed.
+  'newsletter_settings_save',
+  // A link on that page: `label` the newsletter ('events', 'updates'),
+  // `source` where it leads ('issues' = its past issues page, 'substack' =
+  // the Updates newsletter).
+  'newsletter_page_click',
   // A click on one of the footer's links ("Help us out" / "Newsletters" /
   // "For press and developers" columns) — mostly outbound, so nothing else
   // records them.
@@ -197,6 +210,7 @@ const NEWSLETTER_BOX_PAGES = [
   'Funding',
   '/newsletter/events',
   '/newsletter/training',
+  '/newsletter',
 ]
 
 /** Dashboard labels for newsletter_signup_error's reason (`source`). */
@@ -836,13 +850,16 @@ export interface DashboardData {
   /** Same for the newsletter box, but divided by visitors to the pages that
    *  have it (Events, Training, and Funding) rather than the whole site. */
   siteNewsletterShare: VisitorShare | null
-  /** How the boxes' signups through the site ended (Events and Training,
-   *  through ActiveCampaign, from 8 October 2026), per page, and what went
-   *  wrong when they didn't. */
+  /** How the boxes' signups through the site ended (through ActiveCampaign:
+   *  Events and Training from 8 October 2026, Funding from its move day),
+   *  per page, and what went wrong when they didn't. */
   newsletterResults: NewsletterSignupResults
   /** Each newsletter's past issues page (/newsletter/<key>, from 10 October
    *  2026): its views and where its clicks went. */
   newsletterArchive: NewsletterArchiveRow[]
+  /** The newsletters page (/newsletter): its visits, its settings opened
+   *  from the emails' "Manage subscriptions" link, and what changed. */
+  newslettersPage: NewslettersPageStats
   /** Each newsletter's signups through the site beside the readers who
    *  confirmed (landed on /subscribed/<key>). */
   newsletterConfirmed: NewsletterConfirmRow[]
@@ -998,6 +1015,15 @@ const EMPTY: Omit<DashboardData, 'source'> = {
   siteNewsletterShare: null,
   newsletterResults: { byPage: [], errors: [] },
   newsletterArchive: [],
+  newslettersPage: {
+    views: 0,
+    opened: 0,
+    brokenLinks: 0,
+    openFailures: 0,
+    saves: 0,
+    saveFailures: 0,
+    rows: [],
+  },
   newsletterConfirmed: [],
   newsletterCopies: [],
   newsletterLinks: [],
@@ -1635,6 +1661,7 @@ function aggregateSite(
         newsletterResults
       ),
       newsletterCopies: newsletterCopyViews(inRange, unique),
+      newslettersPage: newslettersPageStats(inRange, unique),
       newsletterLinks: newsletterLinkClicks(inRange, unique),
       newsletterVisits: newsletterVisits(inRange),
       footerClicks,
@@ -2257,10 +2284,12 @@ export interface NewsletterArchiveRow {
   name: string
   /** Views of its past issues page. */
   views: number
-  /** Clicks on the page through to an issue, the feed, and Substack. */
+  /** Clicks on the page through to an issue, the feed, Substack, and the
+   *  resource page (/funding; since 23 October 2026). */
   issueClicks: number
   feedClicks: number
   substackClicks: number
+  resourceClicks: number
 }
 
 /** The newsletters' past issues pages (/newsletter/<key>): views from
@@ -2268,14 +2297,15 @@ export interface NewsletterArchiveRow {
  *  with any, busiest first. Follows the count mode: unique = one view per
  *  visitor per page per day, and one click per visitor per link per day.
  *  Exported for the unit test. */
-/** When each past issues page went live (PR #685, deployed 11 October 2026
- *  at about 12:30 UTC). Before then the address was the site's 404 page,
- *  and so is a newsletter's page that isn't listed here: Funding's, until
- *  its move. Add a newsletter's time on the day its page first lists an
- *  issue (Funding's move checklist in ~/Newsletter/PLAN.md says so). */
+/** When each past issues page went live: Events and Training with PR #685,
+ *  deployed 11 October 2026 at about 12:30 UTC; Funding when its first issue
+ *  from ActiveCampaign (Issue #24) reached its readers, first listed at
+ *  about 17:16 UTC on 21 October 2026. Before then each address was the
+ *  site's 404 page, so earlier views don't count. */
 export const PAST_ISSUES_LIVE_SINCE: Readonly<Record<string, number>> = {
   events: Date.parse('2026-10-11T12:30:00Z'),
   training: Date.parse('2026-10-11T12:30:00Z'),
+  funding: Date.parse('2026-10-21T17:16:00Z'),
 }
 
 export function newsletterArchiveStats(
@@ -2286,7 +2316,14 @@ export function newsletterArchiveStats(
   const rowFor = (name: string) => {
     let row = rows.get(name)
     if (!row) {
-      row = { name, views: 0, issueClicks: 0, feedClicks: 0, substackClicks: 0 }
+      row = {
+        name,
+        views: 0,
+        issueClicks: 0,
+        feedClicks: 0,
+        substackClicks: 0,
+        resourceClicks: 0,
+      }
       rows.set(name, row)
     }
     return row
@@ -2319,6 +2356,7 @@ export function newsletterArchiveStats(
       if (e.source === 'issue') row.issueClicks++
       else if (e.source === 'feed') row.feedClicks++
       else if (e.source === 'substack') row.substackClicks++
+      else if (e.source === 'resource') row.resourceClicks++
     }
   }
   return [...rows.values()].sort((a, b) => b.views - a.views)
@@ -2329,32 +2367,178 @@ export function newsletterArchiveStats(
 const NEWSLETTER_OF_PAGE: Readonly<Record<string, string>> = {
   Events: 'Events',
   Training: 'Training',
+  Funding: 'Funding',
   '/newsletter/events': 'Events',
   '/newsletter/training': 'Training',
+  '/newsletter/funding': 'Funding',
 }
 
 /** Where ActiveCampaign sends a reader once they've pressed "Confirm
  *  subscription" in the email a signup on the site triggers
  *  (src/app/subscribed), per newsletter. */
-const CONFIRM_PAGE = /^\/subscribed\/(events|training)\/?$/
+/** …and, from the newsletters page's combination forms, /subscribed/
+ *  events-funding and the like: a confirmation of each newsletter named. */
+const CONFIRM_PAGE =
+  /^\/subscribed\/((?:events|training|funding)(?:-(?:training|funding))*)\/?$/
+
+/** A confirm page loaded again this soon after the last load of the same
+ *  page, in another browser, is the same email's link opened twice: in
+ *  October 2026 one confirmation in ten came with a twin from a second
+ *  browser 1 to 61 seconds later (an email app's own browser, then the
+ *  phone's, or a mail scanner checking the link), never with a signup of its
+ *  own. */
+const CONFIRM_DOUBLE_OPEN_MS = 2 * 60 * 1000
 
 /** The page views of the confirm pages that count as confirmations: every
- *  one in total mode, one per visitor per newsletter per day in unique mode
- *  (a reader who clicks the link twice). Events without a visitor id each
- *  count. Expects a newest-first list, like the rest. Exported for the unit
- *  test. */
+ *  one in total mode; in unique mode one per visitor per confirm page in the
+ *  range (a reader who presses the link again, that day or later), and none
+ *  for a load within CONFIRM_DOUBLE_OPEN_MS of the page's previous load.
+ *  Events without a visitor id each count, the double-open rule aside.
+ *  Expects a newest-first list, like the rest, and keeps that order.
+ *  Exported for the unit test. */
 export function confirmLandings(
   views: AnalyticsEvent[],
   unique: boolean
 ): AnalyticsEvent[] {
+  const landings = views.filter(
+    e => e.type === 'page_view' && CONFIRM_PAGE.test(e.page ?? '')
+  )
+  if (!unique) return landings
   const seen = new Set<string>()
-  return views.filter(e => {
-    if (e.type !== 'page_view') return false
-    const m = CONFIRM_PAGE.exec(e.page ?? '')
-    if (!m) return false
+  const lastLoad = new Map<string, number>()
+  const kept: AnalyticsEvent[] = []
+  for (let i = landings.length - 1; i >= 0; i--) {
+    const e = landings[i]
+    const page = CONFIRM_PAGE.exec(e.page ?? '')![1]
+    const t = Date.parse(e.ts)
+    const last = lastLoad.get(page)
+    if (!Number.isNaN(t)) lastLoad.set(page, t)
+    if (last != null && t - last < CONFIRM_DOUBLE_OPEN_MS) continue
+    if (e.vid) {
+      const key = `${e.vid}\x00${page}`
+      if (seen.has(key)) continue
+      seen.add(key)
+    }
+    kept.push(e)
+  }
+  return kept.reverse()
+}
+
+export interface NewslettersPageRow {
+  /** 'Events', 'Training', 'Funding', 'Updates'. */
+  name: string
+  /** Ticked on in a save of the settings, and ticked off. */
+  added: number
+  dropped: number
+  /** Clicks through to its past issues page (Updates: to Substack). */
+  clicks: number
+}
+
+export interface NewslettersPageStats {
+  /** Views of /newsletter. */
+  views: number
+  /** Settings opened from a working "Manage subscriptions" link. */
+  opened: number
+  /** Links that will never work: a missing or wrong key, a deleted contact. */
+  brokenLinks: number
+  /** Opens that failed for another reason (ActiveCampaign, the network). */
+  openFailures: number
+  saves: number
+  saveFailures: number
+  /** Per newsletter, the ones with anything. */
+  rows: NewslettersPageRow[]
+}
+
+/** The newsletters page in numbers. Follows the count mode: unique = one
+ *  view, open or save per visitor per day (and each newsletter counted once
+ *  per visitor per day in its changes and clicks). Exported for the unit
+ *  test. */
+export function newslettersPageStats(
+  inRange: AnalyticsEvent[],
+  unique: boolean
+): NewslettersPageStats {
+  const seen = new Set<string>()
+  const counts = (e: AnalyticsEvent, what: string) => {
     if (!unique || !e.vid) return true
     const t = Date.parse(e.ts)
-    const key = `${e.vid}\x00${Number.isNaN(t) ? '' : dashboardDay(t)}\x00${m[1]}`
+    const key = `${e.vid}\x00${Number.isNaN(t) ? '' : dashboardDay(t)}\x00${what}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  }
+  const out: NewslettersPageStats = {
+    views: 0,
+    opened: 0,
+    brokenLinks: 0,
+    openFailures: 0,
+    saves: 0,
+    saveFailures: 0,
+    rows: [],
+  }
+  const rows = new Map<string, NewslettersPageRow>()
+  const rowFor = (key: string) => {
+    const name = key[0].toUpperCase() + key.slice(1)
+    let row = rows.get(name)
+    if (!row) {
+      row = { name, added: 0, dropped: 0, clicks: 0 }
+      rows.set(name, row)
+    }
+    return row
+  }
+  for (const e of inRange) {
+    if (e.type === 'page_view') {
+      if (/^\/newsletter\/?$/.test(e.page ?? '') && counts(e, 'view'))
+        out.views++
+    } else if (e.type === 'newsletter_settings_open') {
+      if (!counts(e, `open\x00${e.source}`)) continue
+      if (e.source === 'ok') out.opened++
+      else if (e.source === 'link_invalid' || e.source === 'not_found')
+        out.brokenLinks++
+      else out.openFailures++
+    } else if (e.type === 'newsletter_settings_save') {
+      if (e.source !== 'saved') {
+        if (counts(e, `save-failed\x00${e.source}`)) out.saveFailures++
+        continue
+      }
+      if (counts(e, 'save')) out.saves++
+      for (const change of (e.label ?? '').split(' ')) {
+        const m = /^([+-])(events|training|funding)$/.exec(change)
+        if (!m || !counts(e, `change\x00${change}`)) continue
+        if (m[1] === '+') rowFor(m[2]).added++
+        else rowFor(m[2]).dropped++
+      }
+    } else if (e.type === 'newsletter_page_click') {
+      const m = /^(events|training|funding|updates)$/.exec(e.label ?? '')
+      if (m && counts(e, `click\x00${m[1]}`)) rowFor(m[1]).clicks++
+    }
+  }
+  const order = ['Events', 'Training', 'Funding', 'Updates']
+  out.rows = [...rows.values()].sort(
+    (a, b) => order.indexOf(a.name) - order.indexOf(b.name)
+  )
+  return out
+}
+
+/** Signups ActiveCampaign took on the newsletters page (/newsletter), which
+ *  signs up to several newsletters at once: each success names, in
+ *  `source`, the newsletters its confirmation email covers ('events+funding'),
+ *  the ones a confirmation lands on. Follows the count mode like the boxes'
+ *  successes (one per visitor per form per day). */
+function newslettersPageSuccesses(
+  inRange: AnalyticsEvent[],
+  unique: boolean
+): AnalyticsEvent[] {
+  const seen = new Set<string>()
+  return inRange.filter(e => {
+    if (e.type !== 'newsletter_signup_success' || e.page !== '/newsletter')
+      return false
+    if (
+      !/^(events|training|funding)(\+(training|funding))*$/.test(e.source ?? '')
+    )
+      return false
+    if (!unique || !e.vid) return true
+    const t = Date.parse(e.ts)
+    const key = `${e.vid}\x00${Number.isNaN(t) ? '' : dashboardDay(t)}\x00${e.source}`
     if (seen.has(key)) return false
     seen.add(key)
     return true
@@ -2362,10 +2546,11 @@ export function confirmLandings(
 }
 
 export interface NewsletterConfirmRow {
-  /** 'Events', 'Training'. */
+  /** 'Events', 'Training', 'Funding'. */
   name: string
   /** Signups ActiveCampaign took (a link to confirm went out), from the
-   *  newsletter's boxes: its resource page and its past issues page. */
+   *  newsletter's boxes (its resource page and its past issues page) and
+   *  from the newsletters page when its confirmation was the one sent. */
   signedUp: number
   /** Readers who landed on the newsletter's confirm page. */
   confirmed: number
@@ -2391,9 +2576,14 @@ export function newsletterConfirmations(
     const name = NEWSLETTER_OF_PAGE[r.name]
     if (name && r.succeeded > 0) rowFor(name).signedUp += r.succeeded
   }
+  const named = (keys: string) =>
+    keys.split(/[+-]/).map(k => k[0].toUpperCase() + k.slice(1))
+  for (const e of newslettersPageSuccesses(inRange, unique)) {
+    for (const name of named(e.source as string)) rowFor(name).signedUp++
+  }
   for (const e of confirmLandings(inRange, unique)) {
-    const key = CONFIRM_PAGE.exec(e.page ?? '')![1]
-    rowFor(key[0].toUpperCase() + key.slice(1)).confirmed++
+    const keys = CONFIRM_PAGE.exec(e.page ?? '')![1]
+    for (const name of named(keys)) rowFor(name).confirmed++
   }
   return [...rows.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
@@ -2458,8 +2648,9 @@ export interface NewsletterLinkRow {
 }
 
 /** The ways to the newsletters elsewhere on the site, busiest first: the
- *  signup box's card link where the box still hands off to Substack (the
- *  card opens the newsletter there to read first; newsletter_view), and the
+ *  signup box's card link from when /funding's box handed off to Substack
+ *  (the card opened the newsletter there to read first; newsletter_view,
+ *  no longer sent since the Funding move), and the
  *  footer's Newsletters column. Unique mode counts a visitor once per link
  *  per day. Exported for the unit test. */
 export function newsletterLinkClicks(
@@ -3105,7 +3296,7 @@ export function orgLookup(
   const oldest = inRange.length
     ? Date.parse(inRange[inRange.length - 1].ts)
     : NaN
-  const { series, unit } = orgSeries(counted, range, now, oldest)
+  const { series, unit } = clicksSeries(counted, range, now, oldest)
   return {
     ...base,
     visitors: visitorIds.size + anonClicks,
@@ -3140,8 +3331,9 @@ function hostPart(cleaned: string): string {
  *  bucket from the range's start to the earlier of its end and now. The
  *  start never goes back before the oldest event read (`oldest`), so an
  *  open range, or a typed date far in the past, draws only days there's
- *  data for. Empty when there's nothing to draw. */
-function orgSeries(
+ *  data for. Empty when there's nothing to draw. Shared by the Org lookup
+ *  and the job board's page (jobs-source.ts). */
+export function clicksSeries(
   clicks: AnalyticsEvent[],
   { startMs, endMs }: DateRange,
   now: number,
@@ -4147,6 +4339,27 @@ async function loadSiteView(
       firstSeenBackfilled: backfilled === 1,
     },
   }
+}
+
+/** Every event in the range, newest first, through the month cache, for a
+ *  page that does its own counting (the job board's page, jobs-source.ts).
+ *  Throws when the store can't be read. */
+export async function readEventsInRange(
+  range: DateRange
+): Promise<AnalyticsEvent[]> {
+  const inside = within(range)
+  if (store) {
+    const byMonth = await storedMonths(store)
+    const wanted = monthsInRange(
+      byMonth.map(b => b.month),
+      range
+    )
+      .map(m => byMonth.find(b => b.month === m)!)
+      .reverse() // newest first
+    const parts = await readMonthsCached(bulkStore ?? store, wanted)
+    return parts.flat().filter(e => !fromTestCopy(e.ref) && inside(e.ts))
+  }
+  return (await readDevEvents()).filter(e => inside(e.ts))
 }
 
 export async function readDashboard(

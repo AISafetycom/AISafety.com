@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  keepsOrder,
+  needsPlace,
   roomFor,
   slotOf,
   sortForSlot,
@@ -118,5 +120,37 @@ describe('sortValue', () => {
     expect(sortValue('')).toBeNull()
     expect(sortValue(null)).toBeNull()
     expect(sortValue('soon')).toBeNull()
+  })
+})
+
+describe('needsPlace', () => {
+  const ordered = [
+    { name: 'Name', type: 'singleLineText' },
+    { name: 'Sort', type: 'number' },
+  ]
+  const unordered = [{ name: 'Name', type: 'singleLineText' }]
+
+  it('knows a manually ordered table by its number Sort field', () => {
+    expect(keepsOrder(ordered)).toBe(true)
+    expect(keepsOrder(unordered)).toBe(false)
+    expect(keepsOrder([{ name: 'Sort', type: 'singleLineText' }])).toBe(false)
+  })
+
+  it('holds back an addition with no Sort on an ordered page', () => {
+    expect(needsPlace('Add', ordered, undefined)).toBe(true)
+    expect(needsPlace('Add', ordered, null)).toBe(true)
+    expect(needsPlace('Add', ordered, '')).toBe(true)
+    expect(needsPlace('Add', ordered, 'top')).toBe(true)
+  })
+
+  it('lets it through once it has one, typed or stored', () => {
+    expect(needsPlace('Add', ordered, '175')).toBe(false)
+    expect(needsPlace('Add', ordered, 175)).toBe(false)
+    expect(needsPlace('Add', ordered, 0)).toBe(false)
+  })
+
+  it('leaves pages that order themselves, and changes, alone', () => {
+    expect(needsPlace('Add', unordered, null)).toBe(false)
+    expect(needsPlace('Change', ordered, null)).toBe(false)
   })
 })

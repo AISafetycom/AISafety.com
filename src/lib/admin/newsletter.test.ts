@@ -1,17 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   cardGroups,
+  contentChecks,
   contentDigest,
+  designOf,
   DraftProblemError,
   FieldError,
   FitError,
   formatLocal,
   isLiveCampaign,
+  lastIssueSent,
   liveCampaignsNamed,
   previewText,
   RemoveCardError,
+  PutBackError,
+  removalCopy,
   removeCardHtml,
+  removedCards,
   ReorderError,
+  restoreCardHtml,
   reorderHtml,
   sendTestCopy,
   setFieldsHtml,
@@ -39,6 +46,7 @@ import {
 import { createHash } from 'node:crypto'
 import cardEdit from './__fixtures__/newsletter-card-edit.json'
 import cardRemove from './__fixtures__/newsletter-card-remove.json'
+import cardPutBack from './__fixtures__/newsletter-card-put-back.json'
 import siteCardEdit from './__fixtures__/newsletter-site-card-edit.json'
 
 // Fixtures generated with the pipeline's own function
@@ -128,6 +136,7 @@ describe('cardGroups', () => {
             fit: null,
             pipelineFit: null,
             fields: [],
+            site: false,
           },
           {
             key: 'b',
@@ -136,6 +145,7 @@ describe('cardGroups', () => {
             fit: null,
             pipelineFit: null,
             fields: [],
+            site: false,
           },
           {
             key: 'c',
@@ -144,6 +154,7 @@ describe('cardGroups', () => {
             fit: null,
             pipelineFit: null,
             fields: [],
+            site: false,
           },
         ],
       },
@@ -237,8 +248,22 @@ describe('removeCardHtml (mirrors ~/Newsletter/render.py remove_card)', () => {
     const twice = removeCardHtml(once.html, 'g1', 'x')
     expect(removedList(html)).toBeUndefined()
     expect(removedList(twice.html)).toEqual([
-      { g: 'g0', key: 'b', title: 'Title b' },
-      { g: 'g1', key: 'x', title: 'Title x' },
+      {
+        g: 'g0',
+        key: 'b',
+        title: 'Title b',
+        p: 1,
+        d: 1,
+        b: removalCopy(html, 'g0', 'b').b,
+      },
+      {
+        g: 'g1',
+        key: 'x',
+        title: 'Title x',
+        p: 0,
+        d: 0,
+        b: removalCopy(once.html, 'g1', 'x').b,
+      },
     ])
   })
   it('refuses the last card of a section, an unknown card and an email without a manifest', () => {
@@ -258,6 +283,143 @@ describe('removeCardHtml (mirrors ~/Newsletter/render.py remove_card)', () => {
   })
 })
 
+describe('restoreCardHtml (mirrors ~/Newsletter/render.py restore_card)', () => {
+  const html = issue([
+    { id: 'g0', label: 'Closing soon', keys: ['a', 'b', 'c', 'd', 'e'] },
+    { id: 'g1', label: 'New', keys: ['x', 'y'] },
+  ])
+  const sha = (s: string) =>
+    createHash('sha256').update(s, 'utf8').digest('hex')
+  /** The copy as Put back reads it back from the Blob store. */
+  const copyOf = (email: string, gid: string, key: string) =>
+    JSON.parse(removalCopy(email, gid, key).body)
+  const textOf = (email: string) =>
+    JSON.parse(
+      Buffer.from(
+        /<!--aisafety-cards:([A-Za-z0-9+/=]+)-->/.exec(email)![1],
+        'base64'
+      ).toString('utf8')
+    )
+      .text.map((s: { t: string }) => s.t)
+      .join('')
+  it('names the copy by its content and keeps what goes in it', () => {
+    const c = removalCopy(html, 'g0', 'b')
+    expect(c.b).toBe(sha(c.body).slice(0, 16))
+    expect(c.path).toBe(`newsletter/removed/${c.b}.json`)
+    expect(JSON.parse(c.body)).toEqual({
+      v: 1,
+      g: 'g0',
+      key: 'b',
+      block: '<!--card:g0:b--><div>b</div><!--/card-->',
+      card: { key: 'b', title: 'Title b' },
+      text: '* b\n',
+    })
+  })
+  it('undoes a removal byte for byte', () => {
+    for (const key of ['a', 'c', 'e']) {
+      const out = removeCardHtml(html, 'g0', key)
+      const back = restoreCardHtml(out.html, copyOf(html, 'g0', key))
+      expect(back.html).toBe(html)
+      expect(back.text).toBe(textOf(html))
+      expect(removedCards(back.html)).toEqual([])
+    }
+  })
+  it('puts cards back where they were, in any order', () => {
+    for (const gone of [
+      ['b', 'c'],
+      ['c', 'b'],
+      ['b', 'd'],
+      ['e', 'a', 'c'],
+    ]) {
+      let email = html
+      const copies: Record<string, ReturnType<typeof copyOf>> = {}
+      for (const key of gone) {
+        copies[key] = copyOf(email, 'g0', key)
+        email = removeCardHtml(email, 'g0', key).html
+      }
+      expect(removedCards(email).map(r => r.key)).toEqual(gone)
+      for (const order of [gone, [...gone].reverse()]) {
+        let out = email
+        for (const key of order) out = restoreCardHtml(out, copies[key]).html
+        expect(out).toBe(html)
+      }
+    }
+  })
+  it('keeps Pen’s order in the manifest when the cards moved meanwhile', () => {
+    const moved = reorderHtml(html, { g0: ['c', 'b', 'a', 'd', 'e'] }).html
+    const copy = copyOf(moved, 'g0', 'b')
+    const out = reorderHtml(removeCardHtml(moved, 'g0', 'b').html, {
+      g0: ['a', 'c', 'd', 'e'],
+    })
+    const back = restoreCardHtml(out.html, copy)
+    expect(cardGroups(back.html)?.[0].cards.map(c => c.key)).toEqual([
+      'a',
+      'b',
+      'c',
+      'd',
+      'e',
+    ])
+    expect(back.text).toBe(
+      'HEAD\n== Closing soon ==\n* a\n* b\n* c\n* d\n* e\n== New ==\n* x\n* y\nTAIL\n'
+    )
+  })
+  it('says which removed cards can be put back', () => {
+    const out = removeCardHtml(html, 'g1', 'x')
+    expect(removedCards(out.html)).toEqual([
+      { group: 'g1', key: 'x', title: 'Title x', canPutBack: true },
+    ])
+    expect(removedCards(html)).toEqual([])
+  })
+  it('refuses what it can’t bring back', () => {
+    const copy = copyOf(html, 'g0', 'b')
+    const out = removeCardHtml(html, 'g0', 'b').html
+    // Removed before Put back existed: no place or copy recorded.
+    const manifest = JSON.parse(
+      Buffer.from(
+        /<!--aisafety-cards:([A-Za-z0-9+/=]+)-->/.exec(out)![1],
+        'base64'
+      ).toString('utf8')
+    )
+    manifest.removed = [{ g: 'g0', key: 'b', title: 'Title b' }]
+    const old = out.replace(
+      /<!--aisafety-cards:[A-Za-z0-9+/=]+-->/,
+      `<!--aisafety-cards:${Buffer.from(JSON.stringify(manifest)).toString('base64')}-->`
+    )
+    expect(removedCards(old)[0].canPutBack).toBe(false)
+    for (const [email, c] of [
+      [html, copy], // not removed
+      [old, copy],
+      [out, { ...copy, block: '<!--card:g0:a--><div>a</div><!--/card-->' }],
+      [out, { ...copy, block: copy.block + copy.block }],
+      ['<p>x</p>', copy],
+    ] as const)
+      expect(() => restoreCardHtml(email, c)).toThrow(PutBackError)
+    const back = restoreCardHtml(out, copy).html
+    expect(() => restoreCardHtml(back, copy)).toThrow(PutBackError)
+  })
+  it('gives byte-identical output to the pipeline (render.py restore_card)', () => {
+    let email = reorderHtml(cardEdit.input, cardPutBack.order).html
+    const copies: Record<string, string> = {}
+    for (const step of cardPutBack.steps) {
+      const copy = removalCopy(email, cardPutBack.group, step.remove)
+      expect(copy.b).toBe(step.b)
+      expect(sha(copy.body)).toBe(step.copySha256)
+      copies[step.remove] = copy.body
+      const out = removeCardHtml(email, cardPutBack.group, step.remove)
+      expect(sha(out.html)).toBe(step.htmlSha256)
+      expect(out.text).toBe(step.text)
+      email = out.html
+    }
+    email = reorderHtml(email, cardPutBack.orderAfter).html
+    for (const step of cardPutBack.steps) {
+      const out = restoreCardHtml(email, JSON.parse(copies[step.remove]))
+      expect(sha(out.html)).toBe(step.putBack.htmlSha256)
+      expect(out.text).toBe(step.putBack.text)
+      email = out.html
+    }
+  })
+})
+
 describe('previewText', () => {
   it('reads the hidden preheader and drops the invisible padding (entity form)', () => {
     const html =
@@ -273,6 +435,58 @@ describe('previewText', () => {
   })
   it('is null without a preheader', () => {
     expect(previewText('<p>no preheader</p>')).toBeNull()
+  })
+})
+
+describe('designOf (the stamp ~/Newsletter/design.py writes)', () => {
+  it('reads the fingerprint before </body>', () => {
+    const html =
+      '<body><p>x</p><!--aisafety-cards:eyJ2IjoxfQ==-->\n<!--aisafety-design:0a1b2c3d4e5f-->\n</body>'
+    expect(designOf(html)).toBe('0a1b2c3d4e5f')
+  })
+  it('is null for an email built before the stamp, or a malformed one', () => {
+    expect(designOf('<body><p>x</p></body>')).toBeNull()
+    expect(designOf('<!--aisafety-design:XYZ-->')).toBeNull()
+  })
+})
+
+describe('lastIssueSent', () => {
+  const c = (id: string, name: string, status: string, sent = '0') => ({
+    id,
+    name,
+    status,
+    send_amt: sent,
+  })
+  const campaigns = [
+    c('300', 'Events · Week 47, 2026', '0'),
+    c('290', 'Training · Week 46, 2026', '5', '3100'),
+    c('285', 'Events · Week 46, 2026 · wave 2/2', '1'),
+    c('284', 'Events · Week 46, 2026 · wave 1/2', '5', '1500'),
+    c('270', 'Events · Week 45, 2026', '5', '3000'),
+    c('260', 'Funding · Issue #26, 2026', '5', '850'),
+  ]
+  it('names the newest issue that reached readers in the same newsletter, without its wave', () => {
+    expect(lastIssueSent(campaigns, 'Events · Week 47, 2026', '6')).toBe(
+      'Events · Week 46, 2026'
+    )
+    expect(lastIssueSent(campaigns, 'Training · Week 47, 2026', '7')).toBe(
+      'Training · Week 46, 2026'
+    )
+  })
+  it('skips the draft’s own issue (a wave still to go) and sends that never started', () => {
+    expect(lastIssueSent(campaigns, 'Events · Week 46, 2026', '6')).toBe(
+      'Events · Week 45, 2026'
+    )
+    expect(
+      lastIssueSent(
+        [c('9', 'Funding · Issue #27, 2026', '1')],
+        'Funding · Issue #28, 2026',
+        '8'
+      )
+    ).toBeNull()
+  })
+  it('is null on a test list', () => {
+    expect(lastIssueSent(campaigns, 'Events · Week 47, 2026', '5')).toBeNull()
   })
 })
 
@@ -646,6 +860,155 @@ describe('card text fields on site cards', () => {
       'Time commitment'
     )
   })
+
+  it('never flags Events and Training cards as site-drawn Funding cards', () => {
+    for (const c of [training, events])
+      expect(cardGroups(c.input)![0].cards.every(k => !k.site)).toBe(true)
+  })
+})
+
+/* ─── Funding cards drawn by the site (funderCardProps, 28 Oct 2026) ──── */
+
+describe('funding cards drawn by the site', () => {
+  const { funding } = siteCardEdit
+  const CORRIGIBILITY = 'recMjI8b5pKstyGHP'
+  const LIGHTCONE = 'recgJ8r2zWoOkmZbe'
+
+  it('labels the status, Who can apply and Grant size rows', () => {
+    const [closing, open] = cardGroups(funding.input)!
+    expect(closing.cards[0].fields.map(f => [f.name, f.label])).toEqual([
+      ['title', 'Title'],
+      ['desc', 'Description'],
+      ['b0', 'Accepting applications'],
+      ['b1', 'Who can apply'],
+      ['b2', 'Grant size'],
+    ])
+    // No grant size: the rows close up, as on the site.
+    expect(open.cards[0].fields.map(f => [f.name, f.icon])).toEqual([
+      ['title', null],
+      ['desc', null],
+      ['b0', 'form-check'],
+      ['b1', 'team'],
+    ])
+  })
+
+  it('labels an invite-only status row like the other two', () => {
+    const html = funding.input.replace(
+      '<!--f:b0:form-check-->Applications close 31 Oct 2026',
+      '<!--f:b0:paper-with-x-->Invite only, no applications'
+    )
+    const card = cardGroups(html)![0].cards[0]
+    expect(card.fields.find(f => f.name === 'b0')).toMatchObject({
+      label: 'Accepting applications',
+      icon: 'paper-with-x',
+      value: 'Invite only, no applications',
+    })
+  })
+
+  it('reads the site flag and Pen’s “Consider applying if” from the manifest', () => {
+    const cards = cardGroups(funding.input)!.flatMap(g => g.cards)
+    expect(cards.map(c => [c.key, c.site, c.fit === c.pipelineFit])).toEqual([
+      [CORRIGIBILITY, true, true],
+      [LIGHTCONE, true, true],
+    ])
+    expect(cards[0].fit).toMatch(/^you need around \$5k–\$35k/)
+    // Lightcone has no line yet, but can be given one.
+    expect(cards[1].fit).toBe('')
+    // A Pen-worded funding card (no flag) is not one the site drew.
+    expect(
+      cardGroups(fundingIssue([{ key: 'a', fit: 'x' }]))![0].cards[0].site
+    ).toBe(false)
+  })
+
+  it('gives byte-identical output to the pipeline for a text edit', () => {
+    const out = setFieldsHtml(
+      funding.input,
+      funding.group,
+      funding.key,
+      funding.values
+    )
+    expect(createHash('sha256').update(out.html, 'utf8').digest('hex')).toBe(
+      funding.expectedHtmlSha256
+    )
+    expect(out.text).toBe(funding.expectedText)
+    // The edit keeps Pen's line and the flag.
+    const card = cardGroups(out.html)![0].cards[0]
+    expect(card.site).toBe(true)
+    expect(card.fit).toBe(card.pipelineFit)
+  })
+
+  it('gives byte-identical output to the pipeline for “Consider applying if”', () => {
+    expect(funding.fit.map(c => c.key)).toEqual([CORRIGIBILITY, LIGHTCONE])
+    // Each case's `fit` is the plain text the page sends; setFitHtml escapes
+    // it itself.
+    for (const c of funding.fit) {
+      const out = setFitHtml(funding.input, c.group, c.key, c.fit)
+      expect(createHash('sha256').update(out.html, 'utf8').digest('hex')).toBe(
+        c.expectedHtmlSha256
+      )
+      expect(out.text).toBe(c.expectedText)
+      const card = cardGroups(out.html)!
+        .flatMap(g => g.cards)
+        .find(k => k.key === c.key)!
+      expect(card.fit).toBe(c.fit)
+    }
+  })
+
+  it('refuses a “Consider applying if” line on a card with no description', () => {
+    // A funder whose Airtable Description is empty: the site card has no
+    // description block for the line to sit in.
+    const start = funding.input.indexOf(`<!--card:g1:${LIGHTCONE}-->`)
+    const end = funding.input.indexOf('<!--/card-->', start)
+    const card = funding.input
+      .slice(start, end)
+      .replace(
+        /<div class="pb"[^>]*><!--f:desc-->[\s\S]*?<!--\/f--><\/div>/,
+        ''
+      )
+    expect(card).not.toContain('<!--f:desc-->')
+    const html = funding.input.slice(0, start) + card + funding.input.slice(end)
+    expect(() => setFitHtml(html, 'g1', LIGHTCONE, 'x')).toThrow(FitError)
+  })
+
+  it('still warns about a status row whose deadline has passed', () => {
+    const checks = contentChecks({
+      name: 'Funding · Issue #24, 2026',
+      listId: '8',
+      subject: 'Issue #24, 2026',
+      html: funding.input,
+      text: funding.expectedText,
+      fromEmail: 'funding@news.aisafety.com',
+      replyTo: null,
+      now: new Date('2026-11-02T09:00:00Z'),
+    })
+    expect(
+      checks.warnings.filter(w => w.kind === 'date').map(w => w.text)
+    ).toEqual([
+      '“Corrigibility Research Fund” – Accepting applications: “Applications close 31 Oct 2026” (31 October 2026 has passed)',
+    ])
+  })
+})
+
+describe('contentChecks size limit', () => {
+  const oversize = (name: string) =>
+    contentChecks({
+      name,
+      listId: '6',
+      subject: 'Week 46, 2026',
+      html: `<p>${'a'.repeat(110 * 1024)}</p> %UNSUBSCRIBELINK% %SENDER-INFO-SINGLELINE%`,
+      text: '%UNSUBSCRIBELINK% %SENDER-INFO-SINGLELINE%',
+      fromEmail: 'events@news.aisafety.com',
+      replyTo: null,
+      now: new Date('2026-11-12T12:00:00Z'),
+    }).blocks.filter(b => b.includes('KB limit'))
+
+  it('blocks an email over the limit', () => {
+    expect(oversize('Events · Week 47, 2026')).toHaveLength(1)
+  })
+
+  it('lets the one trial issue through (12 November 2026)', () => {
+    expect(oversize('Events · Week 46, 2026')).toEqual([])
+  })
 })
 
 /* ─── Test copies ───────────────────────────────────────────────────── */
@@ -1010,7 +1373,7 @@ describe('waveProgress', () => {
     )
     expect(judged.verdictPending).toBe(false)
     expect(judged.startFrom).toBe(Date.parse('2026-10-09T08:30:00Z'))
-    // Funding isn't judged by the watcher: no room kept for a verdict.
+    // Funding is judged too since its move: the same room for the verdict.
     const funding = waveProgress(
       4,
       [w('1', 1, '5')],
@@ -1018,8 +1381,8 @@ describe('waveProgress', () => {
       '-05:00',
       waveTiming('8')
     )
-    expect(funding.verdictPending).toBe(false)
-    expect(funding.startFrom).toBe(Date.parse('2026-10-09T08:30:00Z'))
+    expect(funding.verdictPending).toBe(true)
+    expect(funding.startFrom).toBe(Date.parse('2026-10-09T10:00:00Z'))
     // A test list waits ten minutes after the wave before it finished.
     const test = waveProgress(
       4,
@@ -1056,14 +1419,14 @@ describe('waveSchedule: when each wave of one approval starts', () => {
   const times = (slots: Array<{ wave: number; startsAt: number }>) =>
     slots.map(s => [s.wave, new Date(s.startsAt).toISOString()])
 
-  it('nothing sent yet: wave 1 five minutes out, then a day apart', () => {
+  it('nothing sent yet: wave 1 a minute out, then a day apart', () => {
     expect(
       times(scheduleWaves('6', 1, 4, at('2026-10-08T21:00:00Z'), null))
     ).toEqual([
-      [1, '2026-10-08T21:05:00.000Z'],
-      [2, '2026-10-09T21:05:00.000Z'],
-      [3, '2026-10-10T21:05:00.000Z'],
-      [4, '2026-10-11T21:05:00.000Z'],
+      [1, '2026-10-08T21:01:00.000Z'],
+      [2, '2026-10-09T21:01:00.000Z'],
+      [3, '2026-10-10T21:01:00.000Z'],
+      [4, '2026-10-11T21:01:00.000Z'],
     ])
   })
 
@@ -1089,20 +1452,20 @@ describe('waveSchedule: when each wave of one approval starts', () => {
       [3, '2026-10-10T17:10:00.000Z'],
       [4, '2026-10-11T17:10:00.000Z'],
     ])
-    // Pressed later than that: five minutes from the press.
+    // Pressed later than that: a minute from the press.
     expect(
       times(scheduleWaves('6', 2, 4, at('2026-10-09T18:00:00Z'), p.startFrom))
     ).toEqual([
-      [2, '2026-10-09T18:05:00.000Z'],
-      [3, '2026-10-10T18:05:00.000Z'],
-      [4, '2026-10-11T18:05:00.000Z'],
+      [2, '2026-10-09T18:01:00.000Z'],
+      [3, '2026-10-10T18:01:00.000Z'],
+      [4, '2026-10-11T18:01:00.000Z'],
     ])
   })
 
   it('one wave left: just that one', () => {
     expect(
       times(scheduleWaves('7', 4, 4, at('2026-10-11T12:00:00Z'), null))
-    ).toEqual([[4, '2026-10-11T12:05:00.000Z']])
+    ).toEqual([[4, '2026-10-11T12:01:00.000Z']])
   })
 
   it('test lists: two minutes out, then ten minutes apart', () => {
@@ -1142,15 +1505,15 @@ describe('waveSchedule: when each wave of one approval starts', () => {
     ).toEqual([{ wave: 1, startsAt: 1100 }])
   })
 
-  it('timing per list: real lists 18 hours + verdict room on Events and Training', () => {
+  it('timing per list: real lists 18 hours + verdict room on Events, Training and Funding', () => {
     expect(waveTiming('6')).toEqual({
       gapMs: 18 * 3_600_000,
       leadMs: 90 * 60_000,
       judged: true,
-      delayMs: 5 * 60_000,
+      delayMs: 1 * 60_000,
       spacingMs: 24 * 3_600_000,
     })
-    expect(waveTiming('8')).toMatchObject({ judged: false, leadMs: 0 })
+    expect(waveTiming('8')).toEqual(waveTiming('6'))
     expect(waveTiming('5')).toEqual({
       gapMs: 10 * 60_000,
       leadMs: 0,
@@ -1249,8 +1612,8 @@ describe('wavesStillToGo', () => {
 })
 
 describe('send delay', () => {
-  it('five minutes on the real lists, two on the test lists', () => {
-    for (const l of ['6', '7', '8']) expect(sendDelayMinutes(l)).toBe(5)
+  it('one minute on the real lists, two on the test lists', () => {
+    for (const l of ['6', '7', '8']) expect(sendDelayMinutes(l)).toBe(1)
     for (const l of ['4', '5']) expect(sendDelayMinutes(l)).toBe(2)
   })
 })

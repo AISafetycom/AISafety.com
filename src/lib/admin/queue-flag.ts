@@ -196,3 +196,18 @@ export function verdictWords(verdict: Verdict | null): string {
   if (verdict === 'Dismiss') return 'Dismiss the flag'
   return verdict ?? ''
 }
+
+/** Pure: the line under "Fable says" once the flag was updated from the
+ *  chat, or null when it was not. Without it the new verdict sat above the
+ *  chat that changed it, so his messages read as answers to it (Bryce,
+ *  22 Oct 2026, on Cyber X AI Reading Group: Publish → Don't publish). */
+export function flagRevisedNote(item: {
+  verdict: Verdict | null
+  flagUndo: boolean
+  flagWas: Verdict | null
+}): string | null {
+  if (!item.flagUndo) return null
+  if (!item.flagWas) return 'Set in the chat below'
+  if (item.flagWas === item.verdict) return 'Reasons updated in the chat below'
+  return `Changed from “${verdictWords(item.flagWas)}” in the chat below`
+}

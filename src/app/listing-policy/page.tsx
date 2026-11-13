@@ -35,7 +35,7 @@ const PAGE_PATHS = new Set([
 function linkPagePaths(text: string) {
   return text.split(/(?<![\w/])(\/[a-z-]+)(?![\w/-])/).map((piece, i) =>
     PAGE_PATHS.has(piece) ? (
-      <Link key={i} href={piece} className="color-light-teal">
+      <Link key={i} href={piece} className="color-teal-300">
         {piece}
       </Link>
     ) : (
@@ -58,7 +58,7 @@ function Inline({ text }: { text: string }) {
               href={part.href}
               target="_blank"
               rel="noopener noreferrer"
-              className="color-light-teal"
+              className="color-teal-300"
             >
               {part.text}
             </a>
@@ -138,7 +138,7 @@ export default function ListingPolicyPage() {
               href={CONTACT_FORM}
               target="_blank"
               rel="noopener noreferrer"
-              className="color-light-teal"
+              className="color-teal-300"
             >
               Send us an email
             </a>
@@ -147,7 +147,7 @@ export default function ListingPolicyPage() {
               href={CORRECTION_FORM}
               target="_blank"
               rel="noopener noreferrer"
-              className="color-light-teal"
+              className="color-teal-300"
             >
               Suggest a correction
             </a>

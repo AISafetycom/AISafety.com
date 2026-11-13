@@ -26,10 +26,11 @@ export const WAVE_SPACING_HOURS = 24
  *  since the watcher never judges a test list. */
 export const WAVE_SPACING_MINUTES_TEST = 10
 
-/** The lists whose waves the send watcher judges 18 hours after they finish
- *  (Events and Training: the lists the imported readers are on). Only their
- *  waves wait for a verdict; Funding's would go on their schedule. */
-export const HEALTH_CHECK_LISTS: readonly string[] = ['6', '7']
+/** The lists whose sends and waves the send watcher judges 18 hours after
+ *  they finish: the lists the imported readers are on (Events and Training
+ *  from 8 October 2026, Funding from its move day). Only their waves wait for
+ *  a verdict. */
+export const HEALTH_CHECK_LISTS: readonly string[] = ['6', '7', '8']
 
 /** The watcher cancels a wave (and every later one) that starts within this
  *  many minutes while the wave before it has no verdict. */

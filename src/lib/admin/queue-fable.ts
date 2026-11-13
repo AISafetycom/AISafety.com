@@ -82,7 +82,7 @@ export function wentOutNote(
 }
 
 /** "A", "A and B", "A, B, and C". */
-function listed(names: string[]): string {
+export function listed(names: string[]): string {
   if (names.length < 3) return names.join(' and ')
   return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`
 }

@@ -1,0 +1,145 @@
+/* Open and close motion for admin panels. Kept short on purpose: panels
+   should still feel instant, they just don't jump. The timings live on
+   .adminWrap (admin.module.css). Each `…Out` class plays while useClosing()
+   (motion.ts) keeps a closing panel on screen, and ignores clicks meanwhile.
+   Reduced motion switches all of it off. */
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Menus and popovers: drop in a few pixels. */
+  .pop {
+    animation: popIn var(--admin-open) both;
+  }
+
+  .popOut {
+    animation: popOut var(--admin-close) both;
+  }
+
+  /* Backdrops behind dialogs and drawers. */
+  .fade {
+    animation: fadeIn var(--admin-open) both;
+  }
+
+  .fadeOut {
+    animation: fadeOut var(--admin-close) both;
+  }
+
+  /* Dialogs: grow in from just under full size. */
+  .rise {
+    animation: riseIn var(--admin-open) both;
+  }
+
+  .riseOut {
+    animation: riseOut var(--admin-close) both;
+  }
+
+  /* Drawers on the right edge. */
+  .slide {
+    animation: slideIn var(--admin-open) both;
+  }
+
+  .slideOut {
+    animation: slideOut var(--admin-close) both;
+  }
+
+  /* Collapse (Collapse.tsx): grows open and shut. */
+  .collapseIn {
+    animation: collapseIn var(--admin-open) both;
+  }
+
+  .collapseOut {
+    animation: collapseOut var(--admin-close) both;
+  }
+
+  .collapseIn > .collapseBody,
+  .collapseOut > .collapseBody {
+    overflow: hidden;
+  }
+}
+
+.popOut,
+.fadeOut,
+.riseOut,
+.slideOut,
+.collapseOut {
+  pointer-events: none;
+}
+
+/* `translate` and `scale` rather than `transform`, so panels already
+   centred with a transform stay centred. */
+@keyframes popIn {
+  from {
+    opacity: 0;
+    translate: 0 -4px;
+  }
+}
+
+@keyframes popOut {
+  to {
+    opacity: 0;
+    translate: 0 -4px;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes fadeOut {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    scale: 0.97;
+  }
+}
+
+@keyframes riseOut {
+  to {
+    opacity: 0;
+    scale: 0.97;
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    translate: 32px 0;
+  }
+}
+
+@keyframes slideOut {
+  to {
+    opacity: 0;
+    translate: 32px 0;
+  }
+}
+
+/* A one-row grid animates between no height and the content's height. */
+.collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+}
+
+.collapseBody {
+  min-height: 0;
+}
+
+@keyframes collapseIn {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+
+@keyframes collapseOut {
+  to {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}

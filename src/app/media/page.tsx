@@ -20,6 +20,7 @@ import {
 } from './content'
 import { NEWS } from './news'
 import styles from './page.module.css'
+import Button from '@/components/Button'
 
 export const metadata: Metadata = {
   title: 'Press and media – AISafety.com',
@@ -148,7 +149,7 @@ export default async function MediaPage() {
 
       <h2 className="width-9-col-narrow padding-bottom-56px">
         AISafety.com is a{' '}
-        <span className="color-light-teal">nonprofit resource hub</span> for AI
+        <span className="color-teal-300">nonprofit resource hub</span> for AI
         existential safety. This page has what you need to write about us, and
         what you need to write about the field.
       </h2>
@@ -158,7 +159,7 @@ export default async function MediaPage() {
           <p className="color-white paragraph-default-bold">
             Writing about AISafety.com?
           </p>
-          <p className="paragraph-small color-teal-300">
+          <p className="paragraph-small color-teal-grey-300">
             Boilerplate, team bios, key numbers and logos are below. Press
             contact:{' '}
             <PressLink
@@ -172,30 +173,32 @@ export default async function MediaPage() {
             </PressLink>
             .
           </p>
-          <JumpLink
+          <Button
+            as={JumpLink}
+            variant="clear-border"
             targetId="boilerplate"
             label="Jumped to the boilerplate"
-            className="button-secondary"
           >
             Start with the boilerplate
-          </JumpLink>
+          </Button>
         </div>
         <div className={styles.entryCard}>
           <p className="color-white paragraph-default-bold">
             Writing about AI risk?
           </p>
-          <p className="paragraph-small color-teal-300">
+          <p className="paragraph-small color-teal-grey-300">
             Skip to the reporter resources: the field map, plain-language
             explainers, open data, and the organizations we recommend for
             questions about AI risk itself.
           </p>
-          <JumpLink
+          <Button
+            as={JumpLink}
+            variant="clear-border"
             targetId="reporter-resources"
             label="Jumped to the reporter resources"
-            className="button-secondary"
           >
             Reporter resources
-          </JumpLink>
+          </Button>
         </div>
       </div>
 
@@ -323,7 +326,7 @@ export default async function MediaPage() {
                   <p className="paragraph-default-bold padding-bottom-4px">
                     {person.name}
                   </p>
-                  <p className="paragraph-small color-teal-300">
+                  <p className="paragraph-small color-teal-grey-300">
                     {person.role}
                   </p>
                 </div>
@@ -567,22 +570,24 @@ export default async function MediaPage() {
                   unoptimized
                 />
               </PressLink>
-              <span className="paragraph-xs color-teal-300">{shot.label}</span>
+              <span className="paragraph-xs color-teal-grey-300">
+                {shot.label}
+              </span>
             </div>
           ))}
         </div>
 
         <div className={styles.kitRow}>
-          <PressLink
+          <Button
+            as={PressLink}
             href={PRESS_KIT_ZIP}
             action="download"
             label="Downloaded press kit"
-            className="button-primary"
           >
             Download everything (zip
             {kit ? `, ${(kit.zipBytes / 1_000_000).toFixed(1)} MB` : ''})
-          </PressLink>
-          <span className="paragraph-xs color-teal-300">
+          </Button>
+          <span className="paragraph-xs color-teal-grey-300">
             All logos and screenshots above, in one file.
           </span>
         </div>
@@ -630,7 +635,7 @@ export default async function MediaPage() {
             >
               {PRESS_EMAIL}
             </PressLink>
-            <p className="paragraph-small color-teal-300">
+            <p className="paragraph-small color-teal-grey-300">
               We are a small team, so please include your deadline in the
               subject line. We aim to reply within two working days.
             </p>
@@ -678,7 +683,7 @@ export default async function MediaPage() {
               </a>
               , or{' '}
               <a
-                href="mailto:bryceerobertson@gmail.com?subject=Volunteering%20for%20AISafety.com"
+                href="https://discord.gg/faamWzPcv8"
                 target="_blank"
                 rel="noopener noreferrer"
                 className={styles.inlineLink}

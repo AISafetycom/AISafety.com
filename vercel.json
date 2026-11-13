@@ -23,6 +23,14 @@
     {
       "path": "/api/admin/newsletter/archive",
       "schedule": "37 6 * * *"
+    },
+    {
+      "path": "/api/admin/analytics/subscriber-history",
+      "schedule": "23 */3 * * *"
+    },
+    {
+      "path": "/api/admin/analytics/jobs-seen",
+      "schedule": "17 * * * *"
     }
   ]
 }

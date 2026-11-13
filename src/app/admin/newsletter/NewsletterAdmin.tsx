@@ -15,7 +15,11 @@ import {
   wavesLabel,
 } from '@/lib/admin/newsletter-warmup'
 import Icon from '@/components/Icon'
+import { webPath } from '@/lib/newsletter-web'
 import adminStyles from '../admin.module.css'
+import { Collapse } from '../Collapse'
+import { holdOnScreen, useClosing } from '../motion'
+import motion from '../motion.module.css'
 import styles from './newsletter.module.css'
 import NewsletterAlerts from './NewsletterAlerts'
 
@@ -70,8 +74,15 @@ type AlertState =
   | { status: 'error'; error: string }
 
 /** Pen stamps each item with its Airtable record id; only those cards can
- *  pass a description on to the site's listing. */
+ *  pass a title or description on to the site's listing. */
 const RECORD_KEY_RE = /^rec[A-Za-z0-9]{14}$/
+
+/** The card fields that can go on to the site's listing, and what each is
+ *  called on the button (title → the listing's Name, 6 Nov 2026). */
+const SITE_FIELDS: Record<string, string> = {
+  title: 'title',
+  desc: 'description',
+}
 
 /** How long after the last keystroke the editor saves by itself. */
 const AUTOSAVE_DELAY_MS = 900
@@ -83,6 +94,16 @@ interface CardGroup {
   id: string
   label: string
   cards: CardInfo[]
+}
+
+/** A card taken out of the draft on this page. */
+interface RemovedCard {
+  group: string
+  key: string
+  title: string
+  /** Its copy and place were recorded (removed since 29 Oct 2026), so Put
+   *  back can bring it back. */
+  canPutBack: boolean
 }
 
 interface Draft {
@@ -124,9 +145,14 @@ interface Draft {
   editLock: string | null
   /** The inbox preview line (hidden preheader), as Gmail shows it. */
   preview: string | null
+  /** The last issue sent on its list ("Week 45, 2026") when the email's
+   *  design has changed since: a Send test is worth it. */
+  designChangedSince: string | null
   /** Cards by section, current order; null for drafts built before the
    *  renderer stamped card markers (no Reorder button then). */
   cards: CardGroup[] | null
+  /** Cards taken out of it on this page, oldest first. */
+  removed: RemovedCard[]
 }
 
 /** Something to look at before sending: leftover words (TEST, TODO…) or a
@@ -270,9 +296,23 @@ const LINEUP: Array<{
   key: keyof Payload['lineup']
   label: string
   since: string
+  /** After the date: Events and Training count only listings Pen hasn't
+   *  put in an issue yet (Newsletter not ticked), so the caption says so
+   *  (Bryce, 22 Oct 2026). */
+  after?: string
 }> = [
-  { key: 'events', label: 'Events', since: 'added since' },
-  { key: 'training', label: 'Training', since: 'added since' },
+  {
+    key: 'events',
+    label: 'Events',
+    since: 'added since',
+    after: 'and not yet in an issue',
+  },
+  {
+    key: 'training',
+    label: 'Training',
+    since: 'added since',
+    after: 'and not yet in an issue',
+  },
   { key: 'funding', label: 'Funding', since: 'new since' },
 ]
 
@@ -407,6 +447,14 @@ function waveTimeBoth(at: string | number): string {
   return offset === 0
     ? `${waveTime(at)} UTC`
     : `${waveTime(at)} (${waveTimeUtc(at)})`
+}
+
+/** The waves box on a draft: always while the warm-up is on; with it off
+ *  (12 Oct 2026) only for an issue already going out in waves, so its
+ *  Cancel buttons stay reachable. Otherwise every issue goes to the whole
+ *  list (Bryce, 22 Oct 2026: "I guess we can turn off the waves thing?"). */
+function showWaves(p: WavePlan): boolean {
+  return NEWSLETTER_WARMUP || p.going || p.reached > 0
 }
 
 /** What Approve sends unless the approver picks otherwise: the waves still
@@ -567,6 +615,9 @@ export default function NewsletterAdmin({
   const [stopBusyId, setStopBusyId] = useState<string | null>(null)
   /** The draft whose Delete dialog is open, and the one being deleted. */
   const [deleting, setDeleting] = useState<Draft | null>(null)
+  const [confirmShown, confirmClosing] = useClosing(confirming)
+  const [deleteShown, deleteClosing] = useClosing(deleting)
+  const [stopShown, stopClosing] = useClosing(stopping)
   const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null)
   const [notice, setNotice] = useState<{
     kind: 'ok' | 'error'
@@ -1008,21 +1059,31 @@ export default function NewsletterAdmin({
     return () => window.removeEventListener('message', onMessage)
   }, [])
 
-  function togglePreview(id: string) {
+  function togglePreview(id: string, button: HTMLElement) {
     previewScroll.current = 0
     setPreviewY(0)
+    if (previewId && previewId !== id) holdOnScreen(button)
     setPreviewId(previewId === id ? null : id)
   }
 
   /** A reorder or a text edit was written into the draft: keep the cards,
    *  reload the preview where the reader was, say so (an empty `text` = an
    *  autosave, which reports inside the editor instead). */
-  function draftChanged(draftId: string, cards: CardGroup[], text: string) {
+  function draftChanged(
+    draftId: string,
+    cards: CardGroup[],
+    text: string,
+    removed?: RemovedCard[]
+  ) {
     setData(d =>
       d
         ? {
             ...d,
-            drafts: d.drafts.map(x => (x.id === draftId ? { ...x, cards } : x)),
+            drafts: d.drafts.map(x =>
+              x.id === draftId
+                ? { ...x, cards, ...(removed ? { removed } : {}) }
+                : x
+            ),
           }
         : d
     )
@@ -1197,10 +1258,12 @@ export default function NewsletterAdmin({
       {canSend && (
         <div className={`${adminStyles.notice} ${styles.liveWarning}`}>
           <strong>This sends real emails.</strong> Approving schedules an issue
-          to go out five minutes later (two on the test lists); an issue that
-          goes out in waves gets all its remaining waves scheduled at once, a
-          day apart. Until a send starts you can cancel it; while it’s sending
-          you can pause or stop it under Recent sends. Use with caution.
+          to go out a minute later
+          {NEWSLETTER_WARMUP
+            ? '; an issue that goes out in waves gets all its remaining waves scheduled at once, a day apart'
+            : ''}
+          . Until a send starts you can cancel it; while it’s sending you can
+          pause or stop it under Recent sends.
         </div>
       )}
       {!canSend && (
@@ -1234,7 +1297,7 @@ export default function NewsletterAdmin({
           already in a draft waiting below aren’t counted.
         </p>
         <div className={styles.lineup}>
-          {LINEUP.map(({ key, label, since }) => {
+          {LINEUP.map(({ key, label, since, after }) => {
             const section = data?.lineup[key]
             return (
               <div key={key} className={styles.lineupTile}>
@@ -1244,7 +1307,7 @@ export default function NewsletterAdmin({
                 ) : 'error' in section ? (
                   <span className={styles.noticeError}>{section.error}</span>
                 ) : (
-                  <LineupCounts section={section} since={since} />
+                  <LineupCounts section={section} since={since} after={after} />
                 )}
               </div>
             )
@@ -1269,13 +1332,9 @@ export default function NewsletterAdmin({
           </h2>
         </div>
         <p className={adminStyles.sectionHint}>
-          Issues the pipeline has drafted from Pen. Each one is re-checked here
-          before sending: still a draft, wired to exactly one list, content
-          untouched since the pipeline wrote it, the right sender for its list,
-          a working footer and links, and not already sent. During the warm-up a
-          big list goes out in waves: one approval schedules them all, a day
-          apart, and the send watcher cancels the rest if a wave’s 18-hour check
-          comes back red. The draft stays here until its last wave has gone.
+          Issues the pipeline has drafted from Pen.
+          {NEWSLETTER_WARMUP &&
+            ' During the warm-up a big list goes out in waves: one approval schedules them all, a day apart, and the send watcher cancels the rest if a wave’s 18-hour check comes back red. The draft stays here until its last wave has gone.'}
         </p>
         {/* The first read takes several seconds; say so where the drafts
             will appear, not only in the small line at the top (Bryce, 16
@@ -1388,7 +1447,7 @@ export default function NewsletterAdmin({
                   ))}
                 </ul>
               )}
-              {draft.waves && (
+              {draft.waves && showWaves(draft.waves) && (
                 <WavePanel
                   draftId={draft.id}
                   issue={draft.name}
@@ -1431,11 +1490,21 @@ export default function NewsletterAdmin({
                   <WarningItems items={draft.warnings} />
                 </div>
               )}
+              {/* Only on the weeks the email is drawn differently from the
+                  last issue sent (Bryce, 12 Nov 2026): the preview can't show
+                  how mail apps draw a new design, a test copy can. */}
+              {draft.designChangedSince && data.canSend && testTo && (
+                <p className={`${styles.notice} ${styles.testResult}`}>
+                  The email’s design has changed since{' '}
+                  {draft.designChangedSince} went out, so a Send test is worth
+                  it before you approve.
+                </p>
+              )}
               <div className={styles.actions}>
                 <button
                   type="button"
                   className={styles.button}
-                  onClick={() => togglePreview(draft.id)}
+                  onClick={e => togglePreview(draft.id, e.currentTarget)}
                 >
                   {previewId === draft.id ? 'Hide preview' : 'Preview'}
                 </button>
@@ -1523,15 +1592,15 @@ export default function NewsletterAdmin({
               )}
               {/* The preview brings the reorder panel with it (approvers only;
                   no separate button — Bryce, 11 Sept 2026). */}
-              {previewId === draft.id && (
+              <Collapse open={previewId === draft.id}>
                 <div className={styles.previewRow}>
                   {data.canSend && draft.cards && draft.editable && (
                     <div className={styles.reorderSide}>
                       <ReorderPanel
                         key={draft.id}
                         draft={draft}
-                        onSaved={(cards, text) =>
-                          draftChanged(draft.id, cards, text)
+                        onSaved={(cards, text, removed) =>
+                          draftChanged(draft.id, cards, text, removed)
                         }
                         onUnsavedChange={pending =>
                           setUnsavedId(id =>
@@ -1542,7 +1611,9 @@ export default function NewsletterAdmin({
                     </div>
                   )}
                   <iframe
-                    ref={previewFrame}
+                    // Only the open preview holds the ref: one that is still
+                    // closing must not take it from the one opening.
+                    ref={previewId === draft.id ? previewFrame : undefined}
                     title={`Preview of ${draft.subject}`}
                     className={styles.previewFrame}
                     // Links in the email open in a new, ordinary tab (the
@@ -1556,7 +1627,7 @@ export default function NewsletterAdmin({
                     }&v=${previewNonce}#y=${previewY}`}
                   />
                 </div>
-              )}
+              </Collapse>
             </div>
           )
         })}
@@ -1619,37 +1690,45 @@ export default function NewsletterAdmin({
         )}
       </div>
 
-      {confirming && (
+      {confirmShown && (
         <ConfirmSend
           // New warnings or holds (after a refused approval) start afresh.
           key={[
-            ...confirming.draft.warnings.map(w => w.id),
-            ...confirming.holds,
+            ...confirmShown.draft.warnings.map(w => w.id),
+            ...confirmShown.holds,
           ].join(' ')}
-          draft={confirming.draft}
-          choice={confirming.choice}
-          holds={confirming.holds}
-          changed={alertsFor(confirming.draft.id)}
-          schedule={confirming.schedule}
+          draft={confirmShown.draft}
+          choice={confirmShown.choice}
+          holds={confirmShown.holds}
+          changed={alertsFor(confirmShown.draft.id)}
+          schedule={confirmShown.schedule}
+          closing={confirmClosing}
           onCancel={() => setConfirming(null)}
           onConfirm={(confirmed, override) =>
-            void send(confirming.draft, confirming.choice, confirmed, override)
+            void send(
+              confirmShown.draft,
+              confirmShown.choice,
+              confirmed,
+              override
+            )
           }
         />
       )}
-      {deleting && (
+      {deleteShown && (
         <ConfirmDelete
-          draft={deleting}
+          draft={deleteShown}
+          closing={deleteClosing}
           onCancel={() => setDeleting(null)}
-          onConfirm={() => void removeDraft(deleting)}
+          onConfirm={() => void removeDraft(deleteShown)}
         />
       )}
-      {stopping && (
+      {stopShown && (
         <ConfirmStop
-          target={stopping.target}
-          action={stopping.action}
+          target={stopShown.target}
+          action={stopShown.action}
+          closing={stopClosing}
           onCancel={() => setStopping(null)}
-          onConfirm={() => void stopSend(stopping.target, stopping.action)}
+          onConfirm={() => void stopSend(stopShown.target, stopShown.action)}
         />
       )}
     </div>
@@ -1667,8 +1746,8 @@ function fitToText(el: HTMLTextAreaElement | null) {
 }
 
 /** A text box that is always as tall as its text, while typing too (Bryce,
- *  7 Oct 2026). It refits when the text is set from outside (Pen's text),
- *  when its width changes, and once the web font has loaded. */
+ *  7 Oct 2026). It refits when the text is set from outside (As built,
+ *  Pen's text), when its width changes, and once the web font has loaded. */
 function GrowingTextarea(
   props: Omit<React.TextareaHTMLAttributes<HTMLTextAreaElement>, 'rows'>
 ) {
@@ -1704,7 +1783,7 @@ function ReorderPanel({
   onUnsavedChange,
 }: {
   draft: Draft
-  onSaved: (cards: CardGroup[], notice: string) => void
+  onSaved: (cards: CardGroup[], notice: string, removed?: RemovedCard[]) => void
   /** True while something here isn't in the draft yet; the page holds Send
    *  test and Approve & send back until it is. */
   onUnsavedChange: (unsaved: boolean) => void
@@ -1728,9 +1807,10 @@ function ReorderPanel({
   const [cardError, setCardError] = useState<string | null>(null)
   /** At least one save went through since the editor opened. */
   const [savedOnce, setSavedOnce] = useState(false)
-  /** The last "put this description on the site" for the open card. */
+  /** The last "put this title / description on the site" for the open card. */
   const [listing, setListing] = useState<{
     key: string
+    field: string
     text: string
     status: 'saving' | 'done' | { error: string }
   } | null>(null)
@@ -1742,12 +1822,21 @@ function ReorderPanel({
     gid: string
     card: CardInfo
   } | null>(null)
-  /** A removal in flight, or how the last one went (said in the panel). */
+  const [removeShown, removeClosing] = useClosing(removing)
+  /** A removal or a put back in flight, or how the last one went (said in
+   *  the panel); `undo` = the card just removed, which the line offers to
+   *  put back. */
   const [removeNote, setRemoveNote] = useState<{
     kind: 'busy' | 'ok' | 'error'
     text: string
+    undo?: { gid: string; key: string; title: string }
   } | null>(null)
   const removeBusy = removeNote?.kind === 'busy'
+  /** The cards taken out of this draft, oldest first (Put back, 29 Oct
+   *  2026: Bryce may change his mind well after removing one). */
+  const [removed, setRemoved] = useState<RemovedCard[]>(
+    () => draft.removed ?? []
+  )
 
   // Chrome doesn't always fire dragend on a row React moved in the DOM while
   // it was being dragged, which left that row dimmed after the drop (Bryce,
@@ -1918,12 +2007,13 @@ function ReorderPanel({
     if (await saveCard()) setEditing(null)
   }
 
-  /** "Put this description on the site too": the listing's Description in
-   *  Airtable gets the text in the box (Bryce decides each time). */
-  async function pushListing(gid: string, card: CardInfo) {
-    const text = (values.desc ?? '').replace(/\s+/g, ' ').trim()
+  /** "Put this title / description on the site too": the listing's Name or
+   *  Description in Airtable gets the text in the box (Bryce decides each
+   *  time). */
+  async function pushListing(gid: string, card: CardInfo, field: string) {
+    const text = (values[field] ?? '').replace(/\s+/g, ' ').trim()
     if (!text) return
-    setListing({ key: card.key, text, status: 'saving' })
+    setListing({ key: card.key, field, text, status: 'saving' })
     try {
       const res = await fetch('/api/admin/newsletter/card', {
         method: 'POST',
@@ -1933,6 +2023,7 @@ function ReorderPanel({
           group: gid,
           key: card.key,
           listing: text,
+          listingField: field,
         }),
       })
       const body = (await res.json()) as {
@@ -1943,12 +2034,14 @@ function ReorderPanel({
         throw new Error(body.error ?? `HTTP ${res.status}`)
       setListing({
         key: card.key,
+        field,
         text,
         status: body.listing.ok ? 'done' : { error: body.listing.reason },
       })
     } catch (err) {
       setListing({
         key: card.key,
+        field,
         text,
         status: { error: err instanceof Error ? err.message : String(err) },
       })
@@ -2054,6 +2147,7 @@ function ReorderPanel({
           error?: string
           problems?: string[]
           cards?: CardGroup[]
+          removed?: RemovedCard[]
           tick?:
             | { status: 'unticked' }
             | { status: 'none'; why: string }
@@ -2073,8 +2167,12 @@ function ReorderPanel({
               : g
           )
         )
-        onSaved(body.cards, '')
+        if (body.removed) setRemoved(body.removed)
+        onSaved(body.cards, '', body.removed)
         const tick = body.tick
+        const undoable = body.removed?.some(
+          r => r.group === gid && r.key === card.key && r.canPutBack
+        )
         setRemoveNote({
           kind: 'ok',
           text: `Removed “${card.title}”.${
@@ -2084,12 +2182,87 @@ function ReorderPanel({
                 ? ` Its Newsletter box in Airtable couldn’t be unticked (${tick.reason}): untick it there if it should go in a later issue.`
                 : ''
           }`,
+          undo: undoable
+            ? { gid, key: card.key, title: card.title }
+            : undefined,
         })
         return true
       } catch (err) {
         setRemoveNote({
           kind: 'error',
           text: `“${card.title}” not removed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        })
+        return false
+      }
+    })()
+    inFlight.current = run
+    await run
+    inFlight.current = null
+  }
+
+  /** Bring a removed card back where it was (Put back, or Undo in the
+   *  Removed line; Bryce, 29 Oct 2026). The draft's answer is the cards with
+   *  it back in; the panel says what happened to the Newsletter tick. Waits
+   *  for a save in flight, like Remove. */
+  async function putBack(
+    card: { gid: string; key: string; title: string },
+    from: 'undo' | 'list'
+  ) {
+    if (inFlight.current) await inFlight.current
+    const run = (async () => {
+      setRemoveNote({ kind: 'busy', text: `Putting back “${card.title}”…` })
+      try {
+        const res = await fetch('/api/admin/newsletter/put-back', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            campaign: draft.id,
+            message: draft.messageId ?? undefined,
+            group: card.gid,
+            key: card.key,
+            from,
+          }),
+        })
+        const body = (await res.json()) as {
+          error?: string
+          problems?: string[]
+          cards?: CardGroup[]
+          removed?: RemovedCard[]
+          tick?:
+            | { status: 'ticked' }
+            | { status: 'none'; why: string }
+            | { status: 'failed'; reason: string }
+        }
+        if (!res.ok || !body.cards) {
+          throw new Error(
+            body.problems?.length
+              ? body.problems.join('; ')
+              : (body.error ?? `HTTP ${res.status}`)
+          )
+        }
+        // The order on screen is the draft's (Put back waits for a moved
+        // card to save), so the draft's answer replaces it.
+        setGroups(body.cards.map(g => ({ ...g, cards: [...g.cards] })))
+        setRemoved(body.removed ?? [])
+        onSaved(body.cards, '', body.removed ?? [])
+        const tick = body.tick
+        setRemoveNote({
+          kind: 'ok',
+          text: `Put back “${card.title}” where it was.${
+            tick?.status === 'ticked'
+              ? ' Its Newsletter box in Airtable is ticked again.'
+              : tick?.status === 'failed'
+                ? ` Its Newsletter box in Airtable couldn’t be ticked again (${tick.reason}): tick it there, or Pen may pick it for a later issue too.`
+                : ''
+          }`,
+        })
+        return true
+      } catch (err) {
+        setRemoveNote({
+          kind: 'error',
+          text: `“${card.title}” not put back: ${
             err instanceof Error ? err.message : String(err)
           }`,
         })
@@ -2242,15 +2415,18 @@ function ReorderPanel({
                     <Icon src="/images/icons/trash.svg" size={16} />
                   </button>
                 </li>,
-                open && (
-                  <li key={`${c.key}-edit`} className={styles.fitEditor}>
+                <Collapse as="li" key={`${c.key}-edit`} open={open}>
+                  <div className={styles.fitEditor}>
                     {c.fields.map((f, n) => {
                       const v = values[f.name] ?? f.value
                       const vPlain = v.replace(/\s+/g, ' ').trim()
                       const onSite =
-                        listing?.key === c.key && listing.text === vPlain
+                        listing?.key === c.key &&
+                        listing.field === f.name &&
+                        listing.text === vPlain
                           ? listing.status
                           : null
+                      const siteWord = SITE_FIELDS[f.name]
                       return (
                         <div key={f.name} className={styles.fieldBlock}>
                           <label className={styles.fitLabel}>
@@ -2287,17 +2463,17 @@ function ReorderPanel({
                                     }))
                                   }
                                 >
-                                  Pen’s text
+                                  As built
                                 </button>
                               </div>
                             )}
-                          {f.name === 'desc' &&
+                          {siteWord &&
                             RECORD_KEY_RE.test(c.key) &&
                             (f.original !== null || vPlain !== f.value) &&
                             (onSite === 'done' ? (
                               <p className={styles.noticeOk}>
-                                ✓ The site’s listing has this description now
-                                (it shows there in two or three minutes).
+                                ✓ The site’s listing has this {siteWord} now (it
+                                shows there in two or three minutes).
                               </p>
                             ) : (
                               <div className={styles.fieldActions}>
@@ -2305,11 +2481,13 @@ function ReorderPanel({
                                   type="button"
                                   className={styles.rowButton}
                                   disabled={!vPlain || onSite === 'saving'}
-                                  onClick={() => void pushListing(g.id, c)}
+                                  onClick={() =>
+                                    void pushListing(g.id, c, f.name)
+                                  }
                                 >
                                   {onSite === 'saving'
                                     ? 'Updating the site…'
-                                    : 'Use this description on the site too'}
+                                    : `Use this ${siteWord} on the site too`}
                                 </button>
                                 {onSite && typeof onSite === 'object' && (
                                   <span className={styles.noticeError}>
@@ -2371,13 +2549,61 @@ function ReorderPanel({
                                 ? 'All changes saved to the draft.'
                                 : 'Changes save by themselves as you type.'}
                     </p>
-                  </li>
-                ),
+                  </div>
+                </Collapse>,
               ]
             })}
           </ol>
         </div>
       ))}
+      {removed.length > 0 && (
+        <div className={styles.reorderGroup}>
+          <div className={styles.reorderGroupLabel}>
+            Removed from this issue
+          </div>
+          <ul className={styles.reorderList}>
+            {[...removed].reverse().map(r => (
+              <li
+                key={`${r.group}:${r.key}`}
+                className={`${styles.reorderRow} ${styles.removedRow}`}
+              >
+                <span className={styles.reorderTitle}>
+                  {r.title}
+                  {groups.length > 1 && (
+                    <span className={styles.removedSection}>
+                      {' '}
+                      · {groups.find(g => g.id === r.group)?.label ?? r.group}
+                    </span>
+                  )}
+                </span>
+                {r.canPutBack ? (
+                  <button
+                    type="button"
+                    className={styles.rowButton}
+                    disabled={busy || dirty}
+                    aria-label={`Put “${r.title}” back into this issue`}
+                    onClick={() =>
+                      void putBack(
+                        { gid: r.group, key: r.key, title: r.title },
+                        'list'
+                      )
+                    }
+                  >
+                    Put back
+                  </button>
+                ) : (
+                  <span
+                    className={styles.removedSection}
+                    title="Removed before Put back existed (29 October 2026), so its copy wasn’t kept. A rebuild of the issue with --put-back brings it back."
+                  >
+                    Needs a rebuild to put back
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {(error || saving || dirty) && (
         <p
           className={error ? styles.noticeError : styles.notice}
@@ -2419,13 +2645,30 @@ function ReorderPanel({
         >
           {removeNote.text}
           {removeNote.kind === 'busy' && slowNote}
+          {removeNote.kind === 'ok' && removeNote.undo && (
+            <>
+              {' '}
+              <button
+                type="button"
+                className={styles.rowButton}
+                disabled={busy || dirty}
+                onClick={() => {
+                  const undo = removeNote.undo
+                  if (undo) void putBack(undo, 'undo')
+                }}
+              >
+                Undo
+              </button>
+            </>
+          )}
         </p>
       )}
-      {removing && (
+      {removeShown && (
         <ConfirmRemoveCard
-          title={removing.card.title}
+          title={removeShown.card.title}
+          closing={removeClosing}
           onCancel={() => setRemoving(null)}
-          onConfirm={() => void removeCard(removing.gid, removing.card)}
+          onConfirm={() => void removeCard(removeShown.gid, removeShown.card)}
         />
       )}
     </div>
@@ -2560,9 +2803,12 @@ function ConfirmSend({
   holds,
   schedule,
   changed = [],
+  closing = false,
   onCancel,
   onConfirm,
 }: {
+  /** Playing its closing animation: shown, but no longer usable. */
+  closing?: boolean
   draft: Draft
   /** Listings in the email that changed since it was built, still unfixed:
    *  sending anyway takes its own tick. */
@@ -2624,9 +2870,13 @@ function ConfirmSend({
   }, [onCancel])
 
   return (
-    <div className={styles.overlay} onClick={onCancel}>
+    <div
+      className={`${styles.overlay} ${closing ? motion.fadeOut : motion.fade}`}
+      onClick={onCancel}
+      inert={closing}
+    >
       <div
-        className={styles.dialog}
+        className={`${styles.dialog} ${closing ? motion.riseOut : motion.rise}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-send-title"
@@ -2755,9 +3005,9 @@ function ConfirmSend({
           </p>
         ) : (
           <p className={styles.dialogNote}>
-            It goes out {delay} minutes after you confirm. Until then you can
-            cancel it under Recent sends; while it’s sending you can pause or
-            stop it there. Emails already delivered can’t be recalled.
+            It goes out {durationLabel(delay)} after you confirm. Until then you
+            can cancel it under Recent sends; while it’s sending you can pause
+            or stop it there. Emails already delivered can’t be recalled.
           </p>
         )}
         <div className={styles.dialogActions}>
@@ -2988,9 +3238,11 @@ const STOP_LABELS: Record<StopAction, string> = {
 function LineupCounts({
   section,
   since,
+  after,
 }: {
   section: Extract<LineupSection, { items: unknown }>
   since: string
+  after?: string
 }) {
   const groups = [
     { title: section.closing ? 'New' : null, items: section.items },
@@ -3005,6 +3257,7 @@ function LineupCounts({
           <span className={styles.lineupCount}>{section.items.length}</span>
           <span className={styles.lineupSince}>
             {since} {section.since}
+            {after && ` ${after}`}
           </span>
         </div>
         {section.closing && (
@@ -3064,28 +3317,58 @@ function SendRows({
         ? null
         : first.listNames.join(', ')
 
+  // The issue opens its web version (Bryce, 20 Oct 2026), which shows an
+  // issue once a send of it has reached readers on the newsletter's own
+  // list (reachedReaders in src/lib/admin/newsletter.ts); before that, or
+  // for a test send, the page would only say it isn't online.
+  const reached = (r: Recent) =>
+    r.status === 'sending' ||
+    r.status === 'sent' ||
+    ((r.status === 'paused' || r.status === 'stopped') && r.sentTo > 0)
+  const webHref =
+    !isTest && otherList == null && rows.some(reached)
+      ? webPath(first.baseName)
+      : null
+
+  const nameParts = (
+    <>
+      {newsletter && (
+        <>
+          <span
+            className={`${styles.dot} ${NEWSLETTER_DOTS[newsletter] ?? ''}`}
+            aria-hidden="true"
+          />
+          <span className={styles.newsletterName}>{newsletter}</span>
+        </>
+      )}
+      <span className={webHref ? styles.issueLinkText : undefined}>
+        {issue}
+      </span>
+      {isTest && (
+        <span
+          className={styles.tag}
+          title={`Sent to the test list ${first.listNames.join(', ')}`}
+        >
+          Test
+        </span>
+      )}
+    </>
+  )
   const issueCell = (sub: string | null) => (
     <td>
-      <span className={styles.issueName}>
-        {newsletter && (
-          <>
-            <span
-              className={`${styles.dot} ${NEWSLETTER_DOTS[newsletter] ?? ''}`}
-              aria-hidden="true"
-            />
-            <span className={styles.newsletterName}>{newsletter}</span>
-          </>
-        )}
-        <span>{issue}</span>
-        {isTest && (
-          <span
-            className={styles.tag}
-            title={`Sent to the test list ${first.listNames.join(', ')}`}
-          >
-            Test
-          </span>
-        )}
-      </span>
+      {webHref ? (
+        <a
+          href={webHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`${styles.issueName} ${styles.issueLink}`}
+          title="Open the web version"
+        >
+          {nameParts}
+        </a>
+      ) : (
+        <span className={styles.issueName}>{nameParts}</span>
+      )}
       {(otherList || sub) && (
         <span className={styles.subline}>
           {[otherList && `to ${otherList}`, sub].filter(Boolean).join(' · ')}
@@ -3243,9 +3526,12 @@ function Countdown({ to }: { to: string }) {
 /** Confirmation for a draft's Delete button. Focus starts on "Go back". */
 function ConfirmDelete({
   draft,
+  closing = false,
   onCancel,
   onConfirm,
 }: {
+  /** Playing its closing animation: shown, but no longer usable. */
+  closing?: boolean
   draft: Draft
   onCancel: () => void
   onConfirm: () => void
@@ -3262,9 +3548,13 @@ function ConfirmDelete({
   const midWaves =
     !draft.alreadySent && (draft.waves?.waves.some(w => w.sent) ?? false)
   return (
-    <div className={styles.overlay} onClick={onCancel}>
+    <div
+      className={`${styles.overlay} ${closing ? motion.fadeOut : motion.fade}`}
+      onClick={onCancel}
+      inert={closing}
+    >
       <div
-        className={styles.dialog}
+        className={`${styles.dialog} ${closing ? motion.riseOut : motion.rise}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-delete-title"
@@ -3305,9 +3595,12 @@ function ConfirmDelete({
  *  words. Focus starts on "Go back". */
 function ConfirmRemoveCard({
   title,
+  closing = false,
   onCancel,
   onConfirm,
 }: {
+  /** Playing its closing animation: shown, but no longer usable. */
+  closing?: boolean
   title: string
   onCancel: () => void
   onConfirm: () => void
@@ -3322,9 +3615,13 @@ function ConfirmRemoveCard({
     return () => window.removeEventListener('keydown', onKey)
   }, [onCancel])
   return (
-    <div className={styles.overlay} onClick={onCancel}>
+    <div
+      className={`${styles.overlay} ${closing ? motion.fadeOut : motion.fade}`}
+      onClick={onCancel}
+      inert={closing}
+    >
       <div
-        className={styles.dialog}
+        className={`${styles.dialog} ${closing ? motion.riseOut : motion.rise}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-remove-card-title"
@@ -3366,9 +3663,12 @@ function ConfirmRemoveCard({
 function ConfirmStop({
   target: row,
   action,
+  closing = false,
   onCancel,
   onConfirm,
 }: {
+  /** Playing its closing animation: shown, but no longer usable. */
+  closing?: boolean
   target: StopTarget
   action: StopAction
   onCancel: () => void
@@ -3436,9 +3736,13 @@ function ConfirmStop({
     }
   const t = text[action]
   return (
-    <div className={styles.overlay} onClick={onCancel}>
+    <div
+      className={`${styles.overlay} ${closing ? motion.fadeOut : motion.fade}`}
+      onClick={onCancel}
+      inert={closing}
+    >
       <div
-        className={styles.dialog}
+        className={`${styles.dialog} ${closing ? motion.riseOut : motion.rise}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-stop-title"

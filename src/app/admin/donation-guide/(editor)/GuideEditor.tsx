@@ -15,6 +15,8 @@ import Icon from '@/components/Icon'
 import RichEditor from './RichEditor'
 import styles from '../donation-guide.module.css'
 import adminStyles from '../../admin.module.css'
+import { useClosing } from '../../motion'
+import motion from '../../motion.module.css'
 
 const API = '/api/admin/donation-guide'
 const PREVIEW_PATH = '/admin/donation-guide/preview'
@@ -126,6 +128,9 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
   const [historyError, setHistoryError] = useState<string | null>(null)
   const [restoreArmed, setRestoreArmed] = useState(false)
   const [publishOpen, setPublishOpen] = useState(false)
+  const [historyShown, historyClosing] = useClosing(historyOpen)
+  const [discardShown, discardClosing] = useClosing(discardOpen)
+  const [publishShown, publishClosing] = useClosing(publishOpen)
   const [publishChanges, setPublishChanges] = useState<Change[]>([])
   const [publishBusy, setPublishBusy] = useState(false)
   const [publishError, setPublishError] = useState<string | null>(null)
@@ -1061,10 +1066,18 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
         </div>
       </div>
 
-      {historyOpen && (
+      {historyShown && (
         <>
-          <div className={styles.scrim} onClick={() => setHistoryOpen(false)} />
-          <aside className={styles.drawer} aria-label="History">
+          <div
+            className={`${styles.scrim} ${historyClosing ? motion.fadeOut : motion.fade}`}
+            inert={historyClosing}
+            onClick={() => setHistoryOpen(false)}
+          />
+          <aside
+            className={`${styles.drawer} ${historyClosing ? motion.slideOut : motion.slide}`}
+            aria-label="History"
+            inert={historyClosing}
+          >
             <div className={styles.drawerHead}>
               <span>History</span>
               <button
@@ -1176,11 +1189,16 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
         </>
       )}
 
-      {discardOpen && (
+      {discardShown && (
         <>
-          <div className={styles.scrim} onClick={() => setDiscardOpen(false)} />
           <div
-            className={styles.dialog}
+            className={`${styles.scrim} ${discardClosing ? motion.fadeOut : motion.fade}`}
+            inert={discardClosing}
+            onClick={() => setDiscardOpen(false)}
+          />
+          <div
+            className={`${styles.dialog} ${discardClosing ? motion.riseOut : motion.rise}`}
+            inert={discardClosing}
             role="dialog"
             aria-label="Discard draft"
           >
@@ -1213,13 +1231,19 @@ export default function GuideEditor({ canEdit }: { canEdit: boolean }) {
         </>
       )}
 
-      {publishOpen && (
+      {publishShown && (
         <>
           <div
-            className={styles.scrim}
+            className={`${styles.scrim} ${publishClosing ? motion.fadeOut : motion.fade}`}
+            inert={publishClosing}
             onClick={() => !publishBusy && setPublishOpen(false)}
           />
-          <div className={styles.dialog} role="dialog" aria-label="Publish">
+          <div
+            className={`${styles.dialog} ${publishClosing ? motion.riseOut : motion.rise}`}
+            inert={publishClosing}
+            role="dialog"
+            aria-label="Publish"
+          >
             <div className={styles.drawerHead}>
               <span>Publish version {data.live.version + 1}</span>
             </div>

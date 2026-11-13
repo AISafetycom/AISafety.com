@@ -19,7 +19,7 @@ function renderInlines(
     if (inline.bold) {
       node =
         bold === 'highlight' ? (
-          <span className="color-light-teal">{node}</span>
+          <span className="color-teal-300">{node}</span>
         ) : (
           <strong>{node}</strong>
         )
@@ -30,7 +30,7 @@ function renderInlines(
         <Link
           href={external ? withUtm(inline.href, UTM_PAGE) : inline.href}
           target={external ? '_blank' : undefined}
-          className="display-inline color-teal"
+          className="display-inline color-teal-400"
         >
           {node}
         </Link>
@@ -93,7 +93,7 @@ function TimeSection({
   return (
     <div className={`${styles.timeRow} ${last ? styles.timeRowLast : ''}`}>
       <div className="width-3-col">
-        <p className="color-teal-300 paragraph-small">If you have</p>
+        <p className="color-teal-grey-300 paragraph-small">If you have</p>
         <p className="paragraph-default-bold">{time}</p>
       </div>
       <div className="width-6-col">{children}</div>
@@ -111,7 +111,7 @@ export function TabContent({ tab }: { tab: Tab }) {
       <p className="padding-bottom-56px width-7-col">{tab.lead}</p>
       {tab.sections.map((section, i) => (
         <Fragment key={section.id}>
-          {i > 0 && <div className={styles.divider} />}
+          {i > 0 && <div className="divider margin-bottom-40px" />}
           <TimeSection time={section.time} last={i === last}>
             <RichTextBlocks text={section.body} />
           </TimeSection>

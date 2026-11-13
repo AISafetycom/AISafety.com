@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import base from '../page.module.css'
 import { FIELDS, OTHER_MAX, SECTIONS, maxLen, type Field } from './questions'
+import Button from '@/components/Button'
 
 /** Answers by field key. Checkbox groups hold the ticked options; their
  *  free-text "Other" box is stored under `${key}Other`. */
@@ -27,7 +28,7 @@ function Text({ children }: { children: string }) {
             href={m[2]}
             target="_blank"
             rel="noopener noreferrer"
-            className="color-light-teal"
+            className="color-teal-300"
           >
             {m[1]}
           </a>
@@ -125,7 +126,7 @@ export default function DetailsForm() {
         className={`${base.thanks} border-plus-fill margin-bottom-56px padding-top-32px padding-bottom-32px padding-left-32px padding-right-32px`}
       >
         <h3 className="padding-bottom-16px">Thanks!</h3>
-        <p className="color-teal-300">
+        <p className="color-teal-grey-300">
           {done === 'emailed'
             ? 'We’ve emailed you a copy of your answers. If anything changes, just reply to that email.'
             : 'If anything changes, just let Bryce know.'}
@@ -142,7 +143,7 @@ export default function DetailsForm() {
         {f.hint && (
           <>
             <br />
-            <span className="paragraph-xs color-teal-400">
+            <span className="paragraph-xs color-teal-grey-300">
               <Text>{f.hint}</Text>
             </span>
           </>
@@ -156,7 +157,10 @@ export default function DetailsForm() {
       case 'tel':
         return (
           <div key={f.key} className={`${base.field} ${width}`}>
-            <label className="paragraph-small color-teal-300" htmlFor={f.key}>
+            <label
+              className="paragraph-small color-teal-grey-300"
+              htmlFor={f.key}
+            >
               {label}
             </label>
             <input
@@ -174,7 +178,10 @@ export default function DetailsForm() {
       case 'textarea':
         return (
           <div key={f.key} className={`${base.field} ${width}`}>
-            <label className="paragraph-small color-teal-300" htmlFor={f.key}>
+            <label
+              className="paragraph-small color-teal-grey-300"
+              htmlFor={f.key}
+            >
               {label}
             </label>
             <textarea
@@ -194,7 +201,10 @@ export default function DetailsForm() {
       case 'select':
         return (
           <div key={f.key} className={`${base.field} ${width}`}>
-            <label className="paragraph-small color-teal-300" htmlFor={f.key}>
+            <label
+              className="paragraph-small color-teal-grey-300"
+              htmlFor={f.key}
+            >
               {label}
             </label>
             <select
@@ -229,7 +239,10 @@ export default function DetailsForm() {
             aria-labelledby={`${f.key}-label`}
             className={`${base.field} ${base.full}`}
           >
-            <p id={`${f.key}-label`} className="paragraph-small color-teal-300">
+            <p
+              id={`${f.key}-label`}
+              className="paragraph-small color-teal-grey-300"
+            >
               {label}
             </p>
             <div className="flex flex-col gap-8px">
@@ -309,7 +322,7 @@ export default function DetailsForm() {
                 </h3>
               )}
               {s.intro && (
-                <p className="paragraph-small color-teal-300">{s.intro}</p>
+                <p className="paragraph-small color-teal-grey-300">{s.intro}</p>
               )}
             </div>
           )}
@@ -330,11 +343,11 @@ export default function DetailsForm() {
       </div>
 
       <div className={`${base.full} margin-top-16px`}>
-        <button type="submit" className="button-primary" disabled={busy}>
+        <Button type="submit" disabled={busy}>
           {busy ? 'Submitting…' : 'Submit'}
-        </button>
+        </Button>
         {error && (
-          <p className="paragraph-small color-orange margin-top-16px">
+          <p className="paragraph-small color-orange-300 margin-top-16px">
             {error}
           </p>
         )}

@@ -1,5 +1,6 @@
 import Image from 'next/image'
 import Link from 'next/link'
+import Button from '@/components/Button'
 import Icon from '@/components/Icon'
 import styles from './page.module.css'
 
@@ -16,9 +17,9 @@ export default function AboutPage() {
       <h1 className="padding-top-56px padding-bottom-40px">About us</h1>
 
       <h2 className="width-9-col-narrow padding-bottom-56px">
-        We&apos;re a small nonprofit driven by 1.25 salaried employees and lots
+        We&apos;re a small nonprofit driven by 1.5 salaried employees and lots
         of volunteers. We aim to multiply global AI safety efforts through a{' '}
-        <span className="color-light-teal">
+        <span className="color-teal-300">
           centralized, comprehensive, and up-to-date resource hub
         </span>
         .
@@ -29,19 +30,18 @@ export default function AboutPage() {
         <div className="width-7-col-narrow">
           <div>
             <h3 className="padding-bottom-16px">Funding</h3>
-            <p className="color-teal-300 padding-bottom-40px">
-              This project operates on about $100k USD of annual funding from
-              the Survival and Flourishing Fund, a grantmaker that supports
-              projects working on the long-term survival and flourishing of
-              sentient life. This pays for 1 full-time and 1 part-time salary
-              (everyone else is a volunteer) plus some other costs, like website
-              hosting.
+            <p className="color-teal-grey-300 padding-bottom-40px">
+              This project operates on about $150k of annual funding from the
+              Survival and Flourishing Fund, a grantmaker that supports projects
+              working on the long-term survival and flourishing of sentient
+              life. This pays for one full-time and one part-time salary (everyone
+              else is a volunteer) plus some other costs, like website hosting.
             </p>
 
             <h3 className="padding-bottom-16px">
               (Lack of) financial motivations
             </h3>
-            <p className="color-teal-300">
+            <p className="color-teal-grey-300">
               We work on this project because we care about AI safety. The two
               team members that receive compensation make project decisions
               based solely on what they believe will have the greatest impact.
@@ -56,23 +56,24 @@ export default function AboutPage() {
           <p className="color-white paragraph-default-bold">
             Get in touch with the team
           </p>
-          <p className="color-teal-300 padding-top-16px paragraph-small">
+          <p className="color-teal-grey-300 padding-top-16px paragraph-small">
             Whether it&apos;s a take, suggestion, request, or something else, we
             want to hear from you.
           </p>
           <div className="padding-top-24px">
-            <a
+            <Button
+              as="a"
+              variant="clear-border"
               href="https://airtable.com/appF8XfZUGXtfi40E/pagUmmzVb8OnVvTZS/form"
               target="_blank"
               rel="noopener noreferrer"
-              className="button-secondary"
             >
               Send us an email
-            </a>
+            </Button>
           </div>
-          <p className="color-teal-300 padding-top-24px paragraph-small">
+          <p className="color-teal-grey-300 padding-top-24px paragraph-small">
             Journalist? Boilerplate, logos and a press contact are on the{' '}
-            <Link href="/media" className="color-light-teal">
+            <Link href="/media" className="color-teal-300">
               press and media page
             </Link>
             .
@@ -104,12 +105,12 @@ export default function AboutPage() {
                 <p className="paragraph-default-bold padding-bottom-4px">
                   Søren Elverlin
                 </p>
-                <p className="paragraph-small color-teal-300">
+                <p className="paragraph-small color-teal-grey-300">
                   Project lead, back-end development
                 </p>
               </div>
             </div>
-            <p className="paragraph-small color-teal-300 padding-bottom-16px">
+            <p className="paragraph-small color-teal-grey-300 padding-bottom-16px">
               Søren read the Sequences in 2014 and set out to verify whether AI
               risk was real. He founded AI Safety Danmark in 2016, bought the
               AISafety.com domain the next year, and runs an AI safety reading
@@ -131,12 +132,12 @@ export default function AboutPage() {
                 <p className="paragraph-default-bold padding-bottom-4px">
                   Bryce Robertson
                 </p>
-                <p className="paragraph-small color-teal-300">
+                <p className="paragraph-small color-teal-grey-300">
                   Project manager
                 </p>
               </div>
             </div>
-            <p className="paragraph-small color-teal-300 padding-bottom-16px">
+            <p className="paragraph-small color-teal-grey-300 padding-bottom-16px">
               Bryce was blown away by GPT-4&apos;s capabilities when it was
               released in 2023, but quickly discovered that alongside its
               enormous potential, AI also poses an existential risk. He closed
@@ -161,12 +162,12 @@ export default function AboutPage() {
                 <p className="paragraph-default-bold padding-bottom-4px">
                   Melissa Samworth
                 </p>
-                <p className="paragraph-small color-teal-300">
+                <p className="paragraph-small color-teal-grey-300">
                   Product, strategy, design
                 </p>
               </div>
             </div>
-            <p className="paragraph-small color-teal-300">
+            <p className="paragraph-small color-teal-grey-300">
               Melissa got into AI safety in 2023 when she realized aligned
               superintelligence served the best shot at fulfilling the
               Buddhist-inspired mantra ‘may all sentient beings be free of
@@ -188,12 +189,12 @@ export default function AboutPage() {
                 <p className="paragraph-default-bold padding-bottom-4px">
                   plex
                 </p>
-                <p className="paragraph-small color-teal-300">
+                <p className="paragraph-small color-teal-grey-300">
                   Founder and advisor
                 </p>
               </div>
             </div>
-            <p className="paragraph-small color-teal-300">
+            <p className="paragraph-small color-teal-grey-300">
               plex has been working toward reducing existential risk from AI
               since 2015, building infrastructure like the original versions of
               the AISafety.com resources and{' '}
@@ -201,7 +202,7 @@ export default function AboutPage() {
                 href="https://aisafety.info"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="color-light-teal"
+                className="color-teal-300"
               >
                 AISafety.info
               </a>{' '}
@@ -225,22 +226,23 @@ export default function AboutPage() {
               <Icon
                 src="/images/icons/people.svg"
                 size={16}
-                className="color-teal-bright-300"
+                className="color-teal-300"
               />
             </div>
-            <p className="paragraph-small color-teal-300 padding-top-24px padding-bottom-24px">
+            <p className="paragraph-small color-teal-grey-300 padding-top-24px padding-bottom-24px">
               Volunteers tend to contribute on a project-to-project basis,
               typically in the domains of development, design, and user
               research.
             </p>
-            <a
+            <Button
+              as="a"
+              variant="clear-border"
               href="https://discord.gg/faamWzPcv8"
               target="_blank"
               rel="noopener noreferrer"
-              className="button-secondary"
             >
               Volunteer
-            </a>
+            </Button>
           </div>
 
           <div>
@@ -248,22 +250,23 @@ export default function AboutPage() {
               <Icon
                 src="/images/icons/speech-bubble.svg"
                 size={16}
-                className="color-teal-bright-300"
+                className="color-teal-300"
               />
             </div>
-            <p className="paragraph-small color-teal-300 padding-top-24px padding-bottom-24px">
+            <p className="paragraph-small color-teal-grey-300 padding-top-24px padding-bottom-24px">
               We built this site for the AI safety community – and we&apos;re
               always looking to make it more useful. If you&apos;ve got
               thoughts, we&apos;re listening.
             </p>
-            <a
+            <Button
+              as="a"
+              variant="clear-border"
               href="https://airtable.com/appF8XfZUGXtfi40E/pageXZp18w3Sqm1Z7/form?prefill_Page=about&hide_Page=true"
               target="_blank"
               rel="noopener noreferrer"
-              className="button-secondary"
             >
               Give us your take
-            </a>
+            </Button>
           </div>
         </div>
 
@@ -272,22 +275,23 @@ export default function AboutPage() {
             <Icon
               src="/images/icons/add-doc.svg"
               size={16}
-              className="color-teal-bright-300"
+              className="color-teal-300"
             />
           </div>
-          <p className="paragraph-small color-teal-300 padding-top-24px padding-bottom-24px">
+          <p className="paragraph-small color-teal-grey-300 padding-top-24px padding-bottom-24px">
             We encourage community members to add listings we may have missed
             through the ‘Suggest listing’ button on each resource page, or
             suggest corrections using the button below.
           </p>
-          <a
+          <Button
+            as="a"
+            variant="clear-border"
             href="https://airtable.com/appF8XfZUGXtfi40E/pagndDvdya1DSqoxN/form"
             target="_blank"
             rel="noopener noreferrer"
-            className="button-secondary"
           >
             Suggest a correction
-          </a>
+          </Button>
         </div>
       </div>
     </div>

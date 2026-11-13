@@ -1,7 +1,7 @@
-/* Questions card — custom border color (bright-teal-300 at 30% opacity) */
+/* Questions card — custom border color (teal-300 at 30% opacity) */
 .questionsCard {
   padding: 40px;
-  border: 1px solid color-mix(in srgb, var(--bright-teal-300) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--teal-300) 30%, transparent);
   border-radius: 16px;
   align-self: flex-start;
 }
@@ -13,7 +13,7 @@
   align-items: center;
   width: 32px;
   height: 32px;
-  background-color: var(--teal-800);
+  background-color: var(--teal-grey-800);
   border-radius: 16px;
 }
 

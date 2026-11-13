@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 
+// (This copy isn't the live site, so a signup here always answers
+// `confirm: true`: the reader's click in the email subscribes them.
+// several.test.ts covers the live site subscribing a reader at once.)
 // POST /api/subscribe with the limits stubbed (their own Upstash behavior is
 // tested in newsletter-signup-limits.test.ts) and ActiveCampaign replaced by
 // a pretend fetch: which requests reach ActiveCampaign, what the box is told,
@@ -37,12 +40,13 @@ vi.mock('@/lib/newsletter-signup-limits', async importOriginal => ({
   countSignupToday: h.countSignupToday,
   alertOwner: h.alertOwner,
 }))
-// Events' form filled in, Training's still at its placeholders.
+// Events' form filled in, Training's and Funding's still at their placeholders.
 vi.mock('@/lib/newsletter-signup', async importOriginal => ({
   ...(await importOriginal<typeof import('@/lib/newsletter-signup')>()),
   AC_FORMS: {
     events: { formId: 12, orKey: 'a1b2c3d4e5f6' },
     training: { formId: 0, orKey: '' },
+    funding: { formId: 0, orKey: '' },
   },
 }))
 
@@ -70,7 +74,12 @@ function post(body: unknown, raw = false) {
 }
 
 async function json(res: Response) {
-  return (await res.json()) as { ok: boolean; error?: string; reason?: string }
+  return (await res.json()) as {
+    ok: boolean
+    confirm?: boolean
+    error?: string
+    reason?: string
+  }
 }
 
 beforeEach(() => {
@@ -134,7 +143,7 @@ describe('POST /api/subscribe', () => {
       hp: '',
     })
     expect(res.status).toBe(200)
-    expect(await json(res)).toEqual({ ok: true })
+    expect(await json(res)).toEqual({ ok: true, confirm: true })
     expect(acCalls).toHaveLength(1)
     expect(acCalls[0].url).toContain('alignment23684.activehosted.com/proc.php')
     // Trimmed, with the domain lowercased.
@@ -148,8 +157,8 @@ describe('POST /api/subscribe', () => {
     )
   })
 
-  it('only takes Events and Training', async () => {
-    for (const newsletter of ['funding', 'updates', '', undefined, 7]) {
+  it('only takes Events, Training and Funding', async () => {
+    for (const newsletter of ['updates', '', undefined, 7]) {
       const res = await post({ email: EMAIL, newsletter })
       expect(res.status).toBe(400)
       expect((await json(res)).reason).toBe('unknown_newsletter')

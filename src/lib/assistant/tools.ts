@@ -28,10 +28,11 @@ ARGUMENTS:
 
   Per type:
     job: skillSet ("Policy"|"Research"|"Software engineering"|"Operations"|"Outreach"|"Strategy"|"Legal"|"Data"|"Information security"|"Management"), minimumExperience ("Entry-level"|"Junior"|"Mid"|"Senior"), requiredDegree ("Master's degree"|"Doctoral degree" — only set when a role asks for more than an undergraduate degree), roleType ("Full-time"|"Part-time"|"Internship"), workLocation ("Remote"|"On-site"), location (city or country)
-    funder: type ("Fund"|"Grant program"|"Platform"), recipientType ("Individuals"|"Organizations"), applicationStatus ("Open"|"Closed" — use this to filter open/closed funders; acceptingApplications holds display text like "Applications close 31 October 2026" and is NOT reliably filterable)
+    funder: type ("Fund"|"Grant program"|"Platform"), applicationStatus ("Open"|"Closed" — use this to filter open/closed funders; "Closed" covers both "Not currently accepting applications" and "Invite only, no applications", and the \`applications\` meta field says which. \`applications\` holds the card's status line, like "Applications close 31 Oct 2026", and is NOT reliably filterable), whoCanApply ("Individuals"|"Nonprofits"|"For-profits"|"Universities" — multi-select, a funder can carry several; filtering on one matches funders that carry it among others. For organizations in general pass ['Nonprofits', 'For-profits'])
+      – Funder results also carry \`deadline\` (YYYY-MM-DD closing day of an open funder; none means rolling) and \`grantSize\` (the funder's own wording, e.g. "$10k – $50k"; none means the site doesn't give a size).
     community: platform ("Slack"|"Discord"|"In-person"), type, activityLevel ("Active"|"Quiet"), location
     course: category, courseType
-    advisor: focus, status
+    advisor: whoItsFor ("Newcomers"|"Existing field members" — multi-select), focusAreas ("Career"|"Research"|"Founding"|"Volunteering"|"Donating"|"Well-being"|"Operations"|"Legal"|"Visas" — multi-select, filtering on one matches advisors that carry it among others), applications ("Application required"|"Accepts everyone" — "Accepts everyone" means anyone can book a call directly), status ("Active"|"Inactive")
     founder-resource: type
     media-channel: type ("Podcast"|"Newsletter"|"Blog"|"Video"|"Forum")
     org: category, mapArea, status
@@ -64,7 +65,10 @@ EXAMPLES:
   search_listings({ type: 'community', near: { city: 'Berlin', radiusKm: 200 } })
 
   // All currently-open funders for individuals
-  search_listings({ type: 'funder', filters: { applicationStatus: 'Open', recipientType: 'Individuals' } })
+  search_listings({ type: 'funder', filters: { applicationStatus: 'Open', whoCanApply: 'Individuals' } })
+
+  // Open funders for organizations (nonprofits or companies)
+  search_listings({ type: 'funder', filters: { applicationStatus: 'Open', whoCanApply: ['Nonprofits', 'For-profits'] } })
 
   // Junior or mid-level remote policy + research roles
   search_listings({ type: 'job', filters: { skillSet: ['Policy', 'Research'], minimumExperience: ['Junior', 'Mid'], workLocation: 'Remote' } })

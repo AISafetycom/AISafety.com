@@ -2,6 +2,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   checkShareInput,
   isShareToken,
+  jobsShareOf,
   parseShare,
   sameLeftOut,
   shareForQuery,
@@ -193,6 +194,42 @@ describe('shareForQuery', () => {
   })
 })
 
+describe('the job board’s link', () => {
+  it('needs only a name, and nothing else in the body', () => {
+    expect(
+      checkShareInput({ kind: 'jobs', orgName: ' 80,000 Hours ' })
+    ).toEqual({ kind: 'jobs', query: '', leftOut: [], orgName: '80,000 Hours' })
+    expect(checkShareInput({ kind: 'jobs', orgName: '' })).toBeNull()
+    expect(
+      checkShareInput({
+        kind: 'other',
+        query: 'Lens',
+        orgName: 'L',
+        leftOut: [],
+      })
+    ).toBeNull()
+  })
+
+  it('keeps its kind when read back', () => {
+    const raw = JSON.stringify({ ...share({ query: '' }), kind: 'jobs' })
+    expect(parseShare('A'.repeat(22), raw)?.kind).toBe('jobs')
+    expect(
+      parseShare('A'.repeat(22), JSON.stringify(share()))
+    ).not.toHaveProperty('kind')
+  })
+
+  it('is never an org search’s link, and is found on its own', () => {
+    const jobs: OrgShare = {
+      ...share({ token: 'J'.repeat(22), query: '' }),
+      kind: 'jobs',
+    }
+    const list = [share({ query: 'Lens Academy' }), jobs]
+    expect(shareForQuery(list, '')).toBeUndefined()
+    expect(jobsShareOf(list)?.token).toBe('J'.repeat(22))
+    expect(jobsShareOf([share()])).toBeUndefined()
+  })
+})
+
 describe('the store', () => {
   let store: typeof import('./org-shares')
 
@@ -212,6 +249,25 @@ describe('the store', () => {
     expect(store.isShareToken(made.token)).toBe(true)
     expect(await store.getShare(made.token)).toEqual(made)
     expect(await store.getShare('Z'.repeat(22))).toBeNull()
+  })
+
+  it('keeps one job board link: sharing again keeps the address', async () => {
+    const first = await store.saveShare(
+      { kind: 'jobs', query: '', leftOut: [], orgName: '80,000 Hours' },
+      'Bryce'
+    )
+    await store.saveShare(
+      { query: 'Lens', leftOut: [], orgName: 'Lens Academy' },
+      'Bryce'
+    )
+    const again = await store.saveShare(
+      { kind: 'jobs', query: '', leftOut: [], orgName: '80,000 Hours' },
+      'plex'
+    )
+    expect(again.token).toBe(first.token)
+    expect(again.kind).toBe('jobs')
+    expect((await store.getShare(first.token))?.kind).toBe('jobs')
+    expect(await store.listShares()).toHaveLength(2)
   })
 
   it('keeps one link per search: sharing again keeps the address and updates what it leaves out', async () => {

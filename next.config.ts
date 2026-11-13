@@ -20,6 +20,13 @@ const nextConfig: NextConfig = {
         destination: '/founders',
         permanent: true,
       },
+      // The page with every newsletter is /newsletter (each newsletter's own
+      // page sits under it, /newsletter/events); the plural is an easy guess.
+      {
+        source: '/newsletters/:path*',
+        destination: '/newsletter/:path*',
+        permanent: true,
+      },
       // Admin routes renamed: /admin/assistant -> /admin/chatbot.
       {
         source: '/admin/assistant',

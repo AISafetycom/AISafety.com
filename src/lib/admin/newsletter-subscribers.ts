@@ -4,10 +4,15 @@
 // when, who left when), plus today's live count and the Substack histories
 // added on the tab. Only ever reads ActiveCampaign.
 //
-// Reading every membership takes about 70 requests (some ten seconds), so
-// it isn't done while the page waits: the figures are kept in Upstash (in
-// memory on a laptop) and worked out again after a page load once they're
-// a few hours old. The live counts are one request per list.
+// Reading every membership takes about 70 requests (over a minute: 73
+// seconds for 6,340 memberships on 28 October 2026), so it isn't done while
+// the page waits: the figures are kept in Upstash (in memory on a laptop)
+// and worked out again every three hours by a cron
+// (/api/admin/analytics/subscriber-history), and after a page load that
+// finds them older than that. Page loads alone once left no figure for 23
+// to 27 October 2026, since the load that starts the work still shows the
+// old copy and nobody opened the tab for days. The live counts are one
+// request per list.
 
 import { Redis } from '@upstash/redis'
 import {
@@ -43,13 +48,17 @@ export interface NewsletterSubscribers {
   substack: Map<string, SavedSubstackHistory>
 }
 
-/** Worked out again after a page load once it's this old. */
+/** Worked out again after a page load once it's this old (the cron runs
+ *  as often). */
 const REFRESH_AFTER_MS = 3 * 3_600_000
 /** One copy per environment, so a preview's code never replaces
  *  production's figures (they can share the database). */
 const CACHE_KEY = `aisafety:analytics:subscriber-history:${process.env.VERCEL_ENV ?? 'local'}`
-/** Held while one server works the figures out, so two don't do it at once. */
+/** Held while one server works the figures out, so two don't do it at once:
+ *  as long as a server may take (the routes allow 300 seconds), since the
+ *  read already takes over a minute and grows with the lists. */
 const LOCK_KEY = `${CACHE_KEY}:lock`
+const LOCK_SECONDS = 300
 const PAGE = 100
 /** Pages read at once: about three requests a second, within the five a
  *  second ActiveCampaign allows, with room for the send watcher's. */
@@ -67,7 +76,12 @@ const store =
 
 /** A laptop's copy (no Upstash), and this server's own between loads. */
 let memory: ListHistory | null = null
-let refreshing: Promise<void> | null = null
+let refreshing: Promise<RefreshOutcome> | null = null
+
+/** How a refresh went: worked out and kept, left to another server that
+ *  holds the lock, failed (logged), or not set up here (no ActiveCampaign
+ *  or no moved list). */
+export type RefreshOutcome = 'refreshed' | 'busy' | 'failed' | 'off'
 
 /** The lists that have moved to ActiveCampaign, and since when. */
 function movedLists(): { list: string; since: number }[] {
@@ -177,17 +191,20 @@ async function readHistory(): Promise<ListHistory | null> {
 
 /** Work the figures out again and keep them, unless another server is
  *  already doing it. Never throws: on failure the kept figures stay, and the
- *  next page load tries again. */
-export async function refreshSubscriberHistory(): Promise<void> {
+ *  next cron run or page load tries again. */
+export async function refreshSubscriberHistory(): Promise<RefreshOutcome> {
   if (refreshing) return refreshing
   const moved = movedLists()
-  if (!acConfigured() || moved.length === 0) return
-  refreshing = (async () => {
+  if (!acConfigured() || moved.length === 0) return 'off'
+  refreshing = (async (): Promise<RefreshOutcome> => {
     let locked = false
     try {
       if (store) {
-        const got = await store.set(LOCK_KEY, Date.now(), { nx: true, ex: 120 })
-        if (got !== 'OK') return
+        const got = await store.set(LOCK_KEY, Date.now(), {
+          nx: true,
+          ex: LOCK_SECONDS,
+        })
+        if (got !== 'OK') return 'busy'
         locked = true
       }
       const t0 = Date.now()
@@ -212,13 +229,15 @@ export async function refreshSubscriberHistory(): Promise<void> {
       console.info(
         `[analytics] subscriber history from ${records.length} memberships in ${Date.now() - t0} ms`
       )
+      return 'refreshed'
     } catch (err) {
       console.warn(
         `[analytics] subscriber history refresh failed: ${err instanceof Error ? err.message : String(err)}`
       )
+      return 'failed'
     } finally {
       // Only our own hold on it; analytics, so a failed release just waits
-      // out the lock's two minutes.
+      // out the lock.
       if (store && locked) await store.del(LOCK_KEY).catch(() => {})
       refreshing = null
     }
@@ -226,12 +245,16 @@ export async function refreshSubscriberHistory(): Promise<void> {
   return refreshing
 }
 
-/** Whether the kept figures are missing or old enough to work out again. */
+/** Whether the kept figures are missing, old enough to work out again, or
+ *  without a list that has moved since they were worked out. */
 export function historyStale(h: ListHistory | null): boolean {
+  const moved = movedLists()
   return (
     acConfigured() &&
-    movedLists().length > 0 &&
-    (!h || Date.now() - h.builtAt > REFRESH_AFTER_MS)
+    moved.length > 0 &&
+    (!h ||
+      Date.now() - h.builtAt > REFRESH_AFTER_MS ||
+      moved.some(m => !h.days[m.list]))
   )
 }
 

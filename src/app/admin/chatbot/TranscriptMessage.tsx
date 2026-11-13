@@ -8,10 +8,10 @@
 import { createContext, Fragment, ReactNode, useContext, useState } from 'react'
 import {
   SuggestInline,
-  flattenNoteLinks,
   parseSuggestToken,
 } from '@/components/assistant/MessageContent'
 import { cardTypePage } from '@/components/assistant/cardFallback'
+import { cleanCardNote } from '@/lib/assistant/card-note'
 import { suggestFormUrl } from '@/lib/assistant/constants'
 import styles from '../admin.module.css'
 
@@ -123,7 +123,7 @@ function inlineCardLabel(
   if (!m) return ''
   const info = resolveListing(listings, m[1])
   if (info) return info.name
-  const noteLabel = flattenNoteLinks(m[2] ?? '').trim()
+  const noteLabel = cleanCardNote(m[2] ?? '')
   if (noteLabel) return noteLabel
   const type = cardType(m[1])
   const rec = /rec[A-Za-z0-9]+/.exec(m[1])?.[0] ?? m[1].trim()
@@ -426,7 +426,7 @@ function parseBlocks(text: string): Block[] {
       current.cards.push({
         type: cardType(cardMatch[1]),
         id: cardMatch[1].replace(/\s+/g, ''),
-        note: flattenNoteLinks(cardMatch[2] ?? '').trim(),
+        note: cleanCardNote(cardMatch[2] ?? ''),
       })
     } else if (ulMatch) {
       if (current?.kind !== 'ul') {
@@ -559,7 +559,7 @@ function CardPill({
       {info?.organization &&
         info.organization !== primary &&
         info.organization !== card.note && (
-          <span className="color-teal-300">{info.organization}</span>
+          <span className="color-teal-grey-300">{info.organization}</span>
         )}
       {showNote && <span className={styles.convCardNote}>{card.note}</span>}
       {wasClicked && <span className={styles.convCardClicked}>✓ clicked</span>}

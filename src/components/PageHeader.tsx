@@ -12,15 +12,13 @@ interface PageHeaderProps {
   id?: string
   topPadding?: string
   /** Show the newsletter signup beside the header (stacked below on mobile).
-   *  Needs a heading and either `newsletterKey` or `newsletterSubscribeUrl`. */
+   *  Needs a heading and `newsletterKey`. */
   newsletter?: boolean
   /** Heading for the signup box. */
   newsletterHeading?: string
   /** The newsletter the box signs people up to on the site, through
-   *  ActiveCampaign (/events, /training). */
+   *  ActiveCampaign (/events, /training, /funding). */
   newsletterKey?: SignupNewsletter
-  /** Or: the Substack subscribe page the box opens (/funding). */
-  newsletterSubscribeUrl?: string
   /** Analytics page name for the signup box's submits (e.g. 'Events'). */
   newsletterTrackingPage?: string
   /** Extra content under the description, e.g. a cross-link to a sister page. */
@@ -36,19 +34,23 @@ export default function PageHeader({
   newsletter,
   newsletterHeading,
   newsletterKey,
-  newsletterSubscribeUrl,
   newsletterTrackingPage,
   children,
 }: PageHeaderProps) {
   const header = (
     <>
-      <h1 className={`${topPadding} padding-bottom-8px`} id={id}>
+      {/* Without the "Updated" line under it, the heading keeps a little
+          more room above the description. */}
+      <h1
+        className={`${topPadding} ${lastUpdatedIso ? 'padding-bottom-8px' : 'padding-bottom-24px'}`}
+        id={id}
+      >
         {title}
       </h1>
       {lastUpdatedIso && (
         <RelativeDate
           iso={lastUpdatedIso}
-          className="paragraph-small color-teal-300 margin-bottom-40px"
+          className="paragraph-small color-teal-grey-300 margin-bottom-40px"
         />
       )}
       <h2 className="width-7-col margin-bottom-56px">{description}</h2>
@@ -65,7 +67,6 @@ export default function PageHeader({
         <NewsletterSignup
           heading={newsletterHeading}
           newsletter={newsletterKey}
-          subscribeUrl={newsletterSubscribeUrl}
           trackingPage={newsletterTrackingPage}
         />
       </div>
