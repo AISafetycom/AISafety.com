@@ -1,4 +1,4 @@
-import type { CardProps } from '@/components/ListingCard'
+import type { CardProps, ListingCardMeta } from '@/components/ListingCard'
 import type {
   ProgramBase,
   RecurringProgram,
@@ -53,11 +53,19 @@ function durationLabel(
 }
 
 export function titleMetaFor(program: ProgramBase, upcoming?: TrainingProgram) {
-  const rows: { icon: string; value: string }[] = []
+  const rows: ListingCardMeta[] = []
   if (program.mode === 'Online') {
-    rows.push({ icon: '/images/icons/computer.svg', value: 'Online' })
+    rows.push({
+      icon: '/images/icons/computer.svg',
+      label: 'Location',
+      value: 'Online',
+    })
   } else if (program.location) {
-    rows.push({ icon: '/images/icons/pin.svg', value: program.location })
+    rows.push({
+      icon: '/images/icons/pin.svg',
+      label: 'Location',
+      value: program.location,
+    })
   }
   const startText =
     upcoming?.startDateApprox ??
@@ -67,13 +75,18 @@ export function titleMetaFor(program: ProgramBase, upcoming?: TrainingProgram) {
     const starts = `Starts ${startText}`
     rows.push({
       icon: '/images/icons/calendar.svg',
+      label: null,
       value: duration ? `${duration} · ${starts}` : starts,
     })
   } else {
     // Recurring programs have no dates, but most run a consistent length.
     const typical = (program as RecurringProgram).typicalLength
     if (typical) {
-      rows.push({ icon: '/images/icons/calendar.svg', value: typical })
+      rows.push({
+        icon: '/images/icons/calendar.svg',
+        label: 'Typical length',
+        value: typical,
+      })
     }
   }
   return rows
@@ -83,13 +96,14 @@ export function bottomMetaFor(
   program: ProgramBase,
   upcoming?: TrainingProgram
 ) {
-  const rows: { icon: string; value: string }[] = []
+  const rows: ListingCardMeta[] = []
   if (program.stipend) {
     rows.push({
       icon:
         program.stipend === 'No stipend'
           ? '/images/icons/money-off.svg'
           : '/images/icons/money.svg',
+      label: null,
       value: program.stipend,
     })
   }
@@ -99,18 +113,21 @@ export function bottomMetaFor(
         program.timeCommitment === 'Part-time'
           ? '/images/icons/timer-half.svg'
           : '/images/icons/timer.svg',
+      label: 'Time commitment',
       value: program.timeCommitment,
     })
   }
   if (program.entryBar) {
     rows.push({
       icon: `/images/icons/entry-${program.entryBar.toLowerCase()}.svg`,
+      label: null,
       value: `Entry bar: ${program.entryBar.toLowerCase()}`,
     })
   }
   if (program.focus.length > 0) {
     rows.push({
       icon: '/images/icons/target.svg',
+      label: null,
       value: `Focus: ${program.focus.map(f => f.toLowerCase()).join(', ')}`,
     })
   }
@@ -118,6 +135,7 @@ export function bottomMetaFor(
     if (upcoming.notYetOpen) {
       rows.push({
         icon: '/images/icons/paper-closed.svg',
+        label: null,
         value: 'Applications not yet open',
       })
     } else if (upcoming.applicationsClose) {
@@ -126,6 +144,7 @@ export function bottomMetaFor(
         icon: open
           ? '/images/icons/paper.svg'
           : '/images/icons/paper-closed.svg',
+        label: null,
         value: open
           ? `Apply by ${formatShortDate(upcoming.applicationsClose)}`
           : 'Applications closed',

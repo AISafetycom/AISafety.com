@@ -369,7 +369,7 @@ export default function TrainingClient({
       </StickyBar>
 
       {featuredPrograms.length > 0 && (
-        <div className="flex flex-wrap gap-56px padding-bottom-80px">
+        <ul role="list" className="flex flex-wrap gap-56px padding-bottom-80px">
           {featuredPrograms.map((program, i) => (
             <FeaturedCard
               key={program.id}
@@ -402,7 +402,7 @@ export default function TrainingClient({
               count={featuredPrograms.length}
             />
           ))}
-        </div>
+        </ul>
       )}
 
       <FilterBar
@@ -485,15 +485,15 @@ export default function TrainingClient({
                     {SECTION_LABELS[section.key]}
                   </p>
                 )}
-                <div className="collection-list">
+                <ul role="list" className="collection-list">
                   {section.programs.map(program => renderCard(program))}
-                </div>
+                </ul>
               </div>
             ))
           ) : (
-            <div className="collection-list">
+            <ul role="list" className="collection-list">
               {gridPrograms.map(program => renderCard(program))}
-            </div>
+            </ul>
           )}
           {filtered.length === 0 && (
             <p className="paragraph-small color-teal-grey-300">

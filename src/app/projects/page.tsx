@@ -38,7 +38,7 @@ export default async function ProjectsPage() {
         }
       />
 
-      <div className="flex flex-wrap gap-56px padding-bottom-80px">
+      <ul role="list" className="flex flex-wrap gap-56px padding-bottom-80px">
         {featured.map((project, i) => (
           <FeaturedCard
             key={project.id}
@@ -55,7 +55,7 @@ export default async function ProjectsPage() {
             count={featured.length}
           />
         ))}
-      </div>
+      </ul>
 
       <ProjectsClient projects={projects} />
     </div>

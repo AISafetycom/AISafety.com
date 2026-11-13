@@ -34,7 +34,7 @@ export default async function FoundersPage() {
         }
       />
 
-      <div className="flex flex-wrap gap-56px padding-bottom-80px">
+      <ul role="list" className="flex flex-wrap gap-56px padding-bottom-80px">
         {featured.map((resource, i) => (
           <FeaturedCard
             key={resource.id}
@@ -46,7 +46,13 @@ export default async function FoundersPage() {
             logo={resource.image ?? undefined}
             meta={
               resource.type
-                ? [{ icon: '/images/icons/tag.svg', value: resource.type }]
+                ? [
+                    {
+                      icon: '/images/icons/tag.svg',
+                      label: 'Type',
+                      value: resource.type,
+                    },
+                  ]
                 : []
             }
             trackingPage="Founders"
@@ -57,7 +63,7 @@ export default async function FoundersPage() {
             count={featured.length}
           />
         ))}
-      </div>
+      </ul>
 
       <FoundersClient resources={resources} />
     </div>

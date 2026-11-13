@@ -11,7 +11,13 @@ export function mediaChannelCardProps(channel: MediaChannel): CardProps {
     description: channel.description,
     logo: channel.logo,
     meta: channel.type
-      ? [{ icon: '/images/icons/computer.svg', value: channel.type }]
+      ? [
+          {
+            icon: '/images/icons/computer.svg',
+            label: 'Type',
+            value: channel.type,
+          },
+        ]
       : [],
   }
 }

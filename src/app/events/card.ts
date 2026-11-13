@@ -1,4 +1,4 @@
-import type { CardProps } from '@/components/ListingCard'
+import type { CardProps, ListingCardMeta } from '@/components/ListingCard'
 import type { EventListing } from '@/lib/data/events'
 import { eventTypeColor } from '@/lib/event-types'
 
@@ -58,34 +58,54 @@ function formatDeadline(event: EventListing): string | null {
 export function titleMetaFor(event: EventListing) {
   const date = formatEventDate(event.startDate, event.endDate)
   const time = formatEventTime(event.startTime, event.endTime)
-  const rows: { icon: string; value: string }[] = []
+  const rows: ListingCardMeta[] = []
   // Online events say so via Mode rather than the Location text (mirroring
   // /training), so Location in Airtable can stay empty for them. Hybrid
   // events can be attended either way, so the card spells out both facets
   // ("Online & Oxford, UK") the way /training listings do. The raw location
   // stays city-only in Airtable so the city filter isn't polluted.
   if (event.mode === 'Online') {
-    rows.push({ icon: '/images/icons/computer.svg', value: 'Online' })
+    rows.push({
+      icon: '/images/icons/computer.svg',
+      label: 'Location',
+      value: 'Online',
+    })
   } else if (event.location) {
     rows.push({
       icon: '/images/icons/pin.svg',
+      label: 'Location',
       value:
         event.mode === 'Hybrid' ? `Online & ${event.location}` : event.location,
     })
   }
-  if (date) rows.push({ icon: '/images/icons/calendar.svg', value: date })
-  if (time) rows.push({ icon: '/images/icons/timer.svg', value: time })
+  if (date)
+    rows.push({
+      icon: '/images/icons/calendar.svg',
+      label: 'Date',
+      value: date,
+    })
+  if (time)
+    rows.push({ icon: '/images/icons/timer.svg', label: 'Time', value: time })
   return rows
 }
 
 export function bottomMetaFor(event: EventListing) {
   const deadline = formatDeadline(event)
-  const rows: { icon: string; value: string }[] = []
+  const rows: ListingCardMeta[] = []
   if (event.host)
-    rows.push({ icon: '/images/icons/person.svg', value: `By ${event.host}` })
+    rows.push({
+      icon: '/images/icons/person.svg',
+      label: null,
+      value: `By ${event.host}`,
+    })
   if (event.cost.length > 0)
-    rows.push({ icon: '/images/icons/tag.svg', value: event.cost.join(', ') })
-  if (deadline) rows.push({ icon: '/images/icons/paper.svg', value: deadline })
+    rows.push({
+      icon: '/images/icons/tag.svg',
+      label: 'Cost',
+      value: event.cost.join(', '),
+    })
+  if (deadline)
+    rows.push({ icon: '/images/icons/paper.svg', label: null, value: deadline })
   return rows
 }
 

@@ -96,7 +96,10 @@ export default function ProjectsClient({ projects }: ProjectsClientProps) {
       </FilterBar>
 
       <div className="flex gap-56px">
-        <div className="collection-list padding-bottom-40px width-9-col">
+        <ul
+          role="list"
+          className="collection-list padding-bottom-40px width-9-col"
+        >
           {gridProjects.map(project => (
             <ListingCard
               key={project.id}
@@ -105,11 +108,13 @@ export default function ProjectsClient({ projects }: ProjectsClientProps) {
             />
           ))}
           {filteredProjects.length === 0 && (
-            <p className="paragraph-small color-teal-grey-300">
-              Nothing found.
-            </p>
+            <li>
+              <p className="paragraph-small color-teal-grey-300">
+                Nothing found.
+              </p>
+            </li>
           )}
-        </div>
+        </ul>
 
         <div className="hide-mobile width-3-col">
           <ContributeButtons

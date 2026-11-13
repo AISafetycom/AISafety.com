@@ -511,7 +511,7 @@ export default function EventsClient({ events }: EventsClientProps) {
       </StickyBar>
 
       {featuredEvents.length > 0 && (
-        <div className="flex flex-wrap gap-56px padding-bottom-80px">
+        <ul role="list" className="flex flex-wrap gap-56px padding-bottom-80px">
           {featuredEvents.map((event, i) => (
             <FeaturedCard
               key={event.id}
@@ -538,7 +538,7 @@ export default function EventsClient({ events }: EventsClientProps) {
               count={featuredEvents.length}
             />
           ))}
-        </div>
+        </ul>
       )}
 
       <div className="width-9-col">
@@ -608,7 +608,7 @@ export default function EventsClient({ events }: EventsClientProps) {
               <p className="paragraph-small color-teal-grey-300 padding-bottom-24px">
                 {group.label}
               </p>
-              <div className="collection-list">
+              <ul role="list" className="collection-list">
                 {group.events.map(event => (
                   <ListingCard
                     key={event.id}
@@ -619,7 +619,7 @@ export default function EventsClient({ events }: EventsClientProps) {
                     trackingSource={mode}
                   />
                 ))}
-              </div>
+              </ul>
             </div>
           ))}
           {filteredEvents.length === 0 && (

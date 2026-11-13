@@ -36,7 +36,7 @@ export default async function AdvisorsPage() {
         }
       />
 
-      <div className="flex flex-wrap gap-56px padding-bottom-80px">
+      <ul role="list" className="flex flex-wrap gap-56px padding-bottom-80px">
         {featured.map((advisor, i) => (
           <FeaturedCard
             key={advisor.id}
@@ -55,7 +55,7 @@ export default async function AdvisorsPage() {
             count={featured.length}
           />
         ))}
-      </div>
+      </ul>
 
       <AdvisorsClient advisors={advisors} />
     </div>
