@@ -3656,6 +3656,14 @@ export default function QueueAdmin({
       if (e.metaKey || e.ctrlKey || e.altKey) return
       if (typing) {
         if (e.key === 'Escape') (t as HTMLElement).blur()
+        else if (e.key === 'Tab' && t?.closest('[data-tab-moves]')) {
+          // Tab in Fable's box goes to the next listing, as it does outside
+          // a text box, not to the paperclip (Bryce, 13 Nov 2026). The
+          // typed reply is kept for when he comes back.
+          e.preventDefault()
+          t.blur()
+          move(e.shiftKey ? -1 : 1)
+        }
         return
       }
       const item = selected
@@ -3663,7 +3671,8 @@ export default function QueueAdmin({
       switch (e.key) {
         case 'Tab':
           // Tab and Shift+Tab step through the list, in place of W and Q
-          // (Bryce, 24 Sept 2026). Inside a text box Tab still leaves it.
+          // (Bryce, 24 Sept 2026). Inside a text box Tab still leaves it,
+          // except Fable's box (above).
           e.preventDefault()
           move(e.shiftKey ? -1 : 1)
           break
