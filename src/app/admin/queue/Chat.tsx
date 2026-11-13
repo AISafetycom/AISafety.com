@@ -1322,6 +1322,8 @@ export default function Chat({
         >
           <textarea
             ref={inputRef}
+            // Tab here moves to the next listing (QueueAdmin's keys).
+            data-tab-moves=""
             className={styles.chatInput}
             rows={1}
             placeholder={
