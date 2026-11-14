@@ -9,12 +9,15 @@
 
   When its checks change what the flag should say, Fable ends the reply
   with a ```flag block; the Mac (~/Queue/chat.py) takes it off the text and
-  hangs it on the message as `flag`. The page shows it as a card with an
-  Update flag button (Update verdict on an addition), and the click writes
+  hangs it on the message as `flag`. When the reply lands the page writes
   the new verdict, reasons and reject buttons – and the title and the list
-  of field changes, when Fable gave them – onto the Queue row, with Undo.
-  The page owns the row; the chat never writes it. Nothing reaches the
-  listing itself: that still waits for Accept.
+  of field changes, when Fable gave them – onto the Queue row by itself,
+  and shows it as a card with Undo (Bryce, 14 Nov 2026: "Let's make the
+  flag update automatically because I always just press the button"; it
+  used to wait for an Update flag button). Once undone, a small Update
+  flag link (Update verdict on an addition) puts it back on. The page owns
+  the row; the chat never writes it. Nothing reaches the listing itself:
+  that still waits for Accept.
 */
 
 import type { ProposedChange, QueueType, Verdict } from './queue'

@@ -2091,6 +2091,60 @@ describe('card preview with a formula built from an edited field', () => {
   })
 })
 
+// A correction the Mac could not place has no listing; Accept only marks it
+// done, and Undo used to refuse it (Bryce, 14 Nov 2026: LIaiSE Context
+// Weekend, "Undo failed · This item has no valid target record").
+describe('Undo on a change with no listing', () => {
+  const patches: { path: string; fields: Record<string, unknown> }[] = []
+  beforeEach(() => {
+    patches.length = 0
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(
+      async (path: string, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          patches.push({
+            path,
+            fields: JSON.parse(String(init.body)).fields,
+          })
+        }
+        return new Response('{}', { status: 200 })
+      }
+    )
+  })
+
+  const applied = (over: Partial<QueueItem> = {}) =>
+    item({
+      type: 'Change',
+      status: 'Applied',
+      page: '/training',
+      targetTable: null,
+      targetRecord: null,
+      decidedAt: '2026-11-14T12:44:47.856Z',
+      appliedAt: '2026-11-14T12:44:47.856Z',
+      ...over,
+    })
+
+  it('reopens the row and writes to no listing', async () => {
+    expect(await undoItem(applied())).toEqual([])
+    expect(patches).toEqual([
+      {
+        path: `${QUEUE}/${rid('q1')}`,
+        fields: expect.objectContaining({
+          [STATUS]: 'Pending',
+          [ERROR]: null,
+        }),
+      },
+    ])
+  })
+
+  it('still refuses a change whose listing is half there', async () => {
+    await expect(
+      undoItem(applied({ targetTable: 'tbli1YSCpIuNY2DvL' }))
+    ).rejects.toMatchObject({ status: 400 })
+    expect(patches).toEqual([])
+  })
+})
+
 // Delete (Bryce, 6 Nov 2026: "Need a delete button"): a silent discard,
 // as if the suggestion had been deleted in Airtable by hand.
 describe('deleteItem', () => {
