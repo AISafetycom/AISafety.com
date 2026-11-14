@@ -459,7 +459,19 @@ function Detail({
       <div className={q.detailMain}>
         <div className={q.detailHead}>
           <div className={q.pills}>
-            {item.page && <span className={q.pageTag}>{item.page}</span>}
+            {item.page &&
+              (item.page.startsWith('/') ? (
+                <a
+                  className={q.pageTag}
+                  href={item.page}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {item.page}
+                </a>
+              ) : (
+                <span className={q.pageTag}>{item.page}</span>
+              ))}
             {item.decidedOn && (
               <span className={q.when}>
                 Decided {niceDate(item.decidedOn)}. Judge it as if today were
