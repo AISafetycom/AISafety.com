@@ -772,11 +772,9 @@ function Briefing({ items }: { items: BriefingItem[] }) {
         <li>See what we actually decided in round one, and why.</li>
         <li>Round two: Decide 12 more. This round counts the most.</li>
         <li>
-          Check three proposed changes, fix two descriptions, and reply to two
-          real messages.
-        </li>
-        <li>
-          Tell us one thing that&apos;s wrong with our policy or our process.
+          Check three proposed changes, fix two descriptions, reply to two real
+          messages, and tell us one thing that&apos;s wrong with our policy or
+          our process.
         </li>
       </ol>
 
