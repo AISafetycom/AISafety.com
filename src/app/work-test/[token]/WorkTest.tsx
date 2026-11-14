@@ -388,6 +388,9 @@ export default function WorkTest({
                           <span className={q.rowMeta}>
                             {item.page && <span>{item.page}</span>}
                             {a?.answer && <span>{a.answer}</span>}
+                            {a?.answer && a.text.trim() === '' && (
+                              <span className={q.maybe}>Needs a reason</span>
+                            )}
                             {saves[item.key] === 'failed' && (
                               <span className={q.no}>Not saved</span>
                             )}
@@ -699,26 +702,27 @@ function Briefing({ items }: { items: BriefingItem[] }) {
         gets listed on AISafety.com.
       </p>
       <p>
-        People and bots suggest listings. An AI reviewer we call Fable checks
-        each one and gives a verdict, and then a person makes the final call.
-        That person would be you. Fable is right most of the time, but not
-        always, and the cases where it&apos;s wrong are why the role exists.
+        People and Claude suggest listings. An AI reviewer, Fable, checks each
+        one and gives a verdict, and then a person makes the final call. That
+        person would be you. Fable is right much of the time, but not always,
+        and the cases where it&apos;s wrong are why the role exists.
       </p>
       <p>
-        We&apos;re not testing what you already know about AI safety. We&apos;re
-        testing how quickly you pick up how we decide.
+        We&apos;re trying to avoid testing what you already know about AI
+        safety, instead testing how quickly you pick up how we decide.
       </p>
+      <p>Here&apos;s what you&apos;ll do:</p>
       <ol>
         <li>
           Read this page and our{' '}
           <a href={POLICY} target="_blank" rel="noopener noreferrer">
             listing policy
           </a>
-          . Read all of the policy.
+          . Remember the listing policy is incomplete (it&apos;s a WIP).
         </li>
-        <li>Round one. Decide 12 real past suggestions.</li>
+        <li>Round one: Decide 12 real past suggestions.</li>
         <li>See what we actually decided in round one, and why.</li>
-        <li>Round two. Decide 12 more. This round counts the most.</li>
+        <li>Round two: Decide 12 more. This round counts the most.</li>
         <li>
           Check three proposed changes, fix two descriptions, and reply to two
           real messages.
@@ -749,7 +753,7 @@ function Briefing({ items }: { items: BriefingItem[] }) {
               example, it touches an earlier decision of ours and you can&apos;t
               see why we made it, or an organization is disputing one. This
               isn&apos;t a safe default. In the job, most items shouldn&apos;t
-              need him.
+              need him (but some will).
             </td>
           </tr>
         </tbody>
@@ -763,17 +767,13 @@ function Briefing({ items }: { items: BriefingItem[] }) {
           program whose applications have closed.
         </li>
         <li>
-          <strong>Duplicates.</strong> In round one, each card shows related
-          listings already on the site. In round two it doesn&apos;t, so check
-          AISafety.com yourself before you decide. Every item is a new
-          suggestion, so if the same thing is already listed, it&apos;s a
-          duplicate.
+          <strong>Duplicates.</strong> Every item is a new suggestion, so if the
+          same thing is already listed, it&apos;s a duplicate. In round two,
+          check AISafety.com yourself before you decide.
         </li>
         <li>
           <strong>Fable&apos;s reasons.</strong> They&apos;re worth reading even
           when its verdict is wrong, since the facts it found are usually right.
-          They sometimes mention past cases or internal names you won&apos;t
-          know. Ignore those.
         </li>
       </ul>
 
@@ -782,18 +782,13 @@ function Briefing({ items }: { items: BriefingItem[] }) {
         <li>
           <strong>Round one</strong> uses past suggestions. Each shows the date
           we decided it, so judge it as if today were that date. Decide from
-          what&apos;s on the card, and please don&apos;t check AISafety.com to
-          see what we ended up doing.
-        </li>
-        <li>
-          <strong>Round two</strong> is judged as of today. Look at anything you
-          like, including the links, AISafety.com, and a web search. The same
-          goes for the change checks near the end.
+          what&apos;s on the card. <strong>Round two</strong> is judged as of
+          today.
         </li>
         <li>Give each decision a one-line reason.</li>
         <li>
-          You can use AI tools to help you think, but everything you write has
-          to be in your own words.
+          You can use AI tools, but everything you write has to be in your own
+          words.
         </li>
         <li>
           Your answers save as you go, so you can close this page and come back
@@ -806,7 +801,7 @@ function Briefing({ items }: { items: BriefingItem[] }) {
           <h3 className={q.h3}>Past decisions</h3>
           <p>
             These are real suggestions from the last two months, with what Fable
-            said and what we did.
+            said and what we did. These will help orient you somewhat.
           </p>
           <div className={s.scroll}>
             <table className={s.table}>
@@ -816,7 +811,14 @@ function Briefing({ items }: { items: BriefingItem[] }) {
                   <th scope="col">What it was</th>
                   <th scope="col">Fable said</th>
                   <th scope="col">We</th>
-                  <th scope="col">Why</th>
+                  <th scope="col">
+                    Why
+                    <span className={s.sub}>
+                      (approximately. It&apos;s what Bryce chose as the reason
+                      when given 3 suggested reasons at the time of making the
+                      decision)
+                    </span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
