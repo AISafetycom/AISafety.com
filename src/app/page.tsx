@@ -528,8 +528,8 @@ export default async function Home() {
               <h3>Lightcone Commons</h3>
             </div>
             <p className="padding-bottom-24px">
-              New grantmaking platform coordinating large-scale philanthropy in
-              quarterly rounds.
+              Grantmaking platform coordinating large-scale philanthropy in
+              quarterly rounds (soon monthly).
             </p>
             <Button
               as={TrackedLink}
