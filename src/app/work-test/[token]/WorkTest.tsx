@@ -763,8 +763,9 @@ function Briefing({ items }: { items: BriefingItem[] }) {
           program whose applications have closed.
         </li>
         <li>
-          <strong>Duplicates.</strong> Each card shows related listings already
-          on the site. Check them before you decide.
+          <strong>Duplicates.</strong> In round one, each card shows related
+          listings already on the site. In round two it doesn&apos;t, so check
+          AISafety.com yourself before you decide.
         </li>
         <li>
           <strong>Fable&apos;s reasons.</strong> They&apos;re worth reading even
@@ -777,16 +778,15 @@ function Briefing({ items }: { items: BriefingItem[] }) {
       <h3 className={q.h3}>A few rules</h3>
       <ul>
         <li>
-          Every item shows the date we decided it. Judge it as if today were
-          that date.
+          <strong>Round one</strong> uses past suggestions. Each shows the date
+          we decided it, so judge it as if today were that date. Decide from
+          what&apos;s on the card, and please don&apos;t check AISafety.com to
+          see what we ended up doing.
         </li>
         <li>
-          Decide from what&apos;s on the card. You don&apos;t need to open the
-          links, and the pages may have changed since. The change checks near
-          the end are the exception.
-        </li>
-        <li>
-          Please don&apos;t check AISafety.com to see what we ended up doing.
+          <strong>Round two</strong> is judged as of today. Look at anything you
+          like, including the links, AISafety.com, and a web search. The same
+          goes for the change checks near the end.
         </li>
         <li>Give each decision a one-line reason.</li>
         <li>
