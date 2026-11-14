@@ -75,6 +75,9 @@ import Chat, { CharCount, descriptionCap, type Decided } from './Chat'
 import FieldPicker from './FieldPicker'
 import type { FableChange } from '@/lib/admin/queue-fable'
 import Position, { forgetOrder } from './Position'
+import MapSpot, { forgetMap, notePlaced } from './MapSpot'
+import { spotOf, wantsSpot, withSpot } from '@/lib/admin/queue-spot'
+import type { Spot } from '@/lib/admin/map-spot'
 import Fireworks from './Fireworks'
 import {
   keepsOrder,
@@ -917,6 +920,37 @@ function unfilledAdd(
   )
 }
 
+/** A /map addition as its pin on the map strip, read from the record with
+ *  the edits over it: an edit to its Short name, Scale or Category shows on
+ *  the strip at once. */
+function pinOf(
+  fields: Record<string, unknown>,
+  edits: Record<string, string>,
+  fallbackName: string
+) {
+  const text = (k: string): string => {
+    const v = k in edits ? edits[k] : fields[k]
+    if (Array.isArray(v)) return v.map(String).join(', ')
+    return typeof v === 'string' ? v.trim() : ''
+  }
+  const logo = fields['Logo (for map)']
+  const first = Array.isArray(logo) ? logo[0] : logo
+  const title = text('Long name') || fallbackName
+  return {
+    title,
+    label: text('Short name') || title,
+    description: text('Description') || null,
+    category: text('Category'),
+    scale: text('Scale') || null,
+    logo:
+      typeof first === 'string'
+        ? first
+        : first && typeof first === 'object' && 'url' in first
+          ? String((first as { url: unknown }).url)
+          : null,
+  }
+}
+
 function sameEdits(
   a: Record<string, string>,
   b: Record<string, string>
@@ -1637,6 +1671,21 @@ export default function QueueAdmin({
   const [chatFocus, setChatFocus] = useState(0)
   const [placeFocus, setPlaceFocus] = useState(0)
   const [fieldFocus, setFieldFocus] = useState(0)
+  // A /map addition's suggested spot on the map, by item, as its map strip
+  // worked it out. Not an edit: it is not saved on the row, and it goes
+  // out with Publish only where the listing has no place of its own.
+  const [spots, setSpots] = useState<Record<string, Spot | null>>({})
+  const spotsRef = useRef(spots)
+  spotsRef.current = spots
+  const setSpot = useCallback((id: string, spot: Spot | null) => {
+    setSpots(prev => {
+      const was = prev[id] ?? null
+      if (was?.x === spot?.x && was?.y === spot?.y) return prev
+      return { ...prev, [id]: spot }
+    })
+  }, [])
+  // Bumped when A finds a /map addition with no place: its strip shows.
+  const [spotFocus, setSpotFocus] = useState(0)
   // Bumped when A can't accept yet: the "first" note flashes red.
   const [blockedFlash, setBlockedFlash] = useState(0)
   const wantedRef = useRef<string | null>(null)
@@ -2573,6 +2622,25 @@ export default function QueueAdmin({
   // A fresh draft starts from the edits saved on the row, so what was
   // applied (by hand or from the chat) is still there after a reload.
   const draft = (id: string): Draft => drafts[id] ?? draftOfRow(items, id)
+  // The places other open /map additions hold in their edits (dragged on
+  // their map strips, not yet published), by record: a suggested spot keeps
+  // clear of them. Rebuilt only when one of them changes, since each new
+  // list makes the open strip work its suggestion out again.
+  const claimedKey = JSON.stringify(
+    (items ?? [])
+      .filter(
+        i =>
+          wantsSpot(i) &&
+          i.targetRecord &&
+          (isOpen(i) || Boolean(setAsideUntil(i)))
+      )
+      .map(i => [i.targetRecord, spotOf({}, draft(i.id).edits)])
+      .filter(([, at]) => at)
+  )
+  const claimed = useMemo(
+    () => Object.fromEntries(JSON.parse(claimedKey)) as Record<string, Spot>,
+    [claimedKey]
+  )
   // Edits and the reply draft as edited are kept on the row a moment after
   // they change (one save per item, the last one wins), so they are still
   // there after a reload. The live base is untouched until Accept.
@@ -3159,6 +3227,12 @@ export default function QueueAdmin({
         shownReply: reply ?? item.replyDraft,
         rejectReply: extra.rejectReply,
       })
+      // A /map addition on its way out: the next one's suggested spot keeps
+      // clear of where this one is going, before the write has landed.
+      if (action === 'accept' && wantsSpot(item) && item.targetRecord) {
+        const going = spotOf({}, (extra.edits ?? {}) as Record<string, unknown>)
+        if (going) notePlaced(item.targetRecord, going)
+      }
       if (decision) {
         // The page moves on now; the write lands behind it. The previous
         // decision stops being U's target (the Done list still has it).
@@ -3271,6 +3345,11 @@ export default function QueueAdmin({
         // order the Position picker read.
         forgetCard(updated)
         if (updated.type === 'Add') forgetOrder(updated.targetTable)
+        // And the map, when a /map addition went out or came back; one
+        // that went out keeps its place on the strips already open.
+        if (wantsSpot(updated)) {
+          forgetMap(action === 'accept' ? null : updated.targetRecord)
+        }
         // So is the record as the page read it: read again when the item
         // is next opened (from Done today, or back in the queue).
         forgetLive(updated.id)
@@ -3416,6 +3495,8 @@ export default function QueueAdmin({
         // the list is read again so the wording he must see is on the card,
         // and there is no Retry, which would apply it unread.
         const reread = decision && status === 412
+        // It did not go out: its place is free again.
+        if (wantsSpot(item)) forgetMap(item.targetRecord)
         setDraft(item.id, { busy: false, error: closed ? null : message })
         if (closed || reread) await load()
         if (decision) {
@@ -3704,23 +3785,33 @@ export default function QueueAdmin({
               setBlockedFlash(n => n + 1)
               break
             }
+            // A /map addition goes out at its suggested spot unless it has
+            // a place of its own.
+            const going = wantsSpot(item)
+              ? withSpot(
+                  activeEdits(d),
+                  live[item.id]?.fields ?? item.fields ?? {},
+                  spotsRef.current[item.id]
+                )
+              : activeEdits(d)
             // One with a needed field still empty opens the first that
-            // takes typing (a picture is dropped in its slot instead).
-            const unfilled = unfilledAdd(
-              item,
-              live[item.id] ?? null,
-              activeEdits(d)
-            )
+            // takes typing (a picture is dropped in its slot instead; a
+            // place on the map is picked on the map strip).
+            const unfilled = unfilledAdd(item, live[item.id] ?? null, going)
             if (unfilled.length > 0) {
               const types = new Map(
                 (live[item.id]?.schema ?? []).map(f => [f.name, f.type])
               )
+              const onStrip = (k: string) =>
+                wantsSpot(item) && (k === 'x' || k === 'y')
               const first = unfilled.find(
                 k =>
                   types.get(k) !== 'multipleAttachments' &&
-                  types.get(k) !== 'checkbox'
+                  types.get(k) !== 'checkbox' &&
+                  !onStrip(k)
               )
               if (first) setDraft(item.id, { editing: first })
+              else if (unfilled.some(onStrip)) setSpotFocus(n => n + 1)
               setBlockedFlash(n => n + 1)
               break
             }
@@ -3728,7 +3819,7 @@ export default function QueueAdmin({
               keep: fableFieldsRef.current[item.id] ?? [],
               edits: withLeftOut(
                 coerceEdits(
-                  activeEdits(d),
+                  going,
                   item.type === 'Change'
                     ? {
                         ...live[item.id]?.fields,
@@ -4505,6 +4596,10 @@ export default function QueueAdmin({
                 chatFocus={chatFocus}
                 placeFocus={placeFocus}
                 fieldFocus={fieldFocus}
+                spot={spots[selected.id] ?? null}
+                onSpot={spot => setSpot(selected.id, spot)}
+                spotFocus={spotFocus}
+                claimed={claimed}
                 blockedFlash={blockedFlash}
                 readOnly={
                   !canEdit ||
@@ -5109,6 +5204,10 @@ function Detail({
   chatFocus,
   placeFocus,
   fieldFocus,
+  spot,
+  onSpot,
+  spotFocus,
+  claimed,
   blockedFlash = 0,
   readOnly,
   onFable,
@@ -5154,6 +5253,14 @@ function Detail({
   placeFocus: number
   /** Bumped by E: open the field list on a change. */
   fieldFocus: number
+  /** A /map addition's suggested spot on the map (null: none, or it has a
+   *  place of its own), and where its map strip reports a new one. */
+  spot: Spot | null
+  onSpot: (spot: Spot | null) => void
+  /** Bumped when A finds a /map addition with no place: its strip shows. */
+  spotFocus: number
+  /** Places other open /map additions hold in their edits, by record. */
+  claimed: Record<string, Spot>
   /** Bumped when A can't accept yet: the "first" note flashes red. */
   blockedFlash?: number
   /** A view-only session: no editing, no deciding. */
@@ -5429,7 +5536,14 @@ function Detail({
   const placeable = item.type === 'Add' && keepsOrder(live?.schema ?? [])
   const sortWas = shownFields[SORT_FIELD]
   const unplaced = unplacedAdd(item, live, activeEdits(d))
-  const unfilled = unfilledAdd(item, live, activeEdits(d))
+  // An open /map addition gets the map strip, which stands in for its x
+  // and y fields. It goes out at the strip's suggested spot unless the
+  // record or the edits already place it.
+  const spotted = wantsSpot(item) && draftable && Boolean(item.targetRecord)
+  const going = spotted
+    ? withSpot(activeEdits(d), live?.fields ?? item.fields ?? {}, spot)
+    : activeEdits(d)
+  const unfilled = unfilledAdd(item, live, going)
   // A pressed while one of those is missing: the note saying so flashes
   // red for a moment (Bryce, 5 Nov 2026). A new key restarts the flash on
   // each press; it clears when the animation ends, so the note never
@@ -6107,13 +6221,44 @@ function Detail({
                 fields={shownFields}
                 schema={live?.schema ?? []}
                 fable={fableFields}
-                omit={placeable ? SORT_FIELD : undefined}
+                omit={[
+                  ...(placeable ? [SORT_FIELD] : []),
+                  ...(spotted && !recordGone ? ['x', 'y'] : []),
+                ]}
                 onImage={onImage}
                 d={d}
                 setD={setD}
                 readOnly={readOnly}
                 onFix={fix}
               />
+              {spotted && !recordGone && item.targetRecord && (
+                <MapSpot
+                  key={item.id}
+                  record={item.targetRecord}
+                  {...pinOf(
+                    shownFields,
+                    d.edits,
+                    splitTitle(item).name ?? item.title
+                  )}
+                  spot={spotOf(shownFields, activeEdits(d))}
+                  edited={'x' in d.edits || 'y' in d.edits}
+                  claimed={claimed}
+                  canEdit={!revising}
+                  focusTick={spotFocus}
+                  onSuggest={onSpot}
+                  onMove={to =>
+                    setD({
+                      edits: { ...d.edits, x: String(to.x), y: String(to.y) },
+                    })
+                  }
+                  onReset={() => {
+                    const edits = { ...d.edits }
+                    delete edits.x
+                    delete edits.y
+                    setD({ edits })
+                  }}
+                />
+              )}
             </>
           )}
 
@@ -6586,7 +6731,10 @@ function Detail({
               }
               onClick={() =>
                 act('accept', {
-                  edits: withLeftOut(editsToSave(), d.leftOut),
+                  edits: withLeftOut(
+                    coerceEdits(going, original, types),
+                    d.leftOut
+                  ),
                   keep: fableKept,
                 })
               }
@@ -7168,8 +7316,9 @@ function Fields({
   item: QueueItem
   fields: Record<string, unknown>
   schema: FieldInfo[]
-  /** A field shown elsewhere on the item (Sort, by the Position picker). */
-  omit?: string
+  /** Fields shown elsewhere on the item (Sort, by the Position picker; x
+   *  and y, by the map strip). */
+  omit?: string[]
   /** Fields Fable changed on the record from the chat: marked "by Fable". */
   fable?: Map<string, FableChange>
   onImage: (field: string, urls: string[]) => void
@@ -7206,7 +7355,7 @@ function Fields({
   const editable = ([k]: [string, unknown]) =>
     !HOUSEKEEPING.test(k) && !COMPUTED_TYPES.has(types.get(k) ?? '')
   const rest = entries.filter(
-    e => !seen.has(e[0]) && e[0] !== omit && editable(e)
+    e => !seen.has(e[0]) && !omit?.includes(e[0]) && editable(e)
   )
   const revising = item.status === 'Revising' || (readOnly && !onFix)
   // The description's length against its page's cap, as the chat's edit
