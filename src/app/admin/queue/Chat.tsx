@@ -183,8 +183,17 @@ interface Msg {
   changed?: FableChange[]
   /** A new verdict and reasons for the item, when the reply found the flag
    *  out of date (the ```flag block, taken off the text on the Mac;
-   *  queue-flag.ts). Shown as a card with an Update flag button. */
+   *  queue-flag.ts). Written onto the row when the reply lands, and shown
+   *  as a card with Undo. */
   flag?: unknown
+}
+
+/** A flag write that a landed reply started by itself. */
+interface AutoFlag {
+  /** The reply's time stamp. */
+  at: string
+  busy: boolean
+  error: string | null
 }
 
 interface Event {
@@ -408,6 +417,13 @@ export default function Chat({
   const cap = descriptionCap(item)
   const replyRef = useRef(reply)
   replyRef.current = reply
+  const itemRef = useRef(item)
+  itemRef.current = item
+  const onFlagRef = useRef(onFlag)
+  onFlagRef.current = onFlag
+  // The flag write a landed reply started by itself (putFlag): its card
+  // says it is on its way, then shows any error.
+  const [autoFlag, setAutoFlag] = useState<AutoFlag | null>(null)
   // What this browser kept for the item last time: the newest message it
   // looked at, and what each applied reply replaced (APPLIED_KEY).
   const [kept] = useState(() => appliedOf(item.id))
@@ -486,10 +502,25 @@ export default function Chat({
     },
     [keep, onSetReply]
   )
+  /** A reply's new flag onto the Queue row, as the card's button does it,
+   *  unless the row already says it. Undo is the row's own (flag_before),
+   *  so it lasts past a reload without anything kept here. */
+  const putFlag = useCallback((msg: Msg) => {
+    const parsed = parseFlag(msg.flag, itemRef.current.type)
+    if ('error' in parsed || flagShown(itemRef.current, parsed.flag)) return
+    setAutoFlag({ at: msg.at, busy: true, error: null })
+    void onFlagRef.current({ flag: parsed.flag }).then(failed => {
+      if (mountedRef.current) {
+        setAutoFlag({ at: msg.at, busy: false, error: failed })
+      }
+    })
+  }, [])
 
-  /** Apply the blocks in a reply that has just arrived. */
+  /** Apply the blocks in a reply that has just arrived. `withFlag` is off
+   *  for all but the newest of several replies applied at once: each flag
+   *  write replaces the one before, and two sent together would race. */
   const applyFrom = useCallback(
-    (msg: Msg) => {
+    (msg: Msg, withFlag = true) => {
       if (msg.role !== 'fable' || !mountedRef.current) return
       if (msg.wrote) onWrote?.()
       // A decided item keeps what went with its decision: a reply that
@@ -503,8 +534,9 @@ export default function Chat({
         if (Object.keys(usable).length) putEdits(msg.at, usable)
       }
       if (draft) putReply(msg.at, draft)
+      if (withFlag && msg.flag !== undefined) putFlag(msg)
     },
-    [canEditField, decided, onWrote, putEdits, putReply]
+    [canEditField, decided, onWrote, putEdits, putFlag, putReply]
   )
   // Read through a ref by loadHistory, so that it changes only with the
   // item. The page hands down new callbacks on every render, and each
@@ -599,13 +631,19 @@ export default function Chat({
     // one that came while this item stayed open (the pending poll), and
     // one that came while Bryce was on another item or the page was shut
     // (newer than the last message this browser looked at). Older ones
-    // were applied when they came, and are on the row.
-    if (seenRef.current !== null) {
-      for (const msg of list.slice(seenRef.current)) applyFromRef.current(msg)
-    } else if (seenAtRef.current !== null) {
-      const since = seenAtRef.current
-      for (const msg of list) if (msg.at > since) applyFromRef.current(msg)
-    }
+    // were applied when they came, and are on the row. Of several new
+    // flags only the newest is written.
+    const since = seenAtRef.current
+    const fresh =
+      seenRef.current !== null
+        ? list.slice(seenRef.current)
+        : since !== null
+          ? list.filter(m => m.at > since)
+          : []
+    const newestFlag = fresh.findLast(
+      m => m.role === 'fable' && m.flag !== undefined
+    )
+    for (const msg of fresh) applyFromRef.current(msg, msg === newestFlag)
     seenRef.current = list.length
     markSeen(list.reduce((a, m) => (m.at > a ? m.at : a), ''))
     loadedRef.current = true
@@ -1223,6 +1261,7 @@ export default function Chat({
                     item={item}
                     decided={decided}
                     onFlag={onFlag}
+                    auto={autoFlag?.at === m.at ? autoFlag : null}
                   />
                 )}
               </div>
@@ -1916,15 +1955,18 @@ function shownValue(v: unknown): string {
 }
 
 /** The flag as Fable now sees it (queue-flag.ts; Bryce, 13 Oct 2026: "the
- *  chat should end with an 'update flag' button"). Unlike edits it is not
- *  applied when the reply lands: the button writes it onto the row, and
- *  Undo puts back what the row said before. On a decided item it only
- *  says whether the decision was made on it. */
+ *  chat should end with an 'update flag' button"). Like edits it goes on
+ *  by itself when the reply lands (Bryce, 14 Nov 2026: "Let's make the
+ *  flag update automatically because I always just press the button"),
+ *  and Undo puts back what the row said before; once taken off, a small
+ *  link puts it back on. On a decided item it only says whether the
+ *  decision was made on it. */
 function FlagCard({
   raw,
   item,
   decided,
   onFlag,
+  auto,
 }: {
   raw: unknown
   item: QueueItem
@@ -1932,9 +1974,12 @@ function FlagCard({
   onFlag: (
     body: { flag: FlagUpdate } | { undo: true }
   ) => Promise<string | null>
+  /** The write this reply started by itself, if it did. */
+  auto: AutoFlag | null
 }) {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [clickBusy, setBusy] = useState(false)
+  const [clickError, setError] = useState<string | null>(null)
+  const busy = clickBusy || Boolean(auto?.busy)
   const parsed = parseFlag(raw, item.type)
   if ('error' in parsed) {
     return (
@@ -1946,6 +1991,9 @@ function FlagCard({
   const flag = parsed.flag
   const shown = flagShown(item, flag)
   const noun = item.type === 'Add' ? 'verdict' : 'flag'
+  // A failed write the reply started by itself stays up until the flag
+  // is on the item or the link is pressed.
+  const error = clickError ?? (!busy && !shown ? (auto?.error ?? null) : null)
   const run = async (body: { flag: FlagUpdate } | { undo: true }) => {
     setBusy(true)
     setError(null)
@@ -2013,12 +2061,13 @@ function FlagCard({
         <CardFoot
           applied={shown}
           appliedText={`The item shows this ${noun}`}
-          applyText={busy ? 'Updating…' : `Update ${noun}`}
-          onApply={() => void run({ flag })}
+          offText={`Not the ${noun} on the item`}
+          waitText={`Updating the ${noun}…`}
+          applyText={`Update ${noun}`}
+          onApply={busy ? undefined : () => void run({ flag })}
           undo={
             item.flagUndo && !busy ? () => void run({ undo: true }) : undefined
           }
-          busy={busy}
         />
       )}
       {error && <p className={styles.chatError}>{error}</p>}
@@ -2048,22 +2097,19 @@ function CardFoot({
   onApply,
   undoText = 'Undo',
   undo,
-  busy = false,
 }: {
   applied: boolean
   appliedText: string
-  /** Set on a card that applies by itself: once off the page its Apply is
-   *  a small link beside these words, not a button. */
-  offText?: string
-  /** What such a card says while its reply is still being written
-   *  (onApply missing). */
-  waitText?: string
+  /** Every card applies by itself: once off the page its Apply is a small
+   *  link beside these words, not a button. */
+  offText: string
+  /** What the card says while it cannot be applied yet (onApply missing):
+   *  its reply is still being written, or its write is on the way. */
+  waitText: string
   applyText: string
   onApply?: () => void
   undoText?: string
   undo?: () => void
-  /** A write is on its way: the button waits. */
-  busy?: boolean
 }) {
   if (applied) {
     return (
@@ -2077,30 +2123,16 @@ function CardFoot({
       </div>
     )
   }
-  if (offText !== undefined) {
-    return (
-      <div className={styles.chatCardFoot}>
-        <span className={`${styles.chatTool} ${styles.chatNotApplied}`}>
-          {onApply ? offText : waitText}
-        </span>
-        {onApply && (
-          <button type="button" className={styles.chatLink} onClick={onApply}>
-            {applyText}
-          </button>
-        )}
-      </div>
-    )
-  }
   return (
     <div className={styles.chatCardFoot}>
-      <button
-        type="button"
-        className={`${styles.button} ${styles.primary}`}
-        disabled={busy}
-        onClick={onApply}
-      >
-        {applyText}
-      </button>
+      <span className={`${styles.chatTool} ${styles.chatNotApplied}`}>
+        {onApply ? offText : waitText}
+      </span>
+      {onApply && (
+        <button type="button" className={styles.chatLink} onClick={onApply}>
+          {applyText}
+        </button>
+      )}
     </div>
   )
 }
