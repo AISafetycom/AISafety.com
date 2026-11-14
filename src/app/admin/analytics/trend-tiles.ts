@@ -327,7 +327,7 @@ export function subscriberTiles(
         : 'it was on Substack'
     const what = moved
       ? [
-          `${n.label} subscribers = people on the ${n.label} list in ActiveCampaign at the end of each day, counting confirmed signups and leaving out unsubscribes and bounces.`,
+          `${n.label} subscribers = people on the ${n.label} list in ActiveCampaign at the end of each day, leaving out unsubscribes, bounces, and any signup still waiting for its confirming click (every signup needed one until 12 November 2026).`,
           exported
             ? `Before ${dayWords(moved)} ${wasOnSubstack}, and the line shows how many people each issue was emailed to. Substack’s own subscriber count is higher, as it includes readers of its app who don’t get email.`
             : `Before ${dayWords(moved)} ${wasOnSubstack}; add its export below to chart those years.`,

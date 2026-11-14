@@ -37,7 +37,7 @@ export default async function SelfStudyPage() {
           56px column gutter (gap-56px), and stack on mobile (width-6-col goes
           full-width there). gap-56px must match GRID_GAP in FeaturedCard so the
           shared gradient lines up. */}
-      <div className="flex flex-wrap gap-56px padding-bottom-80px">
+      <ul role="list" className="flex flex-wrap gap-56px padding-bottom-80px">
         {featuredCourses.map((course, i) => (
           <FeaturedCard
             key={course.id}
@@ -52,6 +52,7 @@ export default async function SelfStudyPage() {
                 ? [
                     {
                       icon: '/images/icons/author.svg',
+                      label: null,
                       value: `By ${course.organizer}`,
                     },
                   ]
@@ -62,12 +63,19 @@ export default async function SelfStudyPage() {
                 ? [
                     {
                       icon: '/images/icons/category.svg',
+                      label: 'Category',
                       value: course.category,
                     },
                   ]
                 : []),
               ...(course.courseType
-                ? [{ icon: '/images/icons/type.svg', value: course.courseType }]
+                ? [
+                    {
+                      icon: '/images/icons/type.svg',
+                      label: 'Type',
+                      value: course.courseType,
+                    },
+                  ]
                 : []),
             ]}
             trackingPage="Self-study"
@@ -77,7 +85,7 @@ export default async function SelfStudyPage() {
             count={featuredCourses.length}
           />
         ))}
-      </div>
+      </ul>
 
       {/* Main Content with Search, Cards, and Filters */}
       <SelfStudyClient courses={courses} />

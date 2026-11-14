@@ -1,5 +1,6 @@
 import { requireAccess } from '@/lib/admin/auth'
 import DonationGuideClient from '@/app/donation-guide/DonationGuideClient'
+import { guideShownDate } from '@/lib/donation-guide-date'
 import { readLiveGuide } from '@/lib/donation-guide/live'
 import { guideStore } from '@/lib/donation-guide/store'
 import PreviewAutoRefresh from './PreviewAutoRefresh'
@@ -29,7 +30,7 @@ export default async function DonationGuidePreviewPage({
       <PreviewAutoRefresh stamp={stamp} />
       <DonationGuideClient
         guide={draft?.guide ?? live.guide}
-        lastUpdated={draft?.savedAt ?? live.publishedAt}
+        lastUpdated={draft?.savedAt ?? guideShownDate(live.publishedAt)}
         initialTab={params.tab}
       />
     </div>

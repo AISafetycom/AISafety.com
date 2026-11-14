@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import styles from './page.module.css'
+import Button from '@/components/Button'
 
 const EMPTY = {
   name: '',
@@ -174,9 +175,9 @@ export default function ApplicationForm() {
       </div>
 
       <div className={styles.full}>
-        <button type="submit" className="button-primary" disabled={busy}>
+        <Button type="submit" disabled={busy}>
           {busy ? 'Applying…' : 'Apply'}
-        </button>
+        </Button>
         {error && (
           <p className="paragraph-small color-orange-300 margin-top-16px">
             {error}

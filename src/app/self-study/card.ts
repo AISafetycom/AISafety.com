@@ -14,6 +14,7 @@ export function courseCardProps(course: Course): CardProps {
       ? [
           {
             icon: '/images/icons/author.svg',
+            label: null,
             value: `By ${course.organizer}`,
           },
         ]
@@ -23,6 +24,7 @@ export function courseCardProps(course: Course): CardProps {
         ? [
             {
               icon: '/images/icons/category.svg',
+              label: 'Category',
               value: course.category,
             },
           ]
@@ -31,6 +33,7 @@ export function courseCardProps(course: Course): CardProps {
         ? [
             {
               icon: '/images/icons/type.svg',
+              label: 'Type',
               value: course.courseType,
             },
           ]

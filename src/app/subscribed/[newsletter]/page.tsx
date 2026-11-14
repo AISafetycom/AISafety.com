@@ -4,11 +4,14 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { COMBO_KEYS, type SignupNewsletter } from '@/lib/newsletter-signup'
 
-// Where ActiveCampaign sends readers after they click "Confirm subscription"
-// in the email the signup boxes on /events, /training and /funding trigger (each
-// form's confirmation redirect points at its own path), in place of
-// ActiveCampaign's unbranded confirmation page. The subscription is already
-// confirmed by the time they land here. The twin of /unsubscribed.
+// Where ActiveCampaign sends readers after they press the button in the
+// welcome email the signup boxes on /events, /training and /funding trigger
+// (each form's confirmation redirect points at its own path), in place of
+// ActiveCampaign's unbranded confirmation page. Since 12 November 2026 the
+// site subscribes a reader as they sign up, so most are subscribed before
+// they press it; for the rest the press is what subscribes them. Either
+// way they are subscribed by the time they land here. The twin of
+// /unsubscribed.
 // The newsletters page (/newsletter) signs up to several at once through a
 // form per combination, which lands on /subscribed/events-funding and the
 // like: the same page, naming each newsletter.
@@ -91,7 +94,6 @@ export default async function SubscribedPage({
             You&apos;re subscribed
           </h1>
           <h2 className="padding-bottom-40px">
-            Thanks for confirming.{' '}
             {listOf(
               picked.map(n => (
                 <span key={n.name} className="color-teal-300">

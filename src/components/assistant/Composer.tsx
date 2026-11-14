@@ -1,7 +1,7 @@
 'use client'
 
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
-import Icon from '@/components/Icon'
+import Button from '@/components/Button'
 import styles from './Assistant.module.css'
 
 const MAX_TEXTAREA_HEIGHT_PX = 120
@@ -57,25 +57,27 @@ const Composer = forwardRef<HTMLTextAreaElement, Props>(function Composer(
           aria-label="Message"
         />
         {isStreaming ? (
-          <button
-            type="button"
-            className={styles.stopButton}
+          <Button
+            variant="teal-alt"
+            size="small"
+            icon="/images/icons/stop-large.svg"
+            iconPosition="only"
+            className={styles.composerButton}
             onClick={onStop}
             aria-label="Stop"
-            title="Stop"
-          >
-            <Icon src="/images/icons/stop.svg" size={16} />
-          </button>
+            tooltipPosition="above"
+          />
         ) : (
-          <button
-            type="button"
-            className={styles.sendButton}
+          <Button
+            size="small"
+            icon="/images/icons/arrow-up-large.svg"
+            iconPosition="only"
+            className={styles.composerButton}
             disabled={disabled || value.trim().length === 0}
             onClick={onSubmit}
             aria-label="Send"
-          >
-            <Icon src="/images/icons/arrow-up.svg" size={16} />
-          </button>
+            tooltipPosition="above"
+          />
         )}
       </div>
     </div>

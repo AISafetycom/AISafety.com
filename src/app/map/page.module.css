@@ -39,23 +39,11 @@
    The expanded field matches this height so nothing jumps on open. Fill +
    border come from the global .border-plus-fill class; hover fill matches
    the zoom controls (MapControls.module.css). */
+/* A <Button> (teal, small, icon only); this adds only its shadow over the map. */
 .map-search-toggle {
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border-radius: 50%;
   box-shadow: 0px 12px 24px 0px
     color-mix(in srgb, var(--teal-900) 50%, transparent);
-  cursor: pointer;
-  transition: background-color var(--hover-transition);
   -webkit-tap-highlight-color: transparent;
-}
-
-.map-search-toggle:hover {
-  background-color: var(--teal-800);
 }
 
 /* Expanded field and dropdown copy the /events "Find events near you" box

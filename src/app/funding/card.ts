@@ -22,10 +22,20 @@ export function funderMeta(funder: Funder): ListingCardMeta[] {
   const grant = grantSizeLabel(funder.grantSize)
   return [
     ...(status
-      ? [{ icon: STATUS_ICONS[funder.applicationStatus], value: status }]
+      ? [
+          {
+            icon: STATUS_ICONS[funder.applicationStatus],
+            label: null,
+            value: status,
+          },
+        ]
       : []),
-    ...(who ? [{ icon: '/images/icons/team.svg', value: who }] : []),
-    ...(grant ? [{ icon: '/images/icons/grant-size.svg', value: grant }] : []),
+    ...(who
+      ? [{ icon: '/images/icons/team.svg', label: null, value: who }]
+      : []),
+    ...(grant
+      ? [{ icon: '/images/icons/grant-size.svg', label: null, value: grant }]
+      : []),
   ]
 }
 

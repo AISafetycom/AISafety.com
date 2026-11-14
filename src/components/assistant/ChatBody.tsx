@@ -22,7 +22,7 @@ import {
 import Composer from './Composer'
 import MessageContent from './MessageContent'
 import ToolCallPill from './ToolCallPill'
-import Icon from '@/components/Icon'
+import Button from '@/components/Button'
 import styles from './Assistant.module.css'
 
 const SCROLL_LOCK_THRESHOLD = 60
@@ -1027,15 +1027,16 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
           messages.map((m, turnIndex) =>
             m.role === 'user' ? (
               <div key={m.id} className={styles.userMessageWrap}>
-                <button
-                  type="button"
+                <Button
+                  variant="clear"
+                  size="xs"
+                  icon="/images/icons/pencil.svg"
+                  iconPosition="only"
                   className={styles.editButton}
                   onClick={() => handleEdit(m.id)}
                   aria-label="Edit message"
-                  title="Edit"
-                >
-                  <Icon src="/images/icons/pencil.svg" size={16} />
-                </button>
+                  tooltipPosition="above"
+                />
                 <div className={styles.userMessage}>{m.content}</div>
               </div>
             ) : (
@@ -1077,36 +1078,48 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
                 )}
                 {!m.isStreaming && !m.error && m.content.trim() && (
                   <div className={styles.feedbackRow}>
-                    <button
-                      type="button"
-                      className={`${styles.feedbackButton} ${styles.feedbackButtonUp}${m.rating === 'up' ? ` ${styles.feedbackButtonActive}` : ''}`}
+                    <Button
+                      variant="clear"
+                      size="xs"
+                      icon={
+                        m.rating === 'up'
+                          ? '/images/icons/thumbs-up-filled.svg'
+                          : '/images/icons/thumbs-up.svg'
+                      }
+                      iconPosition="only"
+                      className={`${styles.feedbackButtonUp}${m.rating === 'up' ? ` ${styles.feedbackButtonActive}` : ''}`}
                       onClick={() => handleRate(m.id, 'up')}
                       aria-label="Good response"
+                      tooltipPosition="above"
                       aria-pressed={m.rating === 'up'}
-                    >
-                      <Icon src="/images/icons/thumbs-up.svg" size={16} />
-                    </button>
-                    <button
-                      type="button"
-                      className={`${styles.feedbackButton} ${styles.feedbackButtonDown}${m.rating === 'down' ? ` ${styles.feedbackButtonActive}` : ''}`}
+                    />
+                    <Button
+                      variant="clear"
+                      size="xs"
+                      icon={
+                        m.rating === 'down'
+                          ? '/images/icons/thumbs-down-filled.svg'
+                          : '/images/icons/thumbs-down.svg'
+                      }
+                      iconPosition="only"
+                      className={`${styles.feedbackButtonDown}${m.rating === 'down' ? ` ${styles.feedbackButtonActive}` : ''}`}
                       onClick={() => handleRate(m.id, 'down')}
                       aria-label="Bad response"
+                      tooltipPosition="above"
                       aria-pressed={m.rating === 'down'}
-                    >
-                      <Icon src="/images/icons/thumbs-down.svg" size={16} />
-                    </button>
+                    />
                   </div>
                 )}
                 {m.error && (
                   <div className={styles.errorMessage}>
                     <span>{m.error}</span>
-                    <button
-                      type="button"
+                    <Button
+                      size="small"
                       className={styles.retryButton}
                       onClick={() => handleRetry(m.id)}
                     >
                       Try again
-                    </button>
+                    </Button>
                   </div>
                 )}
               </div>

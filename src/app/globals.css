@@ -11,7 +11,7 @@
    6. Spacing Utility Classes
    7. Layout Utility Classes
    8. Display & Visibility Utilities
-   9. Button Styles
+   9. Link Styles (buttons are the <Button> component)
    10. Form & Input Styles
    11. Shadows & Effects
    12. Layout Components (hero-bg, etc.)
@@ -25,6 +25,7 @@
 
 :root {
   /* Teal Grey Scale */
+  --teal-grey-50: #f1f2f3;
   --teal-grey-100: #e3e5e6;
   --teal-grey-200: #c6cccc;
   --teal-grey-300: #aab2b3;
@@ -53,7 +54,6 @@
   /* Base colors */
   --white: white;
   --black: black;
-  --off-white: #f3f3f3;
 
   /* Accent Colors
      Each hue sits at step 300, about 75% lightness, the same tier as --teal-300.
@@ -93,7 +93,7 @@
   --green-800: color-mix(in srgb, var(--green-300) 12%, transparent);
 
   /* Transitions */
-  --hover-transition: 0.1s ease-in-out;
+  --hover-transition: 0.15s ease-in-out;
 
   /* Shadows */
   --shadow-light: 0 4px 12px color-mix(in srgb, var(--black) 10%, transparent);
@@ -971,7 +971,7 @@ label {
 }
 
 /* ===============================
-   9. BUTTON & LINK STYLES
+   9. LINK STYLES
    =============================== */
 
 /* Links outside buttons: --teal-300, lightening to --teal-200 on hover. Put
@@ -987,48 +987,8 @@ label {
   color: var(--teal-200);
 }
 
-.button-primary {
-  display: inline-flex;
-  align-items: center;
-  width: fit-content;
-  gap: 8px;
-  height: 48px;
-  padding: 0 18px;
-  background-color: var(--white);
-  color: var(--teal-grey-900);
-  border: none;
-  border-radius: 24px;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.3px;
-  text-decoration: none;
-  cursor: pointer;
-  transition: background-color var(--hover-transition);
-}
-
-.button-primary:hover {
-  background-color: var(--off-white);
-}
-
-.button-secondary {
-  display: inline-flex;
-  align-items: center;
-  height: 48px;
-  padding: 0 18px;
-  background-color: transparent;
-  border: 1px solid color-mix(in srgb, var(--white) 40%, transparent);
-  border-radius: 24px;
-  color: white;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.3px;
-  text-decoration: none;
-  transition: background-color var(--hover-transition);
-}
-
-.button-secondary:hover {
-  background-color: color-mix(in srgb, var(--white) 8%, transparent);
-}
+/* Buttons are the <Button> component (src/components/Button.tsx), not a
+   class here. Its styles live in Button.module.css. */
 
 /* ===============================
    10. FORM & INPUT STYLES
@@ -1202,6 +1162,7 @@ select.text-field {
 }
 
 .collection-list {
+  list-style: none;
   display: grid;
   grid-template-columns: 369px 369px;
   gap: 40px;
@@ -1254,24 +1215,6 @@ select.text-field {
 
   .paragraph-small-bold {
     letter-spacing: -0.2px;
-    font-size: 13px;
-    line-height: 167.5%;
-  }
-
-  .button-primary {
-    letter-spacing: -0.2px;
-    height: 40px;
-    padding-left: 16px;
-    padding-right: 16px;
-    font-size: 13px;
-    line-height: 167.5%;
-  }
-
-  .button-secondary {
-    letter-spacing: -0.2px;
-    height: 40px;
-    padding-left: 16px;
-    padding-right: 16px;
     font-size: 13px;
     line-height: 167.5%;
   }

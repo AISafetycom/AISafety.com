@@ -1,4 +1,5 @@
 import { formatDate } from '@/lib/format-date'
+import { guideShownDate } from '@/lib/donation-guide-date'
 import { getLiveGuide } from '@/lib/donation-guide/live'
 import { fetchAirtableWithRetry } from './airtable'
 import { isPreviewRequest, shareLiveRead } from '@/lib/preview'
@@ -150,9 +151,10 @@ export async function fetchLastUpdated(
 
   if (config.type === 'guide') {
     const { publishedAt } = await getLiveGuide()
+    const shown = guideShownDate(publishedAt)
     return {
-      lastUpdated: publishedAt,
-      formattedDate: formatDate(new Date(publishedAt)),
+      lastUpdated: shown,
+      formattedDate: formatDate(new Date(shown)),
     }
   }
 

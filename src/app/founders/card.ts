@@ -11,7 +11,7 @@ export function founderResourceCardProps(resource: FounderResource): CardProps {
     description: resource.description,
     logo: resource.image,
     meta: resource.type
-      ? [{ icon: '/images/icons/tag.svg', value: resource.type }]
+      ? [{ icon: '/images/icons/tag.svg', label: 'Type', value: resource.type }]
       : [],
   }
 }

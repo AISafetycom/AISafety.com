@@ -359,7 +359,7 @@ export function signupAlertMail(p: {
   const subject = `Newsletter signups passed ${n(p.alertAfter)} today`
   const lines = [
     `More than ${n(p.alertAfter)} signups have come through the newsletter boxes on /events, /training and /funding today (${date}, UTC).`,
-    'That can be real interest, such as a mention somewhere popular, or a bot. A bot’s addresses never confirm, so a pile of unconfirmed contacts in ActiveCampaign points to a bot.',
+    `That can be real interest, such as a mention somewhere popular, or a bot. For the rest of today, a new signup is only subscribed once they press the button in their welcome email, so a bot’s addresses stay off the lists. The first ${n(p.alertAfter)} were subscribed as they signed up, so if today’s newest contacts in ActiveCampaign look fake, remove them before the next issue goes out.`,
     `Above ${n(p.cap)} signups in a day, the boxes stop taking signups until midnight UTC.`,
   ]
   const footer = 'This email was sent by the site itself, at most once a day.'

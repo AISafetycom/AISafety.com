@@ -179,6 +179,36 @@ export function wasDeclined(row: DecisionFacts): boolean {
   )
 }
 
+/** The proposal's reply.reject block belongs to the row's current decision.
+ *  Undo leaves the block where it is, so one from an earlier Reject says
+ *  nothing about a Publish made afterwards (Bryce, 12 Nov 2026: "The Gentle
+ *  Romance", rejected, undone and then published, was read as declined and
+ *  deleted, and its Undo was refused as too late). Mirrors `reject_state`
+ *  in ~/Queue/actions.py. */
+export function rejectIsCurrent(
+  reject: unknown,
+  decidedAt: string | null
+): boolean {
+  if (!isRecord(reject)) return false
+  const since = Date.parse(text(reject.since) ?? '')
+  const decided = Date.parse(decidedAt ?? '')
+  return (
+    Number.isFinite(since) && !(Number.isFinite(decided) && since < decided)
+  )
+}
+
+/** What the toast offers after an Undo failed. The server answers 409 when
+ *  there is nothing an Undo can take back, so sending it again never works:
+ *  a declined addition whose record is gone gets Reopen, which brings it
+ *  back, and anything else gets no button. Any other failure may pass. */
+export function afterUndoFailed(
+  item: { type: string; declined: boolean },
+  status: number
+): 'retry' | 'reopen' | null {
+  if (status !== 409) return 'retry'
+  return item.type === 'Add' && item.declined ? 'reopen' : null
+}
+
 /** The marker Reopen writes into the proposal. A record a failed attempt
  *  already made is kept, so the Mac never makes a second one. */
 export function withReopenMarker(
