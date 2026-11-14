@@ -37,6 +37,16 @@
   text-decoration: none;
 }
 
+/* .border-only and .hover-white each set `transition`, so only the later one
+   applied and the label snapped to white while the border faded. List both so
+   they fade together; the `a` keeps this ahead of the two utilities whatever
+   order the stylesheets load in. */
+a.airtableCard {
+  transition:
+    border-color var(--hover-transition),
+    color var(--hover-transition);
+}
+
 /* The table illustration sits at the top, inset slightly below the border
    per the Figma card; its baked-in gradient fades to --teal-900 (the page
    bg) so the label below reads cleanly over it. */
