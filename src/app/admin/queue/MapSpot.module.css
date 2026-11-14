@@ -1,0 +1,82 @@
+/* The map strip on a /map addition (MapSpot.tsx). Colours come from the
+   Queue's own --q-* palette, set on the page in queue.module.css. */
+
+.spot {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--q-border);
+  border-radius: 10px;
+  background: var(--q-panel-2);
+}
+
+.line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  font-size: 13px;
+}
+
+.muted {
+  color: var(--q-text-2);
+}
+
+.unplaced {
+  color: var(--q-warn);
+  font-weight: 600;
+}
+
+.error {
+  color: var(--q-danger);
+}
+
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--q-accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.numbers {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.number {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--q-muted);
+}
+
+.number input {
+  width: 64px;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--q-border-strong);
+  border-radius: 6px;
+  background: var(--q-panel);
+  color: var(--q-text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.number input:disabled {
+  opacity: 0.6;
+}
+
+/* The map editor's canvas, at a strip's height rather than the editor's
+   full window. Its zoom buttons place themselves against this frame. */
+.frame {
+  position: relative;
+}
+
+.frame > div:first-child {
+  height: 400px;
+  min-height: 0;
+}

@@ -18,6 +18,10 @@
   GET  /api/admin/queue?target=<tbl>/<rec>     → { fields, attachments, schema } (live)
   GET  /api/admin/queue?order=<tbl>            → { order } – the page's published
        listings by Sort, for placing an addition (null for a table with no Sort)
+  GET  /api/admin/queue?map=1                  → { records } – every Field map
+       listing with its place, unpublished ones included (live, the map
+       editor's own read; published logos are the site's copies), for the
+       map strip on a /map addition – queue-map.ts
   POST /api/admin/queue  body { id, action, edits?, reason?, replyDraft? } → { item }
        action: accept | reject | edit | later | undo | flag | reopen | fix
        | delete
@@ -51,6 +55,7 @@
 
 import { NextRequest } from 'next/server'
 import { canReviewQueue, canViewQueue, currentAdmin } from '@/lib/admin/auth'
+import { mapForStrip } from '@/lib/admin/queue-map'
 import {
   acceptItem,
   agentInfo,
@@ -119,6 +124,11 @@ export async function GET(req: NextRequest) {
       const item = await getQueueItem(one)
       if (!item) return json({ error: 'That item no longer exists.' }, 404)
       return json({ item })
+    }
+    // The Field map as it stands, for the map strip on a /map addition:
+    // every listing with its place, the ones not yet published included.
+    if (req.nextUrl.searchParams.get('map') === '1') {
+      return json({ records: await mapForStrip() })
     }
     const orderOf = req.nextUrl.searchParams.get('order')
     if (orderOf) return json({ order: await getPageOrder(orderOf) })

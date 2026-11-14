@@ -42,9 +42,9 @@ export interface CanvasControls {
   zoomIn: () => void
   zoomOut: () => void
   reset: () => void
-  /** Pan (and zoom in to at least FOCUS_ZOOM) so this grid position is
-   *  centred in the visible canvas. */
-  focusOn: (x: number, y: number) => void
+  /** Pan (and zoom in to at least FOCUS_ZOOM, or `zoom`) so this grid
+   *  position is centred in the visible canvas; `instant` skips the glide. */
+  focusOn: (x: number, y: number, zoom?: number, instant?: boolean) => void
 }
 
 /** Zoom level a "Show on map" jump lands at (kept if already closer). */
@@ -67,6 +67,13 @@ interface Props {
   controlsRef: React.MutableRefObject<CanvasControls>
   /** A view-only session: pins select on click but never drag or place. */
   readOnly: boolean
+  /** The Queue's map strip: only this record's pin can be dragged. Unset
+   *  on /admin/map, where every pin drags. */
+  onlyId?: string | null
+  /** The Queue's map strip sits in a page that scrolls: there the wheel
+   *  zooms only as a pinch or with Ctrl/Cmd held, so scrolling the page
+   *  over the map still scrolls the page. Read once, when the map is built. */
+  quietWheel?: boolean
 }
 
 const LOGO_CLIP_ID = 'editor-logo-circle-clip'
@@ -199,6 +206,8 @@ export default function MapEditorCanvas({
   onDragStateChange,
   controlsRef,
   readOnly,
+  onlyId = null,
+  quietWheel = false,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const hudRef = useRef<HTMLDivElement>(null)
@@ -253,10 +262,25 @@ export default function MapEditorCanvas({
           }) scale(${event.transform.k})`
         )
       })
+    // A pinch on a trackpad arrives as a wheel event with ctrlKey set.
+    const zoomsOnWheel = (e: WheelEvent) =>
+      !quietWheel || e.ctrlKey || e.metaKey
+    if (quietWheel) {
+      // d3's own rule (no secondary button; Ctrl only with the wheel), plus
+      // ours for the wheel.
+      zoom.filter(
+        (e: MouseEvent | WheelEvent) =>
+          (!e.ctrlKey || e.type === 'wheel') &&
+          !e.button &&
+          (e.type !== 'wheel' || zoomsOnWheel(e as WheelEvent))
+      )
+    }
     svg.call(zoom)
 
     const svgNode = svg.node()!
-    const preventPageZoom = (e: WheelEvent) => e.preventDefault()
+    const preventPageZoom = (e: WheelEvent) => {
+      if (zoomsOnWheel(e)) e.preventDefault()
+    }
     svgNode.addEventListener('wheel', preventPageZoom, { passive: false })
 
     svg
@@ -354,8 +378,8 @@ export default function MapEditorCanvas({
       reset: () => {
         svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity)
       },
-      focusOn: (gx, gy) => {
-        const k = Math.max(d3.zoomTransform(svgNode).k, FOCUS_ZOOM)
+      focusOn: (gx, gy, zoomTo, instant) => {
+        const k = Math.max(d3.zoomTransform(svgNode).k, zoomTo ?? FOCUS_ZOOM)
         // Centre of what is actually visible: the viewBox is fitted with
         // xMidYMin meet, so it is horizontally centred but top-aligned – a
         // canvas taller than the viewBox's aspect ratio shows extra map
@@ -375,7 +399,8 @@ export default function MapEditorCanvas({
             cy - MAP_OFFSET_Y - k * gridToPx(gy)
           )
           .scale(k)
-        svg.transition().duration(500).call(zoom.transform, t)
+        if (instant) svg.call(zoom.transform, t)
+        else svg.transition().duration(500).call(zoom.transform, t)
       },
     }
 
@@ -494,9 +519,15 @@ export default function MapEditorCanvas({
     entered.each(function () {
       drawGlyph(d3.select<SVGGElement, EditorRecord>(this))
     })
-    if (!readOnly) entered.call(drag)
-
     const all: PinSel = entered.merge(pins)
+    // Which pins drag: all of them, none in a view-only session, or the one
+    // the Queue's strip is placing. Set on every pass, since that one pin
+    // can change while the others stay.
+    const drags = (d: EditorRecord) =>
+      !readOnly && (onlyId === null || d.id === onlyId)
+    all.filter(d => drags(d)).call(drag)
+    all.filter(d => !drags(d)).on('.drag', null)
+    all.style('cursor', d => (drags(d) ? 'grab' : 'default'))
     all.each(function (d) {
       const g = d3.select<SVGGElement, EditorRecord>(this)
       if (g.attr('data-sig') !== glyphSignature(d)) drawGlyph(g)
@@ -535,7 +566,7 @@ export default function MapEditorCanvas({
           )
           .attr('stroke-width', 3)
       })
-  }, [records, selectedId, placeModeId, previewPublic, readOnly])
+  }, [records, selectedId, placeModeId, previewPublic, readOnly, onlyId])
 
   // Crosshair while placing.
   useEffect(() => {
