@@ -1,3 +1,4 @@
+import { guideShownDate } from '@/lib/donation-guide-date'
 import { getLiveGuide } from '@/lib/donation-guide/live'
 import DonationGuideClient from './DonationGuideClient'
 
@@ -7,5 +8,10 @@ import DonationGuideClient from './DonationGuideClient'
 // the store is unreachable. Prerendered; a publish revalidates this page.
 export default async function DonationGuidePage() {
   const { guide, publishedAt } = await getLiveGuide()
-  return <DonationGuideClient guide={guide} lastUpdated={publishedAt} />
+  return (
+    <DonationGuideClient
+      guide={guide}
+      lastUpdated={guideShownDate(publishedAt)}
+    />
+  )
 }
