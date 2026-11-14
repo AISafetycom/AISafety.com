@@ -111,14 +111,16 @@ export default function WorkTest({
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
   const latest = useRef(new Map<string, Answer>())
   const inFlight = useRef(new Set<Promise<void>>())
+  // The last save started for each item, so the next one waits its turn.
+  const chains = useRef(new Map<string, Promise<void>>())
 
-  const send = useCallback(
+  const sendNow = useCallback(
     (key: string): Promise<void> => {
       const answer = latest.current.get(key)
       if (!answer) return Promise.resolve()
       latest.current.delete(key)
       setSaves(v => ({ ...v, [key]: 'saving' }))
-      const run = fetch(API, {
+      return fetch(API, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, action: 'save', key, ...answer }),
@@ -133,13 +135,28 @@ export default function WorkTest({
           setSaves(v => ({ ...v, [key]: 'failed' }))
           console.warn('Work test: an answer was not saved', e)
         })
+    },
+    [token]
+  )
+
+  // One save at a time for each item, in the order they were made. Two
+  // saves of the same item sent together can land in either order, and the
+  // older one landing last would undo the newer (a decision click followed
+  // at once by its reason lost the reason).
+  const send = useCallback(
+    (key: string): Promise<void> => {
+      const before = chains.current.get(key) ?? Promise.resolve()
+      const run: Promise<void> = before
+        .then(() => sendNow(key))
         .finally(() => {
           inFlight.current.delete(run)
+          if (chains.current.get(key) === run) chains.current.delete(key)
         })
+      chains.current.set(key, run)
       inFlight.current.add(run)
       return run
     },
-    [token]
+    [sendNow]
   )
 
   const change = useCallback(
@@ -185,10 +202,25 @@ export default function WorkTest({
     return () => document.removeEventListener('visibilitychange', onHide)
   }, [flush])
 
+  // What the page shows now, for the submit below to read.
+  const shown = useRef({ items: state.items, drafts })
+  useEffect(() => {
+    shown.current = { items: state.items, drafts }
+  }, [state.items, drafts])
+
   const move = useCallback(
     async (action: Move) => {
       setBusy(true)
       setError('')
+      type Reply = { state?: WorkTestState; error?: string; missing?: string[] }
+      const post = async (): Promise<{ ok: boolean; data: Reply }> => {
+        const res = await fetch(API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, action }),
+        })
+        return { ok: res.ok, data: (await res.json()) as Reply }
+      }
       try {
         if (!(await flush())) {
           setError(
@@ -196,17 +228,21 @@ export default function WorkTest({
           )
           return
         }
-        const res = await fetch(API, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token, action }),
+        let { ok, data } = await post()
+        // The server is missing answers this page shows as complete, so a
+        // save went astray. Send those again and try the step once more.
+        const missing = data.missing ?? []
+        const { items: shownItems, drafts: shownDrafts } = shown.current
+        const lost = missing.filter(key => {
+          const item = shownItems.find(i => i.key === key)
+          return item !== undefined && isComplete(item, shownDrafts[key])
         })
-        const data = (await res.json()) as {
-          state?: WorkTestState
-          error?: string
-          missing?: string[]
+        if (!data.state && lost.length > 0 && lost.length === missing.length) {
+          console.warn('Work test: saving again, the server lacked', lost)
+          for (const key of lost) latest.current.set(key, shownDrafts[key])
+          if (await flush()) ({ ok, data } = await post())
         }
-        if (!res.ok || !data.state) {
+        if (!ok || !data.state) {
           if (data.missing?.[0]) setSelected(data.missing[0])
           setError(data.error ?? 'That did not work. Try again.')
           return
