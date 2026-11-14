@@ -1,0 +1,153 @@
+/* The work test wears the admin Queue's stylesheet (queue.module.css): its
+   palette (the --q-* variables on .queue), list, detail pane, verdict panel
+   and buttons. Only what the Queue has no class for lives here: filling the
+   window without the admin header, the briefing and review pages, and the
+   reason box beside the decision buttons. Selectors carry an element name
+   where they adjust a Queue class, so they win whichever file loads last. */
+
+div.root {
+  height: 100dvh;
+}
+
+div.topRight {
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+p.banner {
+  margin: 0;
+  padding: 10px 24px;
+}
+
+/* ─── Briefing, review and the last page ─────────────────────────────── */
+
+.page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 32px 24px 56px;
+}
+
+.prose {
+  max-width: 900px;
+  margin: 0 auto;
+  display: grid;
+  gap: 14px;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--q-text-2);
+}
+
+.prose p,
+.prose li {
+  margin: 0;
+  font: inherit;
+  letter-spacing: 0;
+  color: inherit;
+}
+
+.prose ol,
+.prose ul {
+  margin: 0;
+  padding-left: 22px;
+  display: grid;
+  gap: 6px;
+}
+
+.prose h3 {
+  margin-top: 14px;
+}
+
+.prose strong {
+  font-weight: 600;
+  color: var(--q-text);
+}
+
+.pageFoot {
+  max-width: 900px;
+  margin: 28px auto 0;
+}
+
+.scroll {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.table th,
+.table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--q-border);
+  text-align: left;
+  vertical-align: top;
+  font-weight: 400;
+  color: var(--q-text-2);
+}
+
+.table thead th {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--q-muted);
+}
+
+.table tbody th {
+  min-width: 160px;
+  font-weight: 600;
+  color: var(--q-text);
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--q-muted);
+}
+
+/* ─── The list and the decision bar ──────────────────────────────────── */
+
+/* A hollow ring until the item has its decision and reason. */
+.dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--q-border-strong);
+  border-radius: 50%;
+}
+
+.dotDone {
+  border-color: var(--q-accent);
+  background: var(--q-accent);
+}
+
+input.reason {
+  flex: 1 1 260px;
+  width: auto;
+  height: 36px;
+}
+
+.status {
+  min-width: 48px;
+  font-size: 12px;
+  color: var(--q-muted);
+}
+
+/* Narrow windows: the list sits above the item instead of beside it. */
+@media (max-width: 900px) {
+  .root .split {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(140px, 30vh) minmax(0, 1fr);
+  }
+}
