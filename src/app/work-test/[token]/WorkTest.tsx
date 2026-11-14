@@ -765,7 +765,9 @@ function Briefing({ items }: { items: BriefingItem[] }) {
         <li>
           <strong>Duplicates.</strong> In round one, each card shows related
           listings already on the site. In round two it doesn&apos;t, so check
-          AISafety.com yourself before you decide.
+          AISafety.com yourself before you decide. Every item is a new
+          suggestion, so if the same thing is already listed, it&apos;s a
+          duplicate.
         </li>
         <li>
           <strong>Fable&apos;s reasons.</strong> They&apos;re worth reading even
