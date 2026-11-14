@@ -2620,6 +2620,14 @@ export async function undoItem(item: QueueItem): Promise<string[]> {
     return []
   }
   if (item.status === 'Applied' && item.type === 'Change') {
+    // A correction the Mac could not place (no listing at all): Accept only
+    // marked it done (12 Oct 2026), so reopening is the whole Undo (Bryce,
+    // 14 Nov 2026: LIaiSE Context Weekend, "Undo failed · This item has no
+    // valid target record").
+    if (!item.targetTable && !item.targetRecord) {
+      await patchQueueRow(item.id, reopen)
+      return []
+    }
     const t = target(item)
     const fields: Record<string, unknown> = {}
     for (const c of item.changes) {
