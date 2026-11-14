@@ -7,7 +7,7 @@ import Assistant from './assistant/Assistant'
 import MapPreload from './MapPreload'
 
 // Routes that render without Navigation/Footer/Assistant
-const standaloneRoutes = ['/poster-map', '/admin']
+const standaloneRoutes = ['/poster-map', '/admin', '/work-test']
 
 export default function LayoutShell({
   children,

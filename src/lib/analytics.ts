@@ -101,9 +101,12 @@ function getVisitorId(): string | undefined {
 
 /** An org's page (/stats/<token>) is a private link, so its token never goes
  *  into either analytics system, the chatbot's log, or the footer's feedback
- *  form: every one is recorded as '/stats'. */
+ *  form: every one is recorded as '/stats'. The same goes for a candidate's
+ *  work test (/work-test/<token>), recorded as '/work-test'. */
 export function trackedPath(pathname: string): string {
-  return pathname.startsWith('/stats/') ? '/stats' : pathname
+  if (pathname.startsWith('/stats/')) return '/stats'
+  if (pathname.startsWith('/work-test/')) return '/work-test'
+  return pathname
 }
 
 /** Fire a first-party event to /api/track. Prefers sendBeacon so it survives the
