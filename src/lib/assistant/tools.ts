@@ -10,6 +10,7 @@ import {
   type IndexedRound,
 } from './program-history'
 import { datedRoundsByProgram } from './dated-rounds'
+import { distanceNote } from './distance-note'
 
 export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
@@ -45,7 +46,7 @@ Events ('event') are things to attend — conferences, hackathons, meetups, talk
 
 Meta fields you can read off event/training results: startDate, endDate, applicationsClose, mode, plus (events only) host and cost, plus (training) startDateApprox, length, and typicalLength. When \`startDateApprox\` is present (e.g. "early September 2026") it is the org's own wording and the ISO startDate is only an approximate anchor — describe timing with the approx wording, never the exact ISO date. The catalog only contains upcoming or currently-running listings (past ones are excluded — for a program's earlier rounds use \`get_program_history\`), sorted soonest-first (recurring programs come after, in the site's order). NOTE: a future start date does NOT mean you can still apply — the application window may already be closed. For every event/training result the server pre-computes \`applicationsStatus\` ('open' | 'closed' | 'not_yet_open' | 'unknown' | 'recurring') and a plain-English \`applicationsNote\`. TRUST these — do not do your own date arithmetic. Card/recommend listings with \`applicationsStatus: 'open'\`; for 'closed' don't suggest applying (only mention it if the user named that program). 'not_yet_open' means the round is announced but applications/registrations haven't opened yet — you may surface it as upcoming, but don't tell the user to apply now. 'unknown' means there's no closing date on file (rolling, walk-in, or not yet announced) — you may surface it, but never assert it's open or closed; just say the application deadline is unknown. Do NOT tell the user to check the link (if the deadline were findable there, we'd already have it on the site). 'recurring' means an evergreen program with no dated round listed — fine to recommend; follow its applicationsNote for how to talk about timing.
 
-• \`near\` — optional geo filter. Object with \`{city: string, radiusKm?: number}\` or \`{lat, lng, radiusKm?}\`. Default radius is 500km, intentionally wide. Currently only \`community\` listings have coordinates; for other types \`near\` does a fallback substring match on the location meta field. Results within range are ranked by distance ascending. USE THIS for any "near X" / "in X" / "around X" / "close to X" location queries instead of putting the city in the query.
+• \`near\` — optional geo filter. Object with \`{city: string, radiusKm?: number}\` or \`{lat, lng, radiusKm?}\`. Default radius is 500km, intentionally wide. Currently only \`community\` listings have coordinates; for other types \`near\` does a fallback substring match on the location meta field. Results within range are ranked by distance ascending, each with a \`distanceKm\` measured from the center of the place you searched — the user's own distance only if they named that place themselves. USE THIS for any "near X" / "in X" / "around X" / "close to X" location queries instead of putting the city in the query.
 
 • \`limit\` — optional cap on results. Default: no limit (returns every match in the catalog). Pass a number only if you want to truncate (rarely useful).
 
@@ -409,10 +410,15 @@ async function executeSearch(
   }
   const today = new Date().toISOString().slice(0, 10)
   const rounds = datedRoundsByProgram(catalog.listings)
+  const note = distanceNote(
+    input.near,
+    hits.some(h => typeof h.distanceKm === 'number')
+  )
   return {
     ok: true,
     content: JSON.stringify({
       matches: hits.length,
+      ...(note ? { distanceNote: note } : {}),
       results: hits.map(h =>
         summariseListing(
           h.listing,
