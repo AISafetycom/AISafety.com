@@ -17,6 +17,13 @@ import { fillFirst, neededLeft } from '@/lib/admin/queue-needed'
 import { replyWho } from '@/lib/admin/queue-also'
 import { backSince, laterSince, laterUntil } from '@/lib/admin/queue-later'
 import {
+  askedDay,
+  askedState,
+  reviewStage,
+  waitEnds,
+  type AskedState,
+} from '@/lib/admin/queue-asked'
+import {
   passedBlock,
   passedDay,
   takenOutOf,
@@ -140,8 +147,17 @@ const REFRESH_MIN_GAP_MS = 5 * 1000
 // have a huge backlog … a way of triaging"), and above that every item
 // Fable is answering or has answered unread, whatever its kind (Bryce,
 // 4 Oct 2026: "when Fable is responding to something it should go to the
-// top so I can see").
-type Section = 'fable' | 'urgent' | 'requests' | 'broom' | 'rules' | 'comb'
+// top so I can see"). Last, folded, sits what he has asked the submitter a
+// question about and is waiting to hear back on (queue-asked.ts; Bryce,
+// 16 Nov 2026: "what to do with it in queue in the meantime").
+type Section =
+  | 'fable'
+  | 'urgent'
+  | 'requests'
+  | 'broom'
+  | 'rules'
+  | 'comb'
+  | 'waiting'
 const SECTIONS: Section[] = [
   'fable',
   'urgent',
@@ -149,6 +165,7 @@ const SECTIONS: Section[] = [
   'broom',
   'rules',
   'comb',
+  'waiting',
 ]
 type Kind = 'additions' | 'changes' | 'rules'
 const KINDS: { key: Kind; label: string; title: string }[] = [
@@ -182,6 +199,7 @@ const SECTION_LABEL: Record<Section, string> = {
   broom: 'Broom',
   rules: 'Rules',
   comb: 'Comb',
+  waiting: 'Waiting on them',
 }
 
 // Inside a section the items sit under their resource page, in the site's
@@ -303,6 +321,7 @@ const SECTION_ICON: Record<Section, string> = {
   broom: ICON.broom,
   rules: ICON.rule,
   comb: ICON.comb,
+  waiting: ICON.timer,
 }
 
 function sourceIcon(item: QueueItem): string {
@@ -1147,6 +1166,18 @@ function searchDocOf(item: QueueItem): SearchDoc {
 
 /** An item their reply to a decline brought back sits atop Urgent. */
 const REPLIED: Urgency = { days: null, label: 'Replied to your decline' }
+// They answered the question he asked before deciding (queue-asked.ts).
+const ANSWERED: Urgency = { days: null, label: 'Answered your question' }
+
+/** Where the question he asked on an open item stands now, or null. */
+function askedNow(item: QueueItem): AskedState | null {
+  return item.asked ? askedState(item, Date.now()) : null
+}
+
+/** Fable's second look at an addition, once they have answered. */
+function reviewNow(item: QueueItem): 'done' | 'running' | null {
+  return reviewStage(item, Date.now())
+}
 
 /** The live page, landing on this record's card (every site card carries
  *  its record id as an anchor; ScrollToHash finds it once rendered). */
@@ -1766,6 +1797,8 @@ export default function QueueAdmin({
     broom: false,
     rules: false,
     comb: false,
+    // Nothing in it is his to do, so it starts folded.
+    waiting: true,
   })
   // Folded page sub-groups, keyed "<section>:<page label>".
   const [foldedPages, setFoldedPages] = useState<Record<string, boolean>>({})
@@ -1811,7 +1844,11 @@ export default function QueueAdmin({
       if (folded && typeof folded === 'object') {
         setCollapsed(prev => {
           const next = { ...prev }
-          for (const key of SECTIONS) next[key] = folded[key] === true
+          // A section this browser has no saved choice for keeps its
+          // default (Waiting on them starts folded).
+          for (const key of SECTIONS) {
+            next[key] = key in folded ? folded[key] === true : prev[key]
+          }
           return next
         })
       }
@@ -2290,6 +2327,7 @@ export default function QueueAdmin({
       broom: [],
       rules: [],
       comb: [],
+      waiting: [],
     }
     const done: QueueItem[] = []
     const perKind: Record<Kind, number> = {
@@ -2332,9 +2370,16 @@ export default function QueueAdmin({
         if (decidedToday || item.id === selectedId) done.push(item)
         continue
       }
-      open++
       const k = kindOf(item)
-      openPerKind[k]++
+      // Asked a question and waiting to hear back: nothing is his to do, so
+      // it is out of the counts and sits in its own folded section until
+      // they answer or the wait runs out (queue-asked.ts).
+      const question = askedNow(item)
+      const waitingOnThem = question === 'waiting'
+      if (!waitingOnThem) {
+        open++
+        openPerKind[k]++
+      }
       if (search) {
         // Every kind at once; the segments count the matches of each.
         if (!hit) continue
@@ -2342,18 +2387,25 @@ export default function QueueAdmin({
         groups[sectionOf(item)].push(item)
         continue
       }
+      if (waitingOnThem) {
+        if (k === kind) groups.waiting.push(item)
+        continue
+      }
       perKind[k]++
-      // Their reply to a decline brought it back: it can't wait either.
+      // Their reply to a decline brought it back: it can't wait either,
+      // nor can their answer to his question.
       // A passed one is past its dates: only the reply is left.
       const urgency = item.pushback
         ? REPLIED
-        : item.passed
-          ? null
-          : urgencyOf(
-              item,
-              item.targetRecord ? listingDates[item.targetRecord] : undefined,
-              today
-            )
+        : question === 'answered'
+          ? ANSWERED
+          : item.passed
+            ? null
+            : urgencyOf(
+                item,
+                item.targetRecord ? listingDates[item.targetRecord] : undefined,
+                today
+              )
       if (urgency) {
         urgencies.set(item.id, urgency)
         urgentPerKind[k]++
@@ -2371,12 +2423,23 @@ export default function QueueAdmin({
       createdAt: i.createdAt,
       visitors: visitorsOf(i),
     })
+    const heard = (i: QueueItem) => {
+      const u = urgencies.get(i.id)
+      return u === REPLIED ? 2 : u === ANSWERED ? 1 : 0
+    }
     groups.urgent.sort(
-      (a, b) =>
-        Number(Boolean(b.pushback)) - Number(Boolean(a.pushback)) ||
-        byUrgency(urgentAt(a), urgentAt(b))
+      (a, b) => heard(b) - heard(a) || byUrgency(urgentAt(a), urgentAt(b))
     )
-    groups.fable.sort((a, b) => fableTop.indexOf(a.id) - fableTop.indexOf(b.id))
+    // An answer to his question heads the chats too: it is what changed.
+    groups.fable.sort(
+      (a, b) =>
+        Number(heard(b) === 1) - Number(heard(a) === 1) ||
+        fableTop.indexOf(a.id) - fableTop.indexOf(b.id)
+    )
+    // Longest wait first: the next to come back on its own.
+    groups.waiting.sort((a, b) =>
+      (a.asked?.sentAt ?? '') < (b.asked?.sentAt ?? '') ? -1 : 1
+    )
     groups.requests.sort(oldest)
     groups.broom.sort(byVerdict)
     groups.rules.sort(oldest)
@@ -2394,10 +2457,12 @@ export default function QueueAdmin({
       broom: [],
       rules: [],
       comb: [],
+      waiting: [],
     }
     for (const s of SECTIONS) {
-      // Fable and Urgent keep their own order; their rows name their page.
-      if (s === 'fable' || s === 'urgent') continue
+      // Fable, Urgent and Waiting keep their own order; their rows name
+      // their page.
+      if (s === 'fable' || s === 'urgent' || s === 'waiting') continue
       const split = splitByPage(groups[s])
       pages[s] = split.length > 1 ? split : []
     }
@@ -5054,6 +5119,52 @@ function BackTag({ item }: { item: QueueItem }) {
   )
 }
 
+/** On an open row he asked the submitter a question about: where that
+ *  stands (queue-asked.ts). `told` = the row already says they answered. */
+function AskedTag({ item, told }: { item: QueueItem; told?: boolean }) {
+  const state = isOpen(item) ? askedNow(item) : null
+  const asked = item.asked
+  if (!state || !asked) return null
+  if (state === 'answered') {
+    return told ? null : (
+      <span className={`${styles.withIcon} ${styles.urgentTag}`}>
+        <Icon src={ICON.requests} size={12} />
+        {ANSWERED.label}
+      </span>
+    )
+  }
+  if (state === 'draft') {
+    return (
+      <span
+        className={styles.withIcon}
+        title="Your question is saved as a draft in Gmail. Once you send it, this item waits out of the way until they answer."
+      >
+        <Icon src={ICON.mail} size={12} />
+        Question not sent
+      </span>
+    )
+  }
+  const sent = asked.sentAt as string
+  const ends = waitEnds(asked)
+  return state === 'waiting' ? (
+    <span
+      className={styles.withIcon}
+      title={`You asked them a question on ${dayMonth(sent)}. It comes back when they answer${ends ? `, or on ${dayMonth(ends)} if they don't` : ''}.`}
+    >
+      <Icon src={ICON.mail} size={12} />
+      Asked {askedDay(sent)}
+    </span>
+  ) : (
+    <span
+      className={`${styles.withIcon} ${styles.urgentTag}`}
+      title={`You asked them a question on ${dayMonth(sent)} and they haven't answered.`}
+    >
+      <Icon src={ICON.timer} size={12} />
+      No answer since {askedDay(sent)}
+    </span>
+  )
+}
+
 /** On an open row whose date went by while someone waits for a reply. */
 function PassedTag({ item }: { item: QueueItem }) {
   if (!item.passed || !isOpen(item)) return null
@@ -5183,7 +5294,11 @@ function Row({
               title={urgencyNote}
             >
               <Icon
-                src={item.pushback ? ICON.requests : ICON.clock}
+                src={
+                  urgency === REPLIED || urgency === ANSWERED
+                    ? ICON.requests
+                    : ICON.clock
+                }
                 size={12}
               />
               {urgency.label}
@@ -5197,6 +5312,7 @@ function Row({
               </span>
             )
           )}
+          <AskedTag item={item} told={urgency === ANSWERED} />
           <BackTag item={item} />
           <PassedTag item={item} />
           {showKind && <span>{KIND_WORD[item.type]}</span>}
@@ -6078,6 +6194,79 @@ function Detail({
   // Back from "Review again in a week" (Bryce, 20 Oct 2026: "I need to know
   // if something is coming back a week later").
   const back = backFrom(item)
+  // A question he asked them before deciding (queue-asked.ts): their answer
+  // on top once it is in; until then, where the question stands.
+  const question = isOpen(item) ? askedNow(item) : null
+  const asked = item.asked
+  const reviewed = question === 'answered' ? reviewNow(item) : null
+  const askedBlock =
+    !question || !asked ? null : question === 'answered' && asked.answer ? (
+      <section className={`${styles.block} ${styles.pushback}`}>
+        <h3 className={`${styles.h3} ${styles.withIcon}`}>
+          <Icon src={ICON.requests} size={12} />
+          {asked.answer.who || 'They'} answered your question
+          {asked.answer.at && (
+            <span className={styles.when}>{ago(asked.answer.at)}</span>
+          )}
+          {asked.answer.link && (
+            <a
+              className={styles.pushbackLink}
+              href={asked.answer.link}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open in Gmail
+            </a>
+          )}
+        </h3>
+        {asked.text && (
+          <p className={styles.found}>
+            <span className={styles.foundLabel}>You asked</span> {asked.text}
+          </p>
+        )}
+        <p className={styles.pushbackText}>
+          {asked.answer.text ||
+            'Their email has no text of its own. Open it in Gmail.'}
+        </p>
+        {reviewed && (
+          <p className={styles.pushbackTake}>
+            <span className={styles.withIcon}>
+              <Icon src={ICON.stars} size={12} />
+              Fable
+            </span>{' '}
+            {reviewed === 'done'
+              ? 'reviewed it again with their answer, so the verdict here is the new one'
+              : 'is reviewing it again with their answer…'}
+          </p>
+        )}
+      </section>
+    ) : (
+      <>
+        <p className={`${styles.note} ${styles.withIcon} ${styles.returnNote}`}>
+          <Icon src={question === 'draft' ? ICON.mail : ICON.timer} size={12} />
+          {question === 'draft'
+            ? 'Your question is saved as a draft in Gmail, not sent yet · once you send it, this item waits out of the way until they answer'
+            : question === 'waiting'
+              ? `Waiting on them · you asked on ${dayMonth(asked.sentAt as string)} · it comes back when they answer, or on ${dayMonth(waitEnds(asked) as string)} if they don't`
+              : `No answer · you asked on ${dayMonth(asked.sentAt as string)} and they haven't replied`}
+          {asked.sentLink && (
+            <a
+              className={styles.pushbackLink}
+              href={asked.sentLink}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open in Gmail
+            </a>
+          )}
+        </p>
+        {asked.text && (
+          <p className={styles.found}>
+            <span className={styles.foundLabel}>You asked</span> {asked.text}
+          </p>
+        )}
+      </>
+    )
   const returnBlock = pushback ? (
     <section className={`${styles.block} ${styles.pushback}`}>
       <h3 className={`${styles.h3} ${styles.withIcon}`}>
@@ -6273,6 +6462,7 @@ function Detail({
         </div>
 
         {returnBlock}
+        {askedBlock}
         {item.passed && isOpen(item) && (
           <p
             className={`${styles.note} ${styles.withIcon} ${styles.returnNote}`}

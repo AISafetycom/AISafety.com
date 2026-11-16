@@ -78,6 +78,7 @@ import {
   type RulePublic,
 } from './queue-rule-instant'
 import { alreadyRepliedOf, type AlreadyReplied } from './queue-already'
+import { askedOf, type Asked } from './queue-asked'
 import { replyAlsoOf } from './queue-also'
 import { reasonsText, type FlagUpdate } from './queue-flag'
 import { LEFT_OUT_KEY, leftOutOf, withLeftOut } from './queue-left-out'
@@ -243,6 +244,10 @@ export interface QueueItem {
    *  the proposal's `no_reply` (worker duty f); shown where the draft would
    *  be (Bryce, 8 Oct 2026). Null once a `reply` block is there. */
   noReply: NoReply | null
+  /** Email/Form: a question he asked them before deciding, and where it
+   *  stands: a draft, sent and waiting on them, or answered. From the
+   *  proposal's reply.asked, kept current by the Mac (queue-asked.ts). */
+  asked: Asked | null
   /** Email/Form: the owner already replied to them by hand in the
    *  request's Gmail thread, so neither Publish nor Reject saves a draft.
    *  From the proposal's reply.already, written by the Mac (Bryce, 12 Oct
@@ -660,6 +665,7 @@ function rowToItem(
   let noReply: NoReply | null = null
   let emailLink: string | null = null
   let alreadyReplied: AlreadyReplied | null = null
+  let asked: Asked | null = null
   let rejectReply: RejectReply | null = null
   let saidBy: SaidBy | null = null
   let rejectReplied = false
@@ -700,6 +706,7 @@ function rowToItem(
       replyAlso = replyAlsoOf(proposal.also_reply)
       rejectReply = rejectReplyOf(proposal.reply.reject, str(f[F.decidedAt]))
       alreadyReplied = alreadyRepliedOf(proposal.reply.already)
+      asked = askedOf(proposal.reply.asked)
       if (proposal.reply.platform === 'discord' && who) {
         const how = str(proposal.reply.how)
         saidBy = {
@@ -818,6 +825,7 @@ function rowToItem(
     replyAlso,
     noReply,
     alreadyReplied,
+    asked,
     rejectReply,
     rejectDrafts: parseRejectDrafts(f[F.rejectDrafts]),
     saidBy,
