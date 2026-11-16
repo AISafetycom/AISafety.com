@@ -961,6 +961,14 @@ a.pageNav:hover {
   color: var(--q-muted);
 }
 
+/* A listing found by its record id (ListingFound): whether it is on the
+   site, beside its page tag. */
+.listingState {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--q-text-2);
+}
+
 /* Where Comb found the listing: the Source line of its Airtable comment. */
 .found {
   margin: 0;

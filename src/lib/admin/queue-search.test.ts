@@ -6,6 +6,7 @@ import {
   markRanges,
   matchDoc,
   parseQuery,
+  recordIdsIn,
   searchDoc,
   textsOf,
 } from './queue-search'
@@ -203,6 +204,41 @@ describe('matchDoc', () => {
     expect(hit(i, rid('other'))).toBeNull()
     // A bare "rec" is an ordinary word, found nowhere here.
     expect(hit(i, 'rec')).toBeNull()
+  })
+
+  it('finds a record id in the brackets or the link it was copied with', () => {
+    const i = item({})
+    expect(hit(i, `(${rid('live')})`)).not.toBeNull()
+    expect(hit(i, `${rid('live')},`)).not.toBeNull()
+    expect(
+      hit(i, `https://airtable.com/appX/tblY/viwZ/${rid('live')}?blocks=hide`)
+    ).not.toBeNull()
+    expect(hit(i, `https://aisafety.com/events#${rid('live')}`)).not.toBeNull()
+    expect(hit(i, `(${rid('other')})`)).toBeNull()
+    // Longer than an id: an ordinary word.
+    expect(hit(i, `${rid('live')}x`)).toBeNull()
+  })
+})
+
+describe('recordIdsIn', () => {
+  it('gives the ids as written, each once', () => {
+    expect(recordIdsIn('recLfD9z9MnrA9987')).toEqual(['recLfD9z9MnrA9987'])
+    expect(
+      recordIdsIn('the 2027 round (reckjoC9BgXtFz1I9) and recLfD9z9MnrA9987')
+    ).toEqual(['reckjoC9BgXtFz1I9', 'recLfD9z9MnrA9987'])
+    expect(recordIdsIn('recLfD9z9MnrA9987 recLfD9z9MnrA9987')).toEqual([
+      'recLfD9z9MnrA9987',
+    ])
+    expect(
+      recordIdsIn('https://aisafety.com/training#recLfD9z9MnrA9987')
+    ).toEqual(['recLfD9z9MnrA9987'])
+  })
+
+  it('leaves ordinary words alone', () => {
+    expect(recordIdsIn('')).toEqual([])
+    expect(recordIdsIn('record recurring pauseai')).toEqual([])
+    // One character short, and one too many.
+    expect(recordIdsIn('recLfD9z9MnrA998 recLfD9z9MnrA99870')).toEqual([])
   })
 })
 

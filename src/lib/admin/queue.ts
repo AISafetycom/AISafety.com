@@ -43,6 +43,7 @@ import {
 } from './airtable'
 import { sealToken } from './session'
 import { parseRejectDrafts } from './queue-decline'
+import { listingState, type FoundListing } from './queue-listing'
 import { isExpiredAttachment } from './attachment-url'
 import { isSpent, keepPictures } from './queue-before-picture'
 import {
@@ -989,6 +990,10 @@ const SCHEMA_TTL_MS = 10 * 60 * 1000
 /** Each table's name column (Projects calls it "Project Name"), filled
  *  with the schema. */
 const primaryNames = new Map<string, string>()
+/** Every field of the base by its id, with the table it belongs to and
+ *  its name (Publish? and Hide? included), filled with the schema: a record
+ *  read with fields keyed by id says which table it came from. */
+const fieldHomes = new Map<string, { table: string; name: string }>()
 /** Each table's formula fields and the fields each one is built from,
  *  filled with the schema (see mapPreview). */
 const formulaInputs = new Map<string, { id: string; inputs: string[] }[]>()
@@ -1033,6 +1038,8 @@ export async function getTableSchema(
   for (const t of data.tables) {
     const primary = t.fields.find(f => f.id === t.primaryFieldId)
     if (primary) primaryNames.set(t.id, primary.name)
+    for (const f of t.fields)
+      fieldHomes.set(f.id, { table: t.id, name: f.name })
     formulaInputs.set(
       t.id,
       t.fields
@@ -1104,10 +1111,12 @@ export interface TargetRead {
   attachments: Record<string, AttachmentInfo[]>
 }
 
-export async function getTargetFields(
+/** One record's fields as Airtable holds them, keyed by field name; null
+ *  when the table has no such record. */
+async function readRecord(
   table: string,
   record: string
-): Promise<TargetRead | null> {
+): Promise<RawFields | null> {
   if (!TABLE_ID_RE.test(table) || !isRecordId(record)) return null
   const res = await airtableRequest(`${table}/${record}`)
   if (res.status === 404 || res.status === 403) return null
@@ -1117,10 +1126,21 @@ export async function getTargetFields(
       502
     )
   }
-  const data = (await res.json()) as { fields: RawFields }
+  return ((await res.json()) as { fields: RawFields }).fields
+}
+
+export async function getTargetFields(
+  table: string,
+  record: string
+): Promise<TargetRead | null> {
+  const raw = await readRecord(table, record)
+  return raw ? targetRead(raw) : null
+}
+
+function targetRead(raw: RawFields): TargetRead {
   const out: Record<string, unknown> = {}
   const attachments: Record<string, AttachmentInfo[]> = {}
-  for (const [k, v] of Object.entries(data.fields)) {
+  for (const [k, v] of Object.entries(raw)) {
     if (PROTECTED_FIELDS.has(k)) continue
     if (
       Array.isArray(v) &&
@@ -1866,6 +1886,105 @@ const SUGGESTION_TABLES = new Set([
   FOUNDERS_TABLE,
 ])
 const UNPUBLISHED_FORMULA = 'AND(NOT({Publish?}), NOT({Hide?}))'
+
+// ─── A listing by its record id ─────────────────────────────────────────────
+
+/** The resource tables with the page each one feeds, the busiest first:
+ *  the tables a record id from the search box may belong to. */
+const LISTING_TABLES: [table: string, page: string][] = [
+  [EVENTS_TABLE, '/events'],
+  [TRAINING_TABLE, '/training'],
+  [RECURRING_TABLE, '/training'],
+  [MAP_TABLE, '/map'],
+  [COMMUNITIES_TABLE, '/communities'],
+  [SELF_STUDY_TABLE, '/self-study'],
+  [FUNDING_TABLE, '/funding'],
+  [MEDIA_TABLE, '/media-channels'],
+  [ADVISORS_TABLE, '/advisors'],
+  [FOUNDERS_TABLE, '/founders'],
+  [PROJECTS_TABLE, '/projects'],
+]
+
+/** The listing a record id belongs to, as it is in Airtable now, whether or
+ *  not the Queue has ever held it: the search box's answer to a pasted id
+ *  no open item has (Bryce, 16 Nov 2026: a note named a published round by
+ *  its id, and searching for it found nothing). Null when no resource
+ *  table has it.
+ *
+ *  Airtable has no lookup by id across tables, but it answers a read by
+ *  record id from whichever table of the base holds the record, not only
+ *  the one named in the request. So the record is read with its fields
+ *  keyed by id, and those ids say which table it really sits in: one read
+ *  for any record there is. Should Airtable ever start checking the table,
+ *  the loop goes on to the next one (one read after another, well inside
+ *  the base's five a second) and the same check finds the record in its
+ *  own. Once a read has been seen to come from another table than the one
+ *  asked, a miss on the first table is taken as "no such record" without
+ *  asking the other ten. */
+let readsCrossTables = false
+export async function findListing(
+  record: string
+): Promise<FoundListing | null> {
+  if (!isRecordId(record)) return null
+  const pages = new Map(LISTING_TABLES)
+  for (const [asked] of LISTING_TABLES) {
+    const res = await airtableRequest(
+      `${asked}/${record}?returnFieldsByFieldId=true`
+    )
+    if (res.status === 404 || res.status === 403) {
+      // Reads have been seen to cross tables: one miss speaks for them all.
+      if (readsCrossTables) return null
+      continue
+    }
+    if (!res.ok) {
+      throw new QueueError(
+        `Airtable read failed: ${res.status} ${await res.text()}`,
+        502
+      )
+    }
+    const byId = ((await res.json()) as { fields: RawFields }).fields
+    // The record's table, and its fields by name, read off the field ids.
+    const named = () => {
+      const raw: RawFields = {}
+      let table: string | null = null
+      for (const [id, v] of Object.entries(byId)) {
+        const home = fieldHomes.get(id)
+        // A field added in the last few minutes: not in the list yet.
+        if (!home) continue
+        table ??= home.table
+        if (home.table === table) raw[home.name] = v
+      }
+      return { table, raw }
+    }
+    // Fills fieldHomes and primaryNames (cached for ten minutes); read
+    // afresh when the cached list knows none of the record's fields.
+    await getTableSchema(asked)
+    let { table, raw } = named()
+    if (!table && Object.keys(byId).length) {
+      await getTableSchema(asked, 0)
+      ;({ table, raw } = named())
+    }
+    // A record with nothing filled in names no table; one from a table
+    // that feeds no page (a Queue row, a job) is not a listing.
+    if (!table) return null
+    if (table !== asked) readsCrossTables = true
+    const page = pages.get(table)
+    if (!page) return null
+    const name = raw[primaryNames.get(table) ?? 'Name']
+    const base = process.env.AIRTABLE_BASE_ID
+    return {
+      table,
+      record,
+      page,
+      name: typeof name === 'string' ? name.trim() : '',
+      state: listingState(raw),
+      airtable: base ? `https://airtable.com/${base}/${table}/${record}` : null,
+      ...targetRead(raw),
+      schema: await getTableSchema(table),
+    }
+  }
+  return null
+}
 
 /** Why an open Add row is done with, read off its target record as it is
  *  now (null for a record that is gone): nothing while the record is still

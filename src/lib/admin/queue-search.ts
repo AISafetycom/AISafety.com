@@ -48,8 +48,25 @@ export interface SearchHit {
   excerpt: SearchExcerpt | null
 }
 
-const RECORD_ID_RE = /^rec[a-z0-9]{14}$/
+// A record id standing on its own inside a word: bare, in the brackets a
+// note puts round it, or inside a pasted Airtable or site link.
+const RECORD_ID_IN_WORD_RE = /(?<![a-z0-9])rec[a-z0-9]{14}(?![a-z0-9])/
+const RECORD_ID_IN_TEXT_RE =
+  /(?<![A-Za-z0-9])rec[A-Za-z0-9]{14}(?![A-Za-z0-9])/g
 const COMBINING_RE = /[\u0300-\u036f]/g
+
+/** The record id a folded search word holds, if it holds one. */
+function recordIdOf(word: string): string | null {
+  return word.match(RECORD_ID_IN_WORD_RE)?.[0] ?? null
+}
+
+/** Every record id typed or pasted into the search box, as written (ids
+ *  are case-sensitive in Airtable), each once: what the page looks up as a
+ *  listing when no open item has it (Bryce, 16 Nov 2026: "searching Q for
+ *  a record ID" should "come up with that listing"). */
+export function recordIdsIn(query: string): string[] {
+  return [...new Set(query.match(RECORD_ID_IN_TEXT_RE) ?? [])]
+}
 
 /** Lower case with the accents off: "Zürich" and "zurich" are one word. */
 export function fold(text: string): string {
@@ -183,14 +200,16 @@ export function searchDoc(parts: SearchPart[], ids: string[]): SearchDoc {
 }
 
 /** Null unless every word is found somewhere in the item. A word that is
- *  a whole record id matches that record only. */
+ *  a record id (bare, in brackets, or inside a pasted link) matches that
+ *  record only. */
 export function matchDoc(doc: SearchDoc, q: SearchQuery): SearchHit | null {
   const offRow: string[] = []
   let inName = true
   for (let i = 0; i < q.words.length; i++) {
     const word = q.words[i]
-    if (RECORD_ID_RE.test(word)) {
-      if (!doc.ids.includes(word)) return null
+    const id = recordIdOf(word)
+    if (id) {
+      if (!doc.ids.includes(id)) return null
       continue
     }
     if (!q.res[i].test(doc.all)) return null

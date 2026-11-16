@@ -64,8 +64,16 @@ import {
   markRanges,
   matchDoc,
   parseQuery,
+  recordIdsIn,
   searchDoc,
 } from '@/lib/admin/queue-search'
+import {
+  LISTING_STATE_LABEL,
+  LISTING_STATE_NOTE,
+  listingPageLabel,
+  listingSiteUrl,
+  type FoundListing,
+} from '@/lib/admin/queue-listing'
 import type {
   SearchDoc,
   SearchHit,
@@ -1762,6 +1770,24 @@ export default function QueueAdmin({
   const keptRef = useRef<Set<string>>(new Set())
   // The search whose Earlier group was opened past its first few rows.
   const [earlierMoreFor, setEarlierMoreFor] = useState<string | null>(null)
+  // A record id in the search box that no open item holds: the listing
+  // itself, read from Airtable, so an id from one of Fable's notes can be
+  // looked at here whatever the Queue holds (Bryce, 16 Nov 2026: "Let's
+  // make searching Q for a record ID come up with that listing"). By id:
+  // the listing, null when no resource table has it, 'failed' when the
+  // read did not work. Emptied when the search is left, so the next search
+  // reads the listing as it is then.
+  const [listings, setListings] = useState<
+    Record<string, FoundListing | null | 'failed'>
+  >({})
+  const listingAskedRef = useRef<Set<string>>(new Set())
+  // The found listing whose row was clicked: it takes the pane back from a
+  // decision opened out of the same results.
+  const [listingOpenFor, setListingOpenFor] = useState<string | null>(null)
+  // The open item in focus when the search began: where leaving a search
+  // that picked nothing waiting goes back to, so a look at another listing
+  // does not lose the place.
+  const beforeSearchRef = useRef<string | null>(null)
   // The item in focus, for work that lands later (a Reopen) to tell
   // whether the admin is still on it.
   const selectedIdRef = useRef<string | null>(null)
@@ -2576,6 +2602,60 @@ export default function QueueAdmin({
   }, [items, selectedId])
   selectedIdRef.current = selectedId
 
+  // The record id in the search box to look up as a listing: the first one
+  // no open item holds (that item is the listing, in the results already)
+  // and that is not a Queue row's own id.
+  const lookupId = useMemo(() => {
+    for (const id of recordIdsIn(query)) {
+      const held =
+        (items ?? []).some(
+          i => i.id === id || (isOpen(i) && i.targetRecord === id)
+        ) || (earlier ?? []).some(i => i.id === id)
+      if (!held) return id
+    }
+    return null
+  }, [query, items, earlier])
+  useEffect(() => {
+    if (!searching) {
+      listingAskedRef.current.clear()
+      setListings(prev => (Object.keys(prev).length ? {} : prev))
+      setListingOpenFor(null)
+      return
+    }
+    if (!lookupId || listingAskedRef.current.has(lookupId)) return
+    const id = lookupId
+    // A moment's pause, so an id still being typed over is not read.
+    const t = setTimeout(() => {
+      listingAskedRef.current.add(id)
+      fetch(`${API}?listing=${id}`, { cache: 'no-store' })
+        .then(async res => {
+          const data = (await res.json()) as {
+            listing?: FoundListing | null
+            error?: string
+          }
+          if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
+          setListings(prev => ({ ...prev, [id]: data.listing ?? null }))
+        })
+        .catch(e => {
+          console.warn('[queue] listing not read', e)
+          setListings(prev => ({ ...prev, [id]: 'failed' }))
+        })
+    }, 150)
+    return () => clearTimeout(t)
+  }, [searching, lookupId])
+  const lookup = searching && lookupId ? listings[lookupId] : undefined
+  const foundListing = lookup && lookup !== 'failed' ? lookup : null
+  const lookingUp = searching && lookupId !== null && lookup === undefined
+  // The found listing has the pane when its row was clicked, or when the
+  // search leaves the pane with nothing else to show: no waiting match, no
+  // decision of today's, none opened.
+  const listingShown =
+    foundListing !== null &&
+    (listingOpenFor === foundListing.record ||
+      (!selected &&
+        !showDone &&
+        !(ordered.flat.length === 0 && ordered.doneHits.length > 0)))
+
   // Midnight can empty the done list while it is open; back to the queue.
   useEffect(() => {
     if (showDone && items && !ordered.done.length) setShowDone(false)
@@ -2846,6 +2926,7 @@ export default function QueueAdmin({
     setSelectedId(id)
     setShowDone(false)
     setDoneOpen(false)
+    setListingOpenFor(null)
     if (detailRef.current) detailRef.current.scrollTop = 0
     // After the render, so a row inside a page just unfolded is there too.
     requestAnimationFrame(() => {
@@ -2863,6 +2944,7 @@ export default function QueueAdmin({
     setSelectedId(id)
     setShowDone(true)
     setDoneOpen(true)
+    setListingOpenFor(null)
     if (detailRef.current) detailRef.current.scrollTop = 0
   }, [])
 
@@ -2937,11 +3019,22 @@ export default function QueueAdmin({
    *  item and carry on from there. */
   const clearSearch = useCallback(() => {
     setQuery('')
-    if (!selected || !isOpen(selected)) return
-    if (kindOf(selected) !== kind) setKind(kindOf(selected))
-    foldPage(`${sectionOf(selected)}:${pageLabel(selected) ?? ''}`, false)
-    select(selected.id)
-  }, [selected, kind, foldPage, select])
+    const before = beforeSearchRef.current
+    beforeSearchRef.current = null
+    // A waiting match in focus stays in focus. With none picked – the
+    // search found nothing waiting, or was showing a listing by its id –
+    // the item open before the search is, if it is still waiting.
+    const stay =
+      selected && isOpen(selected) && !listingShown
+        ? selected
+        : !selected || listingShown
+          ? ((items ?? []).find(i => i.id === before && isOpen(i)) ?? null)
+          : null
+    if (!stay) return
+    if (kindOf(stay) !== kind) setKind(kindOf(stay))
+    foldPage(`${sectionOf(stay)}:${pageLabel(stay) ?? ''}`, false)
+    select(stay.id)
+  }, [selected, items, listingShown, kind, foldPage, select])
 
   // After an accept: have the Mac agent save the reply draft in Gmail now,
   // and tell the toast and the row how it went. If the agent is not
@@ -4396,7 +4489,17 @@ export default function QueueAdmin({
                   type="text"
                   value={query}
                   onChange={e => {
-                    setQuery(e.target.value)
+                    const typed = e.target.value
+                    if (!typed.trim()) {
+                      // Emptied by hand: the same as leaving with Esc.
+                      clearSearch()
+                      return
+                    }
+                    if (!searching) {
+                      beforeSearchRef.current =
+                        selected && isOpen(selected) ? selected.id : null
+                    }
+                    setQuery(typed)
                     if (listRef.current) listRef.current.scrollTop = 0
                   }}
                   onKeyDown={e => {
@@ -4440,7 +4543,9 @@ export default function QueueAdmin({
               {searching && (
                 <div className={styles.searchMeta} role="status">
                   {ordered.flat.length === 0
-                    ? 'No matches waiting'
+                    ? foundListing
+                      ? 'Nothing waiting on this listing'
+                      : 'No matches waiting'
                     : `${ordered.flat.length} ${ordered.flat.length === 1 ? 'match' : 'matches'} waiting`}
                   {ordered.found.done.length > 0 && (
                     <>
@@ -4462,6 +4567,8 @@ export default function QueueAdmin({
                     ' · earlier decisions could not be read'}
                   {ordered.earlierCount > 0 &&
                     ` · ${ordered.earlierCount} earlier`}
+                  {lookingUp && ' · looking up the listing…'}
+                  {lookup === 'failed' && ' · the listing could not be read'}
                 </div>
               )}
             </div>
@@ -4469,11 +4576,36 @@ export default function QueueAdmin({
               {!searching && takenOut.length > 0 && (
                 <TakenOutLine items={takenOut} onClose={closeTakenOut} />
               )}
+              {searching && foundListing && (
+                // The listing a pasted record id belongs to, whatever the
+                // Queue holds on it.
+                <div className={styles.group}>
+                  <div
+                    className={`${styles.groupHead} ${styles.groupHeadStatic}`}
+                  >
+                    Listing
+                  </div>
+                  <ListingRow
+                    listing={foundListing}
+                    active={listingShown}
+                    onClick={() => {
+                      setListingOpenFor(foundListing.record)
+                      if (detailRef.current) detailRef.current.scrollTop = 0
+                    }}
+                  />
+                </div>
+              )}
               {searching &&
+                !foundListing &&
                 ordered.flat.length === 0 &&
                 ordered.doneHits.length === 0 &&
                 ordered.earlierCount === 0 && (
                   <p className={styles.searchEmpty}>
+                    {lookingUp
+                      ? 'Looking up the listing with that record ID… '
+                      : lookupId && lookup === null
+                        ? 'No listing has that record ID. '
+                        : ''}
                     {earlierState === 'loading'
                       ? 'Nothing waiting or done today matches. Looking through the earlier decisions… '
                       : ''}
@@ -4682,9 +4814,17 @@ export default function QueueAdmin({
           </div>
 
           <div className={styles.detail} ref={detailRef}>
-            {(showDone ||
-              (searching && !ordered.flat.length && ordered.doneHits.length)) &&
-            !(doneOpen && selected && !isOpen(selected)) ? (
+            {listingShown && foundListing ? (
+              <ListingFound
+                key={foundListing.record}
+                listing={foundListing}
+                earlier={ordered.earlierCount}
+              />
+            ) : (showDone ||
+                (searching &&
+                  !ordered.flat.length &&
+                  ordered.doneHits.length)) &&
+              !(doneOpen && selected && !isOpen(selected)) ? (
               // A search that matches only decisions shows them here.
               <DoneList
                 items={ordered.doneHits}
@@ -4763,9 +4903,11 @@ export default function QueueAdmin({
             ) : (
               <div className={styles.emptyDetail}>
                 {searching && ordered.flat.length === 0
-                  ? ordered.earlierCount > 0
-                    ? 'Nothing waiting matches the search. Earlier decisions that do are on the left.'
-                    : 'Nothing waiting matches the search.'
+                  ? lookingUp
+                    ? 'Looking up the listing with that record ID…'
+                    : ordered.earlierCount > 0
+                      ? 'Nothing waiting matches the search. Earlier decisions that do are on the left.'
+                      : 'Nothing waiting matches the search.'
                   : 'Pick an item on the left.'}
               </div>
             )}
@@ -5397,6 +5539,188 @@ function EarlierRow({
         {doneLabel(item)} · {ago(decidedAtOf(item))}
       </span>
     </button>
+  )
+}
+
+/** Where a found listing stands, in the words and mark the list uses for
+ *  a decision: teal with a tick only when it is on the site. */
+function ListingStateTag({ listing }: { listing: FoundListing }) {
+  return (
+    <span
+      className={`${styles.withIcon} ${listing.state === 'published' ? styles.yes : ''}`}
+      title={LISTING_STATE_NOTE[listing.state]}
+    >
+      {listing.state !== 'unpublished' && (
+        <Icon
+          src={listing.state === 'published' ? ICON.check : ICON.x}
+          size={12}
+        />
+      )}
+      {LISTING_STATE_LABEL[listing.state]}
+    </span>
+  )
+}
+
+/** The listing's logo: the first picture of its Logo field, or of any
+ *  picture field when it has none by that name. */
+function listingLogo(listing: FoundListing): string | null {
+  const fields = Object.entries(listing.attachments)
+  const pick = fields.find(([k]) => /logo/i.test(k)) ?? fields[0]
+  return pick?.[1][0]?.url ?? null
+}
+
+/** The listing a searched record id belongs to, as a row of the results:
+ *  its logo and name, then its page and whether it is on the site. */
+function ListingRow({
+  listing,
+  active,
+  onClick,
+}: {
+  listing: FoundListing
+  active: boolean
+  onClick: () => void
+}) {
+  const logo = listingLogo(listing)
+  const [logoDead, setLogoDead] = useState(false)
+  return (
+    <button
+      data-id={listing.record}
+      className={`${styles.row} ${active ? styles.rowActive : ''}`}
+      onClick={onClick}
+    >
+      {logo && !logoDead ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          className={styles.rowLogo}
+          src={logo}
+          alt=""
+          onError={() => setLogoDead(true)}
+        />
+      ) : (
+        <span className={`${styles.rowLogo} ${styles.rowLogoEmpty}`}>
+          <Icon src={ICON.table} />
+        </span>
+      )}
+      <span className={styles.rowBody}>
+        <span className={styles.rowTitle}>{listing.name || 'No name'}</span>
+        <span className={styles.rowMeta}>
+          <span>{listingPageLabel(listing)}</span>
+          <ListingStateTag listing={listing} />
+        </span>
+      </span>
+    </button>
+  )
+}
+
+/** A listing found by its record id, in the pane: the site's own card for
+ *  it and every field as Airtable holds it now, to read only. Nothing here
+ *  decides or edits anything; the page tag opens its card on the site and
+ *  the link its record in Airtable. */
+function ListingFound({
+  listing,
+  earlier,
+}: {
+  listing: FoundListing
+  /** How many earlier decisions the same search lists on the left. */
+  earlier: number
+}) {
+  const nav =
+    Object.values(SITE_PAGES).find(p => p.path === listing.page) ?? null
+  const site = listingSiteUrl(listing)
+  const recurring = listing.table === RECURRING_TABLE
+  // What the field list reads of an item; Applied, as nothing is waiting.
+  const stand = {
+    id: listing.record,
+    page: listing.page,
+    targetTable: listing.table,
+    status: 'Applied' as const,
+  }
+  const fields = {
+    item: stand,
+    fields: listing.fields,
+    schema: listing.schema,
+    onImage: () => {},
+    d: FRESH,
+    setD: () => {},
+    readOnly: true,
+  }
+  const page = nav ? (
+    <>
+      <span className={styles.pageTagIcon}>
+        <Icon
+          className="color-teal-800"
+          src={`/images/icons/${nav.icon}`}
+          size={12}
+        />
+      </span>
+      {nav.title}
+      {recurring && <span className={styles.pageTagNote}>recurring</span>}
+    </>
+  ) : (
+    listingPageLabel(listing)
+  )
+  return (
+    <div className={styles.detailInner}>
+      <div className={styles.detailMain}>
+        <div className={styles.detailHead}>
+          <div className={styles.pills}>
+            <span className={styles.source}>
+              <Icon src={ICON.table} size={12} />
+              Listing
+            </span>
+            <a
+              className={nav ? styles.pageNav : styles.pageTag}
+              href={
+                site ??
+                `https://aisafety.com${listing.page}${recurring ? '?view=recurring' : ''}`
+              }
+              target="_blank"
+              rel="noreferrer"
+              title={
+                site
+                  ? 'Opens the live card'
+                  : 'Opens the page; this listing is not on it'
+              }
+            >
+              {page}
+            </a>
+            <span className={styles.listingState}>
+              <ListingStateTag listing={listing} />
+            </span>
+            <div className={styles.links}>
+              {listing.airtable && (
+                <a
+                  href={listing.airtable}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={styles.withIcon}
+                >
+                  <Icon src={linkIcon(listing.airtable)} size={12} />
+                  {linkLabel(listing.airtable)}
+                </a>
+              )}
+            </div>
+          </div>
+          <p className={styles.found}>
+            Found by its record ID, as it is in Airtable now. Nothing in the
+            Queue is waiting on it
+            {earlier > 0
+              ? `; the ${earlier === 1 ? 'earlier decision' : `${earlier} earlier decisions`} on it ${earlier === 1 ? 'is' : 'are'} on the left`
+              : ''}
+            .
+          </p>
+        </div>
+        <div className={styles.cardRow}>
+          <SitePreview
+            table={listing.table}
+            record={listing.record}
+            edits={{}}
+          />
+          <Fields part="main" {...fields} />
+        </div>
+        <Fields part="rest" {...fields} />
+      </div>
+    </div>
   )
 }
 
@@ -7699,7 +8023,8 @@ function Fields({
   /** "main" is name, link, description and the pictures, which sit beside
    *  the card; "rest" is every other field, under it. */
   part: 'main' | 'rest'
-  item: QueueItem
+  /** The item, or what stands in for one: a listing found by its id. */
+  item: Pick<QueueItem, 'id' | 'page' | 'targetTable' | 'status'>
   fields: Record<string, unknown>
   schema: FieldInfo[]
   /** Fields shown elsewhere on the item (Sort, by the Position picker; x
