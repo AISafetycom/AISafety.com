@@ -79,6 +79,7 @@ import SitePreview, {
   seedPreviews,
 } from './SitePreview'
 import Chat, { CharCount, descriptionCap, type Decided } from './Chat'
+import RejectReason, { type RejectReasonControl } from './RejectReason'
 import FieldPicker from './FieldPicker'
 import type { FableChange } from '@/lib/admin/queue-fable'
 import Position, { forgetOrder } from './Position'
@@ -5403,17 +5404,20 @@ function Detail({
     return () => cancelAnimationFrame(frame)
   }, [rejecting, item.id])
   // Reject sends the rejection reply as the page shows it for that reason.
-  const rejectWith = (chip: string | null) =>
+  // `typed`: dictated words that just went into the reason box, before the
+  // page has them (Enter while it listens).
+  const rejectWith = (chip: string | null, typed?: string) =>
     act('reject', {
-      reason: chip ?? reason,
+      reason: chip ?? (typed === undefined ? reason : typed.trim()),
       rejectReply: rejectReplyFor({
         chips: item.rejectChips,
         drafts: item.rejectDrafts,
         edited: d.decline,
-        chip: chip ?? d.chip,
-        typed: d.other,
+        chip: chip ?? (typed === undefined ? d.chip : null),
+        typed: typed ?? d.other,
       }),
     })
+  const reasonRef = useRef<RejectReasonControl>(null)
   const editCount = Object.keys(activeEdits(d)).length
   const original: Record<string, unknown> =
     item.type === 'Change'
@@ -6790,40 +6794,35 @@ function Detail({
                   <span>{chip}</span>
                 </button>
               ))}
-              {/* Focused as the panel opens, so a reason can be typed
-                  straight away (Bryce, 24 Sept 2026). While it is still
-                  empty the number keys keep picking a chip, and Esc
-                  cancels the reject as it does outside the box. */}
-              <input
-                autoFocus
-                className={`${styles.input} ${styles.other}`}
-                placeholder="Other reason…"
+              <RejectReason
+                control={reasonRef}
                 value={d.other}
-                onChange={e => setD({ other: e.target.value, chip: null })}
-                onKeyDown={e => {
-                  if (e.metaKey || e.ctrlKey || e.altKey) return
-                  const chip = d.other
-                    ? undefined
-                    : item.rejectChips[Number(e.key) - 1]
-                  if (/^[1-9]$/.test(e.key) && chip && !d.busy) {
-                    e.preventDefault()
-                    setD({ chip })
-                    rejectWith(chip)
-                  } else if (e.key === 'Enter' && !d.busy) {
-                    e.preventDefault()
-                    rejectWith(null)
-                  } else if (e.key === 'Escape' && !d.busy) {
-                    e.stopPropagation()
-                    setD({ mode: 'idle', chip: null, other: '' })
-                  }
+                onChange={other => setD({ other, chip: null })}
+                chips={item.rejectChips}
+                busy={d.busy}
+                agent={chatDictate ? chatAgent : null}
+                itemId={item.id}
+                onPick={chip => {
+                  setD({ chip })
+                  rejectWith(chip)
                 }}
+                onReject={typed => {
+                  if (typed !== undefined) setD({ other: typed, chip: null })
+                  rejectWith(null, typed)
+                }}
+                onCancel={() => setD({ mode: 'idle', chip: null, other: '' })}
               />
             </div>
             <div className={styles.buttons}>
               <button
                 className={`${styles.button} ${styles.danger}`}
                 disabled={d.busy}
-                onClick={() => rejectWith(null)}
+                // While the reason box listens, its words go in first.
+                onClick={() =>
+                  reasonRef.current
+                    ? reasonRef.current.reject()
+                    : rejectWith(null)
+                }
               >
                 <Icon src={ICON.x} size={12} />
                 {d.busy ? 'Rejecting…' : 'Confirm reject'} <kbd>↵</kbd>

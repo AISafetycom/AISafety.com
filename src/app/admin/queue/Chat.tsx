@@ -1152,7 +1152,8 @@ export default function Chat({
     if (!dictate) return
     const mac = /Mac|iPhone|iPad/.test(navigator.platform)
     const onKey = (e: KeyboardEvent) => {
-      if (!isDictationKey(e, mac)) return
+      // Taken already: the reject panel's reason box has it.
+      if (e.defaultPrevented || !isDictationKey(e, mac)) return
       // Not the browser's bookmark (Cmd+D).
       e.preventDefault()
       if (!e.repeat) toggleRef.current()
@@ -1645,7 +1646,7 @@ function asSent(files: Pending[]): Attachment[] {
 }
 
 /** A file's bytes as base64, the way the Mac agent takes them. */
-function base64Of(file: Blob): Promise<string> {
+export function base64Of(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader()
     r.onload = () => {
