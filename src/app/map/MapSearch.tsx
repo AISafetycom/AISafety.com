@@ -300,6 +300,8 @@ export default function MapSearch({
           icon="/images/icons/magnifying-glass-large.svg"
           iconPosition="only"
           aria-label="Search the map"
+          // Below, the label would run past the left edge of the map.
+          tooltipPosition="right"
           className={styles['map-search-toggle']}
           onClick={() => openSearch('button')}
         />
