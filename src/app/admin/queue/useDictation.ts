@@ -6,7 +6,8 @@ import { micProblem, recordingType } from '@/lib/admin/queue-dictation'
 // Dictation for the Fable chat (5 Nov 2026): Cmd+D or the mic starts a
 // recording, Cmd+D again stops it, the Mac turns it into words. Enter while
 // it listens stops it and sends the message once the words are in; Esc
-// throws the recording away.
+// throws the recording away. The reject panel's "Other reason…" box uses it
+// too (16 Nov 2026), with Enter there rejecting instead of sending.
 
 export type DictationState = 'off' | 'starting' | 'listening' | 'transcribing'
 
@@ -35,6 +36,7 @@ export function useDictation({
   onWords,
   onProblem,
   meterRef,
+  leave = 'keep',
 }: {
   /** The recording to the Mac and back as words. */
   transcribe: (audio: Blob) => Promise<string>
@@ -44,6 +46,10 @@ export function useDictation({
   onProblem: (message: string, retry?: () => void) => void
   /** Gets `--level` (0–1) as he speaks, for the mic's ring. */
   meterRef: React.RefObject<HTMLElement | null>
+  /** Unmounted mid-recording: 'keep' turns what was said into words (the
+   *  chat puts them in that item's draft), 'cancel' throws it away (the
+   *  reject box, closed with Cancel or by leaving the item). */
+  leave?: 'keep' | 'cancel'
 }) {
   const [state, setState] = useState<DictationState>('off')
   const stateRef = useRef<DictationState>('off')
@@ -56,9 +62,9 @@ export function useDictation({
   const early = useRef<How | null>(null)
   // Enter while the words were on their way: send them when they come.
   const sendAfter = useRef(false)
-  const cb = useRef({ transcribe, onWords, onProblem })
+  const cb = useRef({ transcribe, onWords, onProblem, leave })
   useEffect(() => {
-    cb.current = { transcribe, onWords, onProblem }
+    cb.current = { transcribe, onWords, onProblem, leave }
   })
 
   // Try again sends the same recording through run once more.
@@ -218,12 +224,13 @@ export function useDictation({
   }, [finish, meterRef, release, run, set])
 
   // Leaving the item mid-recording keeps what was said: the words land in
-  // that item's draft (Chat's onWords sees the panel has gone).
+  // that item's draft (Chat's onWords sees the panel has gone). With
+  // leave: 'cancel' the recording is thrown away instead.
   useEffect(
     () => () => {
       const l = live.current
       if (l && l.recorder.state !== 'inactive') {
-        l.how = 'stop'
+        l.how = cb.current.leave === 'cancel' ? 'cancel' : 'stop'
         l.recorder.stop()
       }
       early.current = 'cancel'
