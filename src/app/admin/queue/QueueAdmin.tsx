@@ -315,6 +315,10 @@ const ICON = {
   chevron: '/images/icons/chevron-down.svg',
   search: '/images/icons/magnifying-glass.svg',
   clock: '/images/icons/clock.svg',
+  // Waiting on them: the question is sent. Not the timer: timer.svg and
+  // clock.svg are the same drawing, so the section read as a second Urgent
+  // (Bryce, 16 Nov 2026).
+  sent: '/images/icons/plane.svg',
   reopen: '/images/icons/redo.svg',
   trash: '/images/icons/trash.svg',
 } as const
@@ -329,7 +333,7 @@ const SECTION_ICON: Record<Section, string> = {
   broom: ICON.broom,
   rules: ICON.rule,
   comb: ICON.comb,
-  waiting: ICON.timer,
+  waiting: ICON.sent,
 }
 
 function sourceIcon(item: QueueItem): string {
@@ -6567,7 +6571,16 @@ function Detail({
     ) : (
       <>
         <p className={`${styles.note} ${styles.withIcon} ${styles.returnNote}`}>
-          <Icon src={question === 'draft' ? ICON.mail : ICON.timer} size={12} />
+          <Icon
+            src={
+              question === 'draft'
+                ? ICON.mail
+                : question === 'waiting'
+                  ? ICON.sent
+                  : ICON.timer
+            }
+            size={12}
+          />
           {question === 'draft'
             ? 'Your question is saved as a draft in Gmail, not sent yet · once you send it, this item waits out of the way until they answer'
             : question === 'waiting'
