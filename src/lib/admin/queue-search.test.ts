@@ -74,6 +74,7 @@ function item(over: Partial<QueueItem>): QueueItem {
     pushback: null,
     reopened: null,
     declinedBefore: null,
+    passed: null,
     ...over,
   }
 }

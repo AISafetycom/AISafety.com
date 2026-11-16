@@ -16,6 +16,13 @@ import type {
 import { fillFirst, neededLeft } from '@/lib/admin/queue-needed'
 import { replyWho } from '@/lib/admin/queue-also'
 import { backSince, laterSince, laterUntil } from '@/lib/admin/queue-later'
+import {
+  passedBlock,
+  passedDay,
+  takenOutOf,
+  unseenTakenOut,
+  type TakenOut,
+} from '@/lib/admin/queue-passed'
 import { URL_KEYS, listingLink } from '@/lib/admin/queue-link'
 import { LEFT_OUT_KEY, withLeftOut } from '@/lib/admin/queue-left-out'
 import {
@@ -347,6 +354,8 @@ const FOLDED_PAGES_KEY = 'aisafety-admin-queue:folded-pages'
 const KIND_KEY = 'aisafety-admin-queue:kind'
 // The rules that have popped up here and been closed (ids, newest last).
 const POP_CLOSED_KEY = 'aisafety-admin-queue:rule-popups-closed'
+// The rows the daily check took out whose line here has been closed (ids).
+const TAKEN_OUT_SEEN_KEY = 'aisafety-admin-queue:taken-out-seen'
 // Per chat thread, the time of Fable's newest reply already seen here.
 const CHAT_SEEN_KEY = 'aisafety-admin-queue:chat-seen'
 const CHAT_STATUS_MS = 3000
@@ -1620,6 +1629,7 @@ export default function QueueAdmin({
   // Rules that have popped up and been closed (decided, opened or
   // dismissed), kept in this browser so each one pops up once.
   const [popClosed, setPopClosed] = useState<string[]>([])
+  const [takenOutSeen, setTakenOutSeen] = useState<string[]>([])
   // The rule whose pop-up had Reject pressed: its reasons are showing.
   const [popRejecting, setPopRejecting] = useState<string | null>(null)
   // The last decision, kept for U after the toast has gone.
@@ -1817,6 +1827,12 @@ export default function QueueAdmin({
       )
       if (Array.isArray(shown)) {
         setPopClosed(shown.filter((x): x is string => typeof x === 'string'))
+      }
+      const seen: unknown = JSON.parse(
+        localStorage.getItem(TAKEN_OUT_SEEN_KEY) ?? '[]'
+      )
+      if (Array.isArray(seen)) {
+        setTakenOutSeen(seen.filter((x): x is string => typeof x === 'string'))
       }
     } catch {
       // storage refused: stay on the defaults
@@ -2325,13 +2341,16 @@ export default function QueueAdmin({
       }
       perKind[k]++
       // Their reply to a decline brought it back: it can't wait either.
+      // A passed one is past its dates: only the reply is left.
       const urgency = item.pushback
         ? REPLIED
-        : urgencyOf(
-            item,
-            item.targetRecord ? listingDates[item.targetRecord] : undefined,
-            today
-          )
+        : item.passed
+          ? null
+          : urgencyOf(
+              item,
+              item.targetRecord ? listingDates[item.targetRecord] : undefined,
+              today
+            )
       if (urgency) {
         urgencies.set(item.id, urgency)
         urgentPerKind[k]++
@@ -3778,6 +3797,11 @@ export default function QueueAdmin({
             !d.busy
           ) {
             e.preventDefault()
+            // A passed item can't go out: its note flashes instead.
+            if (item.passed) {
+              setBlockedFlash(n => n + 1)
+              break
+            }
             // An addition with no place yet opens the Position list
             // instead: Accept waits for one.
             if (unplacedAdd(item, live[item.id] ?? null, activeEdits(d))) {
@@ -4105,6 +4129,30 @@ export default function QueueAdmin({
   // An older decision opened from the search sits in the done list but
   // was not done today.
   const doneToday = ordered.done.filter(i => decidedSince(i, dayStart)).length
+  // Rows the Mac's daily check took out this past week because their date
+  // went by before he decided them (Bryce, 16 Nov 2026: "somehow I know
+  // when this has happened"), less the ones whose line he closed.
+  const takenOut = useMemo(
+    () =>
+      unseenTakenOut(
+        (items ?? []).map(takenOutOf).filter((t): t is TakenOut => t !== null),
+        takenOutSeen
+      ),
+    [items, takenOutSeen]
+  )
+  const closeTakenOut = () => {
+    setTakenOutSeen(prev => {
+      const next = [...new Set([...prev, ...takenOut.map(t => t.id)])].slice(
+        -200
+      )
+      try {
+        localStorage.setItem(TAKEN_OUT_SEEN_KEY, JSON.stringify(next))
+      } catch {
+        // storage refused: the line comes back after a reload
+      }
+      return next
+    })
+  }
   // The bar under the top is the open tab's day (Bryce, 13 Oct 2026: "make
   // it for each tab instead of overall").
   const tabDone = ordered.donePerKind[kind]
@@ -4325,6 +4373,9 @@ export default function QueueAdmin({
               )}
             </div>
             <div className={styles.list} ref={listRef}>
+              {!searching && takenOut.length > 0 && (
+                <TakenOutLine items={takenOut} onClose={closeTakenOut} />
+              )}
               {searching &&
                 ordered.flat.length === 0 &&
                 ordered.doneHits.length === 0 &&
@@ -4968,6 +5019,64 @@ function BackTag({ item }: { item: QueueItem }) {
   )
 }
 
+/** On an open row whose date went by while someone waits for a reply. */
+function PassedTag({ item }: { item: QueueItem }) {
+  if (!item.passed || !isOpen(item)) return null
+  return (
+    <span className={styles.withIcon} title={passedBlock(item.passed)}>
+      <Icon src={ICON.clock} size={12} />
+      Passed
+    </span>
+  )
+}
+
+/** Top of the list: what the daily check took out this past week, each
+ *  linked to its record, with a cross that hides the line until the next
+ *  one is taken out. */
+function TakenOutLine({
+  items,
+  onClose,
+}: {
+  items: TakenOut[]
+  onClose: () => void
+}) {
+  return (
+    <div className={styles.takenOut} role="status">
+      <div className={styles.takenOutHead}>
+        <span className={styles.withIcon}>
+          <Icon src={ICON.clock} size={12} />
+          Taken out by the daily check · {items.length}
+        </span>
+        <button
+          className={styles.searchClear}
+          title="Hide this until something else is taken out"
+          aria-label="Hide"
+          onClick={onClose}
+        >
+          <Icon src={ICON.x} size={12} />
+        </button>
+      </div>
+      <p className={styles.note}>Their date went by before you decided them.</p>
+      <ul className={styles.takenOutList}>
+        {items.map(t => (
+          <li key={t.id}>
+            {t.link ? (
+              <a href={t.link} target="_blank" rel="noreferrer">
+                {t.title}
+              </a>
+            ) : (
+              t.title
+            )}
+            <span className={styles.note}>
+              {t.page ? ` · ${t.page}` : ''} · {t.how} on {t.day}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function Row({
   item,
   active,
@@ -5054,6 +5163,7 @@ function Row({
             )
           )}
           <BackTag item={item} />
+          <PassedTag item={item} />
           {showKind && <span>{KIND_WORD[item.type]}</span>}
           {item.source !== 'Comb' && <span>{item.source}</span>}
           {showPage && item.page && <span>{pageLabel(item)}</span>}
@@ -6108,6 +6218,16 @@ function Detail({
         </div>
 
         {returnBlock}
+        {item.passed && isOpen(item) && (
+          <p
+            className={`${styles.note} ${styles.withIcon} ${styles.returnNote}`}
+          >
+            <Icon src={ICON.clock} size={12} />
+            Passed · it {item.passed.how} on {passedDay(item.passed.on)}, before
+            you decided it · only the reply is left, so Reject it with a reason
+            to draft their decline
+          </p>
+        )}
 
         {/* The record as the site shows it, with the proposed change laid
             over it, so the effect of Accept is visible. A field Fable already
@@ -6721,13 +6841,20 @@ function Detail({
           <div className={styles.buttons}>
             <button
               className={`${styles.button} ${styles.primary}`}
-              disabled={d.busy || unplaced || unfilled.length > 0}
+              disabled={
+                d.busy ||
+                Boolean(item.passed) ||
+                unplaced ||
+                unfilled.length > 0
+              }
               title={
-                unplaced
-                  ? NO_PLACE
-                  : unfilled.length > 0
-                    ? fillFirst(unfilled)
-                    : undefined
+                item.passed
+                  ? passedBlock(item.passed)
+                  : unplaced
+                    ? NO_PLACE
+                    : unfilled.length > 0
+                      ? fillFirst(unfilled)
+                      : undefined
               }
               onClick={() =>
                 act('accept', {
@@ -6774,7 +6901,11 @@ function Detail({
               <Icon src={ICON.trash} size={12} />
               Delete <kbd>X</kbd>
             </button>
-            {unplaced &&
+            {item.passed &&
+              !d.busy &&
+              blockedNote('passed', passedBlock(item.passed))}
+            {!item.passed &&
+              unplaced &&
               !d.busy &&
               blockedNote(
                 'place',
@@ -6782,7 +6913,8 @@ function Detail({
                   Pick its position on the page first <kbd>P</kbd>
                 </>
               )}
-            {unfilled.length > 0 &&
+            {!item.passed &&
+              unfilled.length > 0 &&
               !d.busy &&
               blockedNote('fill', fillFirst(unfilled))}
             {(editCount > 0 || leftCount > 0) && (

@@ -294,6 +294,35 @@
   border-top: 1px solid var(--q-border);
 }
 
+/* Top of the list: what the Mac's daily check took out this past week
+   because its date went by before it was decided (queue-passed.ts). */
+.takenOut {
+  padding: 10px 16px 12px;
+  border-bottom: 1px solid var(--q-border);
+  background: var(--q-warn-soft);
+  font-size: 13px;
+  color: var(--q-text);
+}
+
+.takenOutHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.takenOutList {
+  margin: 6px 0 0;
+  padding: 0 0 0 18px;
+  line-height: 1.55;
+}
+
+.takenOutList a {
+  color: var(--q-accent);
+}
+
 .earlierHead {
   padding: 6px 16px 4px;
   font-size: 11px;

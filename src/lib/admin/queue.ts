@@ -56,6 +56,12 @@ import {
 import { fillFirst, neededLeft } from './queue-needed'
 import type { ListingDates } from './queue-urgent'
 import { reviewAgainAt } from './queue-later'
+import {
+  passedBlock,
+  passedOf,
+  TAKEN_OUT_FORMULA,
+  type Passed,
+} from './queue-passed'
 import { ruleTestOf, type RuleTest } from './queue-rule-test'
 import {
   PUBLIC_KEY,
@@ -293,6 +299,9 @@ export interface QueueItem {
   /** Brought back with no word from them since: the decline they already
    *  have, so Reject saves no second one. */
   declinedBefore: DeclinedBefore | null
+  /** Its date went by while someone waits for a reply (the Mac's daily
+   *  check, queue-passed.ts): Publish is off, Reject drafts the reply. */
+  passed: Passed | null
 }
 
 export type NoReply = 'no email' | 'no notification'
@@ -649,7 +658,9 @@ function rowToItem(
   let pushback: Pushback | null = null
   let reopened: Reopened | null = null
   let declinedBefore: DeclinedBefore | null = null
+  let passed: Passed | null = null
   if (isRecord(proposal)) {
+    passed = passedOf(proposal.passed)
     reopening = reopeningOf(proposal.reopen)
     pushback = pushbackOf(proposal.pushback)
     reopened = reopenedOf(proposal.reopened)
@@ -709,7 +720,8 @@ function rowToItem(
           k !== FLAG_BEFORE_KEY &&
           k !== 'reopen' &&
           k !== 'pushback' &&
-          k !== 'reopened'
+          k !== 'reopened' &&
+          k !== 'passed'
         )
           rest[k] = v
       }
@@ -827,16 +839,21 @@ function rowToItem(
     pushback,
     reopened,
     declinedBefore,
+    passed,
   }
 }
 
 // Open rows, plus anything decided in the last day: the "Done today" strip
 // with its Undo buttons. A day is enough for any viewer's "today" (their
 // midnight is at most 24 hours back); the browser trims it to its own
-// calendar day.
+// calendar day. Also the rows the Mac's daily check took out in the last
+// week, for the line at the top of the list (queue-passed.ts); they have no
+// Decided at, so they show nowhere else.
 const LIST_FORMULA =
   "OR({Status}='Pending',{Status}='Revising',{Status}='Accepted',{Status}='Failed'," +
-  "AND(OR({Status}='Applied',{Status}='Rejected'),IS_AFTER({Decided at},DATEADD(NOW(),-1,'day'))))"
+  "AND(OR({Status}='Applied',{Status}='Rejected'),IS_AFTER({Decided at},DATEADD(NOW(),-1,'day')))," +
+  TAKEN_OUT_FORMULA +
+  ')'
 
 /** The rows, and nothing else: one paginated read of the Queue table, so
  *  the page has its list in about a second. A logo here comes only from
@@ -2023,6 +2040,9 @@ export async function acceptItem(
       : null
   const draftFields: Record<string, unknown> =
     draft !== null && draft !== item.replyDraft ? { [F.replyDraft]: draft } : {}
+  // Before the try: a passed item (its date went by while someone waits
+  // for a reply) stays open for the Reject that drafts it, not Failed.
+  if (item.passed) throw new QueueError(passedBlock(item.passed), 422)
   // Before the try: an addition with no place or an empty needed field
   // stays open, not Failed.
   if (
