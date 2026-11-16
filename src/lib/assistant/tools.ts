@@ -25,13 +25,13 @@ ARGUMENTS:
 
 • \`query\` — optional free-text terms. Tokens are matched against name (×5 weight), organization (×3), meta fields (×2), and description (×1). Use the user's words, related keywords, or leave empty to browse by filter alone.
 
-• \`filters\` — optional object of meta-field constraints. Values can be a string OR an array of strings (array means OR semantics: matches if ANY value substring matches). Substring match is case-insensitive.
+• \`filters\` — optional object of meta-field constraints. Values can be a string OR an array of strings (array means OR semantics: matches if ANY value substring matches). Substring match is case-insensitive. The exceptions are \`activityLevel\` and \`status\`, which match the whole label: "Active" returns only Active listings, never "Semi-active" or "Inactive" ones – pass an array to include more than one level.
 
   Per type:
     job: skillSet ("Communications"|"Data"|"Engineering"|"Finance"|"Information security"|"Legal"|"Management"|"Operations"|"Other"|"Policy"|"Research"|"Software engineering"|"Strategy"),minimumExperience ("Entry-level"|"Junior"|"Mid"|"Senior"), requiredDegree ("Master's degree"|"Doctoral degree" — only set when a role asks for more than an undergraduate degree), roleType ("Full-time"|"Part-time"|"Internship"), workLocation ("Remote"|"On-site"), location (city or country)
     funder: type ("Fund"|"Grant program"|"Platform"), applicationStatus ("Open"|"Closed" — use this to filter open/closed funders; "Closed" covers both "Not currently accepting applications" and "Invite only, no applications", and the \`applications\` meta field says which. \`applications\` holds the card's status line, like "Applications close 31 Oct 2026", and is NOT reliably filterable), whoCanApply ("Individuals"|"Nonprofits"|"For-profits"|"Universities" — multi-select, a funder can carry several; filtering on one matches funders that carry it among others. For organizations in general pass ['Nonprofits', 'For-profits'])
       – Funder results also carry \`deadline\` (YYYY-MM-DD closing day of an open funder; none means rolling) and \`grantSize\` (the funder's own wording, e.g. "$10k – $50k"; none means the site doesn't give a size).
-    community: platform ("Slack"|"Discord"|"In-person"), type, activityLevel ("Active"|"Quiet"), location
+    community: platform ("Slack"|"Discord"|"Local" — in-person groups are tagged "Local"), type, activityLevel ("Active"|"Semi-active"|"Inactive"), location
     course: category, courseType
     advisor: whoItsFor ("Newcomers"|"Existing field members" — multi-select), focusAreas ("Career"|"Research"|"Founding"|"Volunteering"|"Donating"|"Well-being"|"Operations"|"Legal"|"Visas" — multi-select, filtering on one matches advisors that carry it among others), applications ("Application required"|"Accepts everyone" — "Accepts everyone" means anyone can book a call directly), status ("Active"|"Inactive")
     founder-resource: type
