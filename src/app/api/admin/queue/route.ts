@@ -16,6 +16,10 @@
   GET  /api/admin/queue?id=<rec>               → { item } – one row as it is now
        (the page follows a Reopen with it until the Mac is done)
   GET  /api/admin/queue?target=<tbl>/<rec>     → { fields, attachments, schema } (live)
+  GET  /api/admin/queue?listing=<rec>          → { listing } – the listing with
+       that record id as it is in Airtable now, whichever resource table
+       holds it and whether or not the Queue ever did (null when none has
+       it): what the search shows for a pasted id – queue-listing.ts
   GET  /api/admin/queue?order=<tbl>            → { order } – the page's published
        listings by Sort, for placing an addition (null for a table with no Sort)
   GET  /api/admin/queue?map=1                  → { records } – every Field map
@@ -61,6 +65,7 @@ import {
   agentInfo,
   closeHandledRows,
   deleteItem,
+  findListing,
   fixItem,
   flagItem,
   getPageOrder,
@@ -130,6 +135,8 @@ export async function GET(req: NextRequest) {
     if (req.nextUrl.searchParams.get('map') === '1') {
       return json({ records: await mapForStrip() })
     }
+    const listing = req.nextUrl.searchParams.get('listing')
+    if (listing) return json({ listing: await findListing(listing) })
     const orderOf = req.nextUrl.searchParams.get('order')
     if (orderOf) return json({ order: await getPageOrder(orderOf) })
     const target = req.nextUrl.searchParams.get('target')

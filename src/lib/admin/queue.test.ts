@@ -33,6 +33,7 @@ import {
   DELETED_NOTE,
   deleteItem,
   extraEdits,
+  findListing,
   fixItem,
   flagItem,
   getPreviewListing,
@@ -2278,5 +2279,166 @@ describe('deleteItem', () => {
       status: 409,
     })
     expect(record).not.toBeNull()
+  })
+})
+
+// A record id from the search box, looked up as a listing (16 Nov 2026).
+// Airtable answers a read by record id from whichever table holds the
+// record, so the fields' ids are what say which table that is.
+describe('a listing found by its record id', () => {
+  const TRAINING = 'tbli1YSCpIuNY2DvL'
+  const RECURRING = 'tblEEIbj6dW5oS4cX'
+  const T = {
+    name: 'fldListingName001',
+    description: 'fldListingDesc001',
+    logo: 'fldListingLogo001',
+    publish: 'fldListingPubl001',
+    hide: 'fldListingHide001',
+  }
+  const R = { name: 'fldRecurName00001', publish: 'fldRecurPubl00001' }
+  const Q = { title: 'fldQueueTitle0001' }
+  const tables = [
+    {
+      id: TRAINING,
+      primaryFieldId: T.name,
+      fields: [
+        { id: T.name, name: 'Name', type: 'singleLineText' },
+        { id: T.description, name: 'Description', type: 'multilineText' },
+        { id: T.logo, name: 'Logo', type: 'multipleAttachments' },
+        { id: T.publish, name: 'Publish?', type: 'checkbox' },
+        { id: T.hide, name: 'Hide?', type: 'checkbox' },
+      ],
+    },
+    {
+      id: RECURRING,
+      primaryFieldId: R.name,
+      fields: [
+        { id: R.name, name: 'Program', type: 'singleLineText' },
+        { id: R.publish, name: 'Publish?', type: 'checkbox' },
+      ],
+    },
+    {
+      id: QUEUE,
+      primaryFieldId: Q.title,
+      fields: [{ id: Q.title, name: 'Title', type: 'singleLineText' }],
+    },
+  ]
+  /** Each record's fields by field id, and the table it sits in. */
+  let records: Record<
+    string,
+    { table: string; fields: Record<string, unknown> }
+  >
+  /** True: a read answers from any table, as Airtable does. */
+  let crossTables: boolean
+  let asked: string[]
+
+  beforeEach(() => {
+    process.env.AIRTABLE_TOKEN = 'test-token'
+    process.env.AIRTABLE_BASE_ID = 'appTest'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ tables }))
+    )
+    records = {}
+    crossTables = true
+    asked = []
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(async (path: string) => {
+      const [table, rest] = path.split('/')
+      const id = rest.split('?')[0]
+      asked.push(table)
+      const rec = records[id]
+      if (!rec || (!crossTables && rec.table !== table)) {
+        return Response.json({ error: 'NOT_FOUND' }, { status: 404 })
+      }
+      return Response.json({ id, fields: rec.fields })
+    })
+  })
+
+  // First, while no read has been seen to cross tables.
+  it('goes from table to table should Airtable check the table asked', async () => {
+    crossTables = false
+    records[rid('round')] = {
+      table: TRAINING,
+      fields: { [T.name]: ' Evaluation course ', [T.publish]: true },
+    }
+    const found = await findListing(rid('round'))
+    expect(found).toMatchObject({ table: TRAINING, name: 'Evaluation course' })
+    expect(asked).toEqual([EVENTS, TRAINING])
+
+    asked = []
+    expect(await findListing(rid('nowhere'))).toBeNull()
+    expect(asked).toHaveLength(11)
+  })
+
+  it('reads the record once and names its real table from the field ids', async () => {
+    records[rid('round')] = {
+      table: TRAINING,
+      fields: {
+        [T.name]: 'Evaluation course',
+        [T.description]: 'Four months of evaluations.',
+        [T.logo]: [
+          { url: 'https://dl.airtable.com/logo.png', type: 'image/png' },
+        ],
+        [T.publish]: true,
+      },
+    }
+    const found = await findListing(rid('round'))
+    expect(asked).toEqual([EVENTS])
+    expect(found).toMatchObject({
+      table: TRAINING,
+      record: rid('round'),
+      page: '/training',
+      name: 'Evaluation course',
+      state: 'published',
+      airtable: `https://airtable.com/appTest/${TRAINING}/${rid('round')}`,
+    })
+    // By field name, pictures as links, and never the two boxes.
+    expect(found?.fields).toEqual({
+      Name: 'Evaluation course',
+      Description: 'Four months of evaluations.',
+      Logo: ['https://dl.airtable.com/logo.png'],
+    })
+    expect(found?.schema.map(f => f.name)).toEqual([
+      'Name',
+      'Description',
+      'Logo',
+    ])
+  })
+
+  it('says whether the listing is on the site', async () => {
+    records[rid('new')] = { table: RECURRING, fields: { [R.name]: 'Program' } }
+    records[rid('old')] = {
+      table: TRAINING,
+      fields: { [T.name]: 'Old round', [T.publish]: true, [T.hide]: true },
+    }
+    expect(await findListing(rid('new'))).toMatchObject({
+      table: RECURRING,
+      page: '/training',
+      name: 'Program',
+      state: 'unpublished',
+    })
+    expect(await findListing(rid('old'))).toMatchObject({ state: 'hidden' })
+  })
+
+  it('finds no listing in a Queue row, a missing record or a bad id', async () => {
+    records[rid('row')] = { table: QUEUE, fields: { [Q.title]: 'A row' } }
+    expect(await findListing(rid('row'))).toBeNull()
+    // Reads cross tables (seen above): one miss speaks for every table.
+    asked = []
+    expect(await findListing(rid('nowhere'))).toBeNull()
+    expect(asked).toEqual([EVENTS])
+    asked = []
+    expect(await findListing('not-an-id')).toBeNull()
+    expect(asked).toEqual([])
+  })
+
+  it('fails loudly when Airtable does', async () => {
+    mocks.airtableRequest.mockImplementation(
+      async () => new Response('down', { status: 500 })
+    )
+    await expect(findListing(rid('round'))).rejects.toMatchObject({
+      status: 502,
+    })
   })
 })

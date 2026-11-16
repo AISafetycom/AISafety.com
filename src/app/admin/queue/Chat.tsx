@@ -309,7 +309,9 @@ interface DescCap {
   cap: number
 }
 const PROJECTS_TABLE = 'tblHT29QNgMYKB8iW'
-export function descriptionCap(item: QueueItem): DescCap {
+export function descriptionCap(
+  item: Pick<QueueItem, 'targetTable' | 'page'>
+): DescCap {
   return {
     field:
       item.targetTable === PROJECTS_TABLE
