@@ -118,6 +118,7 @@ function item(over: Partial<QueueItem>): QueueItem {
     pushback: null,
     reopened: null,
     declinedBefore: null,
+    passed: null,
     ...over,
   }
 }
@@ -413,6 +414,19 @@ describe('an addition needs its place and its needed fields', () => {
     await expect(acceptItem(item({}), {})).rejects.toThrow(
       'Fill in Host name and Logo first'
     )
+    expect(patches).toEqual([])
+  })
+
+  // Bryce, 16 Nov 2026: a passed item someone is waiting on stays for the
+  // reply; it can't go on the site any more.
+  it('refuses a passed one, says why, and leaves the row open', async () => {
+    stored = { Name: 'An event', 'Host name': 'XLab', Logo: LOGO }
+    const passed = item({ passed: { how: 'ended', on: '2026-11-15' } })
+    await expect(acceptItem(passed, {})).rejects.toMatchObject({
+      message:
+        "It ended on 15 November, so it can't go on the site. Reject it to draft their reply.",
+      status: 422,
+    })
     expect(patches).toEqual([])
   })
 
