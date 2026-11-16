@@ -7,11 +7,15 @@
 
   A kept copy in the Blob store answers first; otherwise ActiveCampaign,
   once a campaign of the issue has reached readers on its real list, and
-  that email is kept for next time.
+  that email is kept for next time. The copy is kept as sent; since
+  16 Nov 2026 that means its card data is a reference to the Blob store
+  (newsletter-cards-store.ts), put back inline here for the pages that read
+  the cards (the text version, the lined-up counts).
 */
 
 import { put } from '@vercel/blob'
 import { sentIssueHtml } from '@/lib/admin/newsletter'
+import { inlineCards } from '@/lib/newsletter-cards-store'
 import {
   WEB_BASE,
   WEB_NEWSLETTERS,
@@ -19,8 +23,9 @@ import {
   isWebKey,
 } from '@/lib/newsletter-web'
 
-/** The email as sent, or null when the issue isn't online. Throws when
- *  ActiveCampaign can't be read. */
+/** The email as sent, with its card data inline, or null when the issue
+ *  isn't online. Throws when ActiveCampaign or the stored card data can't
+ *  be read. */
 export async function sentEmail(
   key: string,
   slug: string
@@ -29,7 +34,7 @@ export async function sentEmail(
   if (!name || !isWebKey(key)) return null
   const file = `${key}/${slug}.html`
   const kept = await fetch(WEB_BASE + file, { cache: 'no-store' })
-  if (kept.ok) return kept.text()
+  if (kept.ok) return inlineCards(await kept.text())
   if (kept.status !== 404)
     console.warn(
       `[newsletter-web] reading the kept copy of ${file} failed: HTTP ${kept.status}`
@@ -37,7 +42,7 @@ export async function sentEmail(
   const email = await sentIssueHtml(name, WEB_NEWSLETTERS[key].list)
   if (!email) return null
   await keep(`newsletter/web/${file}`, email)
-  return email
+  return inlineCards(email)
 }
 
 /** Keeps the email as sent. Written once and never changed or deleted

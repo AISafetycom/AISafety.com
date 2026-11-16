@@ -11,6 +11,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  blobFiles,
   buildEmail,
   camp,
   expireLocks,
@@ -25,6 +26,10 @@ import {
 // The pretend ActiveCampaign, Upstash and mail script: ./__fixtures__/fake-ac.ts
 vi.mock('@upstash/redis', async () => ({
   Redis: (await import('./__fixtures__/fake-ac')).FakeRedis,
+}))
+// Card data is stored off the email (newsletter-cards-store.ts).
+vi.mock('@vercel/blob', async () => ({
+  put: (await import('./__fixtures__/fake-ac')).fakeBlobPut,
 }))
 
 // The warm-up switch, set per test so both sides of it stay covered whatever
@@ -49,6 +54,7 @@ const ENV = { ...process.env }
 const WHO = { approver: 'Bryce Robertson' }
 
 beforeEach(() => {
+  vi.stubEnv('BLOB_READ_WRITE_TOKEN', 'fake-blob-token')
   resetKv()
   warmup.on = true
   vi.spyOn(console, 'info').mockImplementation(() => {})
@@ -509,6 +515,30 @@ describe('only production can send to, or edit drafts on, lists 6/7/8', () => {
     expect(test.calls.some(c => c.method === 'PUT')).toBe(true)
   })
 
+  it('a card edit stores the card data off the email, and the page still reads it (16 November 2026)', async () => {
+    const test = makeAC({ draftList: '5' })
+    vi.stubGlobal('fetch', test.fetchMock)
+    const nl = await freshModule()
+    const before = test.msgs.get('300')!.html
+    expect(before).toMatch(/<!--aisafety-cards:[A-Za-z0-9+/=]+-->/)
+    const edited = await nl.editDraftCard('200', 'g0', 'recAAAAAAAAAAAAAA', {
+      desc: 'New text.',
+    })
+    const after = test.msgs.get('300')!.html
+    // ActiveCampaign now holds a reference, not the data…
+    expect(after).not.toMatch(/<!--aisafety-cards:/)
+    const ref = /<!--aisafety-cards-ref:([0-9a-f]{16})-->/.exec(after)
+    expect(ref).not.toBeNull()
+    expect(blobFiles.has(ref![1])).toBe(true)
+    expect(after.length).toBeLessThan(before.length)
+    // …and the page reads the cards as before, from a fresh module too.
+    expect(edited.cards[0].cards.map(c => c.key)).toEqual(['recAAAAAAAAAAAAAA'])
+    const again = await freshModule()
+    const [d] = await again.listDrafts()
+    expect(d.cards?.[0].cards.map(c => c.key)).toEqual(['recAAAAAAAAAAAAAA'])
+    expect(d.blocks).toEqual([])
+  })
+
   it('the page is told: real-list drafts show a block and aren’t editable outside production', async () => {
     const ac = makeAC()
     vi.stubGlobal('fetch', ac.fetchMock)
@@ -885,15 +915,15 @@ describe('contentChecks', () => {
     ])
   })
 
-  it('blocks HTML over 96 KB', async () => {
+  it('blocks HTML over 100 KB', async () => {
     const { contentChecks } = await nl()
     const big = buildEmail({ body: `<p>${'x'.repeat(100 * 1024)}</p>` })
     expect(contentChecks(input({ html: big.html })).blocks[0]).toMatch(
-      /the email is 10\d KB, over the 96 KB limit/
+      /the email is 10\d KB, over the 100 KB limit/
     )
   })
 
-  it('lets a 95 KB email through (15 Events cards, 8 October 2026)', async () => {
+  it('lets a 95 KB email through (18 Events cards fit since 16 November 2026)', async () => {
     const { contentChecks } = await nl()
     const e = buildEmail({ body: `<p>${'x'.repeat(93 * 1024)}</p>` })
     expect(

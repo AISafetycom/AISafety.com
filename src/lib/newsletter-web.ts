@@ -148,6 +148,7 @@ export function webPage(email: string, textHref?: string, seen = ''): string {
       .replace(/%(?:UNSUBSCRIBELINK|WEBCOPY|SENDER-INFO-SINGLELINE)%/g, '')
       .replace(/<!--aisafety-issue:[0-9a-f]{16}-->/g, '')
       .replace(/<!--aisafety-cards:[A-Za-z0-9+/=]*-->/g, '')
+      .replace(/<!--aisafety-cards-ref:[0-9a-f]*-->/g, '')
       .replace(/<head>/i, '<head>\n<meta name="robots" content="noindex">'),
     seen
   )

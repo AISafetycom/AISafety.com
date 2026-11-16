@@ -26,6 +26,10 @@ import {
 vi.mock('@upstash/redis', async () => ({
   Redis: (await import('./__fixtures__/fake-ac')).FakeRedis,
 }))
+// Card data is stored off the email (newsletter-cards-store.ts).
+vi.mock('@vercel/blob', async () => ({
+  put: (await import('./__fixtures__/fake-ac')).fakeBlobPut,
+}))
 
 // The warm-up switch, set per test so both sides of it stay covered whatever
 // the shipped value (off since 12 Oct 2026). On unless a test turns it off.
@@ -102,6 +106,7 @@ function sentWave(k: number, more: Parameters<typeof camp>[0] | object = {}) {
 }
 
 beforeEach(() => {
+  vi.stubEnv('BLOB_READ_WRITE_TOKEN', 'fake-blob-token')
   warmup.on = true
   resetKv()
   afterQueue.length = 0

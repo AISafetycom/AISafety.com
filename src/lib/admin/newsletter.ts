@@ -31,6 +31,11 @@
   rebuilds the text from the manifest, re-stamps the marker and writes the
   message back through the v3 API (which returns HTML byte-identical, checked
   10 Sept 2026). Same algorithm as ~/Newsletter/render.py `reorder_cards()`.
+  Since 16 Nov 2026 the manifest is stored off the email: ActiveCampaign
+  holds `<!--aisafety-cards-ref:<b>-->` and the JSON is on the Blob store
+  (src/lib/newsletter-cards-store.ts). Every function here still works on
+  the inline form: `cardsHtml()` puts it back after a read, and
+  `rewriteDraft()` stores it again before the write.
 
   Editing (16 Sept 2026): a funding card's "Consider applying if" line can be
   rewritten from the same panel. `setFitHtml()` swaps the line inside the
@@ -135,6 +140,11 @@ import {
   keepRemovalCopy,
   readRemovalCopy,
 } from '@/lib/admin/newsletter-removed'
+import {
+  CardsStoreError,
+  inlineCards,
+  storeCards,
+} from '@/lib/newsletter-cards-store'
 
 /** Re-exported for callers that already import them from here. */
 export {
@@ -286,18 +296,20 @@ const PRESS_CREATE_BY_MS = 120_000
  *  landed); reads give up after READ_TIMEOUT_MS per attempt. */
 const WRITE_TIMEOUT_MS = 25_000
 const READ_TIMEOUT_MS = 20_000
-/** Gmail clips an email at about 102 KB; stay under it. 96 KiB since 8 October
- *  2026: ActiveCampaign's link tracking is off (28 September), so at send time
- *  it adds only the open pixel and the filled-in merge tags (under 1 KB), not
- *  the ~12% the old 90 KiB allowed for. The pipeline now declares the font once
- *  per email (render.hoist_type), so 15 Events cards fit (~96 KB). Keep
+/** Gmail clips an email at about 102 KB; stay under it. Measured on the email
+ *  as ActiveCampaign holds it and sends it, so since 16 Nov 2026 without the
+ *  card data, which is stored off the email (newsletter-cards-store.ts): it
+ *  used to count too, 18.9 KB of the week 46 Events issue's 120.6 KB, and
+ *  readers never see it. Google doesn't say whether "102 KB" means 102,000
+ *  or 104,448 bytes, and at send time ActiveCampaign adds the open pixel and
+ *  the filled-in merge tags (under 1 KB; its link tracking is off since
+ *  28 Sept 2026), so 100,000 bytes stays under either reading: 18 Events
+ *  cards fit. It was 96 KiB with the card data in (15 cards). The week 46
+ *  oversize trial (12 Nov 2026) sent 19 cards at 123 KB; Gmail's cut fell
+ *  below the last card, in the card data and the footer, and the bottom
+ *  cards were clicked as much as an unclipped issue's. Keep
  *  SITE_MAX_HTML_BYTES in ~/Newsletter/issue.py in step. */
-const MAX_HTML_BYTES = 96 * 1024
-/** Issues allowed over MAX_HTML_BYTES, by campaign name: a one-off trial of
- *  sending a whole issue even though Gmail clips its bottom (Bryce, 12
- *  November 2026: "test it out this once and then decide what we do long
- *  term afterwards"). Every other issue is still blocked. */
-const OVERSIZE_TRIAL = new Set(['Events · Week 46, 2026'])
+const MAX_HTML_BYTES = 100_000
 /** How many campaigns one read covers (AC's page maximum). */
 export const CAMPAIGN_READ_WINDOW = 100
 
@@ -1934,7 +1946,11 @@ export function contentChecks(input: {
   name: string
   listId: string
   subject: string
+  /** The email with its card data inline, as the card code reads it. */
   html: string
+  /** The email as it is saved and sent (card data stored off it), for the
+   *  size limit. Defaults to `html`. */
+  sentHtml?: string
   text: string
   fromEmail: string
   replyTo: string | null
@@ -1981,10 +1997,13 @@ export function contentChecks(input: {
     blocks.push(`list ${listId} isn’t a newsletter list`)
   }
 
-  const bytes = Buffer.byteLength(html.replace(MARKER_RE, ''), 'utf8')
-  if (bytes > MAX_HTML_BYTES && !OVERSIZE_TRIAL.has(name))
+  const bytes = Buffer.byteLength(
+    (input.sentHtml ?? html).replace(MARKER_RE, ''),
+    'utf8'
+  )
+  if (bytes > MAX_HTML_BYTES)
     blocks.push(
-      `the email is ${Math.round(bytes / 1024)} KB, over the ${MAX_HTML_BYTES / 1024} KB limit (Gmail cuts emails off at about 102 KB) – shorten the issue`
+      `the email is ${Math.round(bytes / 1000)} KB, over the ${MAX_HTML_BYTES / 1000} KB limit (Gmail cuts emails off at about 102 KB) – shorten the issue`
     )
 
   // Card text changed by hand on this page isn't flagged: an edit is the
@@ -2238,6 +2257,15 @@ export async function listDrafts(): Promise<DraftSummary[]> {
   return mapLimit(pipeline, 3, async ({ c, messageIds, listIds, msg }) => {
     const listId = listIds.length === 1 ? listIds[0] : null
     const problems = draftProblems(c, listIds, messageIds, msg, null)
+    // The cards as the page shows them. Card data that can't be read leaves
+    // the panel empty for now; sendChecks blocks the send and says why.
+    const shown = await inlineCards(msg.html ?? '').catch(err => {
+      if (!(err instanceof CardsStoreError)) throw err
+      console.warn(
+        `[newsletter] draft ${c.id}: card data unreadable: ${err.detail}`
+      )
+      return null
+    })
     const sameList = pipeline
       .filter(
         o =>
@@ -2316,8 +2344,8 @@ export async function listDrafts(): Promise<DraftSummary[]> {
       editLock,
       preview: previewText(msg.html ?? ''),
       designChangedSince: designSince,
-      cards: cardGroups(msg.html ?? ''),
-      removed: removedCards(msg.html ?? ''),
+      cards: shown == null ? null : cardGroups(shown),
+      removed: shown == null ? [] : removedCards(shown),
     }
     return row
   })
@@ -2332,13 +2360,24 @@ async function sendChecks(
   sameListDrafts: Array<{ id: string; name: string }>,
   now: Date
 ): Promise<SendChecks> {
-  const html = msg.html ?? ''
+  const sent = msg.html ?? ''
   const text = msg.text ?? ''
+  // The card checks read the card data; the size limit measures the email
+  // as it goes out, without it.
+  let html = sent
+  const cardBlocks: string[] = []
+  try {
+    html = await inlineCards(sent)
+  } catch (err) {
+    if (!(err instanceof CardsStoreError)) throw err
+    cardBlocks.push(err.detail)
+  }
   const own = contentChecks({
     name: draft.name,
     listId: draft.listId,
     subject: msg.subject ?? '',
     html,
+    sentHtml: sent,
     text,
     fromEmail: msg.fromemail ?? '',
     replyTo: msg.reply2 ?? null,
@@ -2346,8 +2385,9 @@ async function sendChecks(
   })
   return {
     blocks: [
+      ...cardBlocks,
       ...own.blocks,
-      ...(await linkListBlocks(html, text)),
+      ...(await linkListBlocks(sent, text)),
       ...olderIssueBlocks(draft.name, sameListDrafts),
     ],
     warnings: own.warnings,
@@ -3468,9 +3508,34 @@ export async function draftCardGroups(
     throw new DraftProblemError(
       problems.length > 0 ? problems : ['no message on the draft']
     )
-  const groups = cardGroups(msg.html ?? '')
+  const groups = cardGroups(await cardsHtml(msg.html ?? ''))
   if (!groups) throw new DraftProblemError(['this email has no card markers'])
   return groups
+}
+
+/** The email with its card data inline (inlineCards), card data that can't
+ *  be read or stored becoming a problem the page shows. */
+async function cardsHtml(html: string): Promise<string> {
+  try {
+    return await inlineCards(html)
+  } catch (err) {
+    if (err instanceof CardsStoreError)
+      throw new DraftProblemError([err.detail])
+    throw err
+  }
+}
+
+/** The email as it is saved to ActiveCampaign: its card data stored off it
+ *  (storeCards). Throws DraftProblemError when that fails, before anything
+ *  is written. */
+async function storedCardsHtml(html: string): Promise<string> {
+  try {
+    return await storeCards(html)
+  } catch (err) {
+    if (err instanceof CardsStoreError)
+      throw new DraftProblemError([err.detail])
+    throw err
+  }
 }
 
 export async function editDraftCard(
@@ -3637,8 +3702,12 @@ async function rewriteDraft(
     baseIssueName(campaign.name)
   )
   if (approving) throw new DraftProblemError([approving])
-  const body = (msg.html ?? '').replace(MARKER_RE, '')
-  const { html, text } = await change(body)
+  const body = (await cardsHtml(msg.html ?? '')).replace(MARKER_RE, '')
+  const changed = await change(body)
+  const text = changed.text
+  // A draft built before 16 Nov 2026 (card data inline) moves to the stored
+  // form on its first edit.
+  const html = await storedCardsHtml(changed.html)
   const stamped = `<!--aisafety-issue:${contentDigest(html)}-->` + html
   const stored = await v3put<{ message?: RawMessage }>(
     `messages/${acId(messageId)}`,
@@ -3654,10 +3723,11 @@ async function rewriteDraft(
       `message ${messageId} failed verification after the edit — check the ActiveCampaign dashboard`
     )
   }
-  const cards = cardGroups(liveHtml)
+  const shown = await cardsHtml(liveHtml)
+  const cards = cardGroups(shown)
   if (!cards) throw new Error('card markers missing after the edit')
   console.info(`[newsletter] draft ${draftId} ${logLine}`)
-  return { cards, removed: removedCards(liveHtml) }
+  return { cards, removed: removedCards(shown) }
 }
 
 /* ─── Analytics: sends in a date range ────────────────────────────────── */
