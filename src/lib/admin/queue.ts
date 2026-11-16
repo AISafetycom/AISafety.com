@@ -64,6 +64,11 @@ import {
 } from './queue-passed'
 import { ruleTestOf, type RuleTest } from './queue-rule-test'
 import {
+  FIELD_FLAGS_KEY,
+  fieldFlagsOf,
+  type FieldFlags,
+} from './queue-field-flags'
+import {
   PUBLIC_KEY,
   publicChoiceOf,
   ruleInstantOf,
@@ -307,6 +312,10 @@ export interface QueueItem {
   /** Its date went by while someone waits for a reply (the Mac's daily
    *  check, queue-passed.ts): Publish is off, Reject drafts the reply. */
   passed: Passed | null
+  /** Add: the fields Fable would change, from its field check after a
+   *  Publish verdict (the proposal's `field_flags`, queue-field-flags.ts);
+   *  null until the Mac has run it. */
+  fieldFlags?: FieldFlags | null
 }
 
 export type NoReply = 'no email' | 'no notification'
@@ -665,8 +674,10 @@ function rowToItem(
   let reopened: Reopened | null = null
   let declinedBefore: DeclinedBefore | null = null
   let passed: Passed | null = null
+  let fieldFlags: FieldFlags | null = null
   if (isRecord(proposal)) {
     passed = passedOf(proposal.passed)
+    fieldFlags = fieldFlagsOf(proposal[FIELD_FLAGS_KEY])
     reopening = reopeningOf(proposal.reopen)
     pushback = pushbackOf(proposal.pushback)
     reopened = reopenedOf(proposal.reopened)
@@ -728,7 +739,8 @@ function rowToItem(
           k !== 'reopen' &&
           k !== 'pushback' &&
           k !== 'reopened' &&
-          k !== 'passed'
+          k !== 'passed' &&
+          k !== FIELD_FLAGS_KEY
         )
           rest[k] = v
       }
@@ -848,6 +860,7 @@ function rowToItem(
     reopened,
     declinedBefore,
     passed,
+    fieldFlags,
   }
 }
 

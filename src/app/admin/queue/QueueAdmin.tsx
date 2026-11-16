@@ -88,6 +88,8 @@ import SitePreview, {
 import Chat, { CharCount, descriptionCap, type Decided } from './Chat'
 import RejectReason, { type RejectReasonControl } from './RejectReason'
 import FieldPicker from './FieldPicker'
+import FieldFlags from './FieldFlags'
+import { shownFlags, withFlags } from '@/lib/admin/queue-field-flags'
 import type { FableChange } from '@/lib/admin/queue-fable'
 import Position, { forgetOrder } from './Position'
 import MapSpot, { forgetMap, notePlaced } from './MapSpot'
@@ -4000,6 +4002,31 @@ export default function QueueAdmin({
             setChatFocus(n => n + 1)
           }
           break
+        case 'c': {
+          // Use the fields Fable would change, all at once (Bryce, 16 Nov
+          // 2026). They go into the edits, like anything typed by hand.
+          if (
+            !canEdit ||
+            !item ||
+            !item.fieldFlags ||
+            item.type !== 'Add' ||
+            item.verdict !== 'Publish' ||
+            item.status === 'Revising' ||
+            !(isOpen(item) || setAsideUntil(item))
+          ) {
+            break
+          }
+          const next = withFlags(
+            item.fieldFlags.flags,
+            live[item.id]?.fields ?? item.fields ?? {},
+            d.edits
+          )
+          if (Object.keys(next).some(k => next[k] !== d.edits[k])) {
+            e.preventDefault()
+            setDraft(item.id, { edits: next })
+          }
+          break
+        }
         case 'p':
           // Where the addition goes on its page (Bryce, 30 Sept 2026).
           if (
@@ -4969,6 +4996,13 @@ export default function QueueAdmin({
               </dt>
               <dd>talk to Fable about the item, or tell it what to change</dd>
               <dt>
+                <kbd>C</kbd>
+              </dt>
+              <dd>
+                use the fields Fable would change on an addition it said to
+                publish; they go out with Publish, and each has its own Undo
+              </dd>
+              <dt>
                 <kbd>P</kbd>
               </dt>
               <dd>
@@ -5602,6 +5636,23 @@ function Detail({
       !COMPUTED_TYPES.has(types.get(c.field)?.type ?? '')
   )
   const fableFields = new Map(fableChanges.map(c => [c.field, c]))
+  // The fields Fable would change, from its field check after a Publish
+  // verdict (queue-field-flags.ts): under the verdict while the item can
+  // still be edited, and marked on the fields themselves while open.
+  const flagCheck =
+    item.type === 'Add' && item.verdict === 'Publish' && draftable
+      ? (item.fieldFlags ?? null)
+      : null
+  const flagLive = live?.fields ?? item.fields ?? {}
+  const canFlagField = (k: string) =>
+    !HOUSEKEEPING.test(k) && !COMPUTED_TYPES.has(types.get(k)?.type ?? '')
+  const flagged = new Set(
+    flagCheck
+      ? shownFlags(flagCheck.flags, flagLive, d.edits, canFlagField)
+          .filter(x => x.state === 'open')
+          .map(x => x.flag.field)
+      : []
+  )
   // The proposed fields Fable changed: Accept leaves them as they are.
   const fableKept =
     item.type === 'Change'
@@ -6497,6 +6548,7 @@ function Detail({
                   fields={shownFields}
                   schema={live?.schema ?? []}
                   fable={fableFields}
+                  flagged={flagged}
                   onImage={onImage}
                   d={d}
                   setD={setD}
@@ -6535,6 +6587,7 @@ function Detail({
                 fields={shownFields}
                 schema={live?.schema ?? []}
                 fable={fableFields}
+                flagged={flagged}
                 omit={[
                   ...(placeable ? [SORT_FIELD] : []),
                   ...(spotted && !recordGone ? ['x', 'y'] : []),
@@ -6845,6 +6898,17 @@ function Detail({
                 ))}
               </ul>
             ))}
+          {flagCheck && (
+            <FieldFlags
+              check={flagCheck}
+              live={flagLive}
+              edits={d.edits}
+              canEdit={!revising}
+              canEditField={canFlagField}
+              cap={descriptionCap(item)}
+              onSetEdits={edits => setD({ edits })}
+            />
+          )}
           {chatAgent && (
             <Chat
               key={item.id}
@@ -7625,6 +7689,7 @@ function Fields({
   schema,
   omit,
   fable,
+  flagged,
   onImage,
   d,
   setD,
@@ -7642,6 +7707,9 @@ function Fields({
   omit?: string[]
   /** Fields Fable changed on the record from the chat: marked "by Fable". */
   fable?: Map<string, FableChange>
+  /** Fields Fable's field check would change, still open: marked
+   *  "flagged" (the verdict panel has the value and the reason). */
+  flagged?: Set<string>
   onImage: (field: string, urls: string[]) => void
   d: Draft
   setD: (patch: Partial<Draft>) => void
@@ -7650,6 +7718,15 @@ function Fields({
    *  straight onto the live listing, not into the draft. */
   onFix?: ((field: string, text: string) => void) | null
 }) {
+  const flagMark = (k: string) =>
+    flagged?.has(k) ? (
+      <em
+        className={styles.byFable}
+        title="Fable would change this field: its panel has the new value and the reason"
+      >
+        flagged
+      </em>
+    ) : null
   // With the table's field list we show every column, empty ones included,
   // in the table's order (name, link and description first); without it,
   // only what the snapshot carries.
@@ -7808,6 +7885,7 @@ function Fields({
       >
         {e[0]}
         <ByFable change={fable?.get(e[0])} />
+        {flagMark(e[0])}
       </span>
       <span className={styles.value}>
         {valueOf(e)}
@@ -7842,6 +7920,7 @@ function Fields({
         <span className={styles.label}>
           {k}
           <ByFable change={fable?.get(k)} />
+          {flagMark(k)}
         </span>
         <span className={styles.value}>{valueOf(e, icon)}</span>
       </div>
