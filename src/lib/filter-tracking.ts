@@ -44,6 +44,13 @@ const RELABELLED_FILTERS: Record<string, PageRelabels> = {
       // Was "Role type" until the directory-template rollout (September 2026).
       Type: 'Role type',
     },
+    options: {
+      // The job data's "Outreach" label became "Communications" (the list
+      // was updated 16 November 2026), so its clicks keep the old history.
+      'Skill set': {
+        Communications: 'Outreach',
+      },
+    },
   },
 }
 
