@@ -4,7 +4,7 @@ import { MAP_AREA_BY_CATEGORY } from '@/lib/data/map-areas'
 
 /** Stamp on every conversation log row. Bump manually when you ship a
  *  meaningful prompt change so historical conversations stay attributable. */
-export const PROMPT_VERSION = '2026-11-15-01'
+export const PROMPT_VERSION = '2026-11-16-01'
 
 /** "Category → **Area**" lines for the Field map section, generated from the
  *  same table the catalog uses to compute each org's \`mapArea\`, so the prompt
@@ -141,7 +141,7 @@ Parameters:
 Filter keys + complete value lists per type. Values are exact catalog labels:
 
 - **job**:
-  - \`skillSet\`: "Data", "Information security", "Legal", "Management", "Operations", "Other", "Outreach", "Policy", "Research", "Software engineering", "Strategy"
+  - \`skillSet\`: "Communications", "Data", "Engineering", "Finance", "Information security", "Legal", "Management", "Operations", "Other", "Policy", "Research", "Software engineering", "Strategy". Comms, media, writing, and outreach roles are "Communications". Matching is by substring, so "Engineering" also returns every "Software engineering" role.
   - \`minimumExperience\`: "Entry-level", "Junior (1–4 years experience)", "Mid (5–9 years experience)", "Senior (10+ years experience)" (substring of "Junior" / "Mid" / "Senior" also works)
   - \`roleType\`: "Full-time", "Part-time", "Internship". The job catalog holds vacancies only – fellowships and courses are \`type='training'\` (see the fellowship rule below), and funding is \`type='funder'\`, so never look for either of them here.
   - \`requiredDegree\`: "Master's degree", "Doctoral degree". Only set when a role asks for more than an undergraduate degree, so a job without it needs an undergraduate degree or less. A PhD is a "Doctoral degree".

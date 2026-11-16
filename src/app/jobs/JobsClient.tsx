@@ -14,14 +14,19 @@ interface JobsClientProps {
   jobs: Job[]
 }
 
+// The labels the published jobs carry. When the 80k data adds or renames
+// one, update this list and the chatbot's two copies (skillSet in
+// src/lib/assistant/prompt.ts and tools.ts) together.
 const skillSetOptions = [
+  'Communications',
   'Data',
+  'Engineering',
+  'Finance',
   'Information security',
   'Legal',
   'Management',
   'Operations',
   'Other',
-  'Outreach',
   'Policy',
   'Research',
   'Software engineering',
