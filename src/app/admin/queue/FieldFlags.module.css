@@ -1,0 +1,149 @@
+/* "Fields Fable would change" under the verdict (FieldFlags.tsx). Colours
+   come from the Queue's own --q-* palette, set on the page in
+   queue.module.css. */
+
+.flags {
+  display: grid;
+  gap: 8px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 26px;
+}
+
+.kicker {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+/* A check that found nothing: one quiet line, so "checked and fine" reads
+   differently from "not checked yet". */
+.none {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--q-muted);
+}
+
+.flag {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--q-border-strong);
+  border-radius: 8px;
+  background: var(--q-panel);
+}
+
+.flagUsed {
+  border-color: var(--q-accent);
+}
+
+.field {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--q-text-2);
+}
+
+.change {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--q-text);
+  overflow-wrap: anywhere;
+}
+
+.cut {
+  color: var(--q-muted);
+  text-decoration: line-through;
+}
+
+.fresh {
+  color: var(--q-accent);
+}
+
+.to {
+  font-weight: 600;
+}
+
+.arrow {
+  color: var(--q-muted);
+}
+
+.why {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--q-text-2);
+}
+
+.count,
+.countOver {
+  display: block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--q-muted);
+}
+
+.countOver {
+  color: var(--q-danger);
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.use {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--q-border-strong);
+  border-radius: 6px;
+  background: var(--q-panel-2);
+  color: var(--q-text);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.use:hover {
+  border-color: var(--q-accent);
+}
+
+.used {
+  font-size: 12px;
+  color: var(--q-accent);
+}
+
+.used::before {
+  content: '✓';
+  margin-right: 6px;
+}
+
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--q-muted);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link:hover {
+  color: var(--q-text);
+}
