@@ -990,24 +990,48 @@ describe('funding cards drawn by the site', () => {
 })
 
 describe('contentChecks size limit', () => {
-  const oversize = (name: string) =>
+  const footer = ' %UNSUBSCRIBELINK% %SENDER-INFO-SINGLELINE%'
+  const sizeBlocks = (name: string, html: string, sentHtml?: string) =>
     contentChecks({
       name,
       listId: '6',
-      subject: 'Week 46, 2026',
-      html: `<p>${'a'.repeat(110 * 1024)}</p> %UNSUBSCRIBELINK% %SENDER-INFO-SINGLELINE%`,
+      subject: 'Week 47, 2026',
+      html,
+      sentHtml,
       text: '%UNSUBSCRIBELINK% %SENDER-INFO-SINGLELINE%',
       fromEmail: 'events@news.aisafety.com',
       replyTo: null,
-      now: new Date('2026-11-12T12:00:00Z'),
+      now: new Date('2026-11-19T12:00:00Z'),
     }).blocks.filter(b => b.includes('KB limit'))
 
-  it('blocks an email over the limit', () => {
-    expect(oversize('Events · Week 47, 2026')).toHaveLength(1)
+  it('blocks an email over 100,000 bytes', () => {
+    expect(
+      sizeBlocks(
+        'Events · Week 47, 2026',
+        `<p>${'a'.repeat(100_000)}</p>${footer}`
+      )
+    ).toEqual([
+      'the email is 100 KB, over the 100 KB limit (Gmail cuts emails off at about 102 KB) – shorten the issue',
+    ])
   })
 
-  it('lets the one trial issue through (12 November 2026)', () => {
-    expect(oversize('Events · Week 46, 2026')).toEqual([])
+  it('no longer lets the week 46 trial issue through (16 November 2026)', () => {
+    expect(
+      sizeBlocks(
+        'Events · Week 46, 2026',
+        `<p>${'a'.repeat(110 * 1024)}</p>${footer}`
+      )
+    ).toHaveLength(1)
+  })
+
+  it('measures the email as sent, without its card data', () => {
+    // Inline card data that won't go out doesn't count…
+    const body = `<p>${'a'.repeat(95_000)}</p>${footer}`
+    const inline = `${body}<!--aisafety-cards:${'Q'.repeat(20_000)}-->`
+    const sent = `${body}<!--aisafety-cards-ref:0123456789abcdef-->`
+    expect(sizeBlocks('Events · Week 47, 2026', inline, sent)).toEqual([])
+    // …and without a separate sent copy, the email is measured as it is.
+    expect(sizeBlocks('Events · Week 47, 2026', inline)).toHaveLength(1)
   })
 })
 

@@ -26,6 +26,10 @@ import {
 vi.mock('@upstash/redis', async () => ({
   Redis: (await import('./__fixtures__/fake-ac')).FakeRedis,
 }))
+// Card data is stored off the email (newsletter-cards-store.ts).
+vi.mock('@vercel/blob', async () => ({
+  put: (await import('./__fixtures__/fake-ac')).fakeBlobPut,
+}))
 
 // The routes' sign-in checks, and next/server's after() (outside a real
 // request it would throw).
@@ -63,6 +67,7 @@ function waved(more: AcOptions = {}): AcOptions {
 }
 
 beforeEach(() => {
+  vi.stubEnv('BLOB_READ_WRITE_TOKEN', 'fake-blob-token')
   resetKv()
   vi.spyOn(console, 'info').mockImplementation(() => {})
   vi.spyOn(console, 'error').mockImplementation(() => {})

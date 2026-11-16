@@ -34,7 +34,34 @@ export const kv: KvState = (g.__fakeNewsletterKv ??= {
   down: false,
 })
 
+/** Files written through the pretend `put` of @vercel/blob (the card data
+ *  stored off the email, newsletter-cards-store.ts), by file name without
+ *  `.json`: the pretend Blob store reads answer from here too. In a test
+ *  file: vi.mock('@vercel/blob', async () => ({
+ *    put: (await import('./__fixtures__/fake-ac')).fakeBlobPut,
+ *  })) and vi.stubEnv('BLOB_READ_WRITE_TOKEN', 'fake-blob-token'). */
+const gb = globalThis as { __fakeBlobFiles?: Map<string, string> }
+export const blobFiles: Map<string, string> = (gb.__fakeBlobFiles ??= new Map())
+
+export async function fakeBlobPut(
+  pathname: string,
+  body: string,
+  opts?: { allowOverwrite?: boolean }
+): Promise<{ url: string }> {
+  const id = pathname
+    .split('/')
+    .pop()!
+    .replace(/\.json$/, '')
+  if (blobFiles.has(id) && opts?.allowOverwrite === false)
+    throw new Error('Vercel Blob: This blob already exists')
+  blobFiles.set(id, body)
+  return {
+    url: `https://vfnmdozpctvdobh7.public.blob.vercel-storage.com/${pathname}`,
+  }
+}
+
 export function resetKv() {
+  blobFiles.clear()
   kv.data.clear()
   kv.expiry.clear()
   kv.zsets.clear()
@@ -425,7 +452,7 @@ export function makeAC(opts: AcOptions = {}) {
         .split('/')
         .pop()!
         .replace(/\.json$/, '')
-      const b = blob[id]
+      const b = blob[id] ?? blobFiles.get(id)
       if (b === undefined) return new Response('not found', { status: 404 })
       if (typeof b === 'number') return new Response('x', { status: b })
       if (typeof b === 'string') return new Response(b)
