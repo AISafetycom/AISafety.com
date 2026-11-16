@@ -1,5 +1,6 @@
 import type { Catalog, Listing, ListingType } from './types'
 import { geocodeCity, haversineKm } from './geocode'
+import { activityRank, filterValueMatches, placeBand } from './search-rank'
 
 const STOPWORDS = new Set([
   'a',
@@ -75,11 +76,10 @@ function score(queryTokens: string[], pre: ScoreInputs): number {
 function matchesFilter(listing: Listing, key: string, want: unknown): boolean {
   const have = listing.meta[key]
   if (!have) return false
-  const haveLower = have.toLowerCase()
   const candidates = Array.isArray(want) ? want : [want]
   for (const c of candidates) {
     if (typeof c !== 'string' || !c) continue
-    if (haveLower.includes(c.toLowerCase())) return true
+    if (filterValueMatches(key, have, c)) return true
   }
   return false
 }
@@ -248,7 +248,16 @@ export async function searchCatalog(
 
   hits.sort((a, b) => {
     // If we have distances, prefer closer first; ties broken by score then site order.
+    // Listings in the same place (one city, say) lead with the more active
+    // groups before the exact distance decides: a semi-active London group
+    // used to head every London answer because its pin sat nearest the center.
     if (typeof a.distanceKm === 'number' && typeof b.distanceKm === 'number') {
+      const aBand = placeBand(a.distanceKm)
+      const bBand = placeBand(b.distanceKm)
+      if (aBand !== bBand) return aBand - bBand
+      const aAct = activityRank(a.listing.meta.activityLevel)
+      const bAct = activityRank(b.listing.meta.activityLevel)
+      if (aAct !== bAct) return aAct - bAct
       if (a.distanceKm !== b.distanceKm) return a.distanceKm - b.distanceKm
     }
     if (b.score !== a.score) return b.score - a.score
