@@ -601,7 +601,8 @@ export default async function MediaPage() {
           <Link href="/newsletter/updates" className={styles.inlineLink}>
             updates newsletter
           </Link>{' '}
-          goes out when we launch something new. Probably a few times a year.
+          goes out when we launch a major new feature – about a few times a
+          year.
         </p>
         {coverage.length > 0 && (
           <>

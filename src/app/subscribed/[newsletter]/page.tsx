@@ -42,7 +42,7 @@ const NEWSLETTERS = {
     name: 'AISafety.com Updates',
     page: null,
     what: null,
-    when: 'whenever something new launches on AISafety.com',
+    when: 'whenever a major new feature launches on AISafety.com',
   },
 } as const
 
