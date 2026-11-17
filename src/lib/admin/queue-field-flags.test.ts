@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  FLAG_VERDICTS,
   fieldFlagsOf,
   flagShown,
   flagState,
@@ -11,6 +12,15 @@ import {
   wordDiff,
   type FieldFlag,
 } from './queue-field-flags'
+
+describe('FLAG_VERDICTS', () => {
+  it('shows the field check on Publish and Unsure additions only', () => {
+    expect(FLAG_VERDICTS.has('Publish')).toBe(true)
+    expect(FLAG_VERDICTS.has('Unsure')).toBe(true)
+    expect(FLAG_VERDICTS.has("Don't publish")).toBe(false)
+    expect(FLAG_VERDICTS.has('Fix')).toBe(false)
+  })
+})
 
 const category: FieldFlag = {
   field: 'Category',

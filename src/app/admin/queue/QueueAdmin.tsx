@@ -103,7 +103,11 @@ import Chat, { CharCount, descriptionCap, type Decided } from './Chat'
 import RejectReason, { type RejectReasonControl } from './RejectReason'
 import FieldPicker from './FieldPicker'
 import FieldFlags from './FieldFlags'
-import { shownFlags, withFlags } from '@/lib/admin/queue-field-flags'
+import {
+  FLAG_VERDICTS,
+  shownFlags,
+  withFlags,
+} from '@/lib/admin/queue-field-flags'
 import type { FableChange } from '@/lib/admin/queue-fable'
 import Position, { forgetOrder } from './Position'
 import MapSpot, { forgetMap, notePlaced } from './MapSpot'
@@ -4161,7 +4165,7 @@ export default function QueueAdmin({
             !item ||
             !item.fieldFlags ||
             item.type !== 'Add' ||
-            item.verdict !== 'Publish' ||
+            !FLAG_VERDICTS.has(item.verdict ?? '') ||
             item.status === 'Revising' ||
             !(isOpen(item) || setAsideUntil(item))
           ) {
@@ -6014,11 +6018,11 @@ function Detail({
       !COMPUTED_TYPES.has(types.get(c.field)?.type ?? '')
   )
   const fableFields = new Map(fableChanges.map(c => [c.field, c]))
-  // The fields Fable would change, from its field check after a Publish
-  // verdict (queue-field-flags.ts): under the verdict while the item can
-  // still be edited, and marked on the fields themselves while open.
+  // The fields Fable would change, from its field check after a Publish or
+  // Unsure verdict (queue-field-flags.ts): under the verdict while the item
+  // can still be edited, and marked on the fields themselves while open.
   const flagCheck =
-    item.type === 'Add' && item.verdict === 'Publish' && draftable
+    item.type === 'Add' && FLAG_VERDICTS.has(item.verdict ?? '') && draftable
       ? (item.fieldFlags ?? null)
       : null
   const flagLive = live?.fields ?? item.fields ?? {}

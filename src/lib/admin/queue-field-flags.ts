@@ -6,7 +6,8 @@
   fields that it thinks should be changed").
 
   The Mac (~/Queue/fieldcheck.py) makes a second, separate look at every
-  open addition whose verdict is Publish and keeps its answer on the row's
+  open addition whose verdict is Publish or Unsure (Unsure since 17 Nov
+  2026, Bryce: "Publish and Unsure") and keeps its answer on the row's
   proposal as `field_flags` = {at, review, checked, flags: [{field, from,
   to, why}]}. The page lists the flags under the verdict, each with a Use
   button that puts the value into the page's edits – so, like any edit,
@@ -16,6 +17,10 @@
   page's edits over it). A flag whose field no longer reads that way has
   been overtaken – edited by hand, changed from the chat – and is dropped.
 */
+
+/** The verdicts whose additions get a field check, and so show its flags.
+ *  Same list as CHECKED_VERDICTS in ~/Queue/fieldcheck.py. */
+export const FLAG_VERDICTS: ReadonlySet<string> = new Set(['Publish', 'Unsure'])
 
 export type FlagValue = string | number | boolean | string[] | null
 
