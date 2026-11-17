@@ -33,6 +33,12 @@ import {
 import { URL_KEYS, listingLink } from '@/lib/admin/queue-link'
 import { LEFT_OUT_KEY, withLeftOut } from '@/lib/admin/queue-left-out'
 import {
+  heldRepeat,
+  shortcutAllowed,
+  takesTyping,
+  type ItemView,
+} from '@/lib/admin/queue-keys'
+import {
   flagRevisedNote,
   verdictWords,
   type FlagUpdate,
@@ -2659,6 +2665,31 @@ export default function QueueAdmin({
       (!selected &&
         !showDone &&
         !(ordered.flat.length === 0 && ordered.doneHits.length > 0)))
+  // What the pane on the right shows, worked out once for the page and for
+  // the keys: a shortcut that decides acts only on an item whose detail is
+  // there (17 Nov 2026: with Done today, a found listing or the "?" card
+  // showing, A, W, X and R still decided the item that was open before).
+  // A search that matches only decisions shows them as the list.
+  const pane: 'listing' | 'done' | 'detail' | 'none' = listingShown
+    ? 'listing'
+    : (showDone ||
+          (searching &&
+            ordered.flat.length === 0 &&
+            ordered.doneHits.length > 0)) &&
+        !(doneOpen && selected && !isOpen(selected))
+      ? 'done'
+      : selected
+        ? 'detail'
+        : 'none'
+  // How much of the item in focus that leaves on screen (queue-keys.ts).
+  const itemView: ItemView =
+    pane === 'detail'
+      ? 'detail'
+      : pane === 'done' &&
+          selected !== null &&
+          ordered.doneHits.some(i => i.id === selected.id)
+        ? 'row'
+        : 'hidden'
 
   // Midnight can empty the done list while it is open; back to the queue.
   useEffect(() => {
@@ -2837,6 +2868,14 @@ export default function QueueAdmin({
           ? settle(base, { ...base, ...patch })
           : { ...base, ...patch }
       const merged = next(was)
+      // The ref moves now, not at the next render, so a second change in the
+      // same breath builds on this one. A Fable reply that changed fields
+      // and rewrote the reply draft made two calls in a row; the second read
+      // the draft from before the first and its save, the one that goes,
+      // carried the old edits under the new fields' names, which took
+      // Fable's edits off the row (17 Nov 2026: they stayed on the page and
+      // a reload lost them).
+      draftsRef.current = { ...draftsRef.current, [id]: merged }
       const leftOutMoved = !sameList(merged.leftOut, was.leftOut)
       const changed =
         (patch.edits !== undefined && !sameEdits(patch.edits, was.edits)) ||
@@ -3838,11 +3877,8 @@ export default function QueueAdmin({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null
-      const typing =
-        t &&
-        (t.tagName === 'INPUT' ||
-          t.tagName === 'TEXTAREA' ||
-          t.isContentEditable)
+      // A dropdown field editor counts: a letter there picks an option.
+      const typing = takesTyping(t)
       if (
         (e.metaKey || e.ctrlKey) &&
         e.shiftKey &&
@@ -3852,6 +3888,8 @@ export default function QueueAdmin({
       ) {
         // Cmd+Shift+Z: the last edit Cmd+Z took away comes back.
         e.preventDefault()
+        // Once per press, like every key below that changes something.
+        if (e.repeat) return
         const r = redoRef.current
         while (r.length) {
           const row = items?.find(i => i.id === r[r.length - 1].id)
@@ -3885,6 +3923,7 @@ export default function QueueAdmin({
         // that came later (what U does). Inside a text box the browser's own
         // undo keeps working.
         e.preventDefault()
+        if (e.repeat) return
         const h = historyRef.current
         while (h.length) {
           const row = items?.find(i => i.id === h[h.length - 1].id)
@@ -3931,8 +3970,23 @@ export default function QueueAdmin({
         }
         return
       }
+      // A held key acts once: only Tab and the arrows repeat (17 Nov 2026:
+      // holding X asked "delete?", confirmed it on the first repeat, then
+      // deleted the items after it, and Delete has no Undo).
+      if (heldRepeat(e)) return
       const item = selected
       const d = item ? draft(item.id) : FRESH
+      // A key that acts on the item waits until that item is what the pane
+      // shows, and one that decides it until no field editor is open.
+      if (
+        !shortcutAllowed(e.key, {
+          help: showHelp,
+          view: itemView,
+          editing: Boolean(item && d.editing),
+        })
+      ) {
+        return
+      }
       switch (e.key) {
         case 'Tab':
           // Tab and Shift+Tab step through the list, in place of W and Q
@@ -4303,6 +4357,7 @@ export default function QueueAdmin({
     clearSearch,
     ordered.done,
     popUp,
+    itemView,
   ])
 
   // Enter or the down arrow in the search box goes to the first match, so
@@ -4818,18 +4873,13 @@ export default function QueueAdmin({
           </div>
 
           <div className={styles.detail} ref={detailRef}>
-            {listingShown && foundListing ? (
+            {pane === 'listing' && foundListing ? (
               <ListingFound
                 key={foundListing.record}
                 listing={foundListing}
                 earlier={ordered.earlierCount}
               />
-            ) : (showDone ||
-                (searching &&
-                  !ordered.flat.length &&
-                  ordered.doneHits.length)) &&
-              !(doneOpen && selected && !isOpen(selected)) ? (
-              // A search that matches only decisions shows them here.
+            ) : pane === 'done' ? (
               <DoneList
                 items={ordered.doneHits}
                 activeId={selectedId}
@@ -4840,7 +4890,7 @@ export default function QueueAdmin({
                 onReopen={canEdit ? item => void act(item, 'reopen') : null}
                 onOpen={showDecided}
               />
-            ) : selected ? (
+            ) : pane === 'detail' && selected ? (
               <Detail
                 onFable={fields => {
                   const id = selected.id
