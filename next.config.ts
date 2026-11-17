@@ -1,6 +1,15 @@
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
+  // How long one page may take to build, in seconds (Next's default is 60).
+  // When Airtable answers 429 it wants 30 seconds of quiet, and the build's
+  // fetch waits 30 to 60 seconds before asking again (BUILD_RETRY in
+  // src/lib/data/airtable.ts). At 60 seconds Next gave up on the page in the
+  // middle of that wait and started it over, which sent a fresh burst of
+  // requests and tripped the limit again: three rounds of that failed the
+  // production build on 17 Nov 2026. Five minutes covers the first three
+  // waits, so a rate-limited page sits the cool-off out and then finishes.
+  staticPageGenerationTimeout: 300,
   env: {
     // Timestamp when this build started. Used by /api/check-rebuild to decide
     // whether Airtable has been edited since the last deploy.
