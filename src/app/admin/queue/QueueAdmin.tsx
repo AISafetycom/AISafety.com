@@ -61,8 +61,12 @@ import {
   type RuleTestResult,
 } from '@/lib/admin/queue-rule-test'
 import {
+  mayTeach,
   rememberClosed,
+  RULE_STATUS_MS,
+  RULE_TEST_REFRESH_MS,
   ruleToPopUp,
+  settleRuleWatch,
   type RulePublic,
 } from '@/lib/admin/queue-rule-instant'
 import {
@@ -1632,6 +1636,58 @@ async function fetchChatRows(agent: AgentInfo): Promise<ChatRows | null> {
   }
 }
 
+/** Ask the Mac to look for a rule in a decision now, rather than on its
+ *  next five-minute run (Bryce, 17 Nov 2026: rule suggestions "at the time of
+ *  the decision which created it"). True when it is looking: the decision
+ *  teaches something. False when it doesn't, or the Mac can't be reached or
+ *  is an older agent with no /rule/draft (its own run still looks). */
+async function askForRule(agent: AgentInfo, id: string): Promise<boolean> {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), AGENT_TIMEOUT_MS)
+  try {
+    const res = await fetch(`http://127.0.0.1:${agent.port}/rule/draft`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, token: agent.token }),
+      cache: 'no-store',
+      signal: ctrl.signal,
+    })
+    if (!res.ok) return false
+    const data = (await res.json()) as { lesson?: boolean }
+    return data.lesson === true
+  } catch {
+    return false
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** Whether the Mac has written the rule for each of these decisions yet
+ *  (drafting, rule, nothing, error); null when it did not say. */
+async function fetchRuleStates(
+  agent: AgentInfo,
+  ids: string[]
+): Promise<Record<string, unknown> | null> {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), AGENT_TIMEOUT_MS)
+  try {
+    const res = await fetch(`http://127.0.0.1:${agent.port}/rule/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, token: agent.token }),
+      cache: 'no-store',
+      signal: ctrl.signal,
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as { rows?: Record<string, unknown> }
+    return data.rows ?? null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 const WORKER_NOTE = 'the Mac saves the reply draft within five minutes'
 const OFFLINE_SUB = `Mac agent not reachable · ${WORKER_NOTE}`
 
@@ -1681,6 +1737,12 @@ export default function QueueAdmin({
   // Rules that have popped up and been closed (decided, opened or
   // dismissed), kept in this browser so each one pops up once.
   const [popClosed, setPopClosed] = useState<string[]>([])
+  // Decisions the Mac is looking for a rule in right now, with when each
+  // was decided here: the page asks every few seconds and reads the list
+  // again the moment the rule is written (queue-rule-instant).
+  const [ruleWatch, setRuleWatch] = useState<Record<string, number>>({})
+  const ruleWatchRef = useRef(ruleWatch)
+  ruleWatchRef.current = ruleWatch
   const [takenOutSeen, setTakenOutSeen] = useState<string[]>([])
   // The rule whose pop-up had Reject pressed: its reasons are showing.
   const [popRejecting, setPopRejecting] = useState<string | null>(null)
@@ -2215,6 +2277,36 @@ export default function QueueAdmin({
       document.removeEventListener('visibilitychange', poll)
     }
   }, [chatOn, agent])
+
+  // A rule being drafted from one of his decisions: ask the Mac every few
+  // seconds, and read the list again the moment it is written, so the card
+  // comes up a minute or two after the decision rather than on the next
+  // minute refresh.
+  const ruleWatchIds = Object.keys(ruleWatch).sort().join(',')
+  useEffect(() => {
+    if (!agent || !ruleWatchIds) return
+    let alive = true
+    const ids = ruleWatchIds.split(',')
+    const tick = async () => {
+      const states = await fetchRuleStates(agent, ids)
+      if (!alive) return
+      const { watch, written } = settleRuleWatch(
+        ruleWatchRef.current,
+        states ?? {},
+        Date.now()
+      )
+      const same =
+        Object.keys(watch).sort().join(',') ===
+        Object.keys(ruleWatchRef.current).sort().join(',')
+      if (!same) setRuleWatch(watch)
+      if (written.length > 0) void load({ sync: true })
+    }
+    const t = setInterval(() => void tick(), RULE_STATUS_MS)
+    return () => {
+      alive = false
+      clearInterval(t)
+    }
+  }, [agent, ruleWatchIds, load])
 
   // The open item's replies are in front of Bryce: seen.
   const openId = selectedId && !showDone ? selectedId : null
@@ -3670,7 +3762,23 @@ export default function QueueAdmin({
           )
           if (draftPending) void saveReply(updated)
           if (rejectReplyPending) void saveRejectReply(updated)
+          // A rule from this decision, while the listing is on his mind:
+          // the Mac starts looking now, not on its next five-minute run.
+          if (agent && mayTeach(updated.type, action)) {
+            void askForRule(agent, updated.id).then(looking => {
+              if (looking)
+                setRuleWatch(prev => ({ ...prev, [updated.id]: Date.now() }))
+            })
+          }
         } else if (action === 'undo') {
+          // Undone: no rule to wait for (the Mac lets it go, or withdraws
+          // one it already wrote).
+          setRuleWatch(prev => {
+            if (!(item.id in prev)) return prev
+            const next = { ...prev }
+            delete next[item.id]
+            return next
+          })
           // A rejection's reply already in Gmail stays there, and so does a
           // picture Undo had no copy of (Bryce, 3 Nov 2026: AISUM26 kept
           // the new logo): say so. A decision made while the undo was on
@@ -3809,6 +3917,17 @@ export default function QueueAdmin({
     popCandidate && popCandidate.id !== selectedId ? popCandidate : null
   const popSeenId =
     popCandidate && popCandidate.id === selectedId ? popCandidate.id : null
+  // A rule pops up as it is written, its test still running on the Mac:
+  // the list is read again until the result is in, so it fills in on the
+  // card.
+  const popTesting = popUp && !popUp.ruleTest ? popUp.id : null
+  useEffect(() => {
+    if (!popTesting) return
+    const t = setInterval(() => {
+      if (document.visibilityState === 'visible') void load({ sync: true })
+    }, RULE_TEST_REFRESH_MS)
+    return () => clearInterval(t)
+  }, [popTesting, load])
   const closePop = useCallback((id: string) => {
     setPopRejecting(null)
     setPopClosed(prev => {
@@ -9227,7 +9346,7 @@ function RulePopUp({
           ? against
             ? `${ruleTestShort(test)}, against you on ${against}`
             : ruleTestShort(test)
-          : 'Not tested yet'}
+          : 'Being tested on your past decisions…'}
       </p>
       {item.rulePublic && (
         <PublicWording
