@@ -6,7 +6,8 @@
   fields that it thinks should be changed").
 
   The Mac (~/Queue/fieldcheck.py) makes a second, separate look at every
-  open addition whose verdict is Publish and keeps its answer on the row's
+  open addition whose verdict is Publish or Unsure (Unsure since 17 Nov
+  2026, Bryce: "Publish and Unsure") and keeps its answer on the row's
   proposal as `field_flags` = {at, review, checked, flags: [{field, from,
   to, why}]}. The page lists the flags under the verdict, each with a Use
   button that puts the value into the page's edits – so, like any edit,
@@ -15,7 +16,23 @@
   `from` is the value the flag was judged against (the record with the
   page's edits over it). A flag whose field no longer reads that way has
   been overtaken – edited by hand, changed from the chat – and is dropped.
+
+  A logo (17 Nov 2026 – Bryce, told the check never changed pictures: "Why
+  not?") comes as a picture flag: `picture: true`, `from` and `to` naming
+  files by name and size – the record's file, and the one Logo Prep made,
+  which the Mac keeps on the row's Prepared logo field (queue-prepared.ts).
+  A flag never holds an Airtable link: they expire within hours. The page
+  shows the two side by side, and Use copies the prepared file onto the
+  record the way a picture dropped into the logo slot is written (the
+  record is unpublished; Publish takes it live). A site without this code
+  skips such a flag: its `from` and `to` are not values.
 */
+
+import { preparedNamed, type PreparedFile } from './queue-prepared'
+
+/** The verdicts whose additions get a field check, and so show its flags.
+ *  Same list as CHECKED_VERDICTS in ~/Queue/fieldcheck.py. */
+export const FLAG_VERDICTS: ReadonlySet<string> = new Set(['Publish', 'Unsure'])
 
 export type FlagValue = string | number | boolean | string[] | null
 
@@ -27,12 +44,34 @@ export interface FieldFlag {
   why: string
 }
 
+/** A file named by a picture flag: its name, and its size in bytes when
+ *  the Mac knew it (two files Logo Prep names alike differ in size). */
+export interface PictureSide {
+  file: string
+  size: number | null
+}
+
+export interface PictureFlag {
+  field: string
+  /** The record's file when the check ran; null: the field was empty. */
+  from: PictureSide | null
+  /** The prepared file on the row's Prepared logo field. */
+  to: PictureSide & { width: number | null; height: number | null }
+  /** Where the file came from, in plain words ("the site header of x.org"). */
+  source: string | null
+  /** What Logo Prep did to it ("background made transparent"). */
+  prep: string | null
+  why: string
+}
+
 export interface FieldFlags {
   /** When the check ran (ISO), if the Mac said. */
   at: string | null
   /** How many fields it went through. */
   checked: number
   flags: FieldFlag[]
+  /** A proposed logo, one flag per logo field (/map has two). */
+  pictures: PictureFlag[]
 }
 
 /** The proposal key the Mac writes. */
@@ -57,6 +96,53 @@ function asValue(v: unknown): FlagValue | undefined {
   return undefined
 }
 
+const PICTURE_FIELD_RE = /logo|image/i
+const MAX_PICTURES = 2
+
+function sideOf(v: unknown): PictureSide | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null
+  const r = v as Record<string, unknown>
+  const file = typeof r.file === 'string' ? r.file.trim() : ''
+  if (!file || file.length > 200) return null
+  const size =
+    typeof r.size === 'number' && Number.isFinite(r.size) && r.size > 0
+      ? r.size
+      : null
+  return { file, size }
+}
+
+function dimension(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null
+}
+
+function shortText(v: unknown, max: number): string | null {
+  return typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null
+}
+
+/** Pure: one picture flag, or null when it is not well formed. `from`
+ *  null means the field was empty; a `from` that is there but unreadable
+ *  makes the flag unusable (its state could not be told). */
+function pictureFlagOf(f: Record<string, unknown>): PictureFlag | null {
+  const field = typeof f.field === 'string' ? f.field.trim() : ''
+  const why = typeof f.why === 'string' ? f.why.trim() : ''
+  if (!field || field.length > 100 || !PICTURE_FIELD_RE.test(field)) {
+    return null
+  }
+  const to = sideOf(f.to)
+  const from = f.from === null || f.from === undefined ? null : sideOf(f.from)
+  if (!why || !to || (from === null && f.from !== null && f.from !== undefined))
+    return null
+  const t = f.to as Record<string, unknown>
+  return {
+    field,
+    from,
+    to: { ...to, width: dimension(t.width), height: dimension(t.height) },
+    source: shortText(f.source, 200),
+    prep: shortText(f.prep, 200),
+    why: why.slice(0, 400),
+  }
+}
+
 /** Pure: the proposal's `field_flags` block, or null when the check has
  *  not run (or the block is malformed). A flag that is not well formed is
  *  left out; the rest stand. */
@@ -65,10 +151,19 @@ export function fieldFlagsOf(v: unknown): FieldFlags | null {
   const r = v as Record<string, unknown>
   if (!Array.isArray(r.flags)) return null
   const flags: FieldFlag[] = []
+  const pictures: PictureFlag[] = []
   const seen = new Set<string>()
   for (const x of r.flags) {
     if (!x || typeof x !== 'object' || Array.isArray(x)) continue
     const f = x as Record<string, unknown>
+    if (f.picture === true) {
+      const p = pictureFlagOf(f)
+      if (p && !seen.has(p.field) && pictures.length < MAX_PICTURES) {
+        seen.add(p.field)
+        pictures.push(p)
+      }
+      continue
+    }
     const field = typeof f.field === 'string' ? f.field.trim() : ''
     const why = typeof f.why === 'string' ? f.why.trim() : ''
     const from = asValue(f.from)
@@ -87,7 +182,58 @@ export function fieldFlagsOf(v: unknown): FieldFlags | null {
         ? Math.floor(r.checked)
         : 0,
     flags,
+    pictures,
   }
+}
+
+/** The file a logo field holds now, as the page knows it: undefined until
+ *  the record has been read, null when the field is empty. */
+export type PictureNow = { filename: string | null; size: number | null }
+
+function holds(now: PictureNow, side: PictureSide): boolean {
+  return (
+    now.filename === side.file &&
+    (side.size === null || now.size === null || now.size === side.size)
+  )
+}
+
+/** Pure: where a picture flag stands. used: the record holds the prepared
+ *  file. open: it still holds the file the flag was judged against (or is
+ *  still empty) – and before the record has been read it counts as open:
+ *  Use checks the record again before writing. gone: the logo has been
+ *  changed some other way (dropped in by hand, fixed from the chat). */
+export function pictureState(
+  flag: PictureFlag,
+  now: PictureNow | null | undefined
+): FlagState {
+  if (now === undefined) return 'open'
+  if (now && holds(now, flag.to)) return 'used'
+  if (flag.from === null) return now === null ? 'open' : 'gone'
+  return now && holds(now, flag.from) ? 'open' : 'gone'
+}
+
+/** Pure: the picture flags to show – not overtaken, on a field the page
+ *  can edit, and with their prepared file still on the row – each with
+ *  where it stands and that file. */
+export function shownPictures(
+  flags: PictureFlag[],
+  nowOf: (field: string) => PictureNow | null | undefined,
+  files: PreparedFile[],
+  canEdit: (field: string) => boolean = () => true
+): { flag: PictureFlag; state: 'open' | 'used'; file: PreparedFile }[] {
+  const out: {
+    flag: PictureFlag
+    state: 'open' | 'used'
+    file: PreparedFile
+  }[] = []
+  for (const flag of flags) {
+    if (!canEdit(flag.field)) continue
+    const file = preparedNamed(flag.to.file, flag.to.size, files)
+    if (!file) continue
+    const state = pictureState(flag, nowOf(flag.field))
+    if (state !== 'gone') out.push({ flag, state, file })
+  }
+  return out
 }
 
 /** Pure: a flag's value as the page's editors hold values – text, a list

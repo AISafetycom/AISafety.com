@@ -1,16 +1,30 @@
 import { describe, expect, it } from 'vitest'
 import {
+  FLAG_VERDICTS,
   fieldFlagsOf,
   flagShown,
   flagState,
   flagText,
+  pictureState,
   sameValue,
   shownFlags,
+  shownPictures,
   withFlags,
   withoutFlag,
   wordDiff,
   type FieldFlag,
+  type PictureFlag,
 } from './queue-field-flags'
+import type { PreparedFile } from './queue-prepared'
+
+describe('FLAG_VERDICTS', () => {
+  it('shows the field check on Publish and Unsure additions only', () => {
+    expect(FLAG_VERDICTS.has('Publish')).toBe(true)
+    expect(FLAG_VERDICTS.has('Unsure')).toBe(true)
+    expect(FLAG_VERDICTS.has("Don't publish")).toBe(false)
+    expect(FLAG_VERDICTS.has('Fix')).toBe(false)
+  })
+})
 
 const category: FieldFlag = {
   field: 'Category',
@@ -28,7 +42,12 @@ describe('fieldFlagsOf', () => {
         checked: 6,
         flags: [category],
       })
-    ).toEqual({ at: '2026-11-16T12:00:00Z', checked: 6, flags: [category] })
+    ).toEqual({
+      at: '2026-11-16T12:00:00Z',
+      checked: 6,
+      flags: [category],
+      pictures: [],
+    })
   })
 
   it('is null until the check has run', () => {
@@ -43,6 +62,7 @@ describe('fieldFlagsOf', () => {
       at: null,
       checked: 9,
       flags: [],
+      pictures: [],
     })
   })
 
@@ -256,5 +276,108 @@ describe('wordDiff', () => {
         'A weekly newsletter of newly announced training programs, online and in person, for people new to the field.'
       )
     ).toBeNull()
+  })
+})
+
+// 17 Nov 2026 – Bryce, told the field check never changed pictures: "Why
+// not?". A proposed logo names files by name and size; the prepared one sits
+// on the row's Prepared logo field.
+const logoFlag = {
+  field: 'Logo (for cards)',
+  picture: true,
+  from: { file: 'poseidon-research.svg', size: 1113 },
+  to: { file: 'poseidon-research.webp', size: 8194, width: 250, height: 90 },
+  source: 'the site header of poseidonresearch.org',
+  prep: 'used unchanged',
+  why: "The favicon's PR monogram; the header draws the wordmark.",
+}
+
+const prepared: PreparedFile[] = [
+  {
+    url: 'https://v5.airtableusercontent.com/p/1',
+    filename: 'poseidon-research.webp',
+    size: 8194,
+    width: 250,
+    height: 90,
+    type: 'image/webp',
+  },
+]
+
+describe('picture flags', () => {
+  it('reads a proposed logo apart from the field flags', () => {
+    const got = fieldFlagsOf({ checked: 6, flags: [logoFlag, category] })
+    expect(got?.flags).toEqual([category])
+    expect(got?.pictures).toEqual([
+      {
+        field: 'Logo (for cards)',
+        from: { file: 'poseidon-research.svg', size: 1113 },
+        to: {
+          file: 'poseidon-research.webp',
+          size: 8194,
+          width: 250,
+          height: 90,
+        },
+        source: 'the site header of poseidonresearch.org',
+        prep: 'used unchanged',
+        why: "The favicon's PR monogram; the header draws the wordmark.",
+      },
+    ])
+  })
+
+  it('takes an empty field as from null, and leaves out what is not well formed', () => {
+    const got = fieldFlagsOf({
+      flags: [
+        { ...logoFlag, from: null },
+        { ...logoFlag, field: 'Logo (for map)', from: 'a link' },
+        { ...logoFlag, field: 'Description' },
+        { ...logoFlag, field: 'Image', to: { url: 'https://x/y.png' } },
+        { ...logoFlag, field: 'Logo', why: '' },
+        { ...logoFlag, field: 'Logo (for cards)' },
+      ],
+    })
+    expect(got?.pictures.map(p => [p.field, p.from])).toEqual([
+      ['Logo (for cards)', null],
+    ])
+  })
+
+  it('a site without picture flags read them as nothing', () => {
+    // what the page did before 17 Nov 2026: from and to are not values
+    const got = fieldFlagsOf({ flags: [{ ...logoFlag, picture: undefined }] })
+    expect(got?.flags).toEqual([])
+  })
+
+  const flag = fieldFlagsOf({ flags: [logoFlag] })?.pictures[0] as PictureFlag
+
+  it('stands open, used or gone by the file the record holds', () => {
+    expect(pictureState(flag, undefined)).toBe('open') // record not read yet
+    expect(
+      pictureState(flag, { filename: 'poseidon-research.svg', size: 1113 })
+    ).toBe('open')
+    expect(
+      pictureState(flag, { filename: 'poseidon-research.webp', size: 8194 })
+    ).toBe('used')
+    // the same name at another size is another file: dropped in by hand
+    expect(
+      pictureState(flag, { filename: 'poseidon-research.svg', size: 999 })
+    ).toBe('gone')
+    expect(pictureState(flag, null)).toBe('gone')
+    const empty = { ...flag, from: null }
+    expect(pictureState(empty, null)).toBe('open')
+    expect(pictureState(empty, { filename: 'other.png', size: 1 })).toBe('gone')
+  })
+
+  it('shows a flag only while its prepared file is on the row', () => {
+    const now = () => ({ filename: 'poseidon-research.svg', size: 1113 })
+    expect(shownPictures([flag], now, prepared)).toEqual([
+      { flag, state: 'open', file: prepared[0] },
+    ])
+    expect(shownPictures([flag], now, [])).toEqual([])
+    expect(shownPictures([flag], now, [{ ...prepared[0], size: 1 }])).toEqual(
+      []
+    )
+    expect(shownPictures([flag], now, prepared, () => false)).toEqual([])
+    expect(
+      shownPictures([flag], () => ({ filename: 'x.png', size: 3 }), prepared)
+    ).toEqual([])
   })
 })
