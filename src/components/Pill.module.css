@@ -1,0 +1,106 @@
+/* <Pill> — shape and color only. Text type comes from the global
+   .paragraph-* classes in Pill.tsx, and the focus ring from the global
+   *:focus-visible rule. */
+
+.pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 16px 0 4px;
+  border: 1px solid color-mix(in srgb, var(--teal-300) 30%, transparent);
+  border-radius: 20px;
+  flex: none;
+  max-width: 100%;
+  /* Resets for <button> use — iOS Safari otherwise paints button text in
+     its system blue. */
+  background-color: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--hover-transition),
+    border-color var(--hover-transition),
+    box-shadow var(--hover-transition);
+}
+
+.noIcon {
+  padding: 0 16px;
+}
+
+.fullWidth {
+  width: 100%;
+}
+
+.icon {
+  display: flex;
+  flex: none;
+  justify-content: center;
+  align-items: center;
+  width: 32px;
+  height: 32px;
+  background-color: var(--white);
+  border-radius: 16px;
+  box-shadow: var(--shadow-dark);
+}
+
+/* A label too long for its pill ends in "…" rather than spilling out. */
+.label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.count {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Current page ("you are here"): the resting border at full strength, with
+   a fill. Same border width, so no layout shift. */
+.pill[aria-current='page'] {
+  border-color: var(--teal-300);
+  background-color: var(--teal-grey-850);
+}
+
+/* Hover: a teal-850 fill and a shadow. Touch devices skip it so a tap
+   mid-scroll doesn't leave a pill stuck highlighted. */
+@media (hover: hover) {
+  .pill:hover:not(:disabled) {
+    background-color: var(--teal-850);
+    /* border-color: color-mix(in srgb, var(--white) 40%, transparent); */
+    box-shadow: var(--shadow-dark);
+  }
+}
+
+.pill:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* teal-alt: for pills on a lighter surface (the +N dropdown, the mobile
+   menu, the search box). The same colors as the teal-alt <Button>, with a
+   lighter shadow than the nav row's that stays the same on hover. */
+.tealAlt {
+  background-color: var(--teal-800);
+  border-color: var(--teal-750);
+  box-shadow: var(--shadow);
+}
+.tealAlt[aria-current='page'] {
+  background-color: var(--teal-800);
+  border-color: var(--teal-300);
+}
+@media (hover: hover) {
+  .tealAlt:hover:not(:disabled) {
+    background-color: var(--teal-800);
+    border-color: var(--teal-700);
+    box-shadow: var(--shadow);
+  }
+}
+.tealAlt:disabled {
+  opacity: 1;
+  background-color: var(--teal-grey-750);
+  border-color: var(--teal-grey-850);
+  color: var(--teal-grey-400);
+}

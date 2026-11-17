@@ -2,7 +2,7 @@
 
 import Image from 'next/image'
 import Button from './Button'
-import Icon from './Icon'
+import Pill from './Pill'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
@@ -348,38 +348,24 @@ export default function Navigation({
 
           <nav ref={navRef} className={styles['nav-menu']}>
             {visibleItems.map((item, i) => (
-              <Link
+              <Pill
+                as={Link}
                 key={item.href}
                 href={item.href}
-                className={styles['nav-item']}
+                icon={`/images/icons/${item.icon}`}
+                count={counts[item.href]}
                 aria-current={pathname === item.href ? 'page' : undefined}
-                ref={el => {
+                ref={(el: HTMLAnchorElement | null) => {
                   itemRefs.current[i] = el
                 }}
               >
-                <div className={styles['nav-item-icon']}>
-                  <Icon
-                    className="color-teal-900"
-                    src={`/images/icons/${item.icon}`}
-                  />
-                </div>
-                <p className="paragraph-small-bold">{item.label}</p>
-                {counts[item.href] && (
-                  <p className="paragraph-xs color-teal-grey-300">
-                    {counts[item.href]}
-                  </p>
-                )}
-              </Link>
+                {item.label}
+              </Pill>
             ))}
 
             <div
               ref={dropdownRef}
-              className={styles['nav-item-last']}
-              data-active-inside={
-                overflowItems.some(item => item.href === pathname)
-                  ? ''
-                  : undefined
-              }
+              className={styles['nav-more']}
               data-open={isDropdownOpen ? '' : undefined}
               onPointerEnter={openDropdownOnHover}
               onPointerLeave={closeDropdownOnLeave}
@@ -394,7 +380,17 @@ export default function Navigation({
                 setIsDropdownOpen(open => (touch ? !open : true))
               }}
             >
-              <p className="paragraph-small-bold">+{overflowItems.length}</p>
+              <Pill
+                as="span"
+                className={styles['nav-more-pill']}
+                data-active-inside={
+                  overflowItems.some(item => item.href === pathname)
+                    ? ''
+                    : undefined
+                }
+              >
+                +{overflowItems.length}
+              </Pill>
               {(isDropdownOpen || isDropdownClosing) && (
                 <div
                   className={`${styles['nav-dropdown']} border-plus-fill${
@@ -402,27 +398,20 @@ export default function Navigation({
                   }`}
                 >
                   {overflowItems.map(item => (
-                    <Link
+                    <Pill
+                      as={Link}
                       key={item.href}
                       href={item.href}
-                      className={styles['nav-dropdown-item']}
+                      icon={`/images/icons/${item.icon}`}
+                      count={counts[item.href]}
+                      fullWidth
+                      variant="teal-alt"
                       aria-current={pathname === item.href ? 'page' : undefined}
                       style={{ marginBottom: '8px' }}
                       onClick={() => setIsDropdownOpen(false)}
                     >
-                      <div className={styles['nav-item-icon']}>
-                        <Icon
-                          className="color-teal-900"
-                          src={`/images/icons/${item.icon}`}
-                        />
-                      </div>
-                      <p className="paragraph-small-bold">{item.label}</p>
-                      {counts[item.href] && (
-                        <p className="paragraph-xs color-teal-grey-300">
-                          {counts[item.href]}
-                        </p>
-                      )}
-                    </Link>
+                      {item.label}
+                    </Pill>
                   ))}
                 </div>
               )}
@@ -483,35 +472,30 @@ export default function Navigation({
         </div>
         <nav className={styles['mobile-menu-items']}>
           {navItems.map(item => (
-            <Link
+            <Pill
+              as={Link}
               key={item.href}
               href={item.href}
-              className={styles['nav-item']}
+              icon={`/images/icons/${item.icon}`}
+              count={counts[item.href]}
+              textSize="large"
+              fullWidth
+              variant="teal-alt"
               aria-current={pathname === item.href ? 'page' : undefined}
             >
-              <div className={styles['nav-item-icon']}>
-                <Icon
-                  className="color-teal-900"
-                  src={`/images/icons/${item.icon}`}
-                />
-              </div>
-              <p className="paragraph-default-bold">{item.label}</p>
-              {counts[item.href] && (
-                <p className="paragraph-small color-teal-grey-300">
-                  {counts[item.href]}
-                </p>
-              )}
-            </Link>
+              {item.label}
+            </Pill>
           ))}
-          <SearchButton
-            className={styles['nav-item']}
+          <Pill
+            as={SearchButton}
+            icon="/images/icons/search.svg"
+            textSize="large"
+            fullWidth
+            variant="teal-alt"
             onClick={() => setIsMenuOpen(false)}
           >
-            <div className={styles['nav-item-icon']}>
-              <Icon className="color-teal-900" src="/images/icons/search.svg" />
-            </div>
-            <p className="paragraph-default-bold">Search</p>
-          </SearchButton>
+            Search
+          </Pill>
         </nav>
       </div>
     </SearchProvider>
