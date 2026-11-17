@@ -6,6 +6,15 @@
 // decisions, and stamps the Rule row's proposal `instant.ready`. The page
 // then shows that rule once as a small card over whatever he is on.
 //
+// Since 17 Nov 2026 that is the only way a rule is suggested (Bryce, on 17
+// waiting rules: "We really need all rule suggestions to be happening at the
+// time of the decision which created it"). The page tells the Mac the moment
+// a decision lands (agent /rule/draft) instead of waiting for its five-minute
+// run, asks every few seconds whether the rule is written (/rule/status), and
+// the Mac marks it ready as it is written: the card comes up while its test
+// is still running, and the test fills in. A rule he doesn't answer there
+// still waits on the Rules tab.
+//
 // A rule that changes what the site lists carries the sentence for the
 // public listing policy in the same proposal (`public`), so one Apply covers
 // both. The page records what he chose for that sentence under PUBLIC_KEY in
@@ -131,4 +140,55 @@ export function rememberClosed(
   keep = 100
 ): string[] {
   return [...closed.filter(x => x !== id), id].slice(-keep)
+}
+
+/** What the Mac says of a decision it was asked to look for a rule in. */
+export type RuleDraftState = 'drafting' | 'rule' | 'nothing' | 'error'
+
+/** How long the page keeps asking about one decision. A draft takes one to
+ *  four minutes; past this the Mac's own run has it, and the card still
+ *  comes up on the page's next minute refresh. */
+export const RULE_WATCH_MS = 15 * 60 * 1000
+
+/** How often the page asks the Mac while a rule is being drafted. */
+export const RULE_STATUS_MS = 4000
+
+/** While a popped-up rule's test runs, how often the page reads the list
+ *  again so the result fills in on the card. */
+export const RULE_TEST_REFRESH_MS = 15000
+
+/** The Mac's word on a decision, read loosely: anything unknown is still
+ *  being drafted. */
+export function ruleDraftStateOf(v: unknown): RuleDraftState {
+  return v === 'rule' || v === 'nothing' || v === 'error' ? v : 'drafting'
+}
+
+/** The decisions to keep asking about, given what the Mac said of each
+ *  (missing = not asked this time) and when each was decided on the page,
+ *  plus the ones whose rule is now written (the page reads the list again
+ *  for them). A decision whose look ended with no rule, or that has been
+ *  watched for RULE_WATCH_MS, is let go. */
+export function settleRuleWatch(
+  watch: Readonly<Record<string, number>>,
+  states: Readonly<Record<string, unknown>>,
+  now: number
+): { watch: Record<string, number>; written: string[] } {
+  const next: Record<string, number> = {}
+  const written: string[] = []
+  for (const [id, since] of Object.entries(watch)) {
+    const state = id in states ? ruleDraftStateOf(states[id]) : 'drafting'
+    if (state === 'rule') written.push(id)
+    else if (state === 'drafting' && now - since <= RULE_WATCH_MS)
+      next[id] = since
+  }
+  return { watch: next, written }
+}
+
+/** True for a decision the Mac may learn a rule from: Publish or Reject on
+ *  an addition or a change. The Mac decides whether it teaches anything. */
+export function mayTeach(type: string, action: string): boolean {
+  return (
+    (type === 'Add' || type === 'Change') &&
+    (action === 'accept' || action === 'reject')
+  )
 }
