@@ -9111,9 +9111,10 @@ function RuleCard({
 const RULE_OUTCOMES = ['breaks', 'unclear', 'fixes', 'keeps'] as const
 
 /** A rule drafted minutes after one decision, as it pops up over the page:
- *  the listing it came from, the rule in a line, its test, any wording for
- *  the public listing policy (always in view, as Apply publishes it), and
- *  the decision. Anything more is a click away on the Rules tab. */
+ *  the listing it came from, the rule itself (its title), the first
+ *  sentence of its summary, its test, any wording for the public listing
+ *  policy (always in view, as Apply publishes it), and the decision.
+ *  Anything more is a click away on the Rules tab. */
 function RulePopUp({
   item,
   draft,
@@ -9165,7 +9166,12 @@ function RulePopUp({
           <Icon src={ICON.x} size={12} />
         </button>
       </div>
-      <p className={styles.rulePopLead}>{lead}</p>
+      {/* The rule itself comes first (Bryce, 17 Nov 2026: "This should show
+          the actual rule being proposed as well"). The summary's first
+          sentence is often the story of his decision, which on its own
+          never said what would change. */}
+      <p className={styles.rulePopLead}>{item.title}</p>
+      {item.summary && <p className={styles.rulePopWhy}>{lead}</p>}
       <p className={styles.note}>
         {test
           ? against

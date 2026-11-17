@@ -2363,6 +2363,13 @@ select.input {
   overflow-wrap: anywhere;
 }
 
+/* The summary's first sentence, under the rule: lighter, so the rule is
+   what he reads first. */
+.rulePopWhy {
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 @keyframes rulePopIn {
   from {
     transform: translateY(calc(100% + 24px));
