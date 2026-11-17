@@ -2304,14 +2304,12 @@ export interface NewsletterArchiveRow {
  *  about 17:16 UTC on 21 October 2026. Before then each address was the
  *  site's 404 page, so earlier views don't count. Updates' page exists from
  *  the deploy that moved it (it shows before its first issue), so its time
- *  is that deploy's: SET IT TO THE REAL DEPLOY TIME when the move goes live.
- *  Until then it is the start of the day the move was built, when nothing
- *  linked the address yet. */
+ *  is that deploy's (17 November 2026, within a few minutes). */
 export const PAST_ISSUES_LIVE_SINCE: Readonly<Record<string, number>> = {
   events: Date.parse('2026-10-11T12:30:00Z'),
   training: Date.parse('2026-10-11T12:30:00Z'),
   funding: Date.parse('2026-10-21T17:16:00Z'),
-  updates: Date.parse('2026-11-17T00:00:00Z'),
+  updates: Date.parse('2026-11-17T09:01:00Z'),
 }
 
 export function newsletterArchiveStats(

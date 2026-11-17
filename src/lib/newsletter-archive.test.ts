@@ -94,7 +94,7 @@ describe('what sets Updates apart', () => {
       'https://aisafetycom.substack.com/archive'
     )
     expect(NEWSLETTER_ABOUT.updates).toBe(
-      'goes out when AISafety.com launches something new, a few times a year.'
+      'goes out when AISafety.com launches something new. Probably a few times a year.'
     )
   })
 })
@@ -256,7 +256,7 @@ describe('feedXml for Updates', () => {
     ])
     expect(xml).toContain('<title>AISafety.com Updates</title>')
     expect(xml).toContain(
-      '<description>AISafety.com Updates goes out when AISafety.com launches something new, a few times a year. From AISafety.com.</description>'
+      '<description>AISafety.com Updates goes out when AISafety.com launches something new. Probably a few times a year. From AISafety.com.</description>'
     )
     expect(xml).toContain(
       '<title>New chatbot &amp; a redesigned Funding page</title>'

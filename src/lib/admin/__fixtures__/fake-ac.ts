@@ -248,7 +248,7 @@ export function buildUpdatesEmail(
     '<div style="display:none;max-height:0;">This newsletter goes out when something new launches.&nbsp;&zwnj;</div>' +
     '<table><tr><td class="mast"><h1 class="h1">Updates</h1></td></tr>' +
     '<tr><td class="inner" style="padding:0 32px 40px;">\n' +
-    `  <p style="margin:16px 0 0;">This newsletter goes out when something new launches on <a style="color:#a6dad9;" href="${link}">AISafety.com</a>, a few times a year.</p>\n\n` +
+    `  <p style="margin:16px 0 0;">This newsletter goes out when something new launches on <a style="color:#a6dad9;" href="${link}">AISafety.com</a>. Probably a few times a year.</p>\n\n` +
     '  <div style="margin:40px 0 16px;font-size:22px;">New features</div>\n' +
     '<table width="100%" role="presentation" style="margin-bottom:16px;">\n' +
     `  <tr><td bgcolor="#04292a" class="card" style="padding:40px;"><div style="margin:0 0 12px;"><a href="${link}" style="color:#ffffff;">A chatbot</a></div><div style="font-size:15px;">Ask it anything about the field, with <a href="https://example.org/more">a link inside</a>.</div></td></tr>\n` +

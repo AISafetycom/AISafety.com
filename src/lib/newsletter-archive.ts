@@ -53,7 +53,7 @@ export const NEWSLETTER_ABOUT: Record<WebKey, string> = {
   funding:
     'is a newsletter that lists new and closing-soon funding opportunities for addressing existential risk from AI.',
   updates:
-    'goes out when AISafety.com launches something new, a few times a year.',
+    'goes out when AISafety.com launches something new. Probably a few times a year.',
 }
 
 /** The link under each newsletter page's lead to the resource page it

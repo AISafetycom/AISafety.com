@@ -231,7 +231,7 @@ describe('textVersion of a cardless issue (Updates)', () => {
     ])
     const [intro, heading, first, second, closing] = tv!.body!
     expect(intro.kind === 'paragraph' && inlinePlain(intro.runs)).toBe(
-      'This newsletter goes out when we launch something new on AISafety.com, a few times a year.'
+      'This newsletter goes out when we launch something new on AISafety.com. Probably a few times a year.'
     )
     expect(heading).toEqual({ kind: 'heading', text: 'New features' })
     // The box's title keeps the email's own link; so does its description.
