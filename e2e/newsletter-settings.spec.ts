@@ -68,7 +68,7 @@ test('the Updates newsletter page and feed exist before its first issue', async 
     page.getByRole('heading', { level: 1, name: 'Updates newsletter' })
   ).toBeVisible()
   await expect(
-    page.getByText('goes out when AISafety.com launches something new')
+    page.getByText('goes out when AISafety.com launches a major new feature')
   ).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Past issues' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Substack' })).toHaveAttribute(
