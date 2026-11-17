@@ -37,16 +37,24 @@
 }
 
 /* Only the title is a link, so a screen reader announces a short name. This
-   stretches its click area over the whole card (.card is position: relative). */
+   box stretches it over the card (.card is position: relative) but lets the
+   pointer through, so the card's text can be selected; CardClicks opens the
+   link from a click anywhere on the card. While Cmd or Ctrl is held, and for
+   a right-click, the box catches the pointer so the browser finds a real
+   link over the whole card. */
 .titleLink::after {
   content: '';
   position: absolute;
   inset: 0;
+  pointer-events: none;
+}
+
+:global(html[data-card-links]) .titleLink::after {
+  pointer-events: auto;
 }
 
 /* The keyboard focus ring goes around the card. It is drawn on .card itself
-   because .card's overflow: hidden would clip one drawn on the stretched
-   click area. */
+   because .card's overflow: hidden would clip one drawn on the box. */
 .titleLink:focus-visible {
   outline: none;
 }

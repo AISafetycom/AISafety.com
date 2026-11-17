@@ -89,6 +89,8 @@ export default function FeaturedCard({
     <li
       className={`${styles.card} ${href ? '' : styles.cardStatic} ${className ?? ''}`}
       style={gradientStyle}
+      // A click anywhere on the card opens the title link (CardClicks).
+      data-card={href ? '' : undefined}
     >
       {accentClass ? (
         <span

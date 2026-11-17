@@ -893,6 +893,9 @@ label {
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+  /* Text a visitor selects and copies holds only what they can see, never
+     a screen-reader note like "(opens in new tab)". */
+  user-select: none;
 }
 
 /* Display */
@@ -1142,6 +1145,12 @@ select.text-field {
 
 .card-static:hover {
   transform: scale(1);
+}
+
+/* A card that opens its title link from a click anywhere on it (CardClicks).
+   The pointer also lets iPhones send that click from a tap on plain text. */
+[data-card] {
+  cursor: pointer;
 }
 
 .featured-img {

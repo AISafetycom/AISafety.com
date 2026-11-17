@@ -109,6 +109,8 @@ export default function ListingCard({
     <li
       id={listingId}
       className={`card ${href ? '' : 'card-static'} ${styles.card}`}
+      // A click anywhere on the card opens the title link (CardClicks).
+      data-card={href ? '' : undefined}
     >
       <div
         className={`flex gap-16px padding-bottom-24px ${

@@ -1,0 +1,13 @@
+/* <SelectionMenu> — the menu by text a visitor selects. The surface and
+   border are <Tooltip>'s; the pill shape wraps two small clear <Button>s.
+   Its place on the page (left, top) is set in SelectionMenu.tsx. */
+.menu {
+  position: absolute;
+  z-index: 30; /* above the sticky filter bar (20), under the nav */
+  display: flex;
+  align-items: center;
+  padding: 3px; /* + the 1px border = 4px around the buttons */
+  border: 1px solid var(--teal-800);
+  border-radius: 24px;
+  background-color: var(--teal-850);
+}

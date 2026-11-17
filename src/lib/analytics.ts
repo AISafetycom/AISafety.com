@@ -352,6 +352,29 @@ export function trackAirtableView(page: string, url: string): void {
  *  jump down the page. */
 export type PressAction = 'copy' | 'download' | 'contact' | 'jump'
 
+export type SelectionMenuAction = 'open' | 'copy' | 'correction' | 'feedback'
+
+/**
+ * Track the menu that appears over selected text (SelectionMenu): it
+ * appearing ('open') and each of its buttons. `listing` is the card the text
+ * is on, when it is on one. The selected text itself is never recorded.
+ */
+export function trackSelectionMenu(
+  action: SelectionMenuAction,
+  listing?: { name: string; id?: string }
+): void {
+  if (typeof window === 'undefined') return
+  if (isTrackingOptedOut()) return
+  window._paq?.push(['trackEvent', 'Selection menu', action, listing?.name])
+  sendTrackEvent({
+    type: 'selection_menu',
+    page: trackedPath(window.location.pathname),
+    source: action,
+    label: listing?.name,
+    listingId: listing?.id,
+  })
+}
+
 /**
  * Track an action on the press and media page (/media). `label` names the
  * thing ('Copied short boilerplate', 'Downloaded press kit'), `url` is the
