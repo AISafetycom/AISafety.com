@@ -13,7 +13,9 @@ import { useDictation } from './useDictation'
 // the mic in the box, or Cmd+D while the panel is open, starts it; Cmd+D
 // again puts the words in the box, Enter puts them in and rejects, Esc
 // throws the recording away. The Mac turns the recording into words
-// (~/Queue/dictate.py), so nothing goes to another service.
+// (~/Queue/dictate.py), so nothing goes to another service. Since 17 Nov
+// 2026 the words show in the box as he speaks, and holding ⌘ after ⌘D is
+// hold-to-talk.
 
 export interface RejectReasonControl {
   /** Confirm reject: with the words first when it is listening. */
@@ -79,23 +81,40 @@ export default function RejectReason({
     text: string
     retry?: () => void
   } | null>(null)
+  // The box as it was when dictation started, and where the words go.
+  const liveAt = useRef<{ text: string; from: number; to: number } | null>(null)
+  const markStart = () => {
+    const el = inputRef.current
+    const now = valueRef.current
+    liveAt.current =
+      el && document.activeElement === el
+        ? {
+            text: now,
+            from: el.selectionStart ?? now.length,
+            to: el.selectionEnd ?? now.length,
+          }
+        : { text: now, from: now.length, to: now.length }
+  }
 
+  const post = async (body: Record<string, unknown>) => {
+    const a = agentRef.current
+    if (!a) throw new Error('the Mac agent is not connected.')
+    return fetch(`http://127.0.0.1:${a.port}/chat/dictate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...body, id: itemId, token: a.token }),
+      cache: 'no-store',
+    })
+  }
   const dictation = useDictation({
     meterRef: micRef,
     leave: 'cancel',
-    transcribe: async audio => {
-      const a = agentRef.current
-      if (!a) throw new Error('the Mac agent is not connected.')
-      const res = await fetch(`http://127.0.0.1:${a.port}/chat/dictate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          audio: await base64Of(audio),
-          type: audio.type,
-          id: itemId,
-          token: a.token,
-        }),
-        cache: 'no-store',
+    transcribe: async (audio, { context, partial }) => {
+      const res = await post({
+        audio: await base64Of(audio),
+        type: audio.type,
+        context,
+        partial,
       })
       const data = (await res.json().catch(() => ({}))) as {
         text?: string
@@ -104,13 +123,33 @@ export default function RejectReason({
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
       return data.text ?? ''
     },
+    warm: () => {
+      post({ warm: true }).catch(e =>
+        console.warn('Queue reject box: the Mac did not get dictation ready', e)
+      )
+    },
+    onLive: words => {
+      const at = liveAt.current
+      if (!at || !mounted.current) return
+      if (!words) liveAt.current = null
+      const next = words
+        ? insertDictated(at.text, at.from, at.to, words)
+        : { text: at.text, caret: at.to }
+      cb.current.onChange(next.text)
+      requestAnimationFrame(() =>
+        inputRef.current?.setSelectionRange(next.caret, next.caret)
+      )
+    },
     onWords: (words, reject) => {
+      const at = liveAt.current
+      liveAt.current = null
       if (!mounted.current) return
       setHeard(null)
       const el = inputRef.current
-      const now = valueRef.current
-      const [from, to] =
-        el && document.activeElement === el
+      const now = at?.text ?? valueRef.current
+      const [from, to] = at
+        ? [at.from, at.to]
+        : el && document.activeElement === el
           ? [el.selectionStart ?? now.length, el.selectionEnd ?? now.length]
           : [now.length, now.length]
       const next = insertDictated(now, from, to, words)
@@ -146,10 +185,15 @@ export default function RejectReason({
   }
   useImperativeHandle(control, () => ({ reject }))
 
-  const toggle = () => {
+  /** The mic (`key` false) or ⌘D (`key` true, which can be held to talk). */
+  const toggle = (key = false) => {
     setHeard(null)
-    if (dictation.state === 'off') inputRef.current?.focus()
-    dictation.toggle()
+    if (dictation.state === 'off') {
+      inputRef.current?.focus()
+      markStart()
+    }
+    if (key) dictation.press()
+    else dictation.toggle()
   }
   const keyRef = useRef({ toggle, state: dictation.state })
   useEffect(() => {
@@ -173,7 +217,7 @@ export default function RejectReason({
       // Not the browser's bookmark, and not the chat's dictation.
       e.preventDefault()
       e.stopPropagation()
-      if (!e.repeat) toggle()
+      if (!e.repeat) toggle(true)
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
@@ -200,6 +244,9 @@ export default function RejectReason({
                 : 'Other reason…'
           }
           value={value}
+          // The words show here as he speaks; typing would land in the
+          // middle of them.
+          readOnly={dictation.state !== 'off'}
           onChange={e => onChange(e.target.value)}
           onKeyDown={e => {
             if (e.key === 'Enter' && dictation.state !== 'off') {
@@ -246,7 +293,7 @@ export default function RejectReason({
             disabled={busy || dictation.state === 'transcribing'}
             // The box keeps the cursor, so the words go where it is.
             onMouseDown={e => e.preventDefault()}
-            onClick={toggle}
+            onClick={() => toggle()}
           >
             {dictation.state === 'transcribing' ? (
               <span className={styles.chatMicBusy} />
@@ -260,8 +307,17 @@ export default function RejectReason({
       </span>
       {dictation.state === 'listening' && (
         <p className={`${styles.chatDictating} ${styles.otherNote}`}>
-          <kbd>⌘D</kbd> puts the words in · <kbd>Enter</kbd> rejects ·{' '}
-          <kbd>Esc</kbd> cancels
+          {dictation.holding ? (
+            <>
+              Let go of <kbd>⌘</kbd> to put the words in · <kbd>Esc</kbd>{' '}
+              cancels
+            </>
+          ) : (
+            <>
+              <kbd>⌘D</kbd> puts the words in · <kbd>Enter</kbd> rejects ·{' '}
+              <kbd>Esc</kbd> cancels
+            </>
+          )}
         </p>
       )}
       {heard && (
