@@ -262,32 +262,47 @@ const KIND_WORD: Record<QueueItem['type'], string> = {
   Rule: 'Rule',
 }
 
-/** One resource page's items within a section. `key` is the page label
- *  ('/training', '/training (recurring)', '' for no page). */
+/** One resource page's items within a section, or for rules one
+ *  rulebook's. `key` is the page label ('/training', '/training
+ *  (recurring)'), the rulebook's name, or '' for neither. */
 type PageGroup = { key: string; label: string; items: QueueItem[] }
 
+/** The sub-head an item sits under: its rulebook for a rule, else its
+ *  page. Also the second half of its fold key. */
+function groupKeyOf(item: QueueItem): string {
+  if (isRule(item)) return ruleBookOf(item)?.name ?? ''
+  return pageLabel(item) ?? ''
+}
+
 function pageRank(group: PageGroup): number {
+  const first = group.items[0]
+  if (first && isRule(first)) {
+    const i = RULEBOOKS.findIndex(b => b.name === group.key)
+    return i === -1 ? RULEBOOKS.length : i
+  }
   if (!group.key) return PAGE_ORDER.length + 1
-  const page = group.items[0]?.page ?? ''
+  const page = first?.page ?? ''
   const i = PAGE_ORDER.indexOf(page)
   return i === -1 ? PAGE_ORDER.length : i
 }
 
 /** The site's nav order, unknown pages after it by name, recurring programs
- *  right behind /training, items with no page last. */
+ *  right behind /training, items with no page last; rulebooks in RULEBOOKS
+ *  order, a rule that names none last. */
 function byPageOrder(a: PageGroup, b: PageGroup): number {
   return pageRank(a) - pageRank(b) || a.key.localeCompare(b.key)
 }
 
-/** Split a section's (already sorted) items by resource page, keeping each
- *  page's items in the order they came. */
+/** Split a section's (already sorted) items by resource page, or rules by
+ *  rulebook, keeping each group's items in the order they came. */
 function splitByPage(list: QueueItem[]): PageGroup[] {
   const byKey = new Map<string, PageGroup>()
   for (const item of list) {
-    const key = pageLabel(item) ?? ''
+    const key = groupKeyOf(item)
     let group = byKey.get(key)
     if (!group) {
-      group = { key, label: key || NO_PAGE_LABEL, items: [] }
+      const none = isRule(item) ? NO_RULEBOOK_LABEL : NO_PAGE_LABEL
+      group = { key, label: key || none, items: [] }
       byKey.set(key, group)
     }
     group.items.push(item)
@@ -327,7 +342,58 @@ const ICON = {
   sent: '/images/icons/plane.svg',
   reopen: '/images/icons/redo.svg',
   trash: '/images/icons/trash.svg',
+  policy: '/images/icons/document.svg',
+  writing: '/images/icons/pencil.svg',
 } as const
+
+// What a rule changes, read off the rulebook name its title starts with
+// (~/Queue/rulebook.py: RULEBOOKS `short`, put in front by queue_title).
+// Its row gets that thing's icon ("Comb: …" Comb's, "Listing policy: …" a
+// page) and the Rules list groups by it, in this order, instead of by
+// resource page (Bryce, 17 Nov 2026). Both Fable Review rulebooks get
+// Fable's stars.
+const RULEBOOKS: ReadonlyArray<{ name: string; icon: string }> = [
+  { name: 'Listing policy', icon: ICON.policy },
+  { name: 'Fable Review', icon: ICON.stars },
+  { name: 'Comb', icon: ICON.comb },
+  { name: 'Descriptions', icon: ICON.writing },
+  { name: 'Broom review', icon: ICON.stars },
+  { name: 'Broom', icon: ICON.broom },
+  { name: 'Discord intake', icon: ICON.discord },
+]
+const NO_RULEBOOK_LABEL = 'Other'
+
+function isRule(item: QueueItem): boolean {
+  return item.type === 'Rule' || item.source === 'Teach'
+}
+
+/** The rulebook a rule changes, or null when its title names none. */
+function ruleBookOf(item: QueueItem): (typeof RULEBOOKS)[number] | null {
+  const title = item.title.trimStart().toLowerCase()
+  const named = RULEBOOKS.find(b =>
+    title.startsWith(`${b.name.toLowerCase()}:`)
+  )
+  if (named) return named
+  return item.rulePublicPolicy ? RULEBOOKS[0] : null
+}
+
+/** A rule's title without its rulebook's name, for a row under that
+ *  rulebook's sub-head. */
+function bareRuleTitle(item: QueueItem): string {
+  const book = ruleBookOf(item)
+  const title = item.title.trimStart()
+  if (!book || !title.toLowerCase().startsWith(`${book.name.toLowerCase()}:`)) {
+    return item.title
+  }
+  return title.slice(book.name.length + 1).trimStart() || item.title
+}
+
+/** The icon in an item's row: what a rule changes, else where the item
+ *  came from. The source pill keeps the book for a rule ("Teach"). */
+function rowIcon(item: QueueItem): string {
+  if (!isRule(item)) return sourceIcon(item)
+  return ruleBookOf(item)?.icon ?? ICON.rule
+}
 
 // Each section's head carries its icon, in grey: colour in the list is kept
 // for the verdicts, and a teal Comb or amber Requests icon read as Publish
@@ -3075,7 +3141,7 @@ export default function QueueAdmin({
           : null
     if (!stay) return
     if (kindOf(stay) !== kind) setKind(kindOf(stay))
-    foldPage(`${sectionOf(stay)}:${pageLabel(stay) ?? ''}`, false)
+    foldPage(`${sectionOf(stay)}:${groupKeyOf(stay)}`, false)
     select(stay.id)
   }, [selected, items, listingShown, kind, foldPage, select])
 
@@ -3831,7 +3897,7 @@ export default function QueueAdmin({
     closePop(item.id)
     setQuery('')
     setKind('rules')
-    foldPage(`${sectionOf(item)}:${pageLabel(item) ?? ''}`, false)
+    foldPage(`${sectionOf(item)}:${groupKeyOf(item)}`, false)
     select(item.id)
   }
 
@@ -4829,7 +4895,8 @@ export default function QueueAdmin({
                                         Boolean(draft(item.id).error)
                                       }
                                       fable={fableMarks[item.id]}
-                                      showPage={false}
+                                      showPage={section === 'rules'}
+                                      bareRule={section === 'rules'}
                                       onClick={() => select(item.id)}
                                       onLogoError={() => logoDied(item)}
                                     />
@@ -5426,6 +5493,7 @@ function Row({
   failed,
   fable = null,
   showPage = true,
+  bareRule = false,
   showKind = false,
   search = null,
   hit,
@@ -5444,6 +5512,8 @@ function Row({
   fable?: FableMark | null
   /** Off under a page sub-head, which already names the page. */
   showPage?: boolean
+  /** On under a rulebook sub-head, which already names the rulebook. */
+  bareRule?: boolean
   /** On in search results, which mix additions, changes and rules. */
   showKind?: boolean
   /** The search in the box, if any: its words are marked in the name. */
@@ -5476,12 +5546,19 @@ function Row({
         />
       ) : (
         <span className={`${styles.rowLogo} ${styles.rowLogoEmpty}`}>
-          <Icon src={sourceIcon(item)} />
+          <Icon src={rowIcon(item)} />
         </span>
       )}
       <span className={styles.rowBody}>
         <span className={styles.rowTitle}>
-          <Marked text={splitTitle(item).name ?? item.title} search={search} />
+          <Marked
+            text={
+              bareRule
+                ? bareRuleTitle(item)
+                : (splitTitle(item).name ?? item.title)
+            }
+            search={search}
+          />
         </span>
         <span className={styles.rowMeta}>
           {urgency ? (
@@ -9062,12 +9139,37 @@ function RuleCard({
     test?.results.filter(
       r => r.outcome !== 'breaks' && r.outcome !== 'unclear'
     ) ?? []
+  // A listing-policy row is only its wording: no test runs on it, and the
+  // rest of the summary just retells the change, so the wording shows
+  // open with nothing else (Bryce, 17 Nov 2026).
+  const policy = item.rulePublicPolicy
   const hasDetails =
-    Boolean(rest) ||
-    Boolean(test?.summary) ||
-    others.length > 0 ||
-    (Boolean(item.appliesTo) && !item.rulePublicPolicy) ||
-    Boolean(item.ruleWording)
+    !policy &&
+    (Boolean(rest) ||
+      Boolean(test?.summary) ||
+      others.length > 0 ||
+      Boolean(item.appliesTo) ||
+      Boolean(item.ruleWording))
+  const wording = (
+    <>
+      {item.ruleWording && (
+        // The rule as it will read (9 Sept 2026: no diffs on the card;
+        // 5 Oct 2026: the words a click away).
+        <>
+          <h3 className={styles.h3}>Exact wording</h3>
+          <blockquote className={styles.quote}>{item.ruleWording}</blockquote>
+        </>
+      )}
+      {item.ruleWas && (
+        <>
+          <h3 className={styles.h3}>Replaces</h3>
+          <blockquote className={`${styles.quote} ${styles.from}`}>
+            {item.ruleWas}
+          </blockquote>
+        </>
+      )}
+    </>
+  )
   return (
     <section className={styles.block}>
       {from?.listing && (
@@ -9078,13 +9180,10 @@ function RuleCard({
         </p>
       )}
       <p className={styles.summary}>{lead}</p>
-      {item.rulePublicPolicy ? (
+      {policy ? (
         // The policy check's rows change aisafety.com/listing-policy only;
-        // replay.py skips them, so "Not tested yet" was never coming true.
-        <p className={styles.note}>
-          Not tested, as no bot reads the public listing policy. Apply puts this
-          wording on aisafety.com/listing-policy.
-        </p>
+        // replay.py skips them, so there is no test line at all.
+        wording
       ) : !test ? (
         <p className={styles.note}>
           Not tested yet. The Mac tests it on your past decisions within a few
@@ -9130,27 +9229,10 @@ function RuleCard({
                 ))}
               </ul>
             )}
-            {item.appliesTo && !item.rulePublicPolicy && (
+            {item.appliesTo && (
               <p className={styles.note}>Applies to {item.appliesTo}</p>
             )}
-            {item.ruleWording && (
-              // The rule as it will read (9 Sept 2026: no diffs on the
-              // card; 5 Oct 2026: the words a click away).
-              <>
-                <h3 className={styles.h3}>Exact wording</h3>
-                <blockquote className={styles.quote}>
-                  {item.ruleWording}
-                </blockquote>
-              </>
-            )}
-            {item.ruleWas && (
-              <>
-                <h3 className={styles.h3}>Replaces</h3>
-                <blockquote className={`${styles.quote} ${styles.from}`}>
-                  {item.ruleWas}
-                </blockquote>
-              </>
-            )}
+            {wording}
           </div>
         </details>
       )}
@@ -9492,7 +9574,7 @@ function DoneList({
               <img className={styles.rowLogo} src={item.logo} alt="" />
             ) : (
               <span className={`${styles.rowLogo} ${styles.rowLogoEmpty}`}>
-                <Icon src={sourceIcon(item)} />
+                <Icon src={rowIcon(item)} />
               </span>
             )}
             <span className={styles.rowBody}>
