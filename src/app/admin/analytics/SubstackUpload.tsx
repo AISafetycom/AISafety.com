@@ -14,6 +14,7 @@ import own from './SubstackUpload.module.css'
 const PUBLICATION_NAMES: Record<string, string> = {
   aisafetyeventsandtraining: 'Events & Training',
   aisafetyfunding: 'Funding',
+  aisafetycom: 'Updates',
 }
 
 type State =

@@ -127,13 +127,13 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   // the upper half of the screen, however they got there.
   'cards_button_click',
   'cards_view',
-  // A submit of the newsletter signup box (Events, Training, Funding).
-  // Counts the attempt. Never carries the email address.
+  // A submit of the newsletter signup box (Events, Training, Funding, and
+  // the newsletters' own pages, Updates' among them). Counts the attempt. Never carries the email address.
   'newsletter_signup',
   // How a submit ended: the boxes sign the reader up on the site, through
   // ActiveCampaign (Events and Training from 8 October 2026, Funding from its
-  // move day; before that Funding's box opened Substack and recorded
-  // neither). Success = the confirmation email went out; error = the visitor
+  // move day, Updates from its move in November 2026; before that Funding's
+  // box opened Substack and recorded neither). Success = the confirmation email went out; error = the visitor
   // saw an error, `source` saying which (/api/subscribe's reason code,
   // 'network', or 'http_<status>'). Never carry the email address.
   'newsletter_signup_success',
@@ -144,7 +144,7 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   // the events already recorded.
   'newsletter_view',
   // A click on a newsletter's past issues page (/newsletter/events,
-  // /newsletter/training): `page` is the newsletter ('Events'), `source`
+  // /newsletter/training, …): `page` is the newsletter ('Events'), `source`
   // where the link leads ('issue' = an issue's web version, 'feed' = the
   // RSS feed, 'substack' = the Substack archive), `label` the issue's
   // address on an issue click. The pages' own views are page_views.
@@ -158,8 +158,8 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   // 'saved' or the reason it failed.
   'newsletter_settings_save',
   // A link on that page: `label` the newsletter ('events', 'updates'),
-  // `source` where it leads ('issues' = its past issues page, 'substack' =
-  // the Updates newsletter).
+  // `source` where it leads ('issues' = its past issues page; 'substack' =
+  // the Updates newsletter's Substack, until it moved in November 2026).
   'newsletter_page_click',
   // A click on one of the footer's links ("Help us out" / "Newsletters" /
   // "For press and developers" columns) — mostly outbound, so nothing else
@@ -210,6 +210,7 @@ const NEWSLETTER_BOX_PAGES = [
   'Funding',
   '/newsletter/events',
   '/newsletter/training',
+  '/newsletter/updates',
   '/newsletter',
 ]
 
@@ -2280,7 +2281,7 @@ export function newsletterSignupResults(
 }
 
 export interface NewsletterArchiveRow {
-  /** The newsletter: 'Events', 'Training', 'Funding'. */
+  /** The newsletter: 'Events', 'Training', 'Funding', 'Updates'. */
   name: string
   /** Views of its past issues page. */
   views: number
@@ -2301,11 +2302,16 @@ export interface NewsletterArchiveRow {
  *  deployed 11 October 2026 at about 12:30 UTC; Funding when its first issue
  *  from ActiveCampaign (Issue #24) reached its readers, first listed at
  *  about 17:16 UTC on 21 October 2026. Before then each address was the
- *  site's 404 page, so earlier views don't count. */
+ *  site's 404 page, so earlier views don't count. Updates' page exists from
+ *  the deploy that moved it (it shows before its first issue), so its time
+ *  is that deploy's: SET IT TO THE REAL DEPLOY TIME when the move goes live.
+ *  Until then it is the start of the day the move was built, when nothing
+ *  linked the address yet. */
 export const PAST_ISSUES_LIVE_SINCE: Readonly<Record<string, number>> = {
   events: Date.parse('2026-10-11T12:30:00Z'),
   training: Date.parse('2026-10-11T12:30:00Z'),
   funding: Date.parse('2026-10-21T17:16:00Z'),
+  updates: Date.parse('2026-11-17T00:00:00Z'),
 }
 
 export function newsletterArchiveStats(
@@ -2339,7 +2345,7 @@ export function newsletterArchiveStats(
   }
   for (const e of inRange) {
     if (e.type === 'page_view') {
-      const m = /^\/newsletter\/(events|training|funding)\/?$/.exec(
+      const m = /^\/newsletter\/(events|training|funding|updates)\/?$/.exec(
         e.page ?? ''
       )
       if (!m) continue
@@ -2371,6 +2377,7 @@ const NEWSLETTER_OF_PAGE: Readonly<Record<string, string>> = {
   '/newsletter/events': 'Events',
   '/newsletter/training': 'Training',
   '/newsletter/funding': 'Funding',
+  '/newsletter/updates': 'Updates',
 }
 
 /** Where ActiveCampaign sends a reader once they've pressed "Confirm
@@ -2379,7 +2386,7 @@ const NEWSLETTER_OF_PAGE: Readonly<Record<string, string>> = {
 /** …and, from the newsletters page's combination forms, /subscribed/
  *  events-funding and the like: a confirmation of each newsletter named. */
 const CONFIRM_PAGE =
-  /^\/subscribed\/((?:events|training|funding)(?:-(?:training|funding))*)\/?$/
+  /^\/subscribed\/((?:events|training|funding|updates)(?:-(?:training|funding|updates))*)\/?$/
 
 /** A confirm page loaded again this soon after the last load of the same
  *  page, in another browser, is the same email's link opened twice: in
@@ -2430,7 +2437,8 @@ export interface NewslettersPageRow {
   /** Ticked on in a save of the settings, and ticked off. */
   added: number
   dropped: number
-  /** Clicks through to its past issues page (Updates: to Substack). */
+  /** Clicks through to its past issues page (Updates, until it moved in
+   *  November 2026: to Substack). */
   clicks: number
 }
 
@@ -2502,7 +2510,7 @@ export function newslettersPageStats(
       }
       if (counts(e, 'save')) out.saves++
       for (const change of (e.label ?? '').split(' ')) {
-        const m = /^([+-])(events|training|funding)$/.exec(change)
+        const m = /^([+-])(events|training|funding|updates)$/.exec(change)
         if (!m || !counts(e, `change\x00${change}`)) continue
         if (m[1] === '+') rowFor(m[2]).added++
         else rowFor(m[2]).dropped++
@@ -2533,7 +2541,9 @@ function newslettersPageSuccesses(
     if (e.type !== 'newsletter_signup_success' || e.page !== '/newsletter')
       return false
     if (
-      !/^(events|training|funding)(\+(training|funding))*$/.test(e.source ?? '')
+      !/^(events|training|funding|updates)(\+(training|funding|updates))*$/.test(
+        e.source ?? ''
+      )
     )
       return false
     if (!unique || !e.vid) return true
@@ -2546,7 +2556,7 @@ function newslettersPageSuccesses(
 }
 
 export interface NewsletterConfirmRow {
-  /** 'Events', 'Training', 'Funding'. */
+  /** 'Events', 'Training', 'Funding', 'Updates'. */
   name: string
   /** Signups ActiveCampaign took (a link to confirm went out), from the
    *  newsletter's boxes (its resource page and its past issues page) and
@@ -2599,7 +2609,7 @@ export function newsletterConfirmations(
 export const NEWSLETTER_COPY_VIEW = 'newsletter_copy_view'
 
 export interface NewsletterCopyRow {
-  /** 'Events', 'Training', 'Funding'. */
+  /** 'Events', 'Training', 'Funding', 'Updates'. */
   newsletter: string
   /** The issue's address ('week-41-2026'). */
   issue: string
@@ -2714,9 +2724,10 @@ export function newsletterOfRef(
   } catch {
     return null
   }
-  const m = /^(events-training|events|training|funding)-newsletter$/i.exec(
-    params.get('utm_source') ?? ''
-  )
+  const m =
+    /^(events-training|events|training|funding|updates)-newsletter$/i.exec(
+      params.get('utm_source') ?? ''
+    )
   if (!m) return null
   return {
     newsletter: NEWSLETTER_OF_UTM[m[1].toLowerCase()],
@@ -2728,6 +2739,7 @@ const NEWSLETTER_OF_UTM: Readonly<Record<string, string>> = {
   events: 'Events',
   training: 'Training',
   funding: 'Funding',
+  updates: 'Updates',
   'events-training': 'Events & Training',
 }
 
@@ -2759,7 +2771,7 @@ export function newsletterLandings(views: AnalyticsEvent[]): AnalyticsEvent[] {
 }
 
 export interface NewsletterVisitRow {
-  /** 'Events', 'Training', 'Funding', 'Events & Training'. */
+  /** 'Events', 'Training', 'Funding', 'Updates', 'Events & Training'. */
   name: string
   visits: number
   /** Distinct visitors among them (a visit without a visitor id isn't one). */

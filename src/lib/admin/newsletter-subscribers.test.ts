@@ -25,12 +25,16 @@ describe('historyStale', () => {
 
   it('works the figures out when there are none or they are three hours old', () => {
     expect(historyStale(null)).toBe(true)
-    expect(historyStale(kept(NOW - 2 * HOUR_MS, ['6', '7', '8']))).toBe(false)
-    expect(historyStale(kept(NOW - 4 * HOUR_MS, ['6', '7', '8']))).toBe(true)
+    const lists = ['6', '7', '8', '9']
+    expect(historyStale(kept(NOW - 2 * HOUR_MS, lists))).toBe(false)
+    expect(historyStale(kept(NOW - 4 * HOUR_MS, lists))).toBe(true)
   })
 
   it('works them out again at once when a list has moved since', () => {
     expect(historyStale(kept(NOW - HOUR_MS, ['6', '7']))).toBe(true)
+    // Updates (list 9) moved in November 2026: figures kept from before
+    // then are worked out again with it.
+    expect(historyStale(kept(NOW - HOUR_MS, ['6', '7', '8']))).toBe(true)
   })
 
   it('leaves them alone without ActiveCampaign', () => {

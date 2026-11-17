@@ -6,6 +6,12 @@
 
 const DAY_MS = 86_400_000
 
+/** The day Updates' readers were imported into ActiveCampaign (list 9).
+ *  SET THIS TO THE REAL IMPORT DAY before the change goes live: the chart
+ *  draws the list's size from this day on, so a day before the import would
+ *  show an empty list. */
+const UPDATES_MOVED_ON = '2026-11-17'
+
 /** The newsletters, their ActiveCampaign lists, the day each moved there
  *  (null for one still on Substack) and the Substack publication its export
  *  comes from. */
@@ -31,6 +37,15 @@ export const NEWSLETTERS = [
     list: '8',
     movedOn: '2026-10-21',
     substack: 'aisafetyfunding',
+  },
+  // Moved with no issue of its own: readers imported, the next update comes
+  // from ActiveCampaign (Issue #5).
+  {
+    key: 'updates',
+    label: 'Updates',
+    list: '9',
+    movedOn: UPDATES_MOVED_ON,
+    substack: 'aisafetycom',
   },
 ] as const
 

@@ -78,6 +78,30 @@ describe('newslettersPageStats', () => {
   it('is empty with nothing on the page', () => {
     expect(newslettersPageStats([], true).rows).toEqual([])
   })
+
+  it('counts Updates ticked on and off, now that it is a box like the others', () => {
+    const stats = newslettersPageStats(
+      [
+        ev('newsletter_settings_save', 'a', DAY1, {
+          source: 'saved',
+          label: '+updates -events',
+        }),
+        ev('newsletter_settings_save', 'b', DAY2, {
+          source: 'saved',
+          label: '-updates',
+        }),
+        ev('newsletter_page_click', 'b', DAY2, {
+          label: 'updates',
+          source: 'issues',
+        }),
+      ],
+      true
+    )
+    expect(stats.rows).toEqual([
+      { name: 'Events', added: 0, dropped: 1, clicks: 0 },
+      { name: 'Updates', added: 1, dropped: 1, clicks: 1 },
+    ])
+  })
 })
 
 describe('newsletterConfirmations with the newsletters page', () => {
@@ -95,13 +119,26 @@ describe('newsletterConfirmations with the newsletters page', () => {
       ev('page_view', 'a', DAY1_LATER, { page: '/subscribed/events-funding' }),
       ev('page_view', 'b', DAY1_LATER, { page: '/subscribed/funding' }),
       // Not a confirm page.
-      ev('page_view', 'b', DAY1_LATER, { page: '/subscribed/updates' }),
+      ev('page_view', 'b', DAY1_LATER, { page: '/subscribed/jobs' }),
     ]
     const results = newsletterSignupResults(events, true)
     expect(newsletterConfirmations(events, true, results)).toEqual([
       { name: 'Events', signedUp: 1, confirmed: 1 },
       { name: 'Funding', signedUp: 2, confirmed: 2 },
       { name: 'Training', signedUp: 1, confirmed: 0 },
+    ])
+  })
+
+  it('credits Updates when a signup on the page includes it', () => {
+    const events = [
+      ev('newsletter_signup_success', 'a', DAY1, { source: 'events+updates' }),
+      ev('newsletter_signup_success', 'b', DAY1, { source: 'updates' }),
+      ev('page_view', 'a', DAY1_LATER, { page: '/subscribed/events-updates' }),
+    ]
+    const results = newsletterSignupResults(events, true)
+    expect(newsletterConfirmations(events, true, results)).toEqual([
+      { name: 'Events', signedUp: 1, confirmed: 1 },
+      { name: 'Updates', signedUp: 2, confirmed: 1 },
     ])
   })
 })
