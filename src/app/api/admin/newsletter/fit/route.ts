@@ -8,7 +8,7 @@
   verifies. Approvers only (canSendNewsletter) — it edits the email, but
   sends nothing, so no fresh-session requirement.
   → { cards } (the cards, with the new text)   409 with { problems } when the
-  draft fails verification (or sits on a real list, 6/7/8, and this isn't
+  draft fails verification (or sits on a real list, 6/7/8/9, and this isn't
   production), 400 for a bad card or body, 403 when not posted from the
   admin page itself.
 */

@@ -628,6 +628,25 @@ describe('runWatch: sends that did not come through the page', () => {
     )
   })
 
+  it('watches Updates (list 9) for sends that skipped the page, like the other lists', async () => {
+    const { sent, run } = setup()
+    ac.campaigns = [
+      campaign({
+        id: '211',
+        name: 'Updates · Issue #5, 2026',
+        status: '1',
+        cdate: acDate(10 * MIN),
+        sdate: acDate(-5 * MIN),
+        segmentid: '0',
+      }),
+    ]
+    ac.lists = { '211': ['9'] }
+    expect(ids(await run())).toEqual(['unapproved:211'])
+    expect(sent[0].subject).toBe(
+      'Newsletter: Updates · Issue #5 was not sent through the approval page'
+    )
+  })
+
   it('stays quiet with a record, inside the grace minutes, and for old sends', async () => {
     const { store, run } = setup()
     ac.campaigns = [
@@ -811,6 +830,20 @@ describe('runWatch: drafts left on the real lists', () => {
     expect((await run()).alerts).toEqual([])
     // A young draft needs no reads at all.
     expect(calls.some(c => c.url.pathname.includes('/231/'))).toBe(false)
+  })
+
+  it('lets an Updates draft wait: it isn’t weekly, and may sit for a read-through', async () => {
+    const { run } = setup()
+    ac.campaigns = [
+      draft({
+        id: '234',
+        name: 'Updates · Issue #5, 2026',
+        cdate: acDate(96 * HOUR),
+      }),
+    ]
+    ac.lists['234'] = ['9']
+    ac.messages['900'] = `${MARKER}<p>Updates</p>`
+    expect((await run()).alerts).toEqual([])
   })
 
   it('leaves a draft alone while its waves are going out, and deletes it once every wave has gone', async () => {
@@ -1418,6 +1451,29 @@ describe('runWatch: health checks', () => {
     ac.lists = { '261': ['8'] }
     const s = await run()
     expect(s.health.map(h => h.campaignId)).toEqual(['261'])
+  })
+
+  it('gives Updates no verdict: on about 70 readers one complaint or bounce would always be red', async () => {
+    const { store, sent, run } = setup()
+    ac.campaigns = [
+      sentWave({
+        id: '262',
+        name: 'Updates · Issue #5, 2026',
+        ldate: acDate(19 * HOUR),
+        send_amt: '70',
+        total_amt: '70',
+        verified_unique_opens: '30',
+        hardbounces: '1',
+        segmentid: '0',
+      }),
+    ]
+    ac.lists = { '262': ['9'] }
+    ac.unsubTotals['262'] = { spam_complaints: '1', unsubscribes: '2' }
+    await approve(store, '262', { listId: '9', expected: 70 })
+    const s = await run()
+    expect(s.health).toEqual([])
+    expect(s.alerts).toEqual([])
+    expect(sent).toEqual([])
   })
 
   it('stores but does not email a check on a rehearsal to a few people', async () => {

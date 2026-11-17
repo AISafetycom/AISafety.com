@@ -20,7 +20,7 @@
   → { cards } for a text edit, { listing: { ok, table } | { ok: false,
     reason } } for a listing update
     409 with { problems } when the draft fails verification (or sits on a
-    real list, 6/7/8, and this isn't production), 400 for a bad card, field
+    real list, 6/7/8/9, and this isn't production), 400 for a bad card, field
     or body, 403 when not posted from the admin page itself.
 */
 
