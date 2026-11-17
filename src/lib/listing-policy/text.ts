@@ -42,6 +42,7 @@ These are real problems, they're just not what this site covers:
 - Bias and fairness, deepfakes, misinformation and AI persuasion, content moderation, surveillance, privacy and civil liberties, child safety, copyright, job displacement and the economic impact of AI, AI for good, and AI literacy about near-term harms.
 - Machine ethics and moral-reasoning evaluations, meaning work on whether models judge right and wrong, even when it is framed in alignment or x-risk terms. Work whose own subject is alignment or loss of control and that includes an ethics track is judged normally.
 - AI welfare, digital minds, AI consciousness, AI and animals.
+- "Better futures" work, meaning how well the future goes if humanity survives, even when some sessions cover x-risk. S-risk and gradual disempowerment still count.
 - General AI policy, AI diplomacy, and great-power competition or export controls framed as geopolitics.
 - Tracking AI capabilities or the economics of AI without any safety work.
 - Enterprise AI security, AI for cybersecurity, adversarial ML without a safety motivation, and general tech, startup, or venture activity.
@@ -52,7 +53,7 @@ Advancing capabilities counts against a listing. The map shows the major AI comp
 
 ## What's the bar for the page I submitted to?
 
-Each page adds its own bar, and seriousness is a separate gate: on topic isn't the same as ready. If the only public link is an application form, with nothing that describes the program, that counts a little against it.
+Each page adds its own bar, and seriousness is a separate gate: on topic isn't the same as ready. If the only public link is an application form, with nothing that describes the program, that counts a little against it. A form that describes the program in detail counts as its page when we can check who runs it.
 
 **/map** – the field map of key organizations, programs, and projects.
 - The bar is higher here than for any of our other pages.
@@ -92,16 +93,16 @@ Each page adds its own bar, and seriousness is a separate gate: on topic isn't t
 
 **/funding** – funders, grant programs, and funding platforms.
 - The funder must explicitly and demonstrably fund AI x-risk work. Theoretical openness doesn't count, so general funders are out, though their dedicated safety programs are listed.
-- Cash only, no API credits or compute.
+- Cash only, no API credits or compute. The money has to be the main offer. A small stipend alongside engineering time or compute isn't funding.
 - A micro-grant for one narrow task isn't listed, such as a few thousand dollars to write one report on the funder's own project. Small grants for any in-scope work are fine, and so is a well-funded call on a single topic.
-- Fellowships where you do the work as part of a program go on /training. A grant-style one (a stipend, no employer) can go here.
+- Fellowships where you do the work as part of a program go on /training. A grant-style one (a stipend you can live or work on, no employer) can go here.
 - Funders that are closed for now or invitation-only stay on the page, flagged as not accepting.
 
 **/communities** – local and online groups people can join.
 - A group needs its own joinable space (e.g. a channel in someone else's server doesn't count).
 - The main question is whether the group addresses x-risk: a multi-cause group where x-risk is only a sliver doesn't clear it.
 - Being new isn't held against you, nor is being national. A group that hasn't held its first meetup yet can still be listed, and a site that calls itself pre-launch isn't a strike.
-- We look for a real organizer, a home people can find (a site, a join link, or an open discussion space), and x-risk framing there. A group whose only footprint is a few event pages and a LinkedIn page is marginal but likely to be accepted.
+- We look for a home people can find (a site, a join link, or an open discussion space) and x-risk framing there. The bar here is low, so a thin site that doesn't name an organizer can still be listed. A group whose only footprint is a few event pages and a LinkedIn page is marginal but likely to be accepted.
 - A listed network's chapters are covered by the parent listing.
 - Coworking hubs go here, not on /map, although one that also runs its own programs can earn a /map entry too.
 
@@ -119,6 +120,7 @@ Each page adds its own bar, and seriousness is a separate gate: on topic isn't t
 
 **/founders** – incubators, accelerators, fiscal sponsors, venture funds, and tools for starting an AI safety organization.
 - Cause-general ones qualify if the organization addresses AI x-risk.
+- A directory that mostly lists what our own pages already cover (founder programs, funders, events) isn't added.
 
 **/advisors** – advising services: mostly career and contribution advice, plus some coaching and operational support.
 - Advisers are people you can talk to. An AI chatbot or automated advice tool isn't listed, however good the organization behind it.
