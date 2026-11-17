@@ -45,7 +45,7 @@ export interface AcForm {
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  THE ACTIVECAMPAIGN FORMS (Events and Training made 8 October 2026,
-//  Funding 12 October 2026; Updates' is still to be made).
+//  Funding 12 October 2026, Updates 17 November 2026).
 //
 //  One double opt-in form per list, made in ActiveCampaign (Website → Forms).
 //  Open the form's hosted page, https://alignment23684.activehosted.com/f/<id>,
@@ -64,9 +64,8 @@ export const AC_FORMS: Record<SignupNewsletter, AcForm> = {
   training: { formId: 6, orKey: 'baffe016-955b-42bc-be9e-711a2d0d44bf' },
   // AI Safety Funding (list 8): form 8, "AI Safety Funding signup (aisafety.com)".
   funding: { formId: 8, orKey: 'c895d3e7-eb90-4022-a904-01f90a9fa8c0' },
-  // AISafety.com Updates (list 9): NOT MADE YET. Fill in the form's number
-  // and `or` key here once it exists; until then Updates isn't offered.
-  updates: { formId: 0, orKey: '' },
+  // AISafety.com Updates (list 9): form 18, "AISafety.com Updates signup (aisafety.com)".
+  updates: { formId: 18, orKey: 'fe46ce91-7e62-4862-919b-fcdb5e0b6b34' },
 }
 
 /** Two or more newsletters at once, from the newsletters page
@@ -119,25 +118,50 @@ export const COMBO_FORMS: Record<ComboKey, AcForm> = {
     formId: 16,
     orKey: '344131d3-3de9-48c4-a91f-c5b5e18f854a',
   },
-  // The seven combinations with Updates (list 9): NOT MADE YET. Each needs
-  // its own form in ActiveCampaign, subscribing to exactly the lists named,
-  // with its confirmation redirect on https://aisafety.com/subscribed/<key>.
-  // Fill in each form's number and `or` key; Updates is offered once its own
-  // form and all seven of these are filled in.
-  // Lists 6 + 9 (Events + Updates).
-  'events-updates': { formId: 0, orKey: '' },
-  // Lists 7 + 9 (Training + Updates).
-  'training-updates': { formId: 0, orKey: '' },
-  // Lists 8 + 9 (Funding + Updates).
-  'funding-updates': { formId: 0, orKey: '' },
-  // Lists 6 + 7 + 9 (Events + Training + Updates).
-  'events-training-updates': { formId: 0, orKey: '' },
-  // Lists 6 + 8 + 9 (Events + Funding + Updates).
-  'events-funding-updates': { formId: 0, orKey: '' },
-  // Lists 7 + 8 + 9 (Training + Funding + Updates).
-  'training-funding-updates': { formId: 0, orKey: '' },
-  // Lists 6 + 7 + 8 + 9 (all four).
-  'events-training-funding-updates': { formId: 0, orKey: '' },
+  // The seven combinations with Updates (list 9), made 17 November 2026 as
+  // copies of the forms above with "Subscribe to AISafety.com Updates"
+  // added: each subscribes to exactly the lists named, and its confirmation
+  // redirect is https://aisafety.com/subscribed/<key>. Updates is offered
+  // only while its own form and all seven of these are filled in.
+  // Lists 6 + 9: form 20, "AI Safety Events + Updates signup (aisafety.com)".
+  'events-updates': {
+    formId: 20,
+    orKey: 'ca7a2c48-84f6-476e-865c-0e038e9acedd',
+  },
+  // Lists 7 + 9: form 22, "AI Safety Training + Updates signup (aisafety.com)".
+  'training-updates': {
+    formId: 22,
+    orKey: 'aa24352c-c662-431f-b984-772b3d374280',
+  },
+  // Lists 8 + 9: form 24, "AI Safety Funding + Updates signup (aisafety.com)".
+  'funding-updates': {
+    formId: 24,
+    orKey: 'a2e5fe67-65e3-47cb-9f2d-f77387140e8c',
+  },
+  // Lists 6 + 7 + 9: form 26, "AI Safety Events + Training + Updates signup
+  // (aisafety.com)".
+  'events-training-updates': {
+    formId: 26,
+    orKey: '72e5f16a-4624-467f-9d11-d37e8f882aba',
+  },
+  // Lists 6 + 8 + 9: form 28, "AI Safety Events + Funding + Updates signup
+  // (aisafety.com)".
+  'events-funding-updates': {
+    formId: 28,
+    orKey: '415b4e14-1945-44e8-ae75-d8e5f1c4c81f',
+  },
+  // Lists 7 + 8 + 9: form 30, "AI Safety Training + Funding + Updates signup
+  // (aisafety.com)".
+  'training-funding-updates': {
+    formId: 30,
+    orKey: 'c28fac96-9f20-438c-9af5-7e4d0634eaf4',
+  },
+  // Lists 6 + 7 + 8 + 9: form 32, "AI Safety Events + Training + Funding +
+  // Updates signup (aisafety.com)".
+  'events-training-funding-updates': {
+    formId: 32,
+    orKey: '77e0df15-e5e0-4ffd-9f03-b528fb4b0027',
+  },
 }
 
 /** The form that signs up to exactly these newsletters (one or more,
