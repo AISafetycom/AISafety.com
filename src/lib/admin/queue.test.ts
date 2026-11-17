@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // The sync that closes queue rows handled in Airtable directly, against a
 // stand-in for the Airtable client: a listing per table, a read per row
-// that is missing from it, a patch per row it closes.
+// that is missing from it, a read of the queue row itself before it closes,
+// a patch per row it closes.
 const mocks = vi.hoisted(() => ({
   listAll: vi.fn(),
   airtableRequest: vi.fn(),
@@ -157,10 +158,16 @@ describe('closeHandledRows', () => {
   }
   let patches: { path: string; fields: Record<string, unknown> }[]
   let listed: { table: string; formula: string | null; fields: string[] }[]
+  // What a read of a queue row answers now, when that is no longer what
+  // the list said: a Status it has moved to since, null for a row that is
+  // gone, 'unreadable' for a read Airtable refuses.
+  let since: Record<string, string | null>
+  const rowRead = (id: string) => `${QUEUE}/${id}?returnFieldsByFieldId=true`
 
   beforeEach(() => {
     patches = []
     listed = []
+    since = {}
     mocks.listAll.mockReset()
     mocks.airtableRequest.mockReset()
     mocks.listAll.mockImplementation(
@@ -186,6 +193,16 @@ describe('closeHandledRows', () => {
           }
           patches.push({ path, fields: body.fields })
           return new Response('{}', { status: 200 })
+        }
+        if (path.startsWith(`${QUEUE}/`)) {
+          const id = path.slice(QUEUE.length + 1).split('?')[0]
+          const now = id in since ? since[id] : 'Pending'
+          if (now === null) return new Response('', { status: 404 })
+          if (now === 'unreadable') return new Response('', { status: 503 })
+          return new Response(
+            JSON.stringify({ id, fields: { [STATUS]: now } }),
+            { status: 200 }
+          )
         }
         const fields = records[path]
         if (!fields) return new Response('', { status: 404 })
@@ -224,7 +241,7 @@ describe('closeHandledRows', () => {
       },
     ])
     // One listing of the table, trimmed to one field; the live row is
-    // never read on its own.
+    // never read on its own. A row about to close is read again first.
     expect(listed).toEqual([
       {
         table: EVENTS,
@@ -237,9 +254,50 @@ describe('closeHandledRows', () => {
       .map(([path]) => path)
     expect(reads).toEqual([
       `${EVENTS}/${rid('deleted')}`,
+      rowRead(rid('q2')),
       `${EVENTS}/${rid('published')}`,
+      rowRead(rid('q3')),
       `${EVENTS}/${rid('hidden')}`,
+      rowRead(rid('q4')),
       `${EVENTS}/${rid('raced')}`,
+    ])
+  })
+
+  it('leaves a row decided since the list was read', async () => {
+    // The page read the list, then Accept published the record and marked
+    // the row Applied before this sync got to it: closing on the list's
+    // "Pending" wrote "Published outside the queue" over the decision.
+    since = {
+      [rid('q1')]: 'Applied',
+      [rid('q2')]: 'Rejected',
+      [rid('q4')]: null,
+      [rid('q5')]: 'unreadable',
+      [rid('q6')]: 'Revising',
+    }
+    const closed = await closeHandledRows([
+      // Accepted on the page a moment ago.
+      item({ id: rid('q1'), targetRecord: rid('published') }),
+      // Rejected, and its record deleted since.
+      item({ id: rid('q2'), targetRecord: rid('deleted') }),
+      // Still waiting: published in Airtable itself.
+      item({ id: rid('q3'), targetRecord: rid('published') }),
+      // Deleted from the page (X): the row went with its record.
+      item({ id: rid('q4'), targetRecord: rid('deleted') }),
+      // Its status cannot be read: left for the next pass.
+      item({ id: rid('q5'), targetRecord: rid('hidden') }),
+      // Being revised now, and hidden in Airtable: still open, so closed.
+      item({ id: rid('q6'), targetRecord: rid('hidden') }),
+    ])
+    expect(closed).toEqual([rid('q3'), rid('q6')])
+    expect(patches).toEqual([
+      {
+        path: `${QUEUE}/${rid('q3')}`,
+        fields: { [STATUS]: 'Closed', [ERROR]: 'Published outside the queue' },
+      },
+      {
+        path: `${QUEUE}/${rid('q6')}`,
+        fields: { [STATUS]: 'Closed', [ERROR]: 'Hidden outside the queue' },
+      },
     ])
   })
 

@@ -2030,15 +2030,35 @@ export function handledOutside(
   return null
 }
 
+/** A Queue row's Status as Airtable holds it this moment (an empty one
+ *  reads as Pending, as in the list): null when the row is gone, undefined
+ *  when the read failed (logged). */
+async function statusNow(id: string): Promise<string | null | undefined> {
+  const res = await airtableRequest(
+    `${QUEUE_TABLE_ID}/${id}?returnFieldsByFieldId=true`
+  )
+  if (res.status === 404 || res.status === 403) return null
+  if (!res.ok) {
+    console.error(
+      `[admin-queue] sync: reading queue row ${id} failed: ${res.status}`
+    )
+    return undefined
+  }
+  const row = (await res.json()) as { fields: RawFields }
+  return str(row.fields[F.status]) ?? 'Pending'
+}
+
 /** Close the open Add rows whose record was deleted, published or hidden
  *  in Airtable itself – the Mac worker's sync, done here when the page asks
  *  so the list is right the moment the admin looks rather than on the
  *  worker's next five-minute pass (Bryce, 17 Sept 2026: suggestions he had
  *  just deleted still counted). One read per table of its unpublished
  *  records; a row whose record is not among them is read once more before
- *  it closes, in case the listing raced a record just added. Accepted rows
- *  and Broom flags stay with the worker. Never throws: a table that cannot
- *  be read is left for the worker. Answers with the ids it closed. */
+ *  it closes, in case the listing raced a record just added. The row
+ *  itself is read again too, right before the write: `items` can be seconds
+ *  old, and a row decided since then is left alone. Accepted rows and Broom
+ *  flags stay with the worker. Never throws: a table that cannot be read is
+ *  left for the worker. Answers with the ids it closed. */
 export async function closeHandledRows(items: QueueItem[]): Promise<string[]> {
   const byTable = new Map<string, QueueItem[]>()
   for (const i of items) {
@@ -2081,6 +2101,25 @@ export async function closeHandledRows(items: QueueItem[]): Promise<string[]> {
               why = handledOutside((await res.json()) as { fields: RawFields })
             }
             if (!why) continue
+            // The list this row came from can be seconds old, and Accept
+            // publishes the record a moment before it marks the row
+            // Applied: closing on the old status wrote "Published outside
+            // the queue" over a decision just made here, which took it off
+            // Done today with no Undo and no reply draft (17 Nov 2026; the
+            // Mac worker's sync had the same fault until 5 Oct 2026).
+            const status = await statusNow(row.id)
+            if (status !== 'Pending' && status !== 'Revising') {
+              console.log(
+                `[admin-queue] sync: left ${row.id} "${row.title}" alone – ${
+                  status === undefined
+                    ? 'its status could not be read'
+                    : status === null
+                      ? 'the row is gone'
+                      : `decided since the list was read (${status})`
+                }`
+              )
+              continue
+            }
             await patchQueueRow(row.id, {
               [F.status]: 'Closed',
               [F.error]: why,
