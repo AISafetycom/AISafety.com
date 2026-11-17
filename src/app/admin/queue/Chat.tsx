@@ -1082,6 +1082,8 @@ export default function Chat({
   // words in the box, Enter puts them in and sends, Esc throws them away.
   // The Mac turns the recording into words (~/Queue/dictate.py), so they
   // are as good as its Whisper model and nothing goes to another service.
+  // Since 17 Nov 2026 the words show in the box as he speaks (the box is
+  // read-only meanwhile), and holding ⌘ after ⌘D is hold-to-talk.
   const textRef = useRef(text)
   textRef.current = text
   const submitRef = useRef(submit)
@@ -1091,12 +1093,24 @@ export default function Chat({
     text: string
     retry?: () => void
   } | null>(null)
+  // The box as it was when dictation started, and where the words go.
+  const liveAt = useRef<{ text: string; from: number; to: number } | null>(null)
+  const markStart = () => {
+    const el = inputRef.current
+    const now = textRef.current
+    liveAt.current =
+      el && document.activeElement === el
+        ? { text: now, from: el.selectionStart, to: el.selectionEnd }
+        : { text: now, from: now.length, to: now.length }
+  }
   const dictation = useDictation({
     meterRef: micRef,
-    transcribe: async audio => {
+    transcribe: async (audio, { context, partial }) => {
       const res = await call('/chat/dictate', {
         audio: await base64Of(audio),
         type: audio.type,
+        context,
+        partial,
       })
       const data = (await res.json().catch(() => ({}))) as {
         text?: string
@@ -1105,24 +1119,56 @@ export default function Chat({
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
       return data.text ?? ''
     },
+    warm: () => {
+      call('/chat/dictate', { warm: true }).catch(e =>
+        console.warn('Queue chat: the Mac did not get dictation ready', e)
+      )
+    },
+    onLive: words => {
+      const at = liveAt.current
+      if (!at) return
+      if (!words) liveAt.current = null
+      if (!mountedRef.current) {
+        // Gone to another item: its draft may hold the words so far.
+        if (!words) {
+          const d = draftOf(item.id)
+          saveDraft(item.id, at.text, d?.quote ?? null)
+        }
+        return
+      }
+      const next = words
+        ? insertDictated(at.text, at.from, at.to, words)
+        : { text: at.text, caret: at.to }
+      setText(next.text)
+      requestAnimationFrame(() => {
+        const box = inputRef.current
+        if (!box) return
+        box.setSelectionRange(next.caret, next.caret)
+        grow(box)
+      })
+    },
     onWords: (words, send) => {
       setHeard(null)
+      const at = liveAt.current
+      liveAt.current = null
       if (!mountedRef.current) {
         // Bryce moved to another item while it listened: the words wait in
-        // this item's draft.
+        // this item's draft, in place of the words so far.
         const d = draftOf(item.id)
-        const was = d?.text ?? ''
+        const was = at?.text ?? d?.text ?? ''
+        const [from, to] = at ? [at.from, at.to] : [was.length, was.length]
         saveDraft(
           item.id,
-          insertDictated(was, was.length, was.length, words).text,
+          insertDictated(was, from, to, words).text,
           d?.quote ?? null
         )
         return
       }
       const el = inputRef.current
-      const now = textRef.current
-      const [from, to] =
-        el && document.activeElement === el
+      const now = at?.text ?? textRef.current
+      const [from, to] = at
+        ? [at.from, at.to]
+        : el && document.activeElement === el
           ? [el.selectionStart, el.selectionEnd]
           : [now.length, now.length]
       const next = insertDictated(now, from, to, words)
@@ -1143,10 +1189,15 @@ export default function Chat({
   })
   const listening =
     dictation.state === 'listening' || dictation.state === 'starting'
-  const toggleDictation = () => {
+  /** The mic (`key` false) or ⌘D (`key` true, which can be held to talk). */
+  const toggleDictation = (key = false) => {
     setHeard(null)
-    if (dictation.state === 'off') inputRef.current?.focus()
-    dictation.toggle()
+    if (dictation.state === 'off') {
+      inputRef.current?.focus()
+      markStart()
+    }
+    if (key) dictation.press()
+    else dictation.toggle()
   }
   const toggleRef = useRef(toggleDictation)
   toggleRef.current = toggleDictation
@@ -1158,7 +1209,7 @@ export default function Chat({
       if (e.defaultPrevented || !isDictationKey(e, mac)) return
       // Not the browser's bookmark (Cmd+D).
       e.preventDefault()
-      if (!e.repeat) toggleRef.current()
+      if (!e.repeat) toggleRef.current(true)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -1382,6 +1433,9 @@ export default function Chat({
                         : 'Ask Fable, or say what should change…'
             }
             value={text}
+            // The words show here as he speaks; typing would land in the
+            // middle of them.
+            readOnly={dictate && dictation.state !== 'off'}
             onChange={e => setText(e.target.value)}
             onInput={e => grow(e.currentTarget)}
             onPaste={e => {
@@ -1448,7 +1502,7 @@ export default function Chat({
               disabled={dictation.state === 'transcribing'}
               // The box keeps the cursor, so the words go where it is.
               onMouseDown={e => e.preventDefault()}
-              onClick={toggleDictation}
+              onClick={() => toggleDictation()}
             >
               {dictation.state === 'transcribing' ? (
                 <span className={styles.chatMicBusy} />
@@ -1483,8 +1537,17 @@ export default function Chat({
         </div>
         {dictation.state === 'listening' && (
           <p className={styles.chatDictating}>
-            <kbd>⌘D</kbd> puts the words in · <kbd>Enter</kbd> sends ·{' '}
-            <kbd>Esc</kbd> cancels
+            {dictation.holding ? (
+              <>
+                Let go of <kbd>⌘</kbd> to put the words in · <kbd>Esc</kbd>{' '}
+                cancels
+              </>
+            ) : (
+              <>
+                <kbd>⌘D</kbd> puts the words in · <kbd>Enter</kbd> sends ·{' '}
+                <kbd>Esc</kbd> cancels
+              </>
+            )}
           </p>
         )}
         {heard && (
