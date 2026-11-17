@@ -1311,8 +1311,8 @@ describe('stopping a send', () => {
     })
   })
 
-  it('only newsletter sends (lists 5–8) can be stopped from the page', async () => {
-    for (const list of ['4', '9']) {
+  it('only newsletter sends (lists 5–9) can be stopped from the page', async () => {
+    for (const list of ['4', '3']) {
       const ac = makeAC({ extra: [at('1', list)] })
       vi.stubGlobal('fetch', ac.fetchMock)
       const nl = await freshModule()
@@ -1671,6 +1671,53 @@ describe('Recent sends and Analytics group waves by issue', () => {
     const nl = await freshModule()
     const { issues } = await nl.readSendStats({ startMs: null, endMs: null })
     expect(issues).toEqual([])
+  })
+
+  it('Analytics and the past issues page: an Updates issue counts from 20 readers, the others from 50', async () => {
+    const ac = makeAC({
+      extra: [
+        // Updates' whole list, about 70 people.
+        camp({
+          id: '176',
+          name: 'Updates · Issue #5, 2026',
+          list: '9',
+          status: '5',
+          send_amt: '70',
+          sdate: '2026-12-01 09:00:00',
+        }),
+        // A practice send of the next one to three addresses.
+        camp({
+          id: '177',
+          name: 'Updates · Issue #6, 2027',
+          list: '9',
+          status: '5',
+          send_amt: '3',
+          sdate: '2027-01-05 09:00:00',
+        }),
+        // 30 people isn't an issue of a weekly newsletter.
+        camp({
+          id: '178',
+          name: 'Events · Week 40, 2026',
+          list: '6',
+          status: '5',
+          send_amt: '30',
+        }),
+      ],
+    })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const { issues } = await nl.readSendStats({ startMs: null, endMs: null })
+    expect(issues.map(s => [s.name, s.newsletter, s.sent])).toEqual([
+      ['Updates · Issue #5, 2026', 'Updates', 70],
+    ])
+    // The past issues page reads every send that reached readers and
+    // applies the newsletter's own floor itself.
+    expect(
+      (await nl.sentIssuesOn('9')).map(i => [i.name, i.readers]).sort()
+    ).toEqual([
+      ['Updates · Issue #5, 2026', 70],
+      ['Updates · Issue #6, 2027', 3],
+    ])
   })
 
   it('Analytics: a spam report that doesn’t load leaves the count unknown', async () => {

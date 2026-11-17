@@ -1558,9 +1558,11 @@ describe('stopActionsFor', () => {
       expect(stopActionsFor(s, ['6'])).toEqual([])
   })
 
-  it('only for single-list sends on lists 5–8', () => {
+  it('only for single-list sends on lists 5–9', () => {
     expect(stopActionsFor('1', ['4'])).toEqual([])
-    expect(stopActionsFor('1', ['9'])).toEqual([])
+    expect(stopActionsFor('1', ['3'])).toEqual([])
+    // Updates (list 9) since its move.
+    expect(stopActionsFor('1', ['9'])).toEqual(['cancel'])
     expect(stopActionsFor('1', ['6', '7'])).toEqual([])
     expect(stopActionsFor('1', [])).toEqual([])
   })

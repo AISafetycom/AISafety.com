@@ -25,7 +25,7 @@
   reports what it would cancel and changes nothing.
 
   Each run looks at campaigns on the real lists (6 Events, 7 Training,
-  8 Funding) and raises an alert when one:
+  8 Funding, 9 Updates) and raises an alert when one:
   - is held for ActiveCampaign's review (status 7) for more than 20 minutes;
   - is paused (3), stopped (4) or disabled (6);
   - is still scheduled (1) 20 minutes after its send time;
@@ -39,12 +39,13 @@
     kept to — nobody has yet proven ActiveCampaign honours a segment set
     through the v1 API at send time);
   - is a pipeline draft on 6, 7 or 8 older than 30 hours that isn't part of a
-    wave sequence still going out.
+    wave sequence still going out (not Updates: its drafts may wait).
   And for the account: ActiveCampaign's API failing for more than an hour,
   account_view's subscriber_limit or status changing, and the contact count
   within 50 of the limit (at 5,000 ActiveCampaign stops EVERY campaign).
 
-  Once per sent issue or wave on 6/7/8, 18 hours after it finished: a health
+  Once per sent issue or wave on 6/7/8 (not Updates' small list, see
+  HEALTH_CHECK_LISTS), 18 hours after it finished: a health
   check (bounces, unsubscribes, spam complaints, verified opens) with a
   green/amber/red verdict, emailed and stored for the page. A red one cancels
   the waves of that issue still scheduled (above); amber cancels nothing.
@@ -97,7 +98,7 @@ import {
 export { MAX_UNSEGMENTED_SEND, NEWSLETTER_WARMUP }
 
 /** Lists real subscribers are on. */
-const REAL_LISTS = ['6', '7', '8']
+const REAL_LISTS = ['6', '7', '8', '9']
 /** Lists whose sends get the 18-hour health check and whose drafts must not
  *  sit around (the lists the imported readers are on: Events and Training,
  *  and Funding from its move day). Their waves are the ones canceled after a
@@ -107,6 +108,7 @@ const LIST_LABELS: Record<string, string> = {
   '6': 'Events',
   '7': 'Training',
   '8': 'Funding',
+  '9': 'Updates',
 }
 
 const MINUTE = 60_000

@@ -44,7 +44,8 @@ describe('confirmations (/subscribed/<key>)', () => {
     // Funding's box signs people up on the site since its move too.
     view('/subscribed/funding', 'd', '2026-10-21T12:00:00Z'),
     view('/events', 'a', '2026-10-12T10:06:00Z'),
-    view('/subscribed/updates', 'c', '2026-10-12T10:06:00Z'),
+    // Not a confirm page.
+    view('/subscribed/jobs', 'c', '2026-10-12T10:06:00Z'),
   ])
 
   it('counts a reader once and a link opened twice once by default, every landing in total mode', () => {
@@ -76,6 +77,30 @@ describe('confirmations (/subscribed/<key>)', () => {
     expect(
       newsletterConfirmations([], true, { byPage: [], errors: [] })
     ).toEqual([])
+  })
+
+  it('counts Updates, alone and in a combination, since its move', () => {
+    const events = newestFirst([
+      view('/subscribed/updates', 'a', '2026-11-20T10:00:00Z'),
+      view('/subscribed/events-updates', 'b', '2026-11-20T11:00:00Z'),
+      view(
+        '/subscribed/events-training-funding-updates',
+        'c',
+        '2026-11-20T12:00:00Z'
+      ),
+    ])
+    const results: NewsletterSignupResults = {
+      byPage: [
+        { name: '/newsletter/updates', succeeded: 2, already: 0, failed: 0 },
+      ],
+      errors: [],
+    }
+    expect(newsletterConfirmations(events, true, results)).toEqual([
+      { name: 'Events', signedUp: 0, confirmed: 2 },
+      { name: 'Funding', signedUp: 0, confirmed: 1 },
+      { name: 'Training', signedUp: 0, confirmed: 1 },
+      { name: 'Updates', signedUp: 2, confirmed: 3 },
+    ])
   })
 })
 
@@ -180,6 +205,12 @@ describe('newsletterOfRef', () => {
         'https://aisafety.com/training?utm_source=events-training-newsletter'
       )
     ).toEqual({ newsletter: 'Events & Training', campaign: null })
+    // Updates' links carry tags since it moved to ActiveCampaign.
+    expect(
+      newsletterOfRef(
+        'https://aisafety.com/?utm_source=updates-newsletter&utm_medium=email&utm_campaign=updates-2026-5'
+      )
+    ).toEqual({ newsletter: 'Updates', campaign: 'updates-2026-5' })
   })
 
   it('ignores any other address', () => {

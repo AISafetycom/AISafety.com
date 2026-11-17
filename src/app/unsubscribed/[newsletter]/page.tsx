@@ -14,6 +14,8 @@ const NEWSLETTERS = {
   events: { name: 'AI Safety Events', page: '/events' },
   training: { name: 'AI Safety Training', page: '/training' },
   funding: { name: 'AI Safety Funding', page: '/funding' },
+  // No resource page: its own page has the signup box.
+  updates: { name: 'AISafety.com Updates', page: '/newsletter/updates' },
 } as const
 
 type Key = keyof typeof NEWSLETTERS

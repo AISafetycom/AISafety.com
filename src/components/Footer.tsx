@@ -79,9 +79,9 @@ export default function Footer() {
                 />
               </h2>
               <div className="paragraph-small flex flex-col gap-8px link-group">
-                {/* Events, Training and Funding each have a page of their
-                    own (signup box, past issues, feed: /newsletter/<key>);
-                    Updates is still on Substack. */}
+                {/* Each newsletter has a page of its own (signup box, past
+                    issues, feed: /newsletter/<key>); Updates' too since it
+                    moved from Substack in November 2026. */}
                 <FooterLink
                   href="/newsletter/events"
                   section="Newsletters"
@@ -98,7 +98,7 @@ export default function Footer() {
                   label="AI Safety Funding"
                 />
                 <FooterLink
-                  href="https://aisafetycom.substack.com/"
+                  href="/newsletter/updates"
                   section="Newsletters"
                   label="AISafety.com Updates"
                 />

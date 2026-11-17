@@ -29,7 +29,18 @@ export const WAVE_SPACING_MINUTES_TEST = 10
 /** The lists whose sends and waves the send watcher judges 18 hours after
  *  they finish: the lists the imported readers are on (Events and Training
  *  from 8 October 2026, Funding from its move day). Only their waves wait for
- *  a verdict. */
+ *  a verdict.
+ *
+ *  Updates (list 9) is left out on purpose: with about 70 readers one spam
+ *  complaint is 1.4% and one hard bounce 1.4%, far past the verdict's lines
+ *  (red above 0.1% complaints, amber at 1% bounces), so every issue would
+ *  raise an alert that says nothing. It never goes out in waves, and its
+ *  drafts may wait days for a read-through, so the leftover-draft alert
+ *  doesn't fit either. The watcher still watches its sends for the problems
+ *  that don't depend on size (held, stuck, stopped, not approved on the
+ *  page: REAL_LISTS in newsletter-watch.ts), and its bounces, unsubscribes
+ *  and complaints show per issue on /admin/analytics. Add '9' here if the
+ *  list ever grows to a few thousand. */
 export const HEALTH_CHECK_LISTS: readonly string[] = ['6', '7', '8']
 
 /** The watcher cancels a wave (and every later one) that starts within this

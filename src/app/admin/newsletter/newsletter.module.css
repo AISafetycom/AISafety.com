@@ -239,6 +239,10 @@
   background: var(--orange-300);
 }
 
+.dotUpdates {
+  background: var(--teal-300);
+}
+
 .newsletterName {
   font-weight: 600;
 }

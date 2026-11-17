@@ -489,8 +489,8 @@ export function OrgView({
                 the issues sent in these dates. Each count covers the
                 issue&apos;s whole life so far and every click, not unique
                 readers. Counting began with the issues sent on 8 October 2026,
-                and a new issue shows here within a day of going out. Issues of
-                the newsletters still sent through Substack aren&apos;t counted.
+                and a new issue shows here within a day of going out. Issues
+                sent through Substack before then aren&apos;t counted.
               </>
             ) : (
               <>

@@ -1194,7 +1194,7 @@ async function AnalyticsView({
               unit: 'signups',
               metric: data.trends.newsletterSignups,
               since: SITE_SIGNUPS_SINCE,
-              what: 'Signed up through the site = submits of the boxes on /events, /training, /funding, their past issues pages, and /newsletter that ActiveCampaign took, as Signups through the site counts them. Since 12 November 2026 each one is subscribed at once; before that the reader first had to press a link in an email.',
+              what: 'Signed up through the site = submits of the boxes on /events, /training, /funding, the newsletters’ own pages, and /newsletter that ActiveCampaign took, as Signups through the site counts them. Since 12 November 2026 each one is subscribed at once; before that the reader first had to press a link in an email.',
             },
             {
               key: 'confirmed',
@@ -1202,7 +1202,7 @@ async function AnalyticsView({
               unit: 'presses',
               metric: data.trends.newsletterConfirmed,
               since: SITE_SIGNUPS_SINCE,
-              what: `Pressed the email’s button = readers who pressed the button in the email a signup sends and landed on aisafety.com/subscribed/events, /subscribed/training or /subscribed/funding, ${unique ? 'once per visitor, and not again when the same link opens a second time within two minutes (the Unique count)' : 'every landing (the Total count)'}, as Signups through the site counts them.`,
+              what: `Pressed the email’s button = readers who pressed the button in the email a signup sends and landed on one of the confirm pages (aisafety.com/subscribed/events and the like), ${unique ? 'once per visitor, and not again when the same link opens a second time within two minutes (the Unique count)' : 'every landing (the Total count)'}, as Signups through the site counts them.`,
             },
             {
               key: 'newsletter-visits',
@@ -1402,16 +1402,16 @@ async function AnalyticsView({
                     />
                     <p className={styles.caption}>
                       Submits of the newsletter email box on /events, /training,
-                      and /funding, on the past issues pages
-                      (/newsletter/events, /newsletter/training, and
-                      /newsletter/funding, listed by their address), and of the
-                      several-newsletters form on /newsletter – not every submit
-                      ends in a signup (how the ActiveCampaign ones ended is
-                      below). % of visitors = the share of the page&apos;s
-                      visitors who submitted it; the Total row divides by
-                      visitors to the pages with the box combined. Recording
-                      since 29 July 2026; the past issues pages since October
-                      2026.
+                      and /funding, on the newsletters&apos; own pages
+                      (/newsletter/events, /newsletter/training,
+                      /newsletter/funding, and /newsletter/updates, listed by
+                      their address), and of the several-newsletters form on
+                      /newsletter – not every submit ends in a signup (how the
+                      ActiveCampaign ones ended is below). % of visitors = the
+                      share of the page&apos;s visitors who submitted it; the
+                      Total row divides by visitors to the pages with the box
+                      combined. Recording since 29 July 2026; the past issues
+                      pages since October 2026.
                     </p>
                   </Panel>
                   <SignupResultsPanel
@@ -1917,8 +1917,9 @@ async function AnalyticsView({
                 />
                 <p className={styles.caption}>
                   Submits of the newsletter email box on /events, /training, and
-                  /funding, on the past issues pages (/newsletter/events,
-                  /newsletter/training, and /newsletter/funding), and of the
+                  /funding, on the newsletters&apos; own pages
+                  (/newsletter/events, /newsletter/training,
+                  /newsletter/funding, and /newsletter/updates), and of the
                   several-newsletters form on /newsletter – not every submit
                   ends in a signup (the Newsletters tab shows how the
                   ActiveCampaign ones ended). % of visitors = the share of the
@@ -2355,8 +2356,9 @@ function NewslettersPagePanel({ stats }: { stats: NewslettersPageStats }) {
         up to several at once (those signups are under its own row in the signup
         results above) and readers change theirs from the Manage subscriptions
         link at the bottom of each issue. Clicks to its page are clicks through
-        to the newsletter&apos;s past issues page (for Updates, to its
-        Substack). Recording since the page went live in October 2026.
+        to the newsletter&apos;s past issues page (for Updates, to its Substack
+        until it moved in November 2026). Recording since the page went live in
+        October 2026.
       </p>
     </Panel>
   )
@@ -2398,7 +2400,7 @@ function CardEditsPanel({ counts }: { counts: CardEditCounts | null }) {
 }
 
 /** The Newsletters tab's newsletter pages (/newsletter/events, /training,
- *  /funding) and feeds: the pages' views and clicks in the range, and the
+ *  /funding, /updates) and feeds: the pages' views and clicks in the range, and the
  *  feeds' readers yesterday and today. */
 function PastIssuesPanel({
   rows,
@@ -2407,7 +2409,12 @@ function PastIssuesPanel({
   rows: NewsletterArchiveRow[]
   feeds: { yesterday: FeedReaders[]; today: FeedReaders[] } | null
 }) {
-  const names = { events: 'Events', training: 'Training', funding: 'Funding' }
+  const names = {
+    events: 'Events',
+    training: 'Training',
+    funding: 'Funding',
+    updates: 'Updates',
+  }
   const readers = (list: FeedReaders[], name: string) => {
     const r = list.find(f => names[f.newsletter] === name)
     return r ? r.services + r.direct : 0
@@ -2509,17 +2516,18 @@ function PastIssuesPanel({
       )}
       <p className={styles.caption}>
         Each newsletter&apos;s page (aisafety.com/newsletter/events,
-        /newsletter/training, /newsletter/funding) lists its issues sent since
-        the move to ActiveCampaign (Events and Training 8 October 2026, Funding
-        21 October 2026), with an RSS feed (…/feed). Page views and clicks
-        follow the range; a click to an issue opens its web version, and
-        &ldquo;To resource page&rdquo; counts the link on to /events, /training,
-        or /funding (since 23 October 2026). Feed readers aren&apos;t for the
-        range: they&apos;re the people following the feed on one day (UTC). A
-        feed service such as Feedly fetches once for all its users and reports
-        how many; a reader app fetches for one person. Opening the feed in a
-        browser, search engines, AI assistants and scripts aren&apos;t counted.
-        Recording since October 2026.
+        /newsletter/training, /newsletter/funding, /newsletter/updates) lists
+        its issues sent since the move to ActiveCampaign (Events and Training 8
+        October 2026, Funding 21 October 2026, Updates November 2026), with an
+        RSS feed (…/feed). Page views and clicks follow the range; a click to an
+        issue opens its web version, and &ldquo;To resource page&rdquo; counts
+        the link on to /events, /training, or /funding (since 23 October 2026).
+        Feed readers aren&apos;t for the range: they&apos;re the people
+        following the feed on one day (UTC). A feed service such as Feedly
+        fetches once for all its users and reports how many; a reader app
+        fetches for one person. Opening the feed in a browser, search engines,
+        AI assistants and scripts aren&apos;t counted. Recording since October
+        2026.
       </p>
     </Panel>
   )
@@ -2647,11 +2655,13 @@ function NewsletterVisitsPanel({
         reloading the page within it isn&apos;t a new visit. Events &amp;
         Training = the two together on Substack, before 8 October 2026; Funding
         sent from Substack with the same tags until it moved on 21 October 2026.
-        Saw another page = the share of visits that went on to another page of
-        the site; Clicked a listing = the share with a click on a listing. Every
-        visit counts, whatever the count mode. Links to other sites in the
-        emails go straight there and are under Most-clicked links. A visitor
-        whose browser blocks the site&apos;s tracking isn&apos;t counted.
+        Updates has carried the same kind of tags since it moved in November
+        2026. Saw another page = the share of visits that went on to another
+        page of the site; Clicked a listing = the share with a click on a
+        listing. Every visit counts, whatever the count mode. Links to other
+        sites in the emails go straight there and are under Most-clicked links.
+        A visitor whose browser blocks the site&apos;s tracking isn&apos;t
+        counted.
       </p>
     </Panel>
   )
@@ -2777,9 +2787,10 @@ function NewsletterLinksPanel({
         email field, which opened the newsletter on Substack to read first until
         the Funding newsletter moved on 21 October 2026; since then the box
         signs people up on the site like the others. Footer = the links in the
-        site footer&apos;s Newsletters column, on every page: Events, Training
-        and Funding go to their pages, whose box signs people up; Updates goes
-        to Substack (Funding did too before its move).{' '}
+        site footer&apos;s Newsletters column, on every page: each goes to the
+        newsletter&apos;s own page, whose box signs people up (Updates went to
+        Substack until it moved in November 2026, and Funding did before its
+        move).{' '}
         {unique
           ? 'Once per visitor per link per day (the Unique count).'
           : 'Every click (the Total count).'}
@@ -2894,24 +2905,24 @@ function SignupResultsPanel({
         through ActiveCampaign; /funding&apos;s box does too since the Funding
         newsletter moved on 21 October 2026 (before that it opened Substack, so
         its earlier signups don&apos;t show here), and so does /newsletter,
-        several newsletters at once, since 26 October 2026. Signed up =
-        ActiveCampaign took the address and emailed the reader. Since 12
-        November 2026 that is all it takes to be subscribed; before then only
-        readers who pressed the link in that email were, and about one in six
-        never did. Already subscribed = the address was on the list already, so
-        the visitor was told so and nothing was sent. Errors = the visitor saw
-        an error message instead. Pressed the button = readers who pressed the
-        button in that email (the confirmation link, until 12 November 2026):
-        ActiveCampaign then sends them to aisafety.com/subscribed/events,
-        /subscribed/training or /subscribed/funding, and their view of that page
-        is counted. In the Unique count that&apos;s once per visitor, and not
-        again when the same link opens a second time within two minutes in
-        another browser (an email app&apos;s own browser and then the
-        phone&apos;s, or a mail scanner checking the link). Anyone else who
-        opens one of those pages counts too, tests included. A press can come
-        days after its signup, so near the range&apos;s edges the two don&apos;t
-        pair up exactly, and a reader whose browser blocks the site&apos;s
-        tracking isn&apos;t counted.
+        several newsletters at once, since 26 October 2026. Updates joined them
+        when it moved from Substack in November 2026. Signed up = ActiveCampaign
+        took the address and emailed the reader. Since 12 November 2026 that is
+        all it takes to be subscribed; before then only readers who pressed the
+        link in that email were, and about one in six never did. Already
+        subscribed = the address was on the list already, so the visitor was
+        told so and nothing was sent. Errors = the visitor saw an error message
+        instead. Pressed the button = readers who pressed the button in that
+        email (the confirmation link, until 12 November 2026): ActiveCampaign
+        then sends them to aisafety.com/subscribed/events, /subscribed/training
+        or /subscribed/funding, and their view of that page is counted. In the
+        Unique count that&apos;s once per visitor, and not again when the same
+        link opens a second time within two minutes in another browser (an email
+        app&apos;s own browser and then the phone&apos;s, or a mail scanner
+        checking the link). Anyone else who opens one of those pages counts too,
+        tests included. A press can come days after its signup, so near the
+        range&apos;s edges the two don&apos;t pair up exactly, and a reader
+        whose browser blocks the site&apos;s tracking isn&apos;t counted.
       </p>
     </Panel>
   )
@@ -3108,25 +3119,27 @@ function NewsletterView({
           </p>
         )}
         <p className={styles.caption}>
-          Issues sent through ActiveCampaign to the Events, Training and Funding
-          lists, by the day each first went out. Test lists, and practice sends
-          to fewer than 50 people, are left out. Events and Training moved from
-          Substack on 8 October 2026 and Funding on 21 October 2026, so their
-          earlier issues aren&apos;t here. An issue sent in waves is one row
-          with all its waves added up. Sent to = emails sent, bounced ones
-          included. Opened = unique opens ÷ emails sent, from ActiveCampaign.
-          Apple Mail opens every email it receives, so this reads high, and the
-          send watcher&apos;s verified opens, which leave those out, read lower.
-          Clicks are counted on aisafety.com as readers follow a link in the
-          email or its web, text or feed copy, every click (not unique readers)
-          whenever it was made, link checkers left out. Clicks per email =
-          clicks ÷ emails sent. Bounced = emails turned away, hard (the address
-          doesn&apos;t exist, so ActiveCampaign sends it nothing more) and soft
-          (a full mailbox or a server down, tried again next time). Hover a
-          number for the split. Spam = readers who pressed Report spam where
-          their mail service tells the sender (Yahoo, Outlook, AOL and others;
-          Gmail tells nobody about one reader). No sender can see whether an
-          email landed in a spam folder, so falling opens are the usual sign.
+          Issues sent through ActiveCampaign to the Events, Training, Funding
+          and Updates lists, by the day each first went out. Test lists, and
+          practice sends to fewer than 50 people (20 for Updates, whose list is
+          small), are left out. Events and Training moved from Substack on 8
+          October 2026, Funding on 21 October 2026 and Updates in November 2026,
+          so their earlier issues aren&apos;t here. An issue sent in waves is
+          one row with all its waves added up. Sent to = emails sent, bounced
+          ones included. Opened = unique opens ÷ emails sent, from
+          ActiveCampaign. Apple Mail opens every email it receives, so this
+          reads high, and the send watcher&apos;s verified opens, which leave
+          those out, read lower. Clicks are counted on aisafety.com as readers
+          follow a link in the email or its web, text or feed copy, every click
+          (not unique readers) whenever it was made, link checkers left out.
+          Clicks per email = clicks ÷ emails sent. Bounced = emails turned away,
+          hard (the address doesn&apos;t exist, so ActiveCampaign sends it
+          nothing more) and soft (a full mailbox or a server down, tried again
+          next time). Hover a number for the split. Spam = readers who pressed
+          Report spam where their mail service tells the sender (Yahoo, Outlook,
+          AOL and others; Gmail tells nobody about one reader). No sender can
+          see whether an email landed in a spam folder, so falling opens are the
+          usual sign.
         </p>
       </Panel>
       <Panel title="Most-clicked links">

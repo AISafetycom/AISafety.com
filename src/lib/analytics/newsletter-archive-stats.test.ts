@@ -128,6 +128,36 @@ describe('newsletterArchiveStats', () => {
     ])
   })
 
+  it('counts the Updates page from the day it moved, issues or not', () => {
+    expect(
+      newsletterArchiveStats(
+        [
+          // Before the move the address was the 404 page.
+          view('/newsletter/updates', 'a', '2026-11-10T12:00:00Z'),
+          view('/newsletter/updates', 'b', '2026-11-20T12:00:00Z'),
+          click('Updates', 'substack', 'b', '2026-11-20T12:01:00Z'),
+          click(
+            'Updates',
+            'issue',
+            'b',
+            '2026-12-03T12:00:00Z',
+            'issue-5-2026'
+          ),
+        ],
+        true
+      )
+    ).toEqual([
+      {
+        name: 'Updates',
+        views: 1,
+        issueClicks: 1,
+        feedClicks: 0,
+        substackClicks: 1,
+        resourceClicks: 0,
+      },
+    ])
+  })
+
   it('is empty with nothing to count', () => {
     expect(newsletterArchiveStats([view('/events', 'a', DAY1)], true)).toEqual(
       []

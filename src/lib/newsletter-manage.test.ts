@@ -97,39 +97,59 @@ describe('maskEmail', () => {
 })
 
 describe('subscriptionsFrom', () => {
-  it('counts only active memberships of the three newsletter lists', () => {
+  it('counts only active memberships of the four newsletter lists', () => {
     expect(
       subscriptionsFrom({
         [NEWSLETTER_LIST.events]: '1',
         [NEWSLETTER_LIST.training]: '2',
         [NEWSLETTER_LIST.funding]: '0',
+        [NEWSLETTER_LIST.updates]: '1',
         '5': '1',
       })
-    ).toEqual({ events: true, training: false, funding: false })
+    ).toEqual({ events: true, training: false, funding: false, updates: true })
     expect(subscriptionsFrom({})).toEqual({
       events: false,
       training: false,
       funding: false,
+      updates: false,
+    })
+  })
+
+  it('knows each newsletter by its ActiveCampaign list', () => {
+    expect(NEWSLETTER_LIST).toEqual({
+      events: '6',
+      training: '7',
+      funding: '8',
+      updates: '9',
     })
   })
 })
 
 describe('parseWanted / changesFor', () => {
   it('turns the ticks into the list changes that differ', () => {
-    const current = { events: true, training: true, funding: false }
+    const current = {
+      events: true,
+      training: true,
+      funding: false,
+      updates: false,
+    }
     expect(
       changesFor(current, { events: true, training: false, funding: true })
     ).toEqual([
       { newsletter: 'training', list: NEWSLETTER_LIST.training, status: 2 },
       { newsletter: 'funding', list: NEWSLETTER_LIST.funding, status: 1 },
     ])
+    expect(changesFor(current, { updates: true })).toEqual([
+      { newsletter: 'updates', list: '9', status: 1 },
+    ])
     expect(changesFor(current, { events: true })).toEqual([])
     expect(changesFor(current, {})).toEqual([])
   })
 
-  it('takes only true or false for the three newsletters', () => {
+  it('takes only true or false for the four newsletters', () => {
     expect(parseWanted({ events: false })).toEqual({ events: false })
-    expect(parseWanted({ updates: true })).toBeNull()
+    expect(parseWanted({ updates: true })).toEqual({ updates: true })
+    expect(parseWanted({ jobs: true })).toBeNull()
     expect(parseWanted({ events: 'yes' })).toBeNull()
     expect(parseWanted([true])).toBeNull()
     expect(parseWanted(null)).toBeNull()
@@ -142,11 +162,12 @@ describe('parsePicks', () => {
       'events',
       'funding',
     ])
+    expect(parsePicks(['updates', 'training'])).toEqual(['training', 'updates'])
   })
 
   it('refuses an empty list, an unknown newsletter or something else', () => {
     expect(parsePicks([])).toBeNull()
-    expect(parsePicks(['events', 'updates'])).toBeNull()
+    expect(parsePicks(['events', 'jobs'])).toBeNull()
     expect(parsePicks('events')).toBeNull()
     expect(parsePicks(undefined)).toBeNull()
   })

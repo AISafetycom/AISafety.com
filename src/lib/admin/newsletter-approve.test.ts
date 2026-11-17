@@ -13,7 +13,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   blobFiles,
   buildEmail,
+  buildUpdatesEmail,
   camp,
+  digest,
   expireLocks,
   freshModule,
   kv,
@@ -21,6 +23,7 @@ import {
   makeAC,
   outcome,
   resetKv,
+  UPDATES_SUBJECT,
 } from './__fixtures__/fake-ac'
 
 // The pretend ActiveCampaign, Upstash and mail script: ./__fixtures__/fake-ac.ts
@@ -485,10 +488,10 @@ describe('only production can send to, or edit drafts on, lists 6/7/8', () => {
   })
 
   it('refuses any list that isn’t a newsletter list', async () => {
-    const ac = makeAC({ draftList: '9' })
+    const ac = makeAC({ draftList: '3' })
     vi.stubGlobal('fetch', ac.fetchMock)
     const nl = await freshModule()
-    const r = await outcome(nl.approveAndSend('200', '9', WHO))
+    const r = await outcome(nl.approveAndSend('200', '3', WHO))
     expect((r.err as Error).message).toMatch(/isn’t a newsletter list/)
     expect(ac.calls).toHaveLength(0)
   })
@@ -910,9 +913,41 @@ describe('contentChecks', () => {
           })
         ).blocks
       ).toEqual([])
-    expect(contentChecks(input({ listId: '9' })).blocks).toEqual([
-      'list 9 isn’t a newsletter list',
+    expect(contentChecks(input({ listId: '3' })).blocks).toEqual([
+      'list 3 isn’t a newsletter list',
     ])
+  })
+
+  it('holds list 9 to Updates issues from the Updates address', async () => {
+    const { contentChecks } = await nl()
+    const updates = buildUpdatesEmail()
+    const issue = {
+      listId: '9',
+      name: 'Updates · Issue #5, 2026',
+      subject: UPDATES_SUBJECT,
+      fromEmail: 'updates@news.aisafety.com',
+      replyTo: 'updates@news.aisafety.com',
+      html: updates.html,
+      text: updates.text,
+    }
+    // A headline for a subject and no cards at all: nothing to block, and
+    // nothing for the approver to tick.
+    expect(contentChecks(input(issue))).toEqual({ blocks: [], warnings: [] })
+    expect(
+      contentChecks(input({ ...issue, name: 'Events · Week 41, 2026' })).blocks
+    ).toEqual([
+      '“Events · Week 41, 2026” isn’t a Updates issue, but list 9 is the Updates list',
+    ])
+    expect(
+      contentChecks(input({ ...issue, fromEmail: 'events@news.aisafety.com' }))
+        .blocks
+    ).toEqual([
+      'list 9 sends from updates@news.aisafety.com, but this draft comes from events@news.aisafety.com',
+    ])
+    // An Updates issue doesn't pass on another newsletter's list.
+    expect(contentChecks(input({ ...issue, listId: '8' })).blocks).toHaveLength(
+      2
+    )
   })
 
   it('blocks HTML over 100 KB', async () => {
@@ -1194,5 +1229,128 @@ describe('reading the page through a burst', () => {
     const drafts = await nl.listDrafts()
     expect(refused).toBe(1)
     expect(drafts.map(d => d.id)).toEqual(['200'])
+  })
+})
+
+/* ─── Updates (list 9, moved from Substack in November 2026) ──────────────
+   The one newsletter without cards: an issue is a few paragraphs, its
+   subject a headline, and its campaign still "Updates · Issue #N, YYYY". */
+
+describe('an Updates issue on list 9', () => {
+  const updatesAC = (over: Parameters<typeof makeAC>[0] = {}) =>
+    makeAC({
+      draftList: '9',
+      draftName: 'Updates · Issue #5, 2026',
+      email: buildUpdatesEmail(),
+      msg: {
+        subject: UPDATES_SUBJECT,
+        fromemail: 'updates@news.aisafety.com',
+        fromname: 'AISafety.com Updates',
+        reply2: 'updates@news.aisafety.com',
+      },
+      blob: {
+        [LINK_LIST]: {
+          v: 1,
+          c: 'Updates · Issue #5, 2026',
+          links: [{ u: 'https://aisafety.com/', k: 'page', t: 'AISafety.com' }],
+        },
+      },
+      ...over,
+    })
+
+  it('waits on the page like any draft, with no card panel and nothing to tick', async () => {
+    const ac = updatesAC()
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const [d] = await nl.listDrafts()
+    expect(d).toMatchObject({
+      id: '200',
+      name: 'Updates · Issue #5, 2026',
+      subject: UPDATES_SUBJECT,
+      listId: '9',
+      problems: [],
+      blocks: [],
+      warnings: [],
+      alreadySent: null,
+      waves: null,
+      // No cards: no Reorder or Edit panel, and nothing removed.
+      cards: null,
+      removed: [],
+      designChangedSince: null,
+    })
+    expect(d.preview).toBe(
+      'This newsletter goes out when something new launches.'
+    )
+  })
+
+  it('is approved in one press, named by its issue, not its subject', async () => {
+    const ac = updatesAC()
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const r = await nl.approveAndSend('200', '9', WHO)
+    expect(r.campaignId).toBe('201')
+    expect(ac.creates).toHaveLength(1)
+    const create = ac.calls.find(c => c.action === 'campaign_create')!
+    expect(create.form!.get('name')).toBe('Updates · Issue #5, 2026')
+    expect(create.form!.has('p[9]')).toBe(true)
+    expect(create.form!.get('segmentid')).toBeNull()
+    // A second press finds the send, whatever the subject says.
+    expireLocks()
+    const again = await outcome(nl.approveAndSend('200', '9', WHO))
+    expect(ac.creates).toHaveLength(1)
+    expect(again.ok).toBe(false)
+  })
+
+  it('goes out only from the live site, like the other real lists', async () => {
+    const ac = updatesAC()
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule({ VERCEL_ENV: undefined })
+    const r = await outcome(nl.approveAndSend('200', '9', WHO))
+    expect((r.err as Error).message).toMatch(/real newsletter list/)
+    expect(ac.creates).toHaveLength(0)
+  })
+
+  it('is told from the last Updates issue by name, so a changed design is noticed', async () => {
+    const stamp = (email: { html: string; text: string }, design: string) => {
+      const body = email.html
+        .replace(/<!--aisafety-issue:[0-9a-f]{16}-->/, '')
+        .replace('</body>', `<!--aisafety-design:${design}-->\n</body>`)
+      return {
+        html: `<!--aisafety-issue:${digest(body)}-->${body}`,
+        text: email.text,
+      }
+    }
+    const ac = updatesAC({
+      draftName: 'Updates · Issue #6, 2027',
+      email: stamp(buildUpdatesEmail(), 'bbbbbbbbbbbb'),
+      extra: [
+        camp({
+          id: '150',
+          name: 'Updates · Issue #5, 2026',
+          status: '5',
+          send_amt: '70',
+          list: '9',
+          msg: '301',
+        }),
+      ],
+      extraMsgs: [
+        {
+          id: '301',
+          subject: 'An earlier headline',
+          fromemail: 'updates@news.aisafety.com',
+          fromname: 'AISafety.com Updates',
+          reply2: 'updates@news.aisafety.com',
+          ...stamp(
+            buildUpdatesEmail({ subject: 'An earlier headline' }),
+            'aaaaaaaaaaaa'
+          ),
+        },
+      ],
+    })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const [d] = await nl.listDrafts()
+    expect(d.blocks).toEqual([])
+    expect(d.designChangedSince).toBe('Issue #5, 2026')
   })
 })

@@ -256,7 +256,7 @@ export function feedTile(
     value: shown.v,
     from,
     note: [
-      'Feed readers = people following the newsletters’ RSS feeds (aisafety.com/newsletter/events/feed, /training/feed, and /funding/feed) on each day (UTC), every feed together: a feed service such as Feedly reports how many of its users follow the feed, and each reader app fetching for one person counts once.',
+      'Feed readers = people following the newsletters’ RSS feeds (aisafety.com/newsletter/events/feed, /training/feed, /funding/feed, and /updates/feed) on each day (UTC), every feed together: a feed service such as Feedly reports how many of its users follow the feed, and each reader app fetching for one person counts once.',
       shown.part
         ? 'The figure is today so far.'
         : `The figure is ${dayWords(shown.t)}, the range’s last full day.`,
