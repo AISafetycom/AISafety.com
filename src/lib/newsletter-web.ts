@@ -2,8 +2,8 @@
 
    Each issue's "View in browser" link opens
    aisafety.com/newsletter/<key>/<issue> ("/newsletter/events/week-41-2026",
-   "/newsletter/funding/issue-21-2026"): the email as it went out, on a page
-   of its own. It replaces ActiveCampaign's web copy, which wrapped the email
+   "/newsletter/funding/issue-21-2026", "/newsletter/updates/issue-5-2026"):
+   the email as it went out, on a page of its own. It replaces ActiveCampaign's web copy, which wrapped the email
    in a share bar, a white frame and "Email Marketing by ActiveCampaign".
    The pipeline writes the link (~/Newsletter/render.py `web_url()`); the two
    must agree on the address, which maps one-to-one onto the campaign name.
@@ -23,7 +23,9 @@
    This module is the pure part (addresses and the page itself); the reads
    and the kept copy are in src/app/newsletter/[key]/[issue]/route.ts. */
 
-// `sender` is the From name each newsletter goes out under (~/Newsletter/ac.py).
+// `sender` is the From name each newsletter goes out under (~/Newsletter/ac.py);
+// `page` the resource page its listings come from, null for a newsletter
+// without one.
 export const WEB_NEWSLETTERS = {
   events: {
     list: '6',
@@ -46,6 +48,19 @@ export const WEB_NEWSLETTERS = {
     page: '/funding',
     sender: 'AI Safety Funding',
   },
+  // AISafety.com's own news, sent when the site launches something new
+  // (moved from Substack in November 2026; Issue #5 is its first from
+  // ActiveCampaign). It lists nothing, so it has no resource page, and an
+  // issue's subject is a headline of its own ("New chatbot and a redesigned
+  // Funding page") rather than its number: the campaign's name and the
+  // issue's address still carry the number, like Funding's.
+  updates: {
+    list: '9',
+    prefix: 'Updates',
+    unit: 'issue',
+    page: null,
+    sender: 'AISafety.com Updates',
+  },
 } as const
 
 export type WebKey = keyof typeof WEB_NEWSLETTERS
@@ -59,7 +74,7 @@ export const WEB_BASE =
 // No leading zeros, so each issue has one address.
 const SLUG_RE = /^(week|issue)-([1-9]\d{0,2})-(20\d\d)$/
 const NAME_RE =
-  /^(Events|Training|Funding) · (Week |Issue #)([1-9]\d{0,2}), (20\d\d)$/
+  /^(Events|Training|Funding|Updates) · (Week |Issue #)([1-9]\d{0,2}), (20\d\d)$/
 
 export function isWebKey(key: string): key is WebKey {
   return Object.prototype.hasOwnProperty.call(WEB_NEWSLETTERS, key)
@@ -87,6 +102,27 @@ export function webPath(name: string): string | null {
   const unit = m[2] === 'Week ' ? 'week' : 'issue'
   if (WEB_NEWSLETTERS[key].unit !== unit) return null
   return `/newsletter/${key}/${unit}-${m[3]}-${m[4]}`
+}
+
+/** Whether a newsletter's subject is a headline of its own rather than the
+ *  issue's number ("Week 41, 2026", "Issue #23, 2026"): its past issues list
+ *  and feed then show the headline, read from each email (emailSubject). */
+export function hasHeadline(key: WebKey): boolean {
+  return key === 'updates'
+}
+
+/** Pure: the subject of a sent email, from its <title> (the pipeline writes
+ *  the subject there, HTML-escaped: ~/Newsletter/render.py), as plain
+ *  characters. Null when the email has none. */
+export function emailSubject(email: string): string | null {
+  const title = /<title>([^<]*)<\/title>/.exec(email)?.[1]?.trim()
+  if (!title) return null
+  return title
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
 }
 
 /** Pure: the footer the web version shows in place of the email's: the
@@ -158,6 +194,11 @@ export function webPage(email: string, textHref?: string, seen = ''): string {
  *  issue at all. In the emails' colours, with the way to sign up. */
 export function missingPage(key: string): string {
   const page = isWebKey(key) ? WEB_NEWSLETTERS[key].page : ''
+  // A newsletter without a resource page (Updates) points at its own page.
+  const where =
+    page === null
+      ? `The newsletter’s own page is <a href="https://aisafety.com/newsletter/${key}">AISafety.com/newsletter/${key}</a>.`
+      : `Everything the newsletter covers is listed on <a href="https://aisafety.com${page}">AISafety.com${page}</a>.`
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -178,7 +219,7 @@ export function missingPage(key: string): string {
 <body>
 <main>
 <h1>This issue isn’t online</h1>
-<p>An issue appears here once it has been sent. Everything the newsletter covers is listed on <a href="https://aisafety.com${page}">AISafety.com${page}</a>.</p>
+<p>An issue appears here once it has been sent. ${where}</p>
 </main>
 </body>
 </html>`

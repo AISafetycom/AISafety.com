@@ -12,6 +12,12 @@
    the practice sends to the lists before it aren't listed (MIN_READERS).
    A newsletter with no issue sent through ActiveCampaign yet (Funding,
    until its move) has neither page: they appear with its first issue.
+   Updates is the exception (SHOWN_WITHOUT_ISSUES): its page and feed exist
+   from its move, before its first issue from ActiveCampaign, because the
+   footer and its Substack's "we've moved" post link there to sign up.
+
+   Updates' subject is a headline of its own, so its list and feed show the
+   headline (read from each email, `subjects`) beside the issue's number.
 
    This module is pure; the reads (ActiveCampaign, the site's own record of
    sent issues, the feed's reader counts) are in
@@ -34,6 +40,7 @@ export const SUBSTACK_ARCHIVES: Record<WebKey, string> = {
   events: 'https://aisafetyeventsandtraining.substack.com/archive',
   training: 'https://aisafetyeventsandtraining.substack.com/archive',
   funding: 'https://aisafetyfunding.substack.com/archive',
+  updates: 'https://aisafetycom.substack.com/archive',
 }
 
 /** What each newsletter is, after its name, as its emails' intros put it:
@@ -45,6 +52,8 @@ export const NEWSLETTER_ABOUT: Record<WebKey, string> = {
     'is a weekly newsletter that lists newly announced training programs addressing existential risk from AI.',
   funding:
     'is a newsletter that lists new and closing-soon funding opportunities for addressing existential risk from AI.',
+  updates:
+    'goes out when AISafety.com launches something new, about every two months.',
 }
 
 /** The link under each newsletter page's lead to the resource page it
@@ -52,7 +61,10 @@ export const NEWSLETTER_ABOUT: Record<WebKey, string> = {
  *  /training's links to each other: "<lead> <name> →". It says "live list"
  *  so the always-current page stands apart from the newsletter's issues
  *  (Bryce, 23 Oct 2026). */
-export const RESOURCE_LINK: Record<WebKey, { lead: string; name: string }> = {
+export const RESOURCE_LINK: Record<
+  WebKey,
+  { lead: string; name: string } | null
+> = {
   events: {
     lead: 'For a live list of every upcoming event go to',
     name: 'Events',
@@ -65,6 +77,8 @@ export const RESOURCE_LINK: Record<WebKey, { lead: string; name: string }> = {
     lead: 'For a live list of every source of funding go to',
     name: 'Funding',
   },
+  // No resource page: Updates is about the site itself.
+  updates: null,
 }
 
 /** Where the Substack issues are, said after the list. */
@@ -74,6 +88,7 @@ export const SUBSTACK_NOTE: Record<WebKey, string> = {
   training:
     'Earlier issues, from when Events and Training were one newsletter, are on',
   funding: 'Earlier issues are on',
+  updates: 'Earlier issues are on',
 }
 
 /** How many issues the feed carries: the newest. Readers keep what they
@@ -86,6 +101,34 @@ export const FEED_ITEMS = 20
  *  the Substack issues' copies, not issues of their own. Every real send
  *  since reaches hundreds (the first warm-up wave, 541). */
 export const MIN_READERS = 50
+
+/** Updates' own floor: its list is small (about 70 readers when it moved
+ *  from Substack in November 2026), so 50 would sit too close to a real
+ *  send. 20 is still far above a practice send's two or three addresses. */
+const MIN_READERS_UPDATES = 20
+
+/** How many people an issue of this newsletter must have gone to before
+ *  it counts as sent (MIN_READERS; Updates has its own). */
+export function minReaders(key: WebKey): number {
+  return key === 'updates' ? MIN_READERS_UPDATES : MIN_READERS
+}
+
+/** The same floor by ActiveCampaign list ('6'…'9'); MIN_READERS for a list
+ *  that isn't a newsletter's. */
+export function minReadersOnList(listId: string): number {
+  const key = (Object.keys(WEB_NEWSLETTERS) as WebKey[]).find(
+    k => WEB_NEWSLETTERS[k].list === listId
+  )
+  return key ? minReaders(key) : MIN_READERS
+}
+
+/** Newsletters whose page and feed exist before any issue has gone out
+ *  through ActiveCampaign: Updates, linked from the footer and from its
+ *  Substack from the day it moved. The others' pages are a 404 until their
+ *  first issue (none is in that state anymore). */
+export function shownWithoutIssues(key: WebKey): boolean {
+  return key === 'updates'
+}
 
 export interface ArchiveIssue {
   /** The issue's address under /newsletter/<key>/: "week-41-2026". */
@@ -115,8 +158,10 @@ export function issueSlug(key: WebKey, name: string): string | null {
   return path?.startsWith(prefix) ? path.slice(prefix.length) : null
 }
 
-/** Pure: the issue's subject, as its email had it ("Week 41, 2026",
- *  "Issue #23, 2026"), or null for an address that isn't an issue's. */
+/** Pure: the issue's number as its campaign's name has it ("Week 41, 2026",
+ *  "Issue #23, 2026"), or null for an address that isn't an issue's. For
+ *  Events, Training and Funding that is the email's subject too; Updates'
+ *  subject is a headline (see FeedEntry's `subject`). */
 export function issueTitle(key: WebKey, slug: string): string | null {
   const name = issueName(key, slug)
   return name ? name.slice(name.indexOf(' · ') + 3) : null
@@ -156,6 +201,10 @@ export function mergeIssues(
 export interface FeedEntry {
   issue: ArchiveIssue
   text: TextVersion | null
+  /** The email's own subject, for a newsletter whose subject is a headline
+   *  (Updates): the item's title. Left out, the title is the issue's
+   *  number. */
+  subject?: string | null
 }
 
 /** Pure: XML text, escaped for an element or an attribute. */
@@ -173,9 +222,9 @@ function xml(s: string): string {
 export function feedXml(key: WebKey, entries: FeedEntry[]): string {
   const nl = WEB_NEWSLETTERS[key]
   const newest = entries.find(e => e.issue.sentAt)?.issue.sentAt
-  const items = entries.map(({ issue, text }) => {
+  const items = entries.map(({ issue, text, subject }) => {
     const link = SITE + issuePath(key, issue.slug)
-    const title = issueTitle(key, issue.slug) ?? issue.slug
+    const title = subject || (issueTitle(key, issue.slug) ?? issue.slug)
     const body = text
       ? textHtml(text)
       : `<p><a href="${esc(link)}">Read this issue on AISafety.com</a></p>`

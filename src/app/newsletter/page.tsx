@@ -1,9 +1,8 @@
 import type { Metadata } from 'next'
 import PageHeader from '@/components/PageHeader'
 import { NEWSLETTER_ABOUT, archivePath } from '@/lib/newsletter-archive'
-import { SIGNUP_NEWSLETTERS } from '@/lib/newsletter-signup'
+import { SIGNUP_NEWSLETTERS, offeredNewsletters } from '@/lib/newsletter-signup'
 import { WEB_NEWSLETTERS } from '@/lib/newsletter-web'
-import { withUtm } from '@/lib/utm'
 import NewsletterChooser from './NewsletterChooser'
 
 // /newsletter: every AISafety.com newsletter on one page. A visitor ticks
@@ -16,8 +15,10 @@ import NewsletterChooser from './NewsletterChooser'
 //
 // Each newsletter's own page (/newsletter/events, …) stays the one to link
 // for that newsletter; this one is for all of them, and the footer's
-// Newsletters heading leads here. The Updates newsletter is still on
-// Substack, so it's a link rather than a box to tick.
+// Newsletters heading leads here. Updates is a box to tick like the others
+// since it moved from Substack (November 2026). A visitor is only offered
+// the newsletters whose signup forms exist in ActiveCampaign
+// (offeredNewsletters); a reader managing their own sees them all.
 
 export const dynamic = 'force-static'
 
@@ -27,8 +28,6 @@ export const metadata: Metadata = {
     'Free newsletters with new events, training programs, and funding opportunities addressing existential risk from AI. Sign up to one or all of them, or change which ones you get.',
   alternates: { canonical: '/newsletter' },
 }
-
-const UPDATES_URL = 'https://aisafetycom.substack.com/'
 
 export default function NewslettersPage() {
   const newsletters = SIGNUP_NEWSLETTERS.map(key => ({
@@ -46,12 +45,7 @@ export default function NewslettersPage() {
       <div className="width-7-col padding-bottom-56px">
         <NewsletterChooser
           newsletters={newsletters}
-          updates={{
-            name: 'AISafety.com Updates',
-            about:
-              'goes out when AISafety.com launches something new, about every two months. It’s on Substack.',
-            url: withUtm(UPDATES_URL, 'Newsletters'),
-          }}
+          offered={offeredNewsletters()}
         />
       </div>
     </div>

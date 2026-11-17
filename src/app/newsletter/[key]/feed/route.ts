@@ -4,7 +4,8 @@
   Every issue sent through ActiveCampaign, newest first, each with its text
   version as the content (src/lib/newsletter-archive.ts says what's in it;
   src/lib/newsletter-archive-store.ts where the list comes from). 404 for a
-  newsletter with no issue sent that way yet.
+  newsletter with no issue sent that way yet, except Updates, whose feed
+  exists (empty) from its move: its page links it from the start.
 
   Each fetch by a reader is counted (after the answer has gone; feedReader()
   and isBrowserLoad() say who counts), so the CDN doesn't keep the feed:
@@ -15,7 +16,12 @@
 
 import { after } from 'next/server'
 import { getClientIp } from '@/lib/assistant/rate-limit'
-import { isWebKey, type WebKey } from '@/lib/newsletter-web'
+import {
+  emailSubject,
+  hasHeadline,
+  isWebKey,
+  type WebKey,
+} from '@/lib/newsletter-web'
 import { sentEmail } from '@/lib/newsletter-web-copy'
 import { textVersion } from '@/lib/newsletter-text'
 import {
@@ -25,6 +31,7 @@ import {
   feedReader,
   feedXml,
   isBrowserLoad,
+  shownWithoutIssues,
   type FeedEntry,
 } from '@/lib/newsletter-archive'
 import { archiveIssues, countFeedFetch } from '@/lib/newsletter-archive-store'
@@ -59,7 +66,7 @@ function feedFor(key: WebKey): Promise<Built | null> {
 
 async function build(key: WebKey): Promise<Built | null> {
   const issues = (await archiveIssues(key)).slice(0, FEED_ITEMS)
-  if (!issues.length) return null
+  if (!issues.length && !shownWithoutIssues(key)) return null
   const entries: FeedEntry[] = new Array(issues.length)
   let next = 0
   const worker = async () => {
@@ -79,7 +86,12 @@ async function build(key: WebKey): Promise<Built | null> {
         console.warn(
           `[newsletter-feed] ${key}/${issue.slug}: no email to show, the item links the issue's page`
         )
-      entries[i] = { issue, text: email ? textVersion(email) : null }
+      entries[i] = {
+        issue,
+        text: email ? textVersion(email) : null,
+        // A headline newsletter's item is titled by its email's subject.
+        subject: email && hasHeadline(key) ? emailSubject(email) : null,
+      }
     }
   }
   await Promise.all(Array.from({ length: READS_AT_ONCE }, worker))

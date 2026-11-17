@@ -3,6 +3,10 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   FEED_ITEMS,
+  MIN_READERS,
+  NEWSLETTER_ABOUT,
+  RESOURCE_LINK,
+  SUBSTACK_ARCHIVES,
   etagMatches,
   feedEtag,
   feedReader,
@@ -12,6 +16,9 @@ import {
   issueSlug,
   issueTitle,
   mergeIssues,
+  minReaders,
+  minReadersOnList,
+  shownWithoutIssues,
 } from './newsletter-archive'
 import { textVersion } from './newsletter-text'
 
@@ -42,6 +49,53 @@ describe('issueSlug / issueTitle', () => {
     expect(issueTitle('training', 'week-41-2026')).toBe('Week 41, 2026')
     expect(issueTitle('funding', 'issue-23-2026')).toBe('Issue #23, 2026')
     expect(issueTitle('funding', 'week-41-2026')).toBeNull()
+  })
+
+  it('knows Updates issues by their number, like Funding’s', () => {
+    expect(issueSlug('updates', 'Updates · Issue #5, 2026')).toBe(
+      'issue-5-2026'
+    )
+    expect(issueSlug('updates', 'Funding · Issue #5, 2026')).toBeNull()
+    expect(issueTitle('updates', 'issue-5-2026')).toBe('Issue #5, 2026')
+    expect(
+      mergeIssues('updates', [
+        { slug: 'issue-5-2026', sentAt: null },
+        { slug: 'issue-6-2027', sentAt: null },
+        { slug: 'week-47-2026', sentAt: null },
+      ]).map(i => i.slug)
+    ).toEqual(['issue-6-2027', 'issue-5-2026'])
+  })
+})
+
+describe('what sets Updates apart', () => {
+  it('counts an issue as sent from 20 readers, the others from 50', () => {
+    expect(MIN_READERS).toBe(50)
+    expect(minReaders('events')).toBe(50)
+    expect(minReaders('training')).toBe(50)
+    expect(minReaders('funding')).toBe(50)
+    expect(minReaders('updates')).toBe(20)
+    expect(minReadersOnList('6')).toBe(50)
+    expect(minReadersOnList('8')).toBe(50)
+    expect(minReadersOnList('9')).toBe(20)
+    // A test list, or anything else, keeps the usual floor.
+    expect(minReadersOnList('5')).toBe(50)
+  })
+
+  it('has its page and feed before its first issue; the others don’t', () => {
+    expect(shownWithoutIssues('updates')).toBe(true)
+    for (const key of ['events', 'training', 'funding'] as const)
+      expect(shownWithoutIssues(key)).toBe(false)
+  })
+
+  it('has no resource page to link on to, and its own Substack archive', () => {
+    expect(RESOURCE_LINK.updates).toBeNull()
+    expect(RESOURCE_LINK.funding).not.toBeNull()
+    expect(SUBSTACK_ARCHIVES.updates).toBe(
+      'https://aisafetycom.substack.com/archive'
+    )
+    expect(NEWSLETTER_ABOUT.updates).toBe(
+      'goes out when AISafety.com launches something new, about every two months.'
+    )
   })
 })
 
@@ -177,6 +231,64 @@ describe('feedXml', () => {
 
   it('carries at most FEED_ITEMS issues', () => {
     expect(FEED_ITEMS).toBe(20)
+  })
+})
+
+describe('feedXml for Updates', () => {
+  // An Updates issue exactly as ~/Newsletter/updates.py draws it.
+  const sample = readFileSync(
+    path.join(__dirname, 'admin/__fixtures__/newsletter-updates-sample.html'),
+    'utf8'
+  )
+
+  it('titles each item with the email’s headline, and carries its words', () => {
+    const xml = feedXml('updates', [
+      {
+        issue: { slug: 'issue-6-2027', sentAt: '2027-01-20T09:00:00.000Z' },
+        text: null,
+        subject: null,
+      },
+      {
+        issue: { slug: 'issue-5-2026', sentAt: '2026-12-01T09:00:00.000Z' },
+        text: textVersion(sample),
+        subject: 'New chatbot & a redesigned Funding page',
+      },
+    ])
+    expect(xml).toContain('<title>AISafety.com Updates</title>')
+    expect(xml).toContain(
+      '<description>AISafety.com Updates goes out when AISafety.com launches something new, about every two months. From AISafety.com.</description>'
+    )
+    expect(xml).toContain(
+      '<title>New chatbot &amp; a redesigned Funding page</title>'
+    )
+    expect(xml).toContain(
+      '<link>https://aisafety.com/newsletter/updates/issue-5-2026</link>'
+    )
+    // Without a subject to hand, the issue's number.
+    expect(xml).toContain('<title>Issue #6, 2027</title>')
+    const item = xml.slice(xml.indexOf('<title>New chatbot'))
+    expect(item).toContain('Sample page')
+    expect(item).toContain('A closing paragraph under the cards.')
+    expect(xml).not.toMatch(/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-f]+);)/i)
+  })
+
+  it('is a valid, empty channel before the first issue', () => {
+    const xml = feedXml('updates', [])
+    expect(xml).toContain('<title>AISafety.com Updates</title>')
+    expect(xml).toContain(
+      '<atom:link href="https://aisafety.com/newsletter/updates/feed" rel="self" type="application/rss+xml"/>'
+    )
+    expect(xml).not.toContain('<item>')
+    expect(xml).not.toContain('lastBuildDate')
+    expect(xml.trimEnd().endsWith('</channel>\n</rss>')).toBe(true)
+  })
+
+  it('leaves the other newsletters’ titles as their issue numbers', () => {
+    expect(
+      feedXml('funding', [
+        { issue: { slug: 'issue-24-2026', sentAt: null }, text: null },
+      ])
+    ).toContain('<title>Issue #24, 2026</title>')
   })
 })
 

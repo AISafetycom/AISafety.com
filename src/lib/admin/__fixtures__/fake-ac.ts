@@ -231,6 +231,44 @@ export function buildEmail(
   }
 }
 
+/** An Updates issue, the shape ~/Newsletter/updates.py writes: the
+ *  headline as the <title> (the email's subject), an intro, a section
+ *  heading, a box per item (title, description) and a closing paragraph in
+ *  the body cell, the footer between the web:hide markers, a counted link.
+ *  No cards and no card manifest. */
+export const UPDATES_SUBJECT = 'New chatbot and a redesigned Funding page'
+
+export function buildUpdatesEmail(
+  opts: { subject?: string; body?: string } = {}
+): { html: string; text: string } {
+  const subject = opts.subject ?? UPDATES_SUBJECT
+  const link = `https://aisafety.com/api/nl/${LINK_LIST}/0`
+  const body =
+    `<!DOCTYPE html><html><head><title>${subject.replace(/&/g, '&amp;')}</title><style>a{color:inherit}</style></head><body>` +
+    '<div style="display:none;max-height:0;">This newsletter goes out when something new launches.&nbsp;&zwnj;</div>' +
+    '<table><tr><td class="mast"><h1 class="h1">Updates</h1></td></tr>' +
+    '<tr><td class="inner" style="padding:0 32px 40px;">\n' +
+    `  <p style="margin:16px 0 0;">This newsletter goes out when something new launches on <a style="color:#a6dad9;" href="${link}">AISafety.com</a>, about every two months.</p>\n\n` +
+    '  <div style="margin:40px 0 16px;font-size:22px;">New features</div>\n' +
+    '<table width="100%" role="presentation" style="margin-bottom:16px;">\n' +
+    `  <tr><td bgcolor="#04292a" class="card" style="padding:40px;"><div style="margin:0 0 12px;"><a href="${link}" style="color:#ffffff;">A chatbot</a></div><div style="font-size:15px;">Ask it anything about the field, with <a href="https://example.org/more">a link inside</a>.</div></td></tr>\n` +
+    '</table>\n' +
+    '<table width="100%" role="presentation" style="margin-bottom:16px;">\n' +
+    '  <tr><td bgcolor="#04292a" class="card" style="padding:40px;"><div style="margin:0 0 12px;">Faster pages</div><div style="font-size:15px;">A change with no page of its own.</div></td></tr>\n' +
+    `</table>${opts.body ?? ''}<p style="margin:8px 0 16px;">Reply to this email with any feedback.</p>\n\n` +
+    '<!--web:hide--><div style="margin-top:24px;border-top:1px solid #1c3334;"></div>\n' +
+    '<div><a href="%UNSUBSCRIBELINK%">Unsubscribe</a> · <a href="https://aisafety.com/newsletter#k=%MANAGE_KEY%">Manage subscriptions</a> · <a href="https://aisafety.com/newsletter/updates/issue-5-2026">View in browser</a></div>\n' +
+    '<div>%SENDER-INFO-SINGLELINE%</div><!--/web:hide-->\n' +
+    '</td></tr></table>\n</body></html>'
+  return {
+    html: `<!--aisafety-issue:${digest(body)}-->${body}`,
+    text:
+      `${subject.toUpperCase()}\nAISafety.com Updates · Issue #5, 2026\n\n` +
+      `* A chatbot\n  Ask it anything about the field.\n  ${link}\n\n` +
+      'Unsubscribe: %UNSUBSCRIBELINK%\n%SENDER-INFO-SINGLELINE%\n',
+  }
+}
+
 /* ─── Waves (the saved segments ~/Newsletter/waves.py makes) ──────────── */
 
 export const WAVE_IDS = [

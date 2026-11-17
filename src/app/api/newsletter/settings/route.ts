@@ -4,7 +4,7 @@
 
   Body: { k, set? }. `k` is the reader's settings key from the link
   (src/lib/newsletter-manage.ts); without `set` the answer says which
-  newsletters they get, with `set` ({ events?, training?, funding? }, each
+  newsletters they get, with `set` ({ events?, training?, funding?, updates? }, each
   true or false) it also subscribes or unsubscribes them first. A POST, so
   the key never sits in an address, and nothing changes on a plain page
   load: mail scanners that open every link in an email can't change anyone's

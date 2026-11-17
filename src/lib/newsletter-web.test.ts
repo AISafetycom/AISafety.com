@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  WEB_NEWSLETTERS,
   beforeBodyEnd,
+  emailSubject,
+  hasHeadline,
   issueName,
   missingPage,
   seenImage,
@@ -14,6 +17,9 @@ describe('issue addresses', () => {
     expect(issueName('training', 'week-7-2027')).toBe('Training · Week 7, 2027')
     expect(issueName('funding', 'issue-21-2026')).toBe(
       'Funding · Issue #21, 2026'
+    )
+    expect(issueName('updates', 'issue-5-2026')).toBe(
+      'Updates · Issue #5, 2026'
     )
   })
 
@@ -44,12 +50,19 @@ describe('issue addresses', () => {
     expect(webPath('Funding · Issue #21, 2026')).toBe(
       '/newsletter/funding/issue-21-2026'
     )
+    expect(webPath('Updates · Issue #5, 2026')).toBe(
+      '/newsletter/updates/issue-5-2026'
+    )
     expect(webPath('Events & Training · Week 36, 2026')).toBeNull()
     expect(webPath('Funding · Week 21, 2026')).toBeNull()
+    expect(webPath('Updates · Week 47, 2026')).toBeNull()
+    // The name, never the subject: an Updates subject is a headline.
+    expect(webPath('New chatbot and a redesigned Funding page')).toBeNull()
     for (const name of [
       'Events · Week 1, 2026',
       'Training · Week 52, 2027',
       'Funding · Issue #3, 2026',
+      'Updates · Issue #12, 2027',
     ]) {
       const [, , key, slug] = webPath(name)!.split('/')
       expect(issueName(key, slug)).toBe(name)
@@ -174,11 +187,53 @@ describe('webPage', () => {
   })
 })
 
+describe('the newsletters', () => {
+  it('are four, each on its own ActiveCampaign list', () => {
+    expect(
+      Object.entries(WEB_NEWSLETTERS).map(([k, n]) => `${k}=${n.list}`)
+    ).toEqual(['events=6', 'training=7', 'funding=8', 'updates=9'])
+    expect(WEB_NEWSLETTERS.updates).toEqual({
+      list: '9',
+      prefix: 'Updates',
+      unit: 'issue',
+      page: null,
+      sender: 'AISafety.com Updates',
+    })
+  })
+
+  it('only Updates has a headline for a subject', () => {
+    expect(hasHeadline('updates')).toBe(true)
+    for (const key of ['events', 'training', 'funding'] as const)
+      expect(hasHeadline(key)).toBe(false)
+  })
+})
+
+describe('emailSubject', () => {
+  it('reads the subject the pipeline writes in the <title>, unescaped', () => {
+    expect(
+      emailSubject(
+        '<html><head><title>New chatbot &amp; a redesigned &quot;Funding&quot; page</title></head></html>'
+      )
+    ).toBe('New chatbot & a redesigned "Funding" page')
+    expect(emailSubject('<title> Week 41, 2026 </title>')).toBe('Week 41, 2026')
+  })
+
+  it('is null without one', () => {
+    expect(emailSubject('<html><body>Hi</body></html>')).toBeNull()
+    expect(emailSubject('<title></title>')).toBeNull()
+  })
+})
+
 describe('missingPage', () => {
   it('points at the newsletter’s own page, and at the homepage otherwise', () => {
     expect(missingPage('training')).toContain(
       '<a href="https://aisafety.com/training">AISafety.com/training</a>'
     )
+    // Updates has no resource page: its own newsletter page instead.
+    expect(missingPage('updates')).toContain(
+      '<a href="https://aisafety.com/newsletter/updates">AISafety.com/newsletter/updates</a>'
+    )
+    expect(missingPage('updates')).not.toContain('null')
     expect(missingPage('nope')).toContain(
       '<a href="https://aisafety.com">AISafety.com</a>'
     )

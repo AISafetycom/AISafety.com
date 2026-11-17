@@ -1,7 +1,7 @@
 /*
   Newsletter signups through ActiveCampaign: the signup boxes on /events,
-  /training and /funding (and their past issues pages, /newsletter/<key>)
-  post to /api/subscribe, which hands the address to the list's
+  /training and /funding (and the newsletters' own pages, /newsletter/<key>,
+  Updates' among them) post to /api/subscribe, which hands the address to the list's
   double opt-in form. ActiveCampaign then emails the reader, and
   /api/subscribe subscribes them at once (since 12 November 2026; before
   that only a reader who pressed the email's link joined the list, and the
@@ -15,12 +15,19 @@
   live endpoint ever refuses server-side posts, swap `postSignup` here and
   nothing else changes. Pure: no Next, no Upstash.
 
-  Funding joined on its move day (its first ActiveCampaign issue); the
-  Updates newsletter is still on Substack and never comes through here.
+  Funding joined on its move day (its first ActiveCampaign issue), Updates
+  when it moved from Substack in November 2026. A newsletter whose forms
+  aren't filled in below isn't offered anywhere yet (offeredNewsletters).
 */
 
-/** The newsletters whose boxes sign people up on the site. */
-export const SIGNUP_NEWSLETTERS = ['events', 'training', 'funding'] as const
+/** The newsletters whose boxes sign people up on the site, in the order
+ *  the site always names them. */
+export const SIGNUP_NEWSLETTERS = [
+  'events',
+  'training',
+  'funding',
+  'updates',
+] as const
 export type SignupNewsletter = (typeof SIGNUP_NEWSLETTERS)[number]
 
 export function isSignupNewsletter(v: unknown): v is SignupNewsletter {
@@ -38,7 +45,7 @@ export interface AcForm {
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  THE ACTIVECAMPAIGN FORMS (Events and Training made 8 October 2026,
-//  Funding 12 October 2026).
+//  Funding 12 October 2026; Updates' is still to be made).
 //
 //  One double opt-in form per list, made in ActiveCampaign (Website → Forms).
 //  Open the form's hosted page, https://alignment23684.activehosted.com/f/<id>,
@@ -57,15 +64,26 @@ export const AC_FORMS: Record<SignupNewsletter, AcForm> = {
   training: { formId: 6, orKey: 'baffe016-955b-42bc-be9e-711a2d0d44bf' },
   // AI Safety Funding (list 8): form 8, "AI Safety Funding signup (aisafety.com)".
   funding: { formId: 8, orKey: 'c895d3e7-eb90-4022-a904-01f90a9fa8c0' },
+  // AISafety.com Updates (list 9): NOT MADE YET. Fill in the form's number
+  // and `or` key here once it exists; until then Updates isn't offered.
+  updates: { formId: 0, orKey: '' },
 }
 
-/** Two or three newsletters at once, from the newsletters page
- *  (/newsletter): their keys in the usual order, joined with "-". */
+/** Two or more newsletters at once, from the newsletters page
+ *  (/newsletter): their keys in the usual order, joined with "-". Every
+ *  combination has a key: eleven for the four newsletters. */
 export const COMBO_KEYS = [
   'events-training',
   'events-funding',
   'training-funding',
   'events-training-funding',
+  'events-updates',
+  'training-updates',
+  'funding-updates',
+  'events-training-updates',
+  'events-funding-updates',
+  'training-funding-updates',
+  'events-training-funding-updates',
 ] as const
 export type ComboKey = (typeof COMBO_KEYS)[number]
 /** A form: one newsletter's, or a combination's. */
@@ -101,6 +119,25 @@ export const COMBO_FORMS: Record<ComboKey, AcForm> = {
     formId: 16,
     orKey: '344131d3-3de9-48c4-a91f-c5b5e18f854a',
   },
+  // The seven combinations with Updates (list 9): NOT MADE YET. Each needs
+  // its own form in ActiveCampaign, subscribing to exactly the lists named,
+  // with its confirmation redirect on https://aisafety.com/subscribed/<key>.
+  // Fill in each form's number and `or` key; Updates is offered once its own
+  // form and all seven of these are filled in.
+  // Lists 6 + 9 (Events + Updates).
+  'events-updates': { formId: 0, orKey: '' },
+  // Lists 7 + 9 (Training + Updates).
+  'training-updates': { formId: 0, orKey: '' },
+  // Lists 8 + 9 (Funding + Updates).
+  'funding-updates': { formId: 0, orKey: '' },
+  // Lists 6 + 7 + 9 (Events + Training + Updates).
+  'events-training-updates': { formId: 0, orKey: '' },
+  // Lists 6 + 8 + 9 (Events + Funding + Updates).
+  'events-funding-updates': { formId: 0, orKey: '' },
+  // Lists 7 + 8 + 9 (Training + Funding + Updates).
+  'training-funding-updates': { formId: 0, orKey: '' },
+  // Lists 6 + 7 + 8 + 9 (all four).
+  'events-training-funding-updates': { formId: 0, orKey: '' },
 }
 
 /** The form that signs up to exactly these newsletters (one or more,
@@ -134,6 +171,36 @@ export function isFormConfigured(form: AcForm): boolean {
     form.orKey.trim() !== '' &&
     (form.u === undefined || (Number.isInteger(form.u) && form.u > 0))
   )
+}
+
+/** Pure: the newsletters a visitor can be offered, given the forms: each
+ *  has its own form filled in, and so has every combination among them, so
+ *  whatever a visitor ticks has a form to go to. A newsletter whose forms
+ *  aren't all there yet is left out, newest first, and the rest keep
+ *  working: with Updates' forms unfilled the page offers Events, Training
+ *  and Funding exactly as before. */
+export function offeredFrom(
+  own: Record<SignupNewsletter, AcForm>,
+  combos: Record<ComboKey, AcForm>
+): SignupNewsletter[] {
+  let offered = SIGNUP_NEWSLETTERS.filter(n => isFormConfigured(own[n]))
+  for (const n of [...offered].reverse()) {
+    const mine = COMBO_KEYS.filter(k => {
+      const parts = k.split('-') as SignupNewsletter[]
+      return parts.includes(n) && parts.every(p => offered.includes(p))
+    })
+    if (mine.some(k => !isFormConfigured(combos[k])))
+      offered = offered.filter(o => o !== n)
+  }
+  return offered
+}
+
+/** The newsletters the site offers for signup right now: the tick boxes on
+ *  /newsletter and the box on each newsletter's own page. (A reader changing
+ *  their own newsletters from an issue's "Manage subscriptions" link needs
+ *  no form, so that view shows every newsletter.) */
+export function offeredNewsletters(): SignupNewsletter[] {
+  return offeredFrom(AC_FORMS, COMBO_FORMS)
 }
 
 // ─── The address ────────────────────────────────────────────────────────────
@@ -202,7 +269,7 @@ const HTML_PAGE = /<(?:!doctype|html|head|body)\b/i
  *  `window.top.location.href = "https://aisafety.com/subscribed/events";`
  *  (a combination's form: /subscribed/events-funding). */
 const ALREADY_REDIRECT =
-  /location\.href\s*=\s*["']https:\/\/(?:www\.)?aisafety\.com\/subscribed\/(?:events|training|funding)(?:-(?:training|funding))*\/?["']/
+  /location\.href\s*=\s*["']https:\/\/(?:www\.)?aisafety\.com\/subscribed\/(?:events|training|funding|updates)(?:-(?:training|funding|updates))*\/?["']/
 const CLOUDFLARE =
   /cf-chl|challenge-platform|cf_chl_opt|cdn-cgi\/challenge|Just a moment\.\.\.|Attention Required! \| Cloudflare/i
 

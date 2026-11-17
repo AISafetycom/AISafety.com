@@ -1,11 +1,12 @@
 import type { MetadataRoute } from 'next'
 import { WEB_NEWSLETTERS, type WebKey } from '@/lib/newsletter-web'
-import { archivePath } from '@/lib/newsletter-archive'
+import { archivePath, shownWithoutIssues } from '@/lib/newsletter-archive'
 import { archiveIssues } from '@/lib/newsletter-archive-store'
 
 // Built with the site and rebuilt hourly, so a newsletter's past issues page
-// joins once it exists (Funding's after its move). force-static: the reads
-// behind that list are uncached fetches.
+// joins once it exists (Funding's after its move; Updates' is there from its
+// move, issues or not). force-static: the reads behind that list are
+// uncached fetches.
 export const dynamic = 'force-static'
 export const revalidate = 3600
 
@@ -39,6 +40,7 @@ async function pastIssuesPages(): Promise<string[]> {
   const keys = Object.keys(WEB_NEWSLETTERS) as WebKey[]
   const found = await Promise.all(
     keys.map(async key => {
+      if (shownWithoutIssues(key)) return archivePath(key)
       try {
         return (await archiveIssues(key)).length > 0 ? archivePath(key) : null
       } catch (err) {

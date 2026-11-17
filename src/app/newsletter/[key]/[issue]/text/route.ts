@@ -14,7 +14,12 @@ import {
   htmlResponse,
   sentEmail,
 } from '@/lib/newsletter-web-copy'
-import { isWebKey, missingPage, seenImage } from '@/lib/newsletter-web'
+import {
+  emailSubject,
+  isWebKey,
+  missingPage,
+  seenImage,
+} from '@/lib/newsletter-web'
 import { TEXT_SCRIPT_HASH, textPage, textVersion } from '@/lib/newsletter-text'
 
 export const runtime = 'nodejs'
@@ -37,8 +42,8 @@ export async function GET(_req: Request, { params }: Ctx) {
     return htmlResponse(missingPage(key), 404, MISSING_CACHE)
   const tv = textVersion(email)
   if (!tv) {
-    // An email without the cards' manifest (none has been sent since the
-    // web version began, but say so if one is): the email itself instead.
+    // A card email without the cards' manifest (none has been sent since
+    // the web version began, but say so if one is): the email itself instead.
     console.warn(`[newsletter-web] ${key}/${issue} has no text version`)
     return new Response(null, {
       status: 302,
@@ -48,12 +53,11 @@ export async function GET(_req: Request, { params }: Ctx) {
       },
     })
   }
-  const subject = /<title>([^<]*)<\/title>/.exec(email)?.[1]?.trim() || issue
   return htmlResponse(
     textPage(
       tv,
       key,
-      decodeTitle(subject),
+      emailSubject(email) ?? issue,
       `/newsletter/${key}/${issue}`,
       seenImage(key, issue, 'text')
     ),
@@ -61,14 +65,4 @@ export async function GET(_req: Request, { params }: Ctx) {
     FOUND_CACHE,
     TEXT_SCRIPT_HASH
   )
-}
-
-/** The <title> is HTML-escaped by the pipeline; textPage() escapes again. */
-function decodeTitle(s: string): string {
-  return s
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, '&')
 }
