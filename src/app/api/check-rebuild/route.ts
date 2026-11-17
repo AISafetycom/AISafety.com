@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { revalidateTag } from 'next/cache'
+import { Redis } from '@upstash/redis'
 import { hasChangesSince } from '@/lib/data/changed-since'
 
 // Force dynamic - this endpoint must run fresh on every cron invocation
@@ -79,6 +80,58 @@ const POST_TRIGGER_COOLDOWN_MS = 10 * 60 * 1000
 // After a 429, back off entirely so we stop adding to Vercel's rate-limit count.
 const RATE_LIMIT_COOLDOWN_MS = 15 * 60 * 1000
 
+// One rebuild at a time. The cooldowns above live in one function instance's
+// memory, and in practice they don't hold from one cron run to the next (a
+// run can land on a fresh instance, and a new deployment always starts
+// empty): on 17 Nov 2026, while the owner worked through the Queue, one
+// deployment triggered four rebuilds in four minutes. Builds
+// that overlap share Airtable's five requests a second, lock each other out,
+// and one of them failed. So the time of the last trigger is also kept in
+// Upstash, where every instance of every deployment reads the same value.
+// While that trigger is newer than this deployment's BUILD_TIME, the build it
+// started isn't live yet, and another one would only overlap it. The edits
+// that came in meanwhile aren't lost: once that build is live its own
+// BUILD_TIME is the newer of the two, and the next check starts the next
+// build. The key expires by itself, so a build that fails or never starts
+// holds a rebuild up for six minutes at most (a build takes two to three).
+const LAST_TRIGGER_KEY = 'aisafety:check-rebuild:last-trigger'
+const BUILD_IN_FLIGHT_MS = 6 * 60 * 1000
+
+// The same Upstash database the site's analytics use.
+const restUrl =
+  process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL
+const restToken =
+  process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN
+const store =
+  restUrl && restToken ? new Redis({ url: restUrl, token: restToken }) : null
+
+/** When any instance last triggered a rebuild (ms), or null when none did in
+ *  the last six minutes. Also null when the store can't be read: a rebuild
+ *  too many is better than a site that stays out of date. */
+async function lastSharedTrigger(): Promise<number | null> {
+  if (!store) return null
+  try {
+    const at = Number(await store.get(LAST_TRIGGER_KEY))
+    return Number.isFinite(at) && at > 0 ? at : null
+  } catch (err) {
+    console.warn(
+      `[check-rebuild] last trigger unreadable, so not holding back: ${err instanceof Error ? err.message : String(err)}`
+    )
+    return null
+  }
+}
+
+async function rememberTrigger(now: number): Promise<void> {
+  if (!store) return
+  try {
+    await store.set(LAST_TRIGGER_KEY, now, { px: BUILD_IN_FLIGHT_MS })
+  } catch (err) {
+    console.warn(
+      `[check-rebuild] last trigger not saved, so the next check may start a second build: ${err instanceof Error ? err.message : String(err)}`
+    )
+  }
+}
+
 export async function GET(request: Request) {
   // Vercel cron jobs include this auth header automatically
   const cronSecret = process.env.CRON_SECRET
@@ -151,6 +204,20 @@ export async function GET(request: Request) {
 
   const now = Date.now()
 
+  const sharedTrigger = await lastSharedTrigger()
+  if (
+    sharedTrigger !== null &&
+    sharedTrigger > buildDate.getTime() &&
+    now - sharedTrigger < BUILD_IN_FLIGHT_MS
+  ) {
+    return NextResponse.json({
+      triggered: false,
+      reason: 'build-in-flight',
+      buildTime: buildDate.toISOString(),
+      changedTables,
+    })
+  }
+
   if (now - lastTriggerAt < POST_TRIGGER_COOLDOWN_MS) {
     return NextResponse.json({
       triggered: false,
@@ -191,6 +258,7 @@ export async function GET(request: Request) {
   }
 
   lastTriggerAt = now
+  await rememberTrigger(now)
 
   return NextResponse.json({
     triggered: true,
