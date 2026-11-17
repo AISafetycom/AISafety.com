@@ -18,10 +18,10 @@ import {
 import type { PreparedFile } from './queue-prepared'
 
 describe('FLAG_VERDICTS', () => {
-  it('shows the field check on Publish and Unsure additions only', () => {
+  it('shows the field check on every addition verdict, never on a change', () => {
     expect(FLAG_VERDICTS.has('Publish')).toBe(true)
     expect(FLAG_VERDICTS.has('Unsure')).toBe(true)
-    expect(FLAG_VERDICTS.has("Don't publish")).toBe(false)
+    expect(FLAG_VERDICTS.has("Don't publish")).toBe(true)
     expect(FLAG_VERDICTS.has('Fix')).toBe(false)
   })
 })

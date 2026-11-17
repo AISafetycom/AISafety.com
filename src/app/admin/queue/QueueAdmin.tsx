@@ -6314,7 +6314,8 @@ function Detail({
   )
   const fableFields = new Map(fableChanges.map(c => [c.field, c]))
   // The fields Fable would change, from its field check after a Publish or
-  // Unsure verdict (queue-field-flags.ts): under the verdict while the item
+  // Unsure verdict, or a one-off pass on Don't publish (queue-field-flags.ts,
+  // FLAG_VERDICTS): under the verdict while the item
   // can still be edited, and marked on the fields themselves while open.
   const flagCheck =
     item.type === 'Add' && FLAG_VERDICTS.has(item.verdict ?? '') && draftable

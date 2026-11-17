@@ -324,7 +324,8 @@ export interface QueueItem {
    *  check, queue-passed.ts): Publish is off, Reject drafts the reply. */
   passed: Passed | null
   /** Add: the fields Fable would change, from its field check after a
-   *  Publish or Unsure verdict (the proposal's `field_flags`, queue-field-flags.ts);
+   *  Publish or Unsure verdict, or a one-off pass on Don't publish (the proposal's
+   *  `field_flags`, queue-field-flags.ts);
    *  null until the Mac has run it. */
   fieldFlags?: FieldFlags | null
   /** The files on the row's Prepared logo field, with links fresh from
