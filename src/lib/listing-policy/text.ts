@@ -73,18 +73,22 @@ Each page adds its own bar, and seriousness is a separate gate: on topic isn't t
 - The event's own page needs to be finished. A placeholder page ("more info coming", a one-line description) isn't ready to list. Suggest it again once the page is done.
 - Protests: a movement's major or coordinated protests are listed, not a local chapter's own small protest.
 - A community's first meetup can be listed. Its later meetups and socials are covered by the community's own listing.
-- The same goes for a regular reading group. We list its first session only, even when a later week's reading is about x-risk.
+- A regular reading group is listed once, and it doesn't have to be its first session. Later sessions are covered by that listing, even when a week's reading is about x-risk. A community's reading group gets this one listing on top of its first meetup.
 - We also look at the care in an event's own materials – wrong or inconsistent details count against it, and an informal event from a group we don't already list has more to prove.
+- Beyond the rules above, small size alone doesn't hold back an on-topic event. It only counts alongside another problem, such as careless materials.
 
 **/training** – fellowships, courses, bootcamps, immersive workshops.
 - If it's really a job (a manager, an open-ended role, or a single position on a careers page), it belongs on /jobs, not here.
 - A salary alone doesn't make it a job. A research residency people apply to in intake rounds, where residents pursue their own research for a fixed term, is listed here even when paid.
 - Expression-of-interest programs are too early.
 - So is a program with no dates yet. A confirmed cohort whose applications open later can be listed, but only once it has a start date, an end date, or an application deadline.
+- A call for mentors isn't a listing on its own. If the program's participant round has dates, we list that round instead, even before its applications open.
 - Individual projects or streams within a larger program aren't listed, only the round itself.
 - Rationalist or effective altruism programs that aren't labeled AI safety can be listed if the link to the field is real.
+- A student group's small program can be listed when people outside the group can apply.
 - Standing programs live under the Recurring tab, but each new cohort generally still gets its own dated listing. Courses that re-run every few weeks are the exception: only the first cohort gets a dated listing, and the Recurring entry covers the rest.
-- A program earns a Recurring listing once it has at least two rounds run or announced. One finished round plus an announced next round is enough. A first round on its own gets a dated listing only.
+- A program can earn a Recurring listing once it has at least two rounds run or announced. One finished round plus an announced next round counts. A first round on its own gets a dated listing only.
+- Two rounds aren't enough alone. A Recurring listing also needs a program run at a professional level, so a university group's program has its rounds listed one at a time.
 
 **/funding** – funders, grant programs, and funding platforms.
 - The funder must explicitly and demonstrably fund AI x-risk work. Theoretical openness doesn't count, so general funders are out, though their dedicated safety programs are listed.
@@ -134,7 +138,7 @@ Sometimes that's a fair point.
 - Many calls are close.
 - Some listings predate today's bar, which keeps sharpening.
 - A few are deliberate one-off exceptions.
-- We make mistakes. We're a small nonprofit with 1.5 salaried employees.
+- We make mistakes. We're a small nonprofit with 1.25 salaried employees.
 
 An existing listing isn't a guarantee, and we review and remove listings often.
 
@@ -144,5 +148,5 @@ An existing listing isn't a guarantee, and we review and remove listings often.
 - **Tell us if we misread you.** If we missed x-risk work on your site or picked the wrong page, show us where. Reply to our email or use the "Send us an email" button.
 - **Suggest a correction.** If you think another listing shouldn't be there, use "Suggest correction" on that page and say why.
 
-Last updated: 30 October 2026
+Last updated: 17 November 2026
 `
