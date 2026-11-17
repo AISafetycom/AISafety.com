@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  mayTeach,
   POP_UP_FOR_MS,
   publicChoiceOf,
+  RULE_WATCH_MS,
+  ruleDraftStateOf,
+  settleRuleWatch,
   rememberClosed,
   ruleInstantOf,
   rulePublicOf,
@@ -159,5 +163,45 @@ describe('rememberClosed', () => {
 
   it('keeps only the newest few', () => {
     expect(rememberClosed(['a', 'b', 'c'], 'd', 3)).toEqual(['b', 'c', 'd'])
+  })
+})
+
+describe('rules at the time of the decision (17 Nov 2026)', () => {
+  it('asks the Mac about a Publish or Reject on an addition or a change', () => {
+    expect(mayTeach('Add', 'accept')).toBe(true)
+    expect(mayTeach('Change', 'reject')).toBe(true)
+  })
+
+  it('never about a rule, a Delete or a Review again', () => {
+    expect(mayTeach('Rule', 'accept')).toBe(false)
+    expect(mayTeach('Add', 'delete')).toBe(false)
+    expect(mayTeach('Add', 'later')).toBe(false)
+  })
+
+  it('reads anything unknown as still drafting', () => {
+    expect(ruleDraftStateOf('rule')).toBe('rule')
+    expect(ruleDraftStateOf('nothing')).toBe('nothing')
+    expect(ruleDraftStateOf(undefined)).toBe('drafting')
+    expect(ruleDraftStateOf('started')).toBe('drafting')
+  })
+
+  it('reads the list again for a written rule and stops asking about it', () => {
+    const watch = { recA: NOW - 60_000, recB: NOW - 60_000 }
+    const out = settleRuleWatch(watch, { recA: 'rule', recB: 'drafting' }, NOW)
+    expect(out.written).toEqual(['recA'])
+    expect(out.watch).toEqual({ recB: NOW - 60_000 })
+  })
+
+  it('lets go of a decision that taught nothing or failed', () => {
+    const watch = { recA: NOW, recB: NOW }
+    const out = settleRuleWatch(watch, { recA: 'nothing', recB: 'error' }, NOW)
+    expect(out).toEqual({ watch: {}, written: [] })
+  })
+
+  it('keeps asking while the Mac is unreachable, but not for ever', () => {
+    const fresh = { recA: NOW - 60_000 }
+    expect(settleRuleWatch(fresh, {}, NOW).watch).toEqual(fresh)
+    const old = { recA: NOW - RULE_WATCH_MS - 1 }
+    expect(settleRuleWatch(old, {}, NOW).watch).toEqual({})
   })
 })

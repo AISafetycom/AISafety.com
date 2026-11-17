@@ -1694,6 +1694,17 @@ a.pageNav:hover {
   text-decoration: none;
 }
 
+/* The card's text can be selected: the title link's box stretched over the
+   card lets the pointer through to the words beneath, and SitePreview's
+   useSelectableCard opens the link from a plain click anywhere on it. */
+.siteFrame h3 a::after {
+  pointer-events: none;
+}
+
+.siteFrame :global(.card) {
+  cursor: pointer;
+}
+
 /* Change items: the card sits beside what Broom found. */
 
 .cardRow {
