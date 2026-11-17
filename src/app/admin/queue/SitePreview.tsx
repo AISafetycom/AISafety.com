@@ -1,6 +1,12 @@
 'use client'
 
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type RefObject,
+} from 'react'
 import ListingCard, { type CardProps } from '@/components/ListingCard'
 import { communityCardProps } from '@/app/communities/card'
 import { eventCardProps } from '@/app/events/card'
@@ -194,6 +200,117 @@ export function prefetchPreview(
   void fetchPreview(table, record, JSON.stringify(edits)).catch(() => {})
 }
 
+// ─── Selecting the card's text ───────────────────────────────────────────────
+// On the site, a card's link is stretched over the whole card (a map card is
+// one big link), so a drag on it drags the link and no word on the card can
+// be selected. In the Queue the title link's stretched box lets the pointer
+// through (.siteFrame in queue.module.css), and this:
+// - selects text on a drag anywhere on the card, the title included (the
+//   link's href is set aside while the button is down, since browsers never
+//   start a selection on a link, and comes back before the click arrives)
+// - still opens the listing from a plain click anywhere on the card
+// - never opens it from a click that selected text or cleared a selection
+// A double-click can't select a word: its first click opens the link, as a
+// click on any link does. Dragging is the way to select. A card marked
+// data-card is left alone: the site's own CardClicks (#867) does all of this
+// for it once that lands.
+
+// Anything on a card that is clickable in its own right.
+const CONTROLS = 'a, button, input, select, textarea, label, summary'
+
+function hasSelection(): boolean {
+  const selection = window.getSelection()
+  return !!selection && !selection.isCollapsed
+}
+
+function useSelectableCard(ref: RefObject<HTMLElement | null>): void {
+  useEffect(() => {
+    const root = ref.current
+    if (!root) return
+    let selectedAtPress = false
+    let held: { link: HTMLAnchorElement; href: string } | null = null
+
+    const cardOf = (target: EventTarget | null) => {
+      const el = target instanceof Element ? target : null
+      const card = el?.closest<HTMLElement>('.card')
+      if (!el || !card || !root.contains(card)) return null
+      if (card.hasAttribute('data-card')) return null
+      const link =
+        card instanceof HTMLAnchorElement
+          ? card
+          : card.querySelector<HTMLAnchorElement>('h3 a')
+      return link ? { el, link } : null
+    }
+
+    const restore = () => {
+      if (!held) return
+      held.link.setAttribute('href', held.href)
+      held = null
+    }
+
+    const onPointerDown = (e: PointerEvent) => {
+      restore()
+      selectedAtPress = hasSelection()
+      const hit = cardOf(e.target)
+      if (!hit || e.pointerType === 'touch' || e.button !== 0) return
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+      if (!hit.link.contains(hit.el)) return
+      const href = hit.link.getAttribute('href')
+      if (href === null) return
+      held = { link: hit.link, href }
+      hit.link.removeAttribute('href')
+    }
+
+    // In the capture phase, before the link's own click handler.
+    const onClick = (e: MouseEvent) => {
+      restore()
+      if (e.button !== 0 || e.defaultPrevented) return
+      const hit = cardOf(e.target)
+      if (!hit) return
+      // Part of selecting text, or the second click of a double-click.
+      const selecting = e.detail > 1 || selectedAtPress || hasSelection()
+      const modified = e.metaKey || e.ctrlKey || e.shiftKey || e.altKey
+      if (hit.link.contains(hit.el)) {
+        // Enter on the focused link and a forwarded click (both detail 0)
+        // go through, and so does any click that wasn't selecting.
+        if (e.detail === 0 || modified || !selecting) return
+        e.preventDefault()
+        e.stopPropagation()
+      } else if (!selecting && !hit.el.closest(CONTROLS)) {
+        // A click on the card's text opens the title link, with the same
+        // keys held.
+        hit.link.dispatchEvent(
+          new MouseEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            view: window,
+            button: e.button,
+            metaKey: e.metaKey,
+            ctrlKey: e.ctrlKey,
+            shiftKey: e.shiftKey,
+            altKey: e.altKey,
+          })
+        )
+      }
+    }
+
+    root.addEventListener('pointerdown', onPointerDown)
+    root.addEventListener('click', onClick, true)
+    // The button can come up anywhere on the page.
+    document.addEventListener('pointerup', restore, true)
+    document.addEventListener('pointercancel', restore, true)
+    window.addEventListener('blur', restore)
+    return () => {
+      restore()
+      root.removeEventListener('pointerdown', onPointerDown)
+      root.removeEventListener('click', onClick, true)
+      document.removeEventListener('pointerup', restore, true)
+      document.removeEventListener('pointercancel', restore, true)
+      window.removeEventListener('blur', restore)
+    }
+  }, [ref])
+}
+
 /** The site's card for a listing. Its link opens in a new tab, as on the
  *  site; the admin page loads no analytics, so clicks are not counted. */
 function Card({ kind, listing }: { kind: PreviewKind; listing: unknown }) {
@@ -240,6 +357,8 @@ export default function SitePreview({
 }) {
   const editsKey = JSON.stringify(edits)
   const key = previewKey(table, record, editsKey)
+  const sectionRef = useRef<HTMLElement>(null)
+  useSelectableCard(sectionRef)
   // The result is tagged with the request it answers, so a new record shows
   // "Building the card…" at once instead of the old card until the new one
   // arrives (cached cards come back within the same tick).
@@ -300,7 +419,7 @@ export default function SitePreview({
   }, [table, record, editsKey, key, gen])
 
   return (
-    <section className={styles.block}>
+    <section ref={sectionRef} className={styles.block}>
       {preview?.kind && preview.listing ? (
         <div className={styles.siteFrame}>
           {/* Keyed by its picture links: a fresh card is a fresh element,
