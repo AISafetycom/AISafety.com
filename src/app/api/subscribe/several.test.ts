@@ -40,16 +40,28 @@ vi.mock('@/lib/newsletter-signup-limits', async importOriginal => ({
   countSignupToday: h.countSignupToday,
   alertOwner: h.alertOwner,
 }))
-// The combinations' forms filled in, except Events + Training's.
-vi.mock('@/lib/newsletter-signup', async importOriginal => ({
-  ...(await importOriginal<typeof import('@/lib/newsletter-signup')>()),
-  COMBO_FORMS: {
-    'events-training': { formId: 0, orKey: '' },
-    'events-funding': { formId: 22, orKey: 'ef-or' },
-    'training-funding': { formId: 23, orKey: 'tf-or' },
-    'events-training-funding': { formId: 24, orKey: 'etf-or' },
-  },
-}))
+// Updates' own form filled in (the real one isn't made yet), and the
+// combinations' forms, except Events + Training's and Funding + Updates'.
+vi.mock('@/lib/newsletter-signup', async importOriginal => {
+  const real = await importOriginal<typeof import('@/lib/newsletter-signup')>()
+  return {
+    ...real,
+    AC_FORMS: { ...real.AC_FORMS, updates: { formId: 30, orKey: 'u-or' } },
+    COMBO_FORMS: {
+      'events-training': { formId: 0, orKey: '' },
+      'events-funding': { formId: 22, orKey: 'ef-or' },
+      'training-funding': { formId: 23, orKey: 'tf-or' },
+      'events-training-funding': { formId: 24, orKey: 'etf-or' },
+      'events-updates': { formId: 31, orKey: 'eu-or' },
+      'training-updates': { formId: 32, orKey: 'tu-or' },
+      'funding-updates': { formId: 0, orKey: '' },
+      'events-training-updates': { formId: 34, orKey: 'etu-or' },
+      'events-funding-updates': { formId: 35, orKey: 'efu-or' },
+      'training-funding-updates': { formId: 36, orKey: 'tfu-or' },
+      'events-training-funding-updates': { formId: 37, orKey: 'etfu-or' },
+    },
+  }
+})
 
 import { DAILY_ALERT_AFTER } from '@/lib/newsletter-signup-limits'
 import { POST } from './route'
@@ -64,11 +76,19 @@ const FORM_OF: Record<string, string> = {
   '22': 'events-funding',
   '23': 'training-funding',
   '24': 'events-training-funding',
+  '30': 'updates',
+  '31': 'events-updates',
+  '32': 'training-updates',
+  '34': 'events-training-updates',
+  '35': 'events-funding-updates',
+  '36': 'training-funding-updates',
+  '37': 'events-training-funding-updates',
 }
 const LIST_OF: Record<string, string> = {
   events: '6',
   training: '7',
   funding: '8',
+  updates: '9',
 }
 
 /** The pretend account: contacts by address, their list statuses, and
@@ -287,8 +307,43 @@ describe('POST /api/subscribe with several newsletters', () => {
     expect(posted).toEqual([])
   })
 
+  it('signs up to Updates with the others through their one form', async () => {
+    const res = await post({
+      email: EMAIL,
+      newsletters: ['updates', 'events', 'training', 'funding'],
+    })
+    expect(await res.json()).toEqual({
+      ok: true,
+      added: ['events', 'training', 'funding', 'updates'],
+      confirm: true,
+    })
+    expect(posted).toEqual(['events-training-funding-updates'])
+  })
+
+  it("uses Updates' own form for a reader who already gets the rest", async () => {
+    contacts.set(LOWER, '77')
+    statuses.set('77', { '6': '1' })
+    const res = await post({ email: EMAIL, newsletters: ['events', 'updates'] })
+    expect(await res.json()).toEqual({
+      ok: true,
+      added: ['updates'],
+      confirm: true,
+    })
+    expect(posted).toEqual(['updates'])
+  })
+
+  it("answers 503 for a combination with Updates whose form isn't filled in", async () => {
+    const res = await post({
+      email: EMAIL,
+      newsletters: ['funding', 'updates'],
+    })
+    expect(res.status).toBe(503)
+    expect((await res.json()).reason).toBe('not_configured')
+    expect(posted).toEqual([])
+  })
+
   it('refuses an empty or unknown list of newsletters', async () => {
-    for (const newsletters of [[], ['updates'], 'events', [7]]) {
+    for (const newsletters of [[], ['jobs'], 'events', [7]]) {
       const res = await post({ email: EMAIL, newsletters })
       expect(res.status).toBe(400)
       expect((await res.json()).reason).toBe('unknown_newsletter')
@@ -362,6 +417,20 @@ describe('POST /api/subscribe on the live site: subscribed at once', () => {
     expect(await res.json()).toEqual({ ok: true })
     expect(posted).toEqual(['training'])
     expect(listWrites).toEqual(['501:7:1:4'])
+  })
+
+  it("subscribes to Updates' list like the others", async () => {
+    const res = await post({ email: EMAIL, newsletters: ['updates', 'events'] })
+    expect(await res.json()).toEqual({ ok: true, added: ['events', 'updates'] })
+    expect(posted).toEqual(['events-updates'])
+    expect(listWrites).toEqual(['501:6:1:4', '501:9:1:4'])
+
+    listWrites = []
+    contacts = new Map()
+    statuses = new Map()
+    const box = await post({ email: EMAIL, newsletter: 'updates', hp: '' })
+    expect(await box.json()).toEqual({ ok: true })
+    expect(listWrites).toEqual(['501:9:1:4'])
   })
 
   it('changes only the lists the form left unconfirmed', async () => {

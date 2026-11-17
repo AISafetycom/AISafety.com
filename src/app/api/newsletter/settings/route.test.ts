@@ -106,7 +106,12 @@ describe('POST /api/newsletter/settings', () => {
     expect(await res.json()).toEqual({
       ok: true,
       email: 'a•••@example.org',
-      subscribed: { events: true, training: true, funding: false },
+      subscribed: {
+        events: true,
+        training: true,
+        funding: false,
+        updates: false,
+      },
     })
     expect(writes).toEqual([])
   })
@@ -135,7 +140,12 @@ describe('POST /api/newsletter/settings', () => {
     expect(await res.json()).toEqual({
       ok: true,
       email: 'a•••@example.org',
-      subscribed: { events: true, training: false, funding: true },
+      subscribed: {
+        events: true,
+        training: false,
+        funding: true,
+        updates: false,
+      },
     })
     // Source 4 only on a subscribe: it lets ActiveCampaign take back someone
     // who unsubscribed before.
@@ -145,12 +155,34 @@ describe('POST /api/newsletter/settings', () => {
     ])
   })
 
+  it('adds and drops Updates (list 9) like the others', async () => {
+    vi.stubEnv('VERCEL_ENV', 'production')
+    const on = await post({ k: KEY, set: { updates: true } })
+    expect((await on.json()).subscribed).toEqual({
+      events: true,
+      training: true,
+      funding: false,
+      updates: true,
+    })
+    const off = await post({ k: KEY, set: { updates: false } })
+    expect((await off.json()).subscribed.updates).toBe(false)
+    expect(writes).toEqual([
+      { list: '9', status: 1, sourceid: 4 },
+      { list: '9', status: 2, sourceid: undefined },
+    ])
+  })
+
   it('only pretends outside the live site', async () => {
     const res = await post({ k: KEY, set: { training: false } })
     expect(await res.json()).toEqual({
       ok: true,
       email: 'a•••@example.org',
-      subscribed: { events: true, training: false, funding: false },
+      subscribed: {
+        events: true,
+        training: false,
+        funding: false,
+        updates: false,
+      },
       dryRun: true,
     })
     expect(writes).toEqual([])
@@ -173,6 +205,7 @@ describe('POST /api/newsletter/settings', () => {
       events: false,
       training: true,
       funding: false,
+      updates: false,
     })
   })
 
@@ -190,8 +223,8 @@ describe('POST /api/newsletter/settings', () => {
     expect((await res.json()).reason).toBe('upstream')
   })
 
-  it('refuses anything but true or false for the three newsletters', async () => {
-    for (const set of [{ updates: true }, { events: 'no' }, [true]]) {
+  it('refuses anything but true or false for the four newsletters', async () => {
+    for (const set of [{ jobs: true }, { events: 'no' }, [true]]) {
       const res = await post({ k: KEY, set })
       expect(res.status).toBe(400)
     }

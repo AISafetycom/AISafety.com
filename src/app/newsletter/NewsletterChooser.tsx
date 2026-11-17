@@ -38,16 +38,12 @@ interface Newsletter {
   archive: string
 }
 
-interface Updates {
-  name: string
-  about: string
-  url: string
-}
-
 /** Recorded under this page in analytics (its own row, apart from the
  *  boxes on /events, /training and /funding). */
 const TRACKING_PAGE = '/newsletter'
-const NONE: Subscriptions = { events: false, training: false, funding: false }
+const NONE = Object.fromEntries(
+  SIGNUP_NEWSLETTERS.map(n => [n, false])
+) as Subscriptions
 /** Where the key waits in history.state. The browser keeps it with this one
  *  history entry and drops it when the tab closes. */
 const HISTORY_KEY = 'newsletterSettingsKey'
@@ -108,10 +104,12 @@ function listOf(names: string[]): string {
 
 export default function NewsletterChooser({
   newsletters,
-  updates,
+  offered,
 }: {
+  /** Every newsletter: what a reader managing their own sees. */
   newsletters: Newsletter[]
-  updates: Updates
+  /** The ones a visitor can sign up to (their signup forms exist). */
+  offered: SignupNewsletter[]
 }) {
   const [view, setView] = useState<View>({ kind: 'signup' })
 
@@ -130,7 +128,8 @@ export default function NewsletterChooser({
         kind: 'manage',
         key,
         email: answer.email,
-        saved: answer.subscribed,
+        // Every newsletter has a tick, whatever the answer left out.
+        saved: { ...NONE, ...answer.subscribed },
       })
       return
     }
@@ -213,10 +212,11 @@ export default function NewsletterChooser({
               )}
             </div>
           )}
-          <SignupForm newsletters={newsletters} />
+          <SignupForm
+            newsletters={newsletters.filter(n => offered.includes(n.key))}
+          />
         </>
       )}
-      {view.kind !== 'loading' && <UpdatesNote updates={updates} />}
     </>
   )
 }
@@ -295,7 +295,7 @@ function SignupForm({ newsletters }: { newsletters: Newsletter[] }) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (sending) return
-    const picks = SIGNUP_NEWSLETTERS.filter(n => ticks[n])
+    const picks = newsletters.map(n => n.key).filter(n => ticks[n])
     if (picks.length === 0) {
       setError('Tick at least one newsletter.')
       return
@@ -474,8 +474,8 @@ function ManageForm({
     setBusy(false)
     // Whatever happened, show what is true now.
     if (answer.subscribed) {
-      setSaved(answer.subscribed)
-      setTicks(answer.subscribed)
+      setSaved({ ...NONE, ...answer.subscribed })
+      setTicks({ ...NONE, ...answer.subscribed })
     }
     const label = changes.map(n => `${next[n] ? '+' : '-'}${n}`).join(' ')
     trackEvent('newsletter_settings_save', {
@@ -487,7 +487,7 @@ function ManageForm({
       setStatus({ ok: false, text: answer.error ?? SOMETHING_WRONG })
       return
     }
-    const now = answer.subscribed ?? next
+    const now = { ...NONE, ...(answer.subscribed ?? next) }
     const names = newsletters.filter(n => now[n.key]).map(n => n.name)
     setStatus({
       ok: true,
@@ -551,29 +551,5 @@ function ManageForm({
         {status?.text}
       </div>
     </form>
-  )
-}
-
-/** The Updates newsletter, still on Substack: a link, not a box to tick. */
-function UpdatesNote({ updates }: { updates: Updates }) {
-  return (
-    <p className="paragraph-small color-teal-grey-300 padding-top-24px">
-      <span className="color-white">{updates.name}</span> {updates.about}{' '}
-      <a
-        href={updates.url}
-        target="_blank"
-        rel="noopener noreferrer"
-        className={`color-teal-300 ${styles.link}`}
-        onClick={() =>
-          trackEvent('newsletter_page_click', {
-            page: TRACKING_PAGE,
-            label: 'updates',
-            source: 'substack',
-          })
-        }
-      >
-        Subscribe on Substack&nbsp;&rarr;
-      </a>
-    </p>
   )
 }

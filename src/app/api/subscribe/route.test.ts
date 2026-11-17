@@ -40,13 +40,14 @@ vi.mock('@/lib/newsletter-signup-limits', async importOriginal => ({
   countSignupToday: h.countSignupToday,
   alertOwner: h.alertOwner,
 }))
-// Events' form filled in, Training's and Funding's still at their placeholders.
+// Events' form filled in, the others' still at their placeholders.
 vi.mock('@/lib/newsletter-signup', async importOriginal => ({
   ...(await importOriginal<typeof import('@/lib/newsletter-signup')>()),
   AC_FORMS: {
     events: { formId: 12, orKey: 'a1b2c3d4e5f6' },
     training: { formId: 0, orKey: '' },
     funding: { formId: 0, orKey: '' },
+    updates: { formId: 0, orKey: '' },
   },
 }))
 
@@ -157,8 +158,8 @@ describe('POST /api/subscribe', () => {
     )
   })
 
-  it('only takes Events, Training and Funding', async () => {
-    for (const newsletter of ['updates', '', undefined, 7]) {
+  it('only takes the four newsletters', async () => {
+    for (const newsletter of ['jobs', 'Updates', '', undefined, 7]) {
       const res = await post({ email: EMAIL, newsletter })
       expect(res.status).toBe(400)
       expect((await json(res)).reason).toBe('unknown_newsletter')
@@ -208,17 +209,21 @@ describe('POST /api/subscribe', () => {
   })
 
   it('answers 503 for a form that is not filled in, without sending', async () => {
-    const res = await post({ email: EMAIL, newsletter: 'training', hp: '' })
-    expect(res.status).toBe(503)
-    expect(await json(res)).toEqual({
-      ok: false,
-      error:
-        "Signups for this newsletter aren't open yet. Please check back soon.",
-      reason: 'not_configured',
-    })
+    // Updates is one of them until its form is made in ActiveCampaign.
+    for (const newsletter of ['training', 'updates']) {
+      logs = []
+      const res = await post({ email: EMAIL, newsletter, hp: '' })
+      expect(res.status).toBe(503)
+      expect(await json(res)).toEqual({
+        ok: false,
+        error:
+          "Signups for this newsletter aren't open yet. Please check back soon.",
+        reason: 'not_configured',
+      })
+      expect(logs.join('\n')).toContain('not configured')
+    }
     expect(acCalls).toHaveLength(0)
     expect(h.ipAllowed).not.toHaveBeenCalled()
-    expect(logs.join('\n')).toContain('not configured')
   })
 
   it('stops a network over its hourly limit', async () => {

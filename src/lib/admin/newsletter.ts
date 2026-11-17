@@ -66,7 +66,7 @@
     for the list, broken click-counter links, oversized HTML or an older issue
     still waiting, and asks the approver to tick leftover words (TEST,
     TODO…) and dates already past;
-  - only production may send to (or edit drafts on) the real lists 6/7/8,
+  - only production may send to (or edit drafts on) the real lists 6/7/8/9,
     and while NEWSLETTER_WARMUP is on a send to more than
     MAX_UNSEGMENTED_SEND people must name a wave;
   - every real-list approval is recorded in Upstash for the send watcher.
@@ -135,7 +135,7 @@ import {
   noteTestCopy,
   readClicks,
 } from '@/lib/newsletter-clicks'
-import { MIN_READERS } from '@/lib/newsletter-archive'
+import { minReadersOnList } from '@/lib/newsletter-archive'
 import {
   keepRemovalCopy,
   readRemovalCopy,
@@ -245,11 +245,17 @@ const WAVE_PREFIX_REAL = 'Newsletter wave '
 const WAVE_PREFIX_TEST = 'SWEEP TEST wave '
 
 /** The real newsletter lists: the campaign name each issue carries in front
- *  ("Events · Week 41, 2026") and the one sender allowed on it. */
+ *  ("Events · Week 41, 2026") and the one sender allowed on it. Updates
+ *  (list 9, since its move from Substack in November 2026) is the odd one:
+ *  its issues are a few paragraphs with no cards (so no card panel, no card
+ *  checks) and its subject is a headline, while its name is still
+ *  "Updates · Issue #5, 2026". Nothing here reads an issue's subject to
+ *  tell what issue it is: the name does that. */
 const REAL_LISTS: Record<string, { prefix: string; from: string }> = {
   '6': { prefix: 'Events', from: 'events@news.aisafety.com' },
   '7': { prefix: 'Training', from: 'training@news.aisafety.com' },
   '8': { prefix: 'Funding', from: 'funding@news.aisafety.com' },
+  '9': { prefix: 'Updates', from: 'updates@news.aisafety.com' },
 }
 /** Bryce's test lists (aliases only): exempt from the name/sender pairing,
  *  and sendable from any copy of the site. No other list can be sent to. */
@@ -282,7 +288,7 @@ function listRefusal(listId: string): string | null {
   }
   return TEST_LISTS.has(listId)
     ? null
-    : `list ${listId} isn’t a newsletter list (Events 6, Training 7, Funding 8, or test lists 4/5)`
+    : `list ${listId} isn’t a newsletter list (Events 6, Training 7, Funding 8, Updates 9, or test lists 4/5)`
 }
 
 /** One approval per list + issue at a time; long enough to cover the
@@ -1150,7 +1156,7 @@ function formatUtc(d: Date): string {
 }
 
 /** Pure: what the page may do to a send in this state. Only the newsletter
- *  lists' single-list campaigns (lists 5–8); status 1 or 7 can only be
+ *  lists' single-list campaigns (lists 5–9); status 1 or 7 can only be
  *  canceled (AC deletes it), 2 paused, 3 stopped for good or resumed. */
 export function stopActionsFor(
   status: string,
@@ -1163,7 +1169,7 @@ export function stopActionsFor(
   return []
 }
 
-const STOPPABLE_LISTS = new Set(['5', '6', '7', '8'])
+const STOPPABLE_LISTS = new Set(['5', '6', '7', '8', '9'])
 /** Scheduled, sending, paused, held: not finished, so a Stop button may
  *  still apply. */
 const STILL_GOING = new Set(['1', '2', '3', '7'])
@@ -3735,7 +3741,7 @@ async function rewriteDraft(
 export interface SendStats {
   id: string
   name: string
-  /** 'Events', 'Training', 'Funding'. */
+  /** 'Events', 'Training', 'Funding', 'Updates'. */
   newsletter: string
   /** When the issue first went out (its first send's start, ISO): the date
    *  the past issues pages give it. */
@@ -3781,8 +3787,8 @@ export interface SendStatsResult {
  *  on aisafety.com. An issue sent in waves is one row with every wave added
  *  up, however the range falls across them: its clicks are counted per
  *  issue and can't be split by wave or by date. Practice sends to the lists
- *  while they held only the team's own addresses (under MIN_READERS, the
- *  past issues pages' rule) are left out. For /admin/analytics' Newsletters
+ *  while they held only the team's own addresses (under the list's floor,
+ *  minReadersOnList: the past issues pages' rule) are left out. For /admin/analytics' Newsletters
  *  tab. */
 export async function readSendStats(range: {
   startMs: number | null
@@ -3842,7 +3848,9 @@ export async function readSendStats(range: {
         sent: g.rows.reduce((n, r) => n + (Number(r.c.send_amt ?? 0) || 0), 0),
       }
     })
-    .filter(g => g.sent >= MIN_READERS && inRange(g.first))
+    .filter(
+      g => g.sent >= minReadersOnList(g.rows[0].listId) && inRange(g.first)
+    )
     .sort((a, b) => (b.first || 0) - (a.first || 0))
   const keptRows = kept.flatMap(g => g.rows)
   const [clicks, reports] = await Promise.all([

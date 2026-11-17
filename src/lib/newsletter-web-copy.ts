@@ -19,8 +19,10 @@ import { inlineCards } from '@/lib/newsletter-cards-store'
 import {
   WEB_BASE,
   WEB_NEWSLETTERS,
+  emailSubject,
   issueName,
   isWebKey,
+  type WebKey,
 } from '@/lib/newsletter-web'
 
 /** The email as sent, with its card data inline, or null when the issue
@@ -43,6 +45,35 @@ export async function sentEmail(
   if (!email) return null
   await keep(`newsletter/web/${file}`, email)
   return inlineCards(email)
+}
+
+/** The subjects of these issues, by issue address, read from each one's
+ *  email: for a newsletter whose subject is a headline (Updates), whose
+ *  past issues list shows it. Three emails at a time; an issue whose email
+ *  can't be read just now is left out (and logged), so the list falls back
+ *  to its number. */
+export async function issueSubjects(
+  key: WebKey,
+  slugs: string[]
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  let next = 0
+  const worker = async () => {
+    while (next < slugs.length) {
+      const slug = slugs[next++]
+      try {
+        const email = await sentEmail(key, slug)
+        const subject = email ? emailSubject(email) : null
+        if (subject) out.set(slug, subject)
+      } catch (err) {
+        console.warn(
+          `[newsletter-web] ${key}/${slug}: the subject couldn't be read: ${err instanceof Error ? err.message : String(err)}`
+        )
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: 3 }, worker))
+  return out
 }
 
 /** Keeps the email as sent. Written once and never changed or deleted

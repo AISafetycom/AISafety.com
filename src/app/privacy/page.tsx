@@ -93,26 +93,27 @@ export default function PrivacyPage() {
 
           <h3 className="padding-bottom-16px">Newsletters</h3>
           <p className="color-teal-grey-300 padding-bottom-40px">
-            When you sign up for the AI Safety Events, AI Safety Training, or AI
-            Safety Funding newsletter on this site, your email address goes to
-            ActiveCampaign, the service that sends them, and you&apos;re
-            subscribed right away and get a welcome email. If you subscribed to
-            the AI Safety Events &amp; Training or the AI Safety Funding
-            newsletter on Substack, your email address moved to ActiveCampaign
-            with the newsletter in 2026. ActiveCampaign records, for each
-            reader, which emails they open and when they unsubscribe. When you
-            click a link in one of those emails, the click is counted by
-            aisafety.com itself, anonymously – it isn&apos;t tied to you or your
-            email address. Every email has an unsubscribe link at the bottom,
-            and a Manage subscriptions link that opens your newsletters on{' '}
+            When you sign up for the AI Safety Events, AI Safety Training, AI
+            Safety Funding, or AISafety.com Updates newsletter on this site,
+            your email address goes to ActiveCampaign, the service that sends
+            them, and you&apos;re subscribed right away and get a welcome email.
+            If you subscribed to the AI Safety Events &amp; Training, the AI
+            Safety Funding, or the AISafety.com Updates newsletter on Substack,
+            your email address moved to ActiveCampaign with the newsletter in
+            2026. ActiveCampaign records, for each reader, which emails they
+            open and when they unsubscribe. When you click a link in one of
+            those emails, the click is counted by aisafety.com itself,
+            anonymously – it isn&apos;t tied to you or your email address. Every
+            email has an unsubscribe link at the bottom, and a Manage
+            subscriptions link that opens your newsletters on{' '}
             <Link href="/newsletter" className="color-teal-300">
               aisafety.com/newsletter
             </Link>{' '}
             so you can change which ones you get; the private code in that link
             stays out of our analytics. When you sign up for several newsletters
-            there at once, one welcome email covers them all. The AISafety.com
-            Updates newsletter is hosted on Substack – when you subscribe to it,
-            Substack&apos;s own privacy policy applies.
+            there at once, one welcome email covers them all. Issues from before
+            the newsletters moved are still on Substack, where Substack&apos;s
+            own privacy policy applies.
           </p>
 
           <h3 className="padding-bottom-16px">Services we rely on</h3>
@@ -121,8 +122,8 @@ export default function PrivacyPage() {
             Airtable (our listings database, forms, and chatbot logs), Anthropic
             (Claude, the AI model behind the chatbot), ipapi.co (the
             approximate-location lookup for chatbot conversations),
-            ActiveCampaign (the Events, Training, and Funding newsletters), and
-            Substack (the Updates newsletter).
+            ActiveCampaign (the newsletters), and Substack (the
+            newsletters&apos; issues from before they moved).
           </p>
 
           <h3 className="padding-bottom-16px">Your choices</h3>
@@ -139,13 +140,13 @@ export default function PrivacyPage() {
             </a>
             . Because our analytics is anonymous, the only things of yours
             we&apos;d be able to find are a chatbot conversation and, if you
-            signed up for the Events, Training, or Funding newsletter, your
-            subscription. For a conversation, mention roughly when it happened
-            and what it was about, and we&apos;ll delete it.
+            signed up for one of the newsletters, your subscription. For a
+            conversation, mention roughly when it happened and what it was
+            about, and we&apos;ll delete it.
           </p>
 
           <p className="paragraph-small color-teal-grey-300 padding-bottom-80px">
-            Last updated: 26 October 2026
+            Last updated: 17 November 2026
           </p>
         </div>
       </div>

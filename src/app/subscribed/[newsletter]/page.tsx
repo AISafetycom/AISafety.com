@@ -5,7 +5,8 @@ import { notFound } from 'next/navigation'
 import { COMBO_KEYS, type SignupNewsletter } from '@/lib/newsletter-signup'
 
 // Where ActiveCampaign sends readers after they press the button in the
-// welcome email the signup boxes on /events, /training and /funding trigger
+// welcome email the signup boxes on /events, /training, /funding and the
+// newsletters' own pages trigger
 // (each form's confirmation redirect points at its own path), in place of
 // ActiveCampaign's unbranded confirmation page. Since 12 November 2026 the
 // site subscribes a reader as they sign up, so most are subscribed before
@@ -34,6 +35,14 @@ const NEWSLETTERS = {
     page: '/funding',
     what: 'funders in AI safety',
     when: 'whenever there are new funding opportunities',
+  },
+  // About the site itself, so it has no resource page to see "in the
+  // meantime" (`page` null): alone, it points at the whole site instead.
+  updates: {
+    name: 'AISafety.com Updates',
+    page: null,
+    what: null,
+    when: 'whenever something new launches on AISafety.com',
   },
 } as const
 
@@ -85,6 +94,11 @@ export default async function SubscribedPage({
   if (!keys) notFound()
   const picked = keys.map(k => NEWSLETTERS[k])
   const one = picked.length === 1 ? picked[0] : null
+  // The resource pages to see in the meantime: every newsletter picked that
+  // has one.
+  const pages = picked.flatMap(n =>
+    n.page ? [{ page: n.page, what: n.what }] : []
+  )
 
   return (
     <div className="container-narrow">
@@ -108,20 +122,30 @@ export default async function SubscribedPage({
               ? 'If it lands in spam or Promotions, move it to your inbox and it will stay there.'
               : 'If any of them lands in spam or Promotions, move it to your inbox and its next issues will stay there.'}
           </p>
-          <p className="color-teal-grey-300">
-            In the meantime, see all{' '}
-            {listOf(
-              picked.map(n => (
-                <Fragment key={n.page}>
-                  {n.what} on{' '}
-                  <Link href={n.page} className="color-teal-300">
-                    AISafety.com{n.page}
-                  </Link>
-                </Fragment>
-              ))
-            )}
-            .
-          </p>
+          {pages.length > 0 ? (
+            <p className="color-teal-grey-300">
+              In the meantime, see all{' '}
+              {listOf(
+                pages.map(n => (
+                  <Fragment key={n.page}>
+                    {n.what} on{' '}
+                    <Link href={n.page} className="color-teal-300">
+                      AISafety.com{n.page}
+                    </Link>
+                  </Fragment>
+                ))
+              )}
+              .
+            </p>
+          ) : (
+            <p className="color-teal-grey-300">
+              In the meantime, explore the AI safety resources on{' '}
+              <Link href="/" className="color-teal-300">
+                AISafety.com
+              </Link>
+              .
+            </p>
+          )}
         </div>
       </div>
     </div>

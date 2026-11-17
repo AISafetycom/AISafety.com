@@ -8,6 +8,7 @@ import {
   inlineHtml,
   inlinePlain,
   parseInline,
+  proseBlocks,
   textHtml,
   textPage,
   textPlain,
@@ -17,6 +18,13 @@ import {
 // Training · Week 41, 2026 exactly as it went out (the kept copy).
 const WEEK_41 = readFileSync(
   path.join(__dirname, 'admin/__fixtures__/newsletter-training-week-41.html'),
+  'utf8'
+)
+
+// An Updates issue exactly as ~/Newsletter/updates.py draws it (its frozen
+// sample issue, with the moved-from-Substack note on): no cards, no manifest.
+const UPDATES = readFileSync(
+  path.join(__dirname, 'admin/__fixtures__/newsletter-updates-sample.html'),
   'utf8'
 )
 
@@ -203,6 +211,104 @@ describe('textVersion', () => {
     expect(textVersion('<!--aisafety-cards:bm9wZQ==-->')).toBeNull()
     expect(
       textVersion(email({ groups: [{ id: 'g0', label: 'X', cards: [] }] }))
+    ).toBeNull()
+  })
+})
+
+describe('textVersion of a cardless issue (Updates)', () => {
+  const tv = textVersion(UPDATES)
+
+  it('reads the body in order: paragraphs, headings and each box', () => {
+    expect(tv).not.toBeNull()
+    expect(tv!.intro).toEqual([])
+    expect(tv!.groups).toEqual([])
+    expect(tv!.body!.map(b => b.kind)).toEqual([
+      'paragraph',
+      'heading',
+      'item',
+      'item',
+      'paragraph',
+    ])
+    const [intro, heading, first, second, closing] = tv!.body!
+    expect(intro.kind === 'paragraph' && inlinePlain(intro.runs)).toBe(
+      'This newsletter goes out when we launch something new on AISafety.com. Probably a few times a year.'
+    )
+    expect(heading).toEqual({ kind: 'heading', text: 'New features' })
+    // The box's title keeps the email's own link; so does its description.
+    expect(first.kind === 'item' && first.title).toEqual([
+      {
+        text: 'Sample page',
+        href: 'https://aisafety.com/sample-page?utm_source=updates-newsletter&utm_medium=email&utm_campaign=updates-2026-1',
+      },
+    ])
+    expect(first.kind === 'item' && inlinePlain(first.desc)).toBe(
+      'A new page that lists sample things, with a link inside the description (https://example.org/more). Let us know any feedback by replying to this email.'
+    )
+    expect(second.kind === 'item' && inlinePlain(second.title)).toBe(
+      'Sample improvement'
+    )
+    expect(closing.kind === 'paragraph' && inlinePlain(closing.runs)).toBe(
+      'A closing paragraph under the cards.'
+    )
+  })
+
+  it('leaves out the moved-from-Substack note, the masthead and the footer', () => {
+    const all = `${textHtml(tv!)}\n${textPlain(tv!)}`
+    expect(all).not.toContain('moved from Substack')
+    expect(all).not.toContain('Unsubscribe')
+    expect(all).not.toContain('Manage subscriptions')
+    expect(all).not.toContain('%')
+    expect(all).not.toContain('Issue #1')
+  })
+
+  it('writes it as simple HTML and as plain text', () => {
+    const html = textHtml(tv!)
+    expect(html).toContain('<p><strong>New features</strong></p>')
+    expect(html).toContain(
+      '<p>• <a href="https://aisafety.com/sample-page?utm_source=updates-newsletter&amp;utm_medium=email&amp;utm_campaign=updates-2026-1">Sample page</a><br>A new page that lists sample things'
+    )
+    expect(html).toContain(
+      '<p>• Sample improvement<br>A change with no page of its own, described in one or two sentences.</p>'
+    )
+    // Paragraphs aren't set in italics the way the card emails' intro is.
+    expect(html).not.toContain('<em>')
+    expect(html).not.toMatch(/<(?!\/?(?:p|a|strong|br)\b)/)
+    const plain = textPlain(tv!)
+    expect(plain).toContain('New features\n\n• Sample page')
+    expect(plain).toContain('• Sample improvement\nA change with no page')
+    expect(plain.endsWith('A closing paragraph under the cards.\n')).toBe(true)
+  })
+
+  it('shows on the text page under its headline', () => {
+    const page = textPage(
+      tv!,
+      'updates',
+      'Sample update: two new features',
+      '/newsletter/updates/issue-1-2026'
+    )
+    expect(page).toContain('<h1>Sample update: two new features</h1>')
+    expect(page).toContain(
+      '<p class="label">AISafety.com Updates · Text version</p>'
+    )
+    expect(page).toContain(
+      '<a href="https://aisafety.com/newsletter/updates/issue-1-2026">AISafety.com Updates · Sample update: two new features</a>'
+    )
+  })
+
+  it('finds nothing without the body cell, and never reads a card email that way', () => {
+    expect(proseBlocks('<html><body><p>Hi</p></body></html>')).toEqual([])
+    // A card email whose manifest is gone or unreadable still has no text
+    // version: its cards can't be told from its markup alone.
+    expect(
+      textVersion(
+        UPDATES.replace(
+          '</body>',
+          '<!--aisafety-cards-ref:0123456789abcdef-->\n</body>'
+        )
+      )
+    ).toBeNull()
+    expect(
+      textVersion(UPDATES.replace('<table', '<!--card:g0:recA--><table'))
     ).toBeNull()
   })
 })

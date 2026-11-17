@@ -598,15 +598,10 @@ export default async function MediaPage() {
         <h2>News</h2>
         <p className={`paragraph-small ${styles.lead}`}>
           What we have launched, and where it was announced. Our{' '}
-          <a
-            href="https://aisafetycom.substack.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className={styles.inlineLink}
-          >
+          <Link href="/newsletter/updates" className={styles.inlineLink}>
             updates newsletter
-          </a>{' '}
-          goes out when we launch something new, about every two months.
+          </Link>{' '}
+          goes out when we launch something new. Probably a few times a year.
         </p>
         {coverage.length > 0 && (
           <>

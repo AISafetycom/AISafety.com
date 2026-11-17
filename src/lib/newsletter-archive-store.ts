@@ -23,9 +23,9 @@ import { Redis } from '@upstash/redis'
 import { sentIssuesOn } from '@/lib/admin/newsletter'
 import { WEB_NEWSLETTERS, type WebKey } from '@/lib/newsletter-web'
 import {
-  MIN_READERS,
   issueSlug,
   mergeIssues,
+  minReaders,
   type ArchiveIssue,
   type FeedReader,
 } from '@/lib/newsletter-archive'
@@ -80,12 +80,14 @@ export async function recordedIssues(
 }
 
 /** ActiveCampaign's sent issues of this newsletter, as addresses: those
- *  that have gone to at least MIN_READERS people. */
+ *  that have gone to at least its floor of people (minReaders). */
 async function live(key: WebKey): Promise<ArchiveIssue[]> {
   const sent = await sentIssuesOn(WEB_NEWSLETTERS[key].list)
   return sent.flatMap(s => {
     const slug = issueSlug(key, s.name)
-    return slug && s.readers >= MIN_READERS ? [{ slug, sentAt: s.sentAt }] : []
+    return slug && s.readers >= minReaders(key)
+      ? [{ slug, sentAt: s.sentAt }]
+      : []
   })
 }
 

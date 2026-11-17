@@ -17,6 +17,11 @@
    The migration note sits in the email's header, not its intro, so it never
    comes along; nor does the footer.
 
+   An Updates issue has no cards: it is a few paragraphs, section headings
+   and boxes about what's new (~/Newsletter/updates.py). Its text version is
+   read from the email's own body instead (proseBlocks): the same words and
+   links, in the same order.
+
    This module is pure; the read is src/lib/newsletter-web-copy.ts, the
    route src/app/newsletter/[key]/[issue]/text/route.ts. */
 
@@ -54,10 +59,20 @@ export interface Run {
   em?: boolean
 }
 
+/** A piece of a cardless issue's body, in the email's order. */
+export type TextBlock =
+  | { kind: 'paragraph'; runs: Run[] }
+  | { kind: 'heading'; text: string }
+  /** A box: its title (the link, when it has one) and its description. */
+  | { kind: 'item'; title: Run[]; desc: Run[] }
+
 export interface TextVersion {
   /** The intro paragraphs, each as runs. */
   intro: Run[][]
   groups: TextGroup[]
+  /** A cardless issue (Updates): everything in its body, in order, in place
+   *  of `intro` and `groups` (both empty then). */
+  body?: TextBlock[]
 }
 
 interface Manifest {
@@ -284,11 +299,68 @@ function cardOf(block: string, href: string | undefined): TextCard | null {
   }
 }
 
-/** Pure: the text version of a sent email, or null when it has no card
- *  manifest to build one from. */
+/** Pure: an email fragment's runs, trimmed at both ends, empty ones gone. */
+function trimmedRuns(html: string): Run[] {
+  const runs = parseInline(html)
+  if (runs.length) {
+    runs[0].text = runs[0].text.trimStart()
+    runs[runs.length - 1].text = runs[runs.length - 1].text.trimEnd()
+  }
+  return runs.filter(r => r.text)
+}
+
+const hasWords = (runs: Run[]) => runs.some(r => r.text.trim())
+
+/** Pure: the body of a cardless issue (~/Newsletter/updates.py
+ *  render_html()): what sits in the body cell before the footer, in order.
+ *  A <p> is a paragraph, a <div> a section heading, and a box (the cell
+ *  with class "card") an item whose first <div> is its title and the rest
+ *  its description. Empty when the body cell isn't found. */
+export function proseBlocks(email: string): TextBlock[] {
+  const cell = /<td\b[^>]*class="inner"[^>]*>/.exec(email)
+  if (!cell) return []
+  const from = cell.index + cell[0].length
+  const footer = email.indexOf('<!--web:hide-->', from)
+  const region = email.slice(from, footer >= 0 ? footer : undefined)
+  const out: TextBlock[] = []
+  for (const m of region.matchAll(
+    /<td\b[^>]*class="card"[^>]*>([\s\S]*?)<\/td>|<p\b[^>]*>([\s\S]*?)<\/p>|<div\b[^>]*>([\s\S]*?)<\/div>/g
+  )) {
+    if (m[1] !== undefined) {
+      const parts = [...m[1].matchAll(/<div\b[^>]*>([\s\S]*?)<\/div>/g)].map(
+        d => trimmedRuns(d[1])
+      )
+      // A box without a title is its description alone.
+      const [title, ...rest] = parts.length > 1 ? parts : [[], ...parts]
+      const desc = rest.flatMap((runs, i) =>
+        i > 0 && hasWords(runs) ? [{ text: '\n' }, ...runs] : runs
+      )
+      if (hasWords(title) || hasWords(desc))
+        out.push({ kind: 'item', title, desc })
+    } else if (m[2] !== undefined) {
+      const runs = trimmedRuns(m[2])
+      if (hasWords(runs)) out.push({ kind: 'paragraph', runs })
+    } else {
+      const text = inlinePlain(
+        trimmedRuns(m[3]).map(({ text: t }) => ({ text: t }))
+      )
+      if (text) out.push({ kind: 'heading', text })
+    }
+  }
+  return out
+}
+
+/** Pure: the text version of a sent email, or null when there's nothing to
+ *  build one from: the card manifest for a card email, the body itself for
+ *  a cardless one (Updates). An email that has cards but no readable
+ *  manifest gets none. */
 export function textVersion(email: string): TextVersion | null {
   const man = manifest(email)
-  if (!man) return null
+  if (!man) {
+    if (/<!--card:|<!--aisafety-cards/.test(email)) return null
+    const body = proseBlocks(email)
+    return body.length ? { intro: [], groups: [], body } : null
+  }
   const links = cardLinks(email)
   const blocks = new Map<string, string>()
   const notes: string[][] = man.groups.map(() => [])
@@ -346,6 +418,18 @@ export function textHtml(tv: TextVersion, title?: TextTitle): string {
       ]
     : []
   out.push(...tv.intro.map(p => `<p><em>${inlineHtml(p)}</em></p>`))
+  for (const b of tv.body ?? []) {
+    if (b.kind === 'paragraph') out.push(`<p>${inlineHtml(b.runs)}</p>`)
+    else if (b.kind === 'heading')
+      out.push(`<p><strong>${esc(b.text)}</strong></p>`)
+    else
+      out.push(
+        `<p>• ${[b.title, b.desc]
+          .filter(hasWords)
+          .map(inlineHtml)
+          .join('<br>')}</p>`
+      )
+  }
   for (const g of tv.groups) {
     out.push(`<p><strong>${esc(g.label)}</strong></p>`)
     for (const n of g.notes) out.push(`<p>${linkify(n)}</p>`)
@@ -368,6 +452,14 @@ export function textHtml(tv: TextVersion, title?: TextTitle): string {
 export function textPlain(tv: TextVersion, title?: TextTitle): string {
   const out: string[] = title ? [`${title.text}\n${title.href}`] : []
   out.push(...tv.intro.map(inlinePlain))
+  for (const b of tv.body ?? []) {
+    if (b.kind === 'paragraph') out.push(inlinePlain(b.runs))
+    else if (b.kind === 'heading') out.push(b.text)
+    else
+      out.push(
+        `• ${[b.title, b.desc].filter(hasWords).map(inlinePlain).join('\n')}`
+      )
+  }
   for (const g of tv.groups) {
     out.push(g.label, ...g.notes)
     for (const c of g.cards)

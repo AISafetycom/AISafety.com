@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { formatDate } from '@/lib/format-date'
-import { WEB_NEWSLETTERS, isWebKey } from '@/lib/newsletter-web'
+import { WEB_NEWSLETTERS, hasHeadline, isWebKey } from '@/lib/newsletter-web'
 import {
   NEWSLETTER_ABOUT,
   RESOURCE_LINK,
@@ -11,17 +11,20 @@ import {
   feedPath,
   issuePath,
   issueTitle,
+  shownWithoutIssues,
   type ArchiveIssue,
 } from '@/lib/newsletter-archive'
 import { archiveIssues, previewIssues } from '@/lib/newsletter-archive-store'
+import { issueSubjects } from '@/lib/newsletter-web-copy'
 import { isPreviewRequest } from '@/lib/preview'
 import { withUtm } from '@/lib/utm'
 import PageHeader from '@/components/PageHeader'
-import { isSignupNewsletter } from '@/lib/newsletter-signup'
+import { offeredNewsletters } from '@/lib/newsletter-signup'
 import ArchiveLink from './ArchiveLink'
 import styles from './page.module.css'
 
-// /newsletter/events, /newsletter/training, /newsletter/funding: each
+// /newsletter/events, /newsletter/training, /newsletter/funding,
+// /newsletter/updates: each
 // newsletter's own page, the one to link when pointing people at the
 // newsletter (its listings on /map and /media-channels, the footer). Under a
 // header like the resource pages' – named "<Funding> newsletter" so it isn't
@@ -37,6 +40,12 @@ import styles from './page.module.css'
 // move) is a 404 until its first one. Open to search engines and in the
 // sitemap (Bryce, 11 Oct 2026); the issues themselves aren't, since their
 // listings go out of date within weeks.
+//
+// Updates (moved from Substack in November 2026) differs in three ways: its
+// page is up before its first issue from ActiveCampaign, since the footer
+// and its Substack link here to sign up (shownWithoutIssues); it has no
+// resource page to link on to; and an issue's subject is a headline, so the
+// list shows that, with the issue's number under it.
 //
 // force-static: the reads behind the list (Upstash, ActiveCampaign) are
 // uncached fetches, which would otherwise make Next render the page on
@@ -91,9 +100,20 @@ export default async function NewsletterPage({ params }: Props) {
     )
     issues = null
   }
-  if (issues?.length === 0) notFound()
+  if (issues?.length === 0 && !shownWithoutIssues(key)) notFound()
 
-  const signup = isSignupNewsletter(key) ? key : null
+  // A headline newsletter's issues are listed by their emails' subjects.
+  const subjects =
+    issues?.length && hasHeadline(key)
+      ? await issueSubjects(
+          key,
+          issues.map(i => i.slug)
+        )
+      : null
+
+  // The box only once the newsletter's forms exist in ActiveCampaign.
+  const signup = offeredNewsletters().find(n => n === key) ?? null
+  const resource = nl.page ? RESOURCE_LINK[key] : null
 
   return (
     <div className="container-default">
@@ -111,32 +131,32 @@ export default async function NewsletterPage({ params }: Props) {
           </>
         }
       >
-        <ArchiveLink
-          href={nl.page}
-          newsletter={nl.prefix}
-          target="resource"
-          className="paragraph-small color-teal-grey-300"
-        >
-          {RESOURCE_LINK[key].lead}{' '}
-          <span className="color-white">{RESOURCE_LINK[key].name}</span>
-          &nbsp;&rarr;
-        </ArchiveLink>
+        {nl.page && resource && (
+          <ArchiveLink
+            href={nl.page}
+            newsletter={nl.prefix}
+            target="resource"
+            className="paragraph-small color-teal-grey-300"
+          >
+            {resource.lead} <span className="color-white">{resource.name}</span>
+            &nbsp;&rarr;
+          </ArchiveLink>
+        )}
       </PageHeader>
 
       <div className="width-7-col padding-bottom-56px">
         <h3 className="paragraph-small-bold color-teal-grey-300 padding-bottom-16px">
           Past issues
         </h3>
-        {issues ? (
+        {issues?.length === 0 ? (
+          <p className="paragraph-small color-teal-grey-300">
+            New issues will be listed here as they go out.
+          </p>
+        ) : issues ? (
           <ul className={`paragraph-small ${styles.issues}`}>
-            {issues.map(issue => (
-              <li
-                key={issue.slug}
-                className={`${styles.issue} gap-16px padding-top-12px padding-bottom-12px`}
-              >
-                <span className="color-teal-grey-300">
-                  {issue.sentAt ? formatDate(new Date(issue.sentAt)) : ''}
-                </span>
+            {issues.map(issue => {
+              const subject = subjects?.get(issue.slug)
+              const link = (
                 <ArchiveLink
                   href={issuePath(key, issue.slug)}
                   newsletter={nl.prefix}
@@ -144,10 +164,31 @@ export default async function NewsletterPage({ params }: Props) {
                   label={issue.slug}
                   className={`color-white ${styles.title}`}
                 >
-                  {issueTitle(key, issue.slug)}
+                  {subject ?? issueTitle(key, issue.slug)}
                 </ArchiveLink>
-              </li>
-            ))}
+              )
+              return (
+                <li
+                  key={issue.slug}
+                  className={`${styles.issue} gap-16px padding-top-12px padding-bottom-12px`}
+                >
+                  <span className="color-teal-grey-300">
+                    {issue.sentAt ? formatDate(new Date(issue.sentAt)) : ''}
+                  </span>
+                  {subject ? (
+                    // The headline, with the issue's number under it.
+                    <div className="flex flex-col items-start">
+                      {link}
+                      <span className="paragraph-xs color-teal-grey-300">
+                        {issueTitle(key, issue.slug)}
+                      </span>
+                    </div>
+                  ) : (
+                    link
+                  )}
+                </li>
+              )
+            })}
           </ul>
         ) : (
           <p className="color-teal-grey-300">

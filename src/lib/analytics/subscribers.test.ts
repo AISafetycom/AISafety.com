@@ -134,6 +134,17 @@ describe('the newsletters', () => {
     expect(SUBSTACK_PUBLICATIONS).toEqual([
       'aisafetyeventsandtraining',
       'aisafetyfunding',
+      'aisafetycom',
     ])
+    expect(NEWSLETTERS.map(n => `${n.key}=${n.list}`)).toEqual([
+      'events=6',
+      'training=7',
+      'funding=8',
+      'updates=9',
+    ])
+    // Every one has moved to ActiveCampaign.
+    expect(NEWSLETTERS.every(n => /^\d{4}-\d{2}-\d{2}$/.test(n.movedOn))).toBe(
+      true
+    )
   })
 })

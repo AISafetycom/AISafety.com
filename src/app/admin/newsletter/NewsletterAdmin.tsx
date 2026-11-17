@@ -399,6 +399,7 @@ const NEWSLETTER_DOTS: Record<string, string> = {
   Events: styles.dotEvents,
   Training: styles.dotTraining,
   Funding: styles.dotFunding,
+  Updates: styles.dotUpdates,
 }
 
 /** "986 people", "1 person". */

@@ -5,9 +5,12 @@ import {
   COMBO_FORMS,
   COMBO_KEYS,
   formKeyFor,
+  SIGNUP_NEWSLETTERS,
   SIGNUP_USER_AGENT,
   isFormConfigured,
   isSignupNewsletter,
+  offeredFrom,
+  offeredNewsletters,
   logSnippet,
   normalizeEmail,
   postSignup,
@@ -60,11 +63,12 @@ afterEach(() => {
 })
 
 describe('which newsletters sign up here', () => {
-  it('takes Events, Training and Funding only', () => {
+  it('takes Events, Training, Funding and Updates only', () => {
     expect(isSignupNewsletter('events')).toBe(true)
     expect(isSignupNewsletter('training')).toBe(true)
     expect(isSignupNewsletter('funding')).toBe(true)
-    for (const other of ['updates', 'Events', '', null, 6]) {
+    expect(isSignupNewsletter('updates')).toBe(true)
+    for (const other of ['jobs', 'Events', '', null, 6]) {
       expect(isSignupNewsletter(other)).toBe(false)
     }
   })
@@ -84,7 +88,60 @@ describe('which newsletters sign up here', () => {
       'events',
       'funding',
       'training',
+      'updates',
     ])
+  })
+})
+
+describe('which newsletters a visitor is offered', () => {
+  const made = { formId: 12, orKey: 'abc' }
+  const unmade = { formId: 0, orKey: '' }
+  const own = (updates: typeof made) => ({
+    events: made,
+    training: made,
+    funding: made,
+    updates,
+  })
+  const combos = (withUpdates: typeof made) =>
+    Object.fromEntries(
+      COMBO_KEYS.map(k => [k, k.includes('updates') ? withUpdates : made])
+    ) as typeof COMBO_FORMS
+
+  it('offers every newsletter once all the forms are filled in', () => {
+    expect(offeredFrom(own(made), combos(made))).toEqual([
+      'events',
+      'training',
+      'funding',
+      'updates',
+    ])
+  })
+
+  it('leaves Updates out until its own form and all its combinations exist, and keeps the rest', () => {
+    const three = ['events', 'training', 'funding']
+    expect(offeredFrom(own(unmade), combos(unmade))).toEqual(three)
+    expect(offeredFrom(own(made), combos(unmade))).toEqual(three)
+    expect(offeredFrom(own(unmade), combos(made))).toEqual(three)
+    // One combination still missing is enough.
+    expect(
+      offeredFrom(own(made), {
+        ...combos(made),
+        'training-funding-updates': unmade,
+      })
+    ).toEqual(three)
+  })
+
+  it('offers whatever the shipped forms allow, never a newsletter without a form', () => {
+    const offered = offeredNewsletters()
+    expect(offered).toEqual(expect.arrayContaining(['events', 'training']))
+    for (const n of offered) {
+      expect(isFormConfigured(AC_FORMS[n])).toBe(true)
+    }
+    // Any ticks a visitor is offered have a form to go to.
+    for (const key of COMBO_KEYS) {
+      const parts = key.split('-') as (typeof SIGNUP_NEWSLETTERS)[number][]
+      if (parts.every(p => offered.includes(p)))
+        expect(isFormConfigured(COMBO_FORMS[key]), key).toBe(true)
+    }
   })
 })
 
@@ -182,7 +239,7 @@ describe('readAcAnswer', () => {
     expect(
       readAcAnswer(
         200,
-        'window.top.location.href = "https://aisafety.com/subscribed/updates";'
+        'window.top.location.href = "https://aisafety.com/subscribed/jobs";'
       )
     ).toEqual({ kind: 'unknown' })
     expect(
@@ -406,14 +463,29 @@ describe('formKeyFor', () => {
     expect(formKeyFor(['training', 'funding', 'events'])).toBe(
       'events-training-funding'
     )
+    expect(formKeyFor(['updates'])).toBe('updates')
+    expect(formKeyFor(['updates', 'events'])).toBe('events-updates')
+    expect(formKeyFor(['updates', 'funding', 'training', 'events'])).toBe(
+      'events-training-funding-updates'
+    )
     // Every combination has a form entry, filled in or not.
     for (const key of COMBO_KEYS) expect(COMBO_FORMS[key]).toBeDefined()
+  })
+
+  it('has a key for every combination of two or more newsletters: eleven', () => {
+    const all: string[] = []
+    for (let mask = 1; mask < 1 << SIGNUP_NEWSLETTERS.length; mask++) {
+      const picked = SIGNUP_NEWSLETTERS.filter((_, i) => mask & (1 << i))
+      if (picked.length > 1) all.push(formKeyFor([...picked]))
+    }
+    expect(all).toHaveLength(11)
+    expect([...COMBO_KEYS].sort()).toEqual(all.sort())
   })
 
   it('has no form for nothing, or for a newsletter it does not know', () => {
     expect(() => formKeyFor([])).toThrow(/no form/)
     expect(() =>
-      formKeyFor(['events', 'updates' as unknown as 'funding'])
+      formKeyFor(['events', 'jobs' as unknown as 'funding'])
     ).toThrow(/no form/)
   })
 })
@@ -426,6 +498,14 @@ describe('readAcAnswer for a combination form', () => {
         'window.top.location.href = "https://aisafety.com/subscribed/events-training-funding";'
       )
     ).toEqual({ kind: 'already' })
+    // Updates' own page, and a combination with it.
+    for (const key of ['updates', 'events-updates', 'training-funding-updates'])
+      expect(
+        readAcAnswer(
+          200,
+          `window.top.location.href = "https://aisafety.com/subscribed/${key}";`
+        )
+      ).toEqual({ kind: 'already' })
     // Another site's page is no such answer.
     expect(
       readAcAnswer(

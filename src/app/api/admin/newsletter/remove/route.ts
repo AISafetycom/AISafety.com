@@ -17,7 +17,7 @@
   → { cards, removed, tick: { status: 'unticked' } | { status: 'none', why } |
       { status: 'failed', reason } }
     409 with { problems } when the draft fails verification (or sits on a
-    real list, 6/7/8, and this isn't production, or waves of the issue are on
+    real list, 6/7/8/9, and this isn't production, or waves of the issue are on
     their way), 400 for a bad body or a card that can't be removed, 502 when
     the copy for Put back can't be stored, 403 when not posted from the admin
     page itself.

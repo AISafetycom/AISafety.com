@@ -194,3 +194,69 @@ describe('/newsletter/<key>/<issue>', () => {
     expect(res.headers.get('cache-control')).toBe('no-store')
   })
 })
+
+/* An Updates issue (list 9): no cards, a headline for a subject. */
+describe('/newsletter/updates/<issue>', () => {
+  const UPDATE = 'Updates · Issue #5, 2026'
+
+  async function updates() {
+    const { buildUpdatesEmail, UPDATES_SUBJECT } =
+      await import('@/lib/admin/__fixtures__/fake-ac')
+    const r = await route({
+      draftList: '9',
+      draftName: 'Updates · Issue #6, 2027',
+      email: buildUpdatesEmail(),
+      msg: {
+        subject: UPDATES_SUBJECT,
+        fromemail: 'updates@news.aisafety.com',
+      },
+      extra: [sent({ id: '210', name: UPDATE, list: '9', send_amt: '70' })],
+    })
+    return { ...r, subject: UPDATES_SUBJECT }
+  }
+
+  it('shows the email as it went out, keeps it, and links its text version', async () => {
+    const { get } = await updates()
+    const res = await get('updates', 'issue-5-2026')
+    expect(res.status).toBe(200)
+    const html = await res.text()
+    expect(html).toContain('<h1 class="h1">Updates</h1>')
+    expect(html).toContain('A chatbot')
+    expect(html).not.toMatch(/%[A-Z]/)
+    expect(html).not.toContain('Manage subscriptions')
+    expect(html).toContain('<a href="/newsletter/updates/issue-5-2026/text"')
+    expect(h.put.mock.calls[0][0]).toBe(
+      'newsletter/web/updates/issue-5-2026.html'
+    )
+    // Not under another newsletter's address, nor by a week's.
+    expect((await get('funding', 'issue-5-2026')).status).toBe(404)
+    expect((await get('updates', 'week-5-2026')).status).toBe(404)
+  })
+
+  it('has a text version read from its paragraphs, under its headline', async () => {
+    const { subject } = await updates()
+    const text = await import('./text/route')
+    const res = await text.GET(
+      new Request('https://aisafety.com/newsletter/updates/issue-5-2026/text'),
+      { params: Promise.resolve({ key: 'updates', issue: 'issue-5-2026' }) }
+    )
+    expect(res.status).toBe(200)
+    const html = await res.text()
+    expect(html).toContain(`<h1>${subject}</h1>`)
+    expect(html).toContain('AISafety.com Updates · Text version')
+    expect(html).toContain('<p><strong>New features</strong></p>')
+    expect(html).toContain('Reply to this email with any feedback.')
+    expect(html).not.toContain('Unsubscribe')
+  })
+
+  it('gives the past issues list each issue’s headline', async () => {
+    const { subject } = await updates()
+    const { issueSubjects } = await import('@/lib/newsletter-web-copy')
+    const subjects = await issueSubjects('updates', [
+      'issue-5-2026',
+      // Not sent: left out, so the list shows its number.
+      'issue-4-2026',
+    ])
+    expect([...subjects]).toEqual([['issue-5-2026', subject]])
+  })
+})
