@@ -70,6 +70,12 @@ import {
   type FieldFlags,
 } from './queue-field-flags'
 import {
+  preparedFilesOf,
+  preparedNamed,
+  withPreparedPictures,
+  type PreparedFile,
+} from './queue-prepared'
+import {
   PUBLIC_KEY,
   publicChoiceOf,
   ruleInstantOf,
@@ -141,6 +147,10 @@ const F = {
   // When it came back: the date it was due, written by the Mac worker as it
   // clears Review again on, so the page can say it is back (queue-later.ts).
   cameBackOn: 'fldAaN9yEat8xWq00',
+  // Logo Prep's version of a picture the row proposes, kept on the row by
+  // the Mac (queue-prepared.ts): a Change's picture and Fable's proposed
+  // logo for an addition.
+  preparedLogo: 'fldDL9JaohN0Kx4CL',
 } as const
 
 export type QueueType = 'Add' | 'Change' | 'Rule'
@@ -317,6 +327,10 @@ export interface QueueItem {
    *  Publish or Unsure verdict (the proposal's `field_flags`, queue-field-flags.ts);
    *  null until the Mac has run it. */
   fieldFlags?: FieldFlags | null
+  /** The files on the row's Prepared logo field, with links fresh from
+   *  this read (queue-prepared.ts). A Change's pictures already point at
+   *  them; an addition's logo flag names one. */
+  preparedLogos?: PreparedFile[]
 }
 
 export type NoReply = 'no email' | 'no notification'
@@ -676,6 +690,7 @@ function rowToItem(
   let declinedBefore: DeclinedBefore | null = null
   let passed: Passed | null = null
   let fieldFlags: FieldFlags | null = null
+  const preparedLogos = preparedFilesOf(f[F.preparedLogo], isExpiredAttachment)
   if (isRecord(proposal)) {
     passed = passedOf(proposal.passed)
     fieldFlags = fieldFlagsOf(proposal[FIELD_FLAGS_KEY])
@@ -688,7 +703,14 @@ function rowToItem(
     rejectReplied =
       isRecord(proposal.reply) &&
       rejectIsCurrent(proposal.reply.reject, str(f[F.decidedAt]))
-    changes = toChanges(proposal.changes)
+    // A picture the Mac prepared for the site replaces the raw file a
+    // change proposes, here and so at Apply, which reads the row afresh
+    // (the Known gap in ~/Queue/CLAUDE.md, closed 17 Nov 2026).
+    changes = withPreparedPictures(
+      toChanges(proposal.changes),
+      proposal.changes,
+      preparedLogos
+    )
     diff = str(proposal.diff)
     summary = str(proposal.summary)
     appliesTo = str(proposal.applies_to) ?? str(proposal.appliesTo)
@@ -862,6 +884,7 @@ function rowToItem(
     declinedBefore,
     passed,
     fieldFlags,
+    preparedLogos,
   }
 }
 
@@ -1492,6 +1515,8 @@ export interface ImageWrite {
   attachments: AttachmentInfo[]
   /** What the write took off the record, when it can be put back. */
   previous: PreviousImage | null
+  /** Nothing was written: the record already held the picture. */
+  unchanged?: boolean
 }
 
 interface StoredAttachment {
@@ -1634,6 +1659,80 @@ export async function uploadImage(
     attachments: picture ? [picture] : [],
     previous,
   }
+}
+
+/** Use on Fable's proposed logo for an addition (queue-field-flags.ts):
+ *  the prepared file on the row's Prepared logo field goes onto the
+ *  record's logo field, the way a picture dropped into the slot does – so
+ *  Undo can put the old one back (`previous`). Only while the item is open,
+ *  only the file the flag names, and only while the record still holds the
+ *  file the flag was judged against (or already holds this one). The
+ *  record is unpublished; Publish takes it live with the rest. */
+export async function applyPreparedLogo(
+  item: QueueItem,
+  field: string,
+  filename: string
+): Promise<ImageWrite> {
+  requireOpen(item)
+  if (item.type !== 'Add') {
+    throw new QueueError('Only an addition takes a proposed logo.', 400)
+  }
+  const { table, record } = target(item)
+  const flag = item.fieldFlags?.pictures.find(
+    p => p.field === field && p.to.file === filename
+  )
+  if (!flag) {
+    throw new QueueError(
+      "Fable's proposed logo is no longer on this item. Reload the page.",
+      409
+    )
+  }
+  const file = preparedNamed(
+    flag.to.file,
+    flag.to.size,
+    item.preparedLogos ?? []
+  )
+  if (!file) {
+    throw new QueueError(
+      'The prepared logo is no longer on the Queue row. Reload the page.',
+      409
+    )
+  }
+  await checkImageField(table, record, field)
+  const now = (await storedImages(table, record, field))[0] ?? null
+  const isSide = (side: { file: string; size: number | null }) =>
+    now !== null &&
+    now.filename === side.file &&
+    (side.size === null || now.size === undefined || now.size === side.size)
+  if (isSide(flag.to)) {
+    const info = attachmentInfo(now as unknown as Record<string, unknown>)
+    return {
+      urls: [info?.url ?? (now as StoredAttachment).url],
+      attachments: info ? [info] : [],
+      previous: null,
+      unchanged: true,
+    }
+  }
+  if (flag.from === null ? now !== null : !isSide(flag.from)) {
+    throw new QueueError(
+      'The logo on the record has changed since Fable looked at it, so this was not used. Reload to see it.',
+      409
+    )
+  }
+  const bytes = await fetchImage({
+    id: '',
+    url: file.url,
+    filename: file.filename,
+    type: file.type ?? undefined,
+    size: file.size ?? undefined,
+  })
+  if (!bytes) {
+    throw new QueueError(
+      'The prepared logo could not be read from the Queue row.',
+      502
+    )
+  }
+  return uploadImage(table, record, field, bytes)
 }
 
 // ─── Airtable helpers ───────────────────────────────────────────────────────

@@ -102,10 +102,11 @@ import SitePreview, {
 import Chat, { CharCount, descriptionCap, type Decided } from './Chat'
 import RejectReason, { type RejectReasonControl } from './RejectReason'
 import FieldPicker from './FieldPicker'
-import FieldFlags from './FieldFlags'
+import FieldFlags, { type PictureHeld } from './FieldFlags'
 import {
   FLAG_VERDICTS,
   shownFlags,
+  shownPictures,
   withFlags,
 } from '@/lib/admin/queue-field-flags'
 import type { FableChange } from '@/lib/admin/queue-fable'
@@ -829,6 +830,64 @@ function stashImage(key: string, stash: ImageStash): void {
     if (oldest === undefined) break
     imageStash.delete(oldest)
   }
+}
+
+/** One write to an attachment field of an item's record, through the
+ *  upload route – a dropped file, an Undo or Redo, or (`prepared`) the logo
+ *  Fable's field check proposes. What the write took off the record is
+ *  stashed for the next Undo, by item and field, so the slot's Undo and a
+ *  logo flag's Undo are the same move. Resolves to the field's new links;
+ *  rejects with the reason it failed. */
+async function writePicture(
+  itemId: string,
+  field: string,
+  body: Record<string, unknown>,
+  what: 'upload' | 'undo' | 'redo'
+): Promise<string[]> {
+  const res = await fetch(UPLOAD_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: itemId, field, ...body }),
+  })
+  const data = (await res.json()) as {
+    urls?: string[]
+    attachments?: AttachmentInfo[]
+    previous?: PreviousImage | null
+    unchanged?: boolean
+    error?: string
+  }
+  if (!res.ok || !data.urls) throw new Error(data.error ?? `HTTP ${res.status}`)
+  rememberAttachments({ [field]: data.attachments ?? [] })
+  // A write that changed nothing (the logo was already on the record) has
+  // nothing for Undo to put back: the earlier stash stays.
+  if (!data.unchanged) {
+    stashImage(`${itemId}/${field}`, {
+      file: data.previous ?? null,
+      redo: what === 'undo',
+    })
+  }
+  return data.urls
+}
+
+/** Undo (or Redo) of the last write to a field, from the stash; null when
+ *  the page holds nothing to put back. */
+async function undoPicture(
+  itemId: string,
+  field: string
+): Promise<string[] | null> {
+  const stash = imageStash.get(`${itemId}/${field}`)
+  if (!stash) return null
+  const what = stash.redo ? 'redo' : 'undo'
+  if (stash.file) {
+    const { filename, contentType, base64 } = stash.file
+    return writePicture(
+      itemId,
+      field,
+      { filename, contentType, data: base64 },
+      what
+    )
+  }
+  return writePicture(itemId, field, { clear: true }, what)
 }
 
 const NAME_KEYS = /\b(name|title)\b|^organi[sz]ation$/i
@@ -4180,6 +4239,46 @@ export default function QueueAdmin({
             e.preventDefault()
             setDraft(item.id, { edits: next })
           }
+          // A proposed logo goes onto the record, as its Use does. Only
+          // once the record has been read: the flag must still be open.
+          const held = live[item.id]?.fields
+          if (held) {
+            const nowOf = (k: string): PictureHeld => {
+              const v = held[k]
+              const url =
+                Array.isArray(v) && typeof v[0] === 'string' ? v[0] : null
+              if (!url) return null
+              const meta = attachmentMeta.get(url)
+              return {
+                url,
+                filename: meta?.filename ?? null,
+                size: meta?.size ?? null,
+              }
+            }
+            const id = item.id
+            for (const { flag } of shownPictures(
+              item.fieldFlags.pictures,
+              nowOf,
+              item.preparedLogos ?? []
+            ).filter(x => x.state === 'open')) {
+              e.preventDefault()
+              void writePicture(
+                id,
+                flag.field,
+                { prepared: flag.to.file },
+                'upload'
+              )
+                .then(urls => {
+                  setLiveField(id, flag.field, urls)
+                  forgetCard(item)
+                })
+                .catch((err: unknown) =>
+                  setDraft(id, {
+                    error: `${flag.field}: ${err instanceof Error ? err.message : String(err)}`,
+                  })
+                )
+            }
+          }
           break
         }
         case 'p':
@@ -6028,11 +6127,31 @@ function Detail({
   const flagLive = live?.fields ?? item.fields ?? {}
   const canFlagField = (k: string) =>
     !HOUSEKEEPING.test(k) && !COMPUTED_TYPES.has(types.get(k)?.type ?? '')
+  // What a logo field holds on the record now, for a proposed logo: its
+  // link, file name and size (undefined until the record has been read).
+  const pictureNow = (k: string): PictureHeld | undefined => {
+    if (!live) return undefined
+    const v = live.fields[k]
+    const url = Array.isArray(v) && typeof v[0] === 'string' ? v[0] : null
+    if (!url) return null
+    const meta = attachmentMeta.get(url)
+    return { url, filename: meta?.filename ?? null, size: meta?.size ?? null }
+  }
   const flagged = new Set(
     flagCheck
-      ? shownFlags(flagCheck.flags, flagLive, d.edits, canFlagField)
-          .filter(x => x.state === 'open')
-          .map(x => x.flag.field)
+      ? [
+          ...shownFlags(flagCheck.flags, flagLive, d.edits, canFlagField)
+            .filter(x => x.state === 'open')
+            .map(x => x.flag.field),
+          ...shownPictures(
+            flagCheck.pictures,
+            pictureNow,
+            item.preparedLogos ?? [],
+            canFlagField
+          )
+            .filter(x => x.state === 'open')
+            .map(x => x.flag.field),
+        ]
       : []
   )
   // The proposed fields Fable changed: Accept leaves them as they are.
@@ -7298,6 +7417,35 @@ function Detail({
               canEditField={canFlagField}
               cap={descriptionCap(item)}
               onSetEdits={edits => setD({ edits })}
+              pictureNow={pictureNow}
+              prepared={item.preparedLogos ?? []}
+              renderPicture={(url, name) => (
+                <Picture
+                  key={url ?? name ?? ''}
+                  url={url}
+                  fallback={null}
+                  name={name}
+                />
+              )}
+              onUsePicture={async flag => {
+                onImage(
+                  flag.field,
+                  await writePicture(
+                    item.id,
+                    flag.field,
+                    { prepared: flag.to.file },
+                    'upload'
+                  )
+                )
+              }}
+              onUndoPicture={async flag => {
+                const urls = await undoPicture(item.id, flag.field)
+                if (urls) onImage(flag.field, urls)
+              }}
+              canUndoPicture={field => {
+                const st = imageStash.get(`${item.id}/${field}`)
+                return Boolean(st && !st.redo)
+              }}
             />
           )}
           {chatAgent && (
@@ -8403,26 +8551,9 @@ function ImageSlot({
     setError(null)
     setBusy(what)
     try {
-      const res = await fetch(UPLOAD_API, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: itemId, field, ...body }),
-      })
-      const data = (await res.json()) as {
-        urls?: string[]
-        attachments?: AttachmentInfo[]
-        previous?: PreviousImage | null
-        error?: string
-      }
-      if (!res.ok || !data.urls)
-        throw new Error(data.error ?? `HTTP ${res.status}`)
-      rememberAttachments({ [field]: data.attachments ?? [] })
-      stashImage(stashKey, {
-        file: data.previous ?? null,
-        redo: what === 'undo',
-      })
+      const urls = await writePicture(itemId, field, body, what)
       setTick(t => t + 1)
-      onDone(data.urls)
+      onDone(urls)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
