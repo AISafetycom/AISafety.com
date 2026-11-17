@@ -39,6 +39,12 @@ import {
 } from '@/lib/admin/queue-flag'
 import { rejectReplyFor, shownDeclineChip } from '@/lib/admin/queue-decline'
 import {
+  replaceBoxWords,
+  replaceOldOf,
+  stillOnNote,
+  tookOffNote,
+} from '@/lib/admin/queue-replaces'
+import {
   afterUndoFailed,
   reopeningLabel,
   type Reopening,
@@ -1446,6 +1452,10 @@ interface Draft {
    *  rule applies and the public page stays as it is, false = the wording
    *  goes on it (null = as saved on the row, which starts as "goes on"). */
   keepInternal: boolean | null
+  /** An addition that replaces a listed one: true = the box above Publish
+   *  is unticked, so Publish leaves the old listing on the site
+   *  (queue-replaces.ts). Ticked again on a reload. */
+  keepOld: boolean
   busy: boolean
   error: string | null
 }
@@ -1463,6 +1473,7 @@ const FRESH: Draft = {
   editingDecline: false,
   focusChip: null,
   keepInternal: null,
+  keepOld: false,
   busy: false,
   error: null,
 }
@@ -3593,6 +3604,18 @@ export default function QueueAdmin({
             return
           }
           if (lastDecidedRef.current === item.id) setUndoable(updated)
+          // An addition that replaces a listed one: the toast says the old
+          // listing came off – or, when Publish was asked to take it off
+          // and could not, that it is still up, and then stays until
+          // closed (the reason is on the item, under Done today).
+          const stillUp =
+            action === 'accept' &&
+            item.replaces &&
+            typeof extra.replaceOld === 'string' &&
+            !updated.replaced &&
+            updated.error
+              ? stillOnNote(item.replaces)
+              : null
           // A newer decision owns the toast; an older one lands quietly and
           // its row moves to Done.
           setToast(prev =>
@@ -3602,7 +3625,8 @@ export default function QueueAdmin({
                   no: action === 'reject',
                   later: action === 'later',
                   state: 'done',
-                  text,
+                  text: stillUp ? `${text} · ${stillUp}` : text,
+                  ...(stillUp ? { stay: true } : {}),
                   copied: prev.copied,
                   sub:
                     action === 'later'
@@ -3625,7 +3649,9 @@ export default function QueueAdmin({
                             ? `You already replied to them on ${updated.alreadyReplied.date} · no draft saved`
                             : updated.source === 'Discord' && updated.replyDraft
                               ? 'Reply drafted · copy it and send it yourself on Discord'
-                              : undefined,
+                              : action === 'accept' && updated.replaced
+                                ? tookOffNote(updated.replaced)
+                                : undefined,
                 }
               : prev
           )
@@ -4006,6 +4032,7 @@ export default function QueueAdmin({
             }
             void act(item, 'accept', {
               keep: fableFieldsRef.current[item.id] ?? [],
+              ...replaceOldOf(item, d.keepOld),
               edits: withLeftOut(
                 coerceEdits(
                   going,
@@ -7287,6 +7314,44 @@ function Detail({
       )}
 
       <div className={styles.actions} ref={actionsRef}>
+        {isOpen(item) &&
+          !readOnly &&
+          !revising &&
+          d.mode === 'idle' &&
+          item.type === 'Add' &&
+          item.replaces &&
+          !item.passed && (
+            // Fable Review said this suggestion takes over a listed one
+            // (Bryce, 4 Oct 2026: "add the auto-unpublish too"). Ticked
+            // unless he unticks it; Publish names the record shown here.
+            // On its own line above the buttons, which stay where they are.
+            <label
+              className={`${styles.check} ${styles.note} ${styles.replaceOld}`}
+            >
+              <input
+                type="checkbox"
+                checked={!d.keepOld}
+                disabled={d.busy}
+                onChange={e => {
+                  setD({ keepOld: !e.target.checked })
+                  // Focus back to the page, so A and the other keys go on
+                  // working: a focused box counts as typing.
+                  e.target.blur()
+                }}
+              />
+              <span>
+                {replaceBoxWords(item.replaces)[0]}{' '}
+                {item.replaces.url ? (
+                  <a href={item.replaces.url} target="_blank" rel="noreferrer">
+                    {item.replaces.name}
+                  </a>
+                ) : (
+                  item.replaces.name
+                )}{' '}
+                {replaceBoxWords(item.replaces)[1]}
+              </span>
+            </label>
+          )}
         {!isOpen(item) ? (
           // A decision opened from Done today: what was decided, and Undo.
           <div className={styles.buttons}>
@@ -7299,6 +7364,9 @@ function Detail({
             {later && <span className={styles.note}>{laterNote(item)}</span>}
             {item.rejectReason && (
               <span className={styles.note}>{item.rejectReason}</span>
+            )}
+            {item.replaced && (
+              <span className={styles.note}>{tookOffNote(item.replaced)}</span>
             )}
             {replyLabel(item) && (
               <span className={styles.note}>{replyLabel(item)}</span>
@@ -7453,6 +7521,7 @@ function Detail({
                     d.leftOut
                   ),
                   keep: fableKept,
+                  ...replaceOldOf(item, d.keepOld),
                 })
               }
             >
@@ -9462,6 +9531,7 @@ function DoneList({
                   {doneLabel(item)}
                 </span>
                 {item.rejectReason && <span>{item.rejectReason}</span>}
+                {item.replaced && <span>{tookOffNote(item.replaced)}</span>}
                 {replyLabel(item) && <span>{replyLabel(item)}</span>}
                 <span>{ago(decidedAtOf(item))}</span>
                 {item.reopening && <ReopeningTag reopening={item.reopening} />}

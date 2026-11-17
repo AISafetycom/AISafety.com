@@ -26,10 +26,13 @@
        listing with its place, unpublished ones included (live, the map
        editor's own read; published logos are the site's copies), for the
        map strip on a /map addition – queue-map.ts
-  POST /api/admin/queue  body { id, action, edits?, reason?, replyDraft? } → { item }
+  POST /api/admin/queue  body { id, action, edits?, reason?, replyDraft?, replaceOld? } → { item }
        action: accept | reject | edit | later | undo | flag | reopen | fix
        | delete
-       (later sets the item aside for a week, Fable reviews it again then;
+       (accept with replaceOld, the record id the page's box named: the
+       listing this addition replaces comes off the site too, and Undo puts
+       it back – queue-replaces.ts;
+       later sets the item aside for a week, Fable reviews it again then;
        delete discards an open item silently: an addition's unpublished
        record goes too, the row closes, no reply, no Undo – deleteItem;
        undo also brings back an item set aside; edit keeps the page's pending edits, and the reply draft as
@@ -218,7 +221,10 @@ export async function POST(req: NextRequest) {
               seen:
                 typeof body.publicSeen === 'string' ? body.publicSeen : null,
             }
-          : null
+          : null,
+        // An addition that replaces a listed one: the record the page's
+        // box named, when it was ticked.
+        typeof body.replaceOld === 'string' ? body.replaceOld : null
       )
     } else if (action === 'reject') {
       await rejectItem(

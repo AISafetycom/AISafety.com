@@ -2158,6 +2158,14 @@ a.pageNav:hover {
   margin: 0;
 }
 
+/* Publish of an addition that replaces a listed one: the box that takes the
+   old listing off the site too, on its own line above the buttons. */
+.replaceOld {
+  display: flex;
+  width: fit-content;
+  margin-bottom: 12px;
+}
+
 select.input {
   width: auto;
   min-width: 220px;

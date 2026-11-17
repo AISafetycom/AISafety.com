@@ -2442,3 +2442,307 @@ describe('a listing found by its record id', () => {
     })
   })
 })
+
+// Publish of a suggestion that replaces a listed one (a rebrand), against a
+// stand-in for Airtable that holds the Queue row and both listings, so a
+// decision is read back the way the page reads it and Undo works on what
+// Accept really left.
+describe('an addition that replaces a listed one', () => {
+  const ID = rid('rebrand')
+  const NEW = rid('new')
+  const OLD = rid('old')
+  const FLD = {
+    title: 'fldeRsOE3DM3R2vbX',
+    type: 'fldBc9YIDhjmu58f3',
+    source: 'flddKkVy62MAZ8M0J',
+    status: 'fldTXGYOoXcUApaI2',
+    proposal: 'fldgl9Ny2jnu8T0Da',
+    targetTable: 'fld45SUjstUZROuXl',
+    targetRecord: 'fldszXtLdUijgFG4l',
+    error: 'fldrJcvFN3FCcyQPn',
+    replaced: 'fldWFnmC0u06GNC6B',
+  }
+  const replaces = {
+    table: EVENTS,
+    record: OLD,
+    name: 'Encode Sub Saharan Africa',
+    page: '/events',
+    url: `https://airtable.com/appTest/${EVENTS}/${OLD}`,
+  }
+  const TOOK_OFF =
+    'Taken off the site from the Queue: a newer listing that replaces it was published.'
+  const PUT_BACK =
+    'Back on the site: the Queue Publish that replaced it was undone.'
+  const newAt = `${EVENTS}/${NEW}`
+  const oldAt = `${EVENTS}/${OLD}`
+
+  let row: Record<string, unknown>
+  let records: Record<string, Record<string, unknown> | undefined>
+  let patches: { path: string; fields: Record<string, unknown> }[]
+  let reads: string[]
+  let comments: { path: string; text: string }[]
+  // A write Airtable refuses, by path.
+  let refused: string | null
+
+  const proposalWith = (over: Record<string, unknown>) =>
+    JSON.stringify({
+      kind: 'add',
+      table: EVENTS,
+      record: NEW,
+      page: '/events',
+      name: 'Encode Africa',
+      fields: { Name: 'Encode Africa' },
+      replaces,
+      ...over,
+    })
+
+  beforeEach(() => {
+    patches = []
+    reads = []
+    comments = []
+    refused = null
+    row = {
+      [FLD.title]: 'Encode Africa',
+      [FLD.type]: 'Add',
+      [FLD.source]: 'Comb',
+      [FLD.status]: 'Pending',
+      [FLD.proposal]: proposalWith({}),
+      [FLD.targetTable]: EVENTS,
+      [FLD.targetRecord]: NEW,
+    }
+    records = {
+      [newAt]: { Name: 'Encode Africa' },
+      [oldAt]: { Name: 'Encode Sub Saharan Africa', 'Publish?': true },
+    }
+    process.env.AIRTABLE_TOKEN = 'test-token'
+    process.env.AIRTABLE_BASE_ID = 'appTest'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          tables: [
+            {
+              id: EVENTS,
+              fields: [{ id: 'fldName', name: 'Name', type: 'singleLineText' }],
+            },
+          ],
+        })
+      )
+    )
+    mocks.listAll.mockReset()
+    mocks.listAll.mockResolvedValue([])
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(
+      async (path: string, init?: RequestInit) => {
+        const at = path.split('?')[0]
+        if (init?.method === 'POST' && at.endsWith('/comments')) {
+          const { text } = JSON.parse(String(init.body)) as { text: string }
+          comments.push({ path: at, text })
+          return new Response('{}', { status: 200 })
+        }
+        if (init?.method === 'PATCH') {
+          if (at === refused) return new Response('nope', { status: 422 })
+          const { fields } = JSON.parse(String(init.body)) as {
+            fields: Record<string, unknown>
+          }
+          patches.push({ path: at, fields })
+          if (at === `${QUEUE}/${ID}`) {
+            for (const [k, v] of Object.entries(fields)) {
+              if (v === null) delete row[k]
+              else row[k] = v
+            }
+          } else if (records[at]) {
+            records[at] = { ...records[at], ...fields }
+          }
+          return new Response('{}', { status: 200 })
+        }
+        reads.push(at)
+        if (at === `${QUEUE}/${ID}`) {
+          return Response.json({ id: ID, createdTime: '', fields: row })
+        }
+        const fields = records[at]
+        if (!fields) return new Response('', { status: 404 })
+        return Response.json({ id: at, fields })
+      }
+    )
+  })
+
+  const current = async () => (await getQueueItem(ID)) as QueueItem
+  /** Publish with the box ticked, as the page sends it. */
+  const publish = async (replaceOld: string | null = OLD) =>
+    acceptItem(await current(), {}, null, [], null, replaceOld)
+  const oldPatches = () => patches.filter(p => p.path === oldAt)
+
+  it('reads the listing it replaces off the proposal, for an addition only', async () => {
+    expect((await current()).replaces).toEqual(replaces)
+    row[FLD.type] = 'Change'
+    expect((await current()).replaces).toBeNull()
+    // Jobs rows have no Publish? or Hide? to change.
+    row[FLD.type] = 'Add'
+    row[FLD.proposal] = proposalWith({ replaces: { ...replaces, table: JOBS } })
+    expect((await current()).replaces).toBeNull()
+    row[FLD.proposal] = proposalWith({ replaces: null })
+    expect((await current()).replaces).toBeNull()
+  })
+
+  it('takes a live old listing off the site, comments on it, and keeps how it was', async () => {
+    await publish()
+    expect(records[newAt]).toMatchObject({ 'Publish?': true })
+    expect(records[oldAt]).toEqual({
+      Name: 'Encode Sub Saharan Africa',
+      'Publish?': false,
+      'Hide?': true,
+    })
+    expect(comments).toEqual([{ path: `${oldAt}/comments`, text: TOOK_OFF }])
+    // The new listing goes out first; how the old one was goes on the row
+    // before it changes.
+    expect(patches.map(p => p.path)).toEqual([
+      newAt,
+      `${QUEUE}/${ID}`,
+      oldAt,
+      `${QUEUE}/${ID}`,
+    ])
+    const done = await current()
+    expect(done.status).toBe('Applied')
+    expect(done.error).toBeNull()
+    expect(done.replaced).toEqual({ ...replaces, publish: true, hide: false })
+  })
+
+  it('leaves an old listing that is not live untouched', async () => {
+    for (const fields of [
+      { 'Publish?': true, 'Hide?': true }, // hidden already
+      { Name: 'Still a suggestion' }, // never published
+      undefined, // deleted
+    ]) {
+      row[FLD.status] = 'Pending'
+      records[oldAt] = fields
+      patches = []
+      await publish()
+      expect(oldPatches()).toEqual([])
+      expect(records[oldAt]).toEqual(fields)
+      const done = await current()
+      expect(done.status).toBe('Applied')
+      expect(done.replaced).toBeNull()
+    }
+    expect(comments).toEqual([])
+  })
+
+  it('leaves the old listing untouched when the box is unticked or was never shown', async () => {
+    await publish(null)
+    expect(reads).not.toContain(oldAt)
+    expect(oldPatches()).toEqual([])
+    expect(comments).toEqual([])
+    expect(records[oldAt]).toEqual({
+      Name: 'Encode Sub Saharan Africa',
+      'Publish?': true,
+    })
+    // The row's Replaced listing is not written at all.
+    expect(patches.some(p => FLD.replaced in p.fields)).toBe(false)
+    expect((await current()).status).toBe('Applied')
+  })
+
+  it('refuses when the row no longer names the listing the page showed, and leaves the item open', async () => {
+    await expect(publish(rid('other'))).rejects.toMatchObject({
+      message: expect.stringContaining('Encode Sub Saharan Africa'),
+      status: 412,
+    })
+    row[FLD.proposal] = proposalWith({ replaces: null })
+    await expect(publish(OLD)).rejects.toMatchObject({
+      message: expect.stringContaining('no longer names a listing'),
+      status: 412,
+    })
+    expect(patches).toEqual([])
+    expect((await current()).status).toBe('Pending')
+  })
+
+  it('never takes the addition’s own record off', async () => {
+    row[FLD.proposal] = proposalWith({ replaces: { ...replaces, record: NEW } })
+    await publish(NEW)
+    expect(records[newAt]).toEqual({ Name: 'Encode Africa', 'Publish?': true })
+    expect(comments).toEqual([])
+    expect((await current()).replaced).toBeNull()
+  })
+
+  it('says so on the row when the old listing cannot be taken off, and the Publish stands', async () => {
+    refused = oldAt
+    await publish()
+    expect(records[newAt]).toMatchObject({ 'Publish?': true })
+    expect(records[oldAt]).toMatchObject({ 'Publish?': true })
+    expect(comments).toEqual([])
+    const done = await current()
+    expect(done.status).toBe('Applied')
+    expect(done.error).toMatch(
+      /^Published, but Encode Sub Saharan Africa could not be taken off \/events: /
+    )
+    expect(done.replaced).toBeNull()
+  })
+
+  it('Undo puts back exactly what Publish changed, then unpublishes the new listing', async () => {
+    const before = { ...records[oldAt] }
+    await publish()
+    patches = []
+    comments = []
+    await undoItem(await current())
+    // The old listing first, so the page is never without both.
+    expect(patches.map(p => p.path)).toEqual([oldAt, newAt, `${QUEUE}/${ID}`])
+    expect(patches[0].fields).toEqual({ 'Publish?': true, 'Hide?': false })
+    expect(records[oldAt]).toEqual({ ...before, 'Hide?': false })
+    expect(records[newAt]).toMatchObject({ 'Publish?': false })
+    expect(comments).toEqual([{ path: `${oldAt}/comments`, text: PUT_BACK }])
+    const back = await current()
+    expect(back.status).toBe('Pending')
+    expect(back.replaced).toBeNull()
+    // Open again with its box: a second Publish takes the listing off again.
+    expect(back.replaces).toEqual(replaces)
+  })
+
+  it('Undo leaves an old listing changed by hand since alone', async () => {
+    for (const fields of [
+      { 'Publish?': true, 'Hide?': true }, // published again by hand
+      { 'Publish?': false, 'Hide?': false }, // no longer hidden
+      undefined, // deleted
+    ]) {
+      row[FLD.status] = 'Pending'
+      records[oldAt] = { Name: 'Encode Sub Saharan Africa', 'Publish?': true }
+      await publish()
+      records[oldAt] = fields
+      patches = []
+      comments = []
+      await undoItem(await current())
+      expect(oldPatches()).toEqual([])
+      expect(comments).toEqual([])
+      expect(records[oldAt]).toEqual(fields)
+      const back = await current()
+      expect(back.status).toBe('Pending')
+      expect(back.replaced).toBeNull()
+    }
+  })
+
+  it('Undo of a Publish that took nothing off touches only the new listing', async () => {
+    await publish(null)
+    patches = []
+    await undoItem(await current())
+    expect(patches.map(p => p.path)).toEqual([newAt, `${QUEUE}/${ID}`])
+    expect(patches.some(p => FLD.replaced in p.fields)).toBe(false)
+    expect(records[oldAt]).toMatchObject({ 'Publish?': true })
+  })
+
+  it('a comment that does not land leaves the change standing', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const stand = mocks.airtableRequest.getMockImplementation()!
+    mocks.airtableRequest.mockImplementation(
+      async (path: string, init?: RequestInit) =>
+        init?.method === 'POST'
+          ? new Response('no comment scope', { status: 403 })
+          : stand(path, init)
+    )
+    await publish()
+    expect(records[oldAt]).toMatchObject({ 'Publish?': false, 'Hide?': true })
+    const done = await current()
+    expect(done.status).toBe('Applied')
+    expect(done.error).toBeNull()
+    expect(done.replaced).toMatchObject({ record: OLD })
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+})

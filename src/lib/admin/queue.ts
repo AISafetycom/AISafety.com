@@ -6,7 +6,10 @@
   side — list the rows, and carry out a decision:
 
     accept  Add     → tick Publish? on the target record (plus any edits;
-                      a Sort already taken moves the listings below down)
+                      a Sort already taken moves the listings below down);
+                      when it replaces a listed one and the page's box was
+                      ticked, that listing comes off the site too
+                      (queue-replaces.ts)
             Change  → write the proposed field values (a proposed Publish? or
                       Hide? box included), drop the Broom flag row
             Rule    → mark Accepted; the Mac worker patches the rulebook
@@ -84,6 +87,16 @@ import { replyAlsoOf } from './queue-also'
 import { reasonsText, type FlagUpdate } from './queue-flag'
 import { LEFT_OUT_KEY, leftOutOf, withLeftOut } from './queue-left-out'
 import {
+  PUT_BACK_COMMENT,
+  TOOK_OFF_COMMENT,
+  notTakenOff,
+  replacedOf,
+  replacesChanged,
+  replacesOf,
+  type ReplacedListing,
+  type ReplacesListing,
+} from './queue-replaces'
+import {
   GONE_KEY,
   goneFields,
   goneNote,
@@ -141,6 +154,9 @@ const F = {
   // When it came back: the date it was due, written by the Mac worker as it
   // clears Review again on, so the page can say it is back (queue-later.ts).
   cameBackOn: 'fldAaN9yEat8xWq00',
+  // What Publish changed on the listing an addition replaced (JSON), so
+  // Undo can put it back (queue-replaces.ts).
+  replaced: 'fldWFnmC0u06GNC6B',
 } as const
 
 export type QueueType = 'Add' | 'Change' | 'Rule'
@@ -317,6 +333,13 @@ export interface QueueItem {
    *  Publish verdict (the proposal's `field_flags`, queue-field-flags.ts);
    *  null until the Mac has run it. */
   fieldFlags?: FieldFlags | null
+  /** Add: the listing this suggestion takes over, when Fable Review named
+   *  one (the proposal's `replaces`, queue-replaces.ts). The page shows a
+   *  box above Publish for it. */
+  replaces?: ReplacesListing | null
+  /** Add, published: the listing that Publish took off the site, as it was
+   *  before, for Undo (the row's Replaced listing). */
+  replaced?: ReplacedListing | null
 }
 
 export type NoReply = 'no email' | 'no notification'
@@ -676,9 +699,16 @@ function rowToItem(
   let declinedBefore: DeclinedBefore | null = null
   let passed: Passed | null = null
   let fieldFlags: FieldFlags | null = null
+  let replaces: ReplacesListing | null = null
   if (isRecord(proposal)) {
     passed = passedOf(proposal.passed)
     fieldFlags = fieldFlagsOf(proposal[FIELD_FLAGS_KEY])
+    // Only an addition replaces a listing, and only one in a table whose
+    // rows carry Publish? and Hide?: nothing else is ever taken off.
+    if (str(f[F.type]) === 'Add') {
+      const named = replacesOf(proposal.replaces)
+      replaces = named && SUGGESTION_TABLES.has(named.table) ? named : null
+    }
     reopening = reopeningOf(proposal.reopen)
     pushback = pushbackOf(proposal.pushback)
     reopened = reopenedOf(proposal.reopened)
@@ -862,6 +892,8 @@ function rowToItem(
     declinedBefore,
     passed,
     fieldFlags,
+    replaces,
+    replaced: replacedOf(parseJson(f[F.replaced])),
   }
 }
 
@@ -2127,6 +2159,87 @@ async function currentValues(
   return out
 }
 
+/** A note on a record saying what the Queue did to it, as every change to
+ *  a listing gets. A comment that does not land never undoes the change it
+ *  describes; it is logged. */
+async function addComment(
+  table: string,
+  id: string,
+  text: string
+): Promise<void> {
+  try {
+    const res = await airtableRequest(`${table}/${id}/comments`, {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    })
+    if (!res.ok) {
+      console.warn(
+        `[admin-queue] comment on ${table}/${id} not added: ${res.status}`
+      )
+    }
+  } catch (e) {
+    console.warn(
+      `[admin-queue] comment on ${table}/${id} not added:`,
+      e instanceof Error ? e.message : e
+    )
+  }
+}
+
+/** A listing's Publish? and Hide? as they are now; null when it is gone. */
+async function publishState(
+  table: string,
+  id: string
+): Promise<{ publish: boolean; hide: boolean } | null> {
+  const res = await airtableRequest(`${table}/${id}`)
+  if (res.status === 404 || res.status === 403) return null
+  if (!res.ok) {
+    throw new QueueError(
+      `Airtable read failed: ${res.status} ${await res.text()}`,
+      502
+    )
+  }
+  const f = ((await res.json()) as { fields: RawFields }).fields
+  return { publish: f['Publish?'] === true, hide: f['Hide?'] === true }
+}
+
+/** Publish of an addition that replaces a listed one: the old listing comes
+ *  off the site (Publish? unticked and Hide? ticked, so it reads as
+ *  archived, not as a fresh suggestion). Only a listing that is live now is
+ *  touched, never the addition's own record, and only in a table that has
+ *  the two boxes. What it was goes on the row before the listing changes:
+ *  if the write after it fails, Undo finds the listing still live and
+ *  leaves it. Null when there was nothing to do. */
+async function takeOffSite(
+  old: ReplacesListing,
+  item: QueueItem
+): Promise<ReplacedListing | null> {
+  if (!SUGGESTION_TABLES.has(old.table)) return null
+  if (old.table === item.targetTable && old.record === item.targetRecord) {
+    return null
+  }
+  const was = await publishState(old.table, old.record)
+  if (!was || !was.publish || was.hide) return null
+  const replaced: ReplacedListing = { ...old, ...was }
+  await patchQueueRow(item.id, { [F.replaced]: JSON.stringify(replaced) })
+  await patchRecord(old.table, old.record, { 'Publish?': false, 'Hide?': true })
+  await addComment(old.table, old.record, TOOK_OFF_COMMENT)
+  return replaced
+}
+
+/** Undo of that Publish: the old listing goes back as it was. One that is
+ *  no longer as Publish left it (gone, live again, or no longer hidden) has
+ *  been changed by hand since, and is left alone. */
+async function putBack(old: ReplacedListing): Promise<void> {
+  if (!SUGGESTION_TABLES.has(old.table)) return
+  const now = await publishState(old.table, old.record)
+  if (!now || now.publish || !now.hide) return
+  await patchRecord(old.table, old.record, {
+    'Publish?': old.publish,
+    'Hide?': old.hide,
+  })
+  await addComment(old.table, old.record, PUT_BACK_COMMENT)
+}
+
 /** Carries out an Accept. Answers with the proposed or edited fields it
  *  left out because their column is no longer in Airtable (GONE_KEY), so a
  *  caller can say so; the row keeps them too. */
@@ -2135,10 +2248,25 @@ export async function acceptItem(
   pageEdits: Record<string, unknown>,
   replyDraft: string | null = null,
   keep: string[] = [],
-  publicWording: { choice: PublicChoice; seen: string | null } | null = null
+  publicWording: { choice: PublicChoice; seen: string | null } | null = null,
+  /** The listing to take off the site with this Publish: the record the
+   *  page's box named, null when the box was unticked or not shown. */
+  replaceOld: string | null = null
 ): Promise<string[]> {
   requireOpen(item)
   const stamp = now()
+  // The box above Publish names the listing this addition replaces. Before
+  // the try, so a refusal leaves the item open, not Failed: the row must
+  // still name the listing the page showed (412, as for a rule's wording;
+  // the page reads the item again).
+  const old =
+    item.type === 'Add' && replaceOld !== null ? (item.replaces ?? null) : null
+  if (item.type === 'Add') {
+    const changed = replacesChanged(replaceOld, item.replaces)
+    if (changed) throw new QueueError(changed, 412)
+  }
+  let replaced: ReplacedListing | null = null
+  let replaceError: string | null = null
   // A rule that brings wording for the public listing policy: the page says
   // what he chose for it, and which wording it showed him. Before the try,
   // so a refusal leaves the rule open, not Failed. 412, not 409: the rule is
@@ -2213,6 +2341,19 @@ export async function acceptItem(
       const sort = fields[SORT_FIELD]
       if (typeof sort === 'number') await makeRoom(t.table, t.record, sort)
       await patchRecord(t.table, t.record, { ...fields, 'Publish?': true })
+      // The new listing is live; the one it replaces comes off. A failure
+      // here leaves the Publish standing and says so on the row.
+      if (old) {
+        try {
+          replaced = await takeOffSite(old, item)
+        } catch (e) {
+          replaceError = notTakenOff(
+            old,
+            e instanceof Error ? e.message : String(e)
+          )
+          console.error(`[admin-queue] ${item.id}: ${replaceError}`)
+        }
+      }
     } else if (item.type === 'Change') {
       // A row with no listing at all is a correction the Mac could not place
       // (no page named, no listing plainly the one): nothing to apply, so
@@ -2324,7 +2465,18 @@ export async function acceptItem(
     [F.decidedAt]: stamp,
     [F.appliedAt]: stamp,
     [F.edits]: Object.keys(saved).length ? JSON.stringify(saved) : null,
-    [F.error]: null,
+    [F.error]: replaceError,
+    // What became of the listing it replaces, when this Publish was asked
+    // to take it off: as it was before (for Undo), or nothing. One an
+    // earlier try had already taken off stays on the row.
+    ...(old
+      ? {
+          [F.replaced]:
+            (replaced ?? item.replaced)
+              ? JSON.stringify(replaced ?? item.replaced)
+              : null,
+        }
+      : {}),
   })
   refreshCache()
   return goneOf(saved[GONE_KEY])
@@ -2774,8 +2926,14 @@ export async function undoItem(item: QueueItem): Promise<string[]> {
   }
   if (item.status === 'Applied' && item.type === 'Add') {
     const t = target(item)
+    // The listing its Publish took off the site goes back first, so the
+    // page is never without both.
+    if (item.replaced) await putBack(item.replaced)
     await patchRecord(t.table, t.record, { 'Publish?': false })
-    await patchQueueRow(item.id, reopen)
+    await patchQueueRow(
+      item.id,
+      item.replaced ? { ...reopen, [F.replaced]: null } : reopen
+    )
     refreshCache()
     return []
   }
