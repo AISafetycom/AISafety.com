@@ -63,6 +63,7 @@ import {
   type Reopening,
 } from '@/lib/admin/queue-reopen'
 import { discordAppLink, replyToCopy } from '@/lib/admin/queue-discord'
+import { formEmailFollows } from '@/lib/admin/queue-form-email'
 import {
   alreadyRepliedOf,
   type AlreadyReplied,
@@ -1719,8 +1720,10 @@ interface Toast {
 }
 
 /** What the page tells the Mac agent to do after a decision: save the
- *  accept's reply draft, or write and save a rejection's. */
-type AgentAction = 'gmail_draft' | 'reject_draft' | 'reopen'
+ *  accept's reply draft, write and save a rejection's, or bring the form's
+ *  email in step with an item nobody waits on a reply for (read once he
+ *  has dealt with it, unread again after an Undo). */
+type AgentAction = 'gmail_draft' | 'reject_draft' | 'reopen' | 'mark_read'
 
 interface AgentResult {
   ok: boolean
@@ -3906,6 +3909,16 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
           delete next[item.id]
           return next
         })
+        // A form item with nobody to reply to: its email in Gmail is read
+        // once he has dealt with the item in any way, and unread again
+        // after an Undo (Bryce, 18 Nov 2026). The Mac re-reads the row and
+        // decides; its worker catches a call that never arrived.
+        if (agent && formEmailFollows(updated, action)) {
+          void callAgent(agent, '/act', {
+            id: updated.id,
+            action: 'mark_read',
+          })
+        }
         if (decision) {
           forget()
           if (action === 'delete') {
