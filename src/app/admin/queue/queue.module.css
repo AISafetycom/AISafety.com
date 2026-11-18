@@ -2032,6 +2032,62 @@ a.pageNav:hover {
   color: var(--q-muted);
 }
 
+/* A listing's history in the Queue (queue-history.ts): who decided or
+   edited what, newest first, under the folding heading the findings use.
+   Quiet, like the search's Earlier rows: what happened reads first, the
+   name and the day stay muted. */
+.history {
+  margin-top: 4px;
+}
+
+.historyList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.historyLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  width: 100%;
+  padding: 2px 0;
+  border: none;
+  background: none;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  color: var(--q-muted);
+}
+
+/* A line from another item of the same listing opens that item. */
+button.historyLine {
+  cursor: pointer;
+}
+
+button.historyLine:hover .historyWhat {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.historyWhat {
+  color: var(--q-text-2);
+}
+
+.historyAll {
+  padding: 4px 0 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--q-accent);
+  cursor: pointer;
+}
+
 /* A pressed while something is still missing: the note saying what goes
    red, holds, then fades back. A colour change only, so it stays on with
    reduced motion. */
