@@ -7377,19 +7377,25 @@ function Detail({
             <span className={styles.when}>{ago(item.createdAt)}</span>
             <div className={styles.links}>
               {/* A form's own link is its record in Airtable; the email it
-                  arrived as sits beside it, and is what Q opens. */}
-              {item.emailLink && sourceHref(item) === item.emailLink && (
-                <a
-                  href={item.emailLink}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={styles.withIcon}
-                >
-                  <Icon src={linkIcon(item.emailLink)} size={12} />
-                  {linkLabel(item.emailLink)}
-                  <kbd>Q</kbd>
-                </a>
-              )}
+                  arrived as sits beside it, and is what Q opens. When the
+                  row's own link already IS that email (a correction the Mac
+                  turned into a new listing), the button below opens it, so
+                  this one is left out rather than shown twice (Bryce,
+                  18 Nov 2026: "There are two buttons here"). */}
+              {item.emailLink &&
+                item.emailLink !== item.sourceLink &&
+                sourceHref(item) === item.emailLink && (
+                  <a
+                    href={item.emailLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={styles.withIcon}
+                  >
+                    <Icon src={linkIcon(item.emailLink)} size={12} />
+                    {linkLabel(item.emailLink)}
+                    <kbd>Q</kbd>
+                  </a>
+                )}
               {item.sourceLink && (
                 <a
                   href={item.sourceLink}
