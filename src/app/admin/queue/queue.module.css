@@ -794,6 +794,54 @@ button.earlierMore {
   color: var(--q-text);
 }
 
+/* What Fable checked before its verdict on a requested change (18 Nov
+   2026): under the reasons, a row per claim – what the request said and
+   how it fared, what the public pages say, then where, as links named by
+   their host. */
+.checked {
+  display: grid;
+  gap: 6px;
+}
+
+.checkedList {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--q-text);
+}
+
+.checkedList li {
+  display: grid;
+  gap: 2px;
+}
+
+.checkedClaim {
+  font-size: 12px;
+  color: var(--q-muted);
+}
+
+.checkedSources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  font-size: 12px;
+}
+
+/* The `a` outweighs `.queue a`'s teal. */
+a.checkedSource {
+  color: var(--q-muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+a.checkedSource:hover {
+  color: var(--q-text);
+}
+
 .detailTwoCol .actions {
   grid-column: 1 / -1;
 }
@@ -2655,8 +2703,72 @@ select.input {
   padding-left: 18px;
 }
 
+.chatFable ol {
+  margin: 0 0 8px;
+  padding-left: 22px;
+}
+
 .chatFable li {
   margin: 2px 0;
+}
+
+/* The rest of Fable's Markdown (18 Nov 2026): a list under a bullet, a
+   paragraph under one, a quote, a rule, a table – all in the panel's own
+   quiet lines. */
+.chatFable li > ul,
+.chatFable li > ol {
+  margin: 2px 0 0;
+}
+
+.chatFable li > p {
+  margin: 4px 0;
+}
+
+.chatFable blockquote {
+  margin: 0 0 8px;
+  padding: 2px 0 2px 10px;
+  border-left: 3px solid var(--q-border-strong);
+  color: var(--q-text-2);
+}
+
+.chatFable blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+.chatFable hr {
+  margin: 10px 0;
+  border: 0;
+  border-top: 1px solid var(--q-border-strong);
+}
+
+.chatTableWrap {
+  margin: 0 0 8px;
+  overflow-x: auto;
+}
+
+.chatTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.chatTable th,
+.chatTable td {
+  padding: 4px 10px 4px 0;
+  border-bottom: 1px solid var(--q-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.chatTable th {
+  font-weight: 600;
+  color: var(--q-text-2);
+  border-bottom-color: var(--q-border-strong);
+}
+
+.chatTable tr:last-child td {
+  border-bottom: 0;
 }
 
 .chatFable code {
@@ -3011,12 +3123,14 @@ select.input {
   display: none;
 }
 
-/* Stop, beside the paperclip while Fable answers. */
+/* Stop, beside the paperclip while Fable answers; with something typed
+   it is Send instead (18 Nov 2026), in the same place and the same teal. */
 .chatBoxAnswering .chatInput {
   padding-right: 68px;
 }
 
-.chatStop {
+.chatStop,
+.chatSend {
   position: absolute;
   right: 35px;
   bottom: 5px;
@@ -3042,6 +3156,10 @@ select.input {
   background: var(--q-accent-text);
 }
 
+.chatSend {
+  color: var(--q-accent-text);
+}
+
 /* Dictation (5 Nov 2026): the mic left of the paperclip, a red dot whose
    ring grows with his voice while it listens, a spinner while the Mac turns
    it into words, and the keys under the box. */
@@ -3057,7 +3175,8 @@ select.input {
   right: 66px;
 }
 
-.chatBoxMic .chatStop {
+.chatBoxMic .chatStop,
+.chatBoxMic .chatSend {
   right: 65px;
 }
 

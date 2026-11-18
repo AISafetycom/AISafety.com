@@ -175,6 +175,24 @@ describe('matchDoc', () => {
     expect(hit(request, 'could')?.excerpt?.label).toBe('Message')
   })
 
+  it('finds what Fable checked on a requested change', () => {
+    const correction = item({
+      type: 'Change',
+      source: 'Form',
+      verdict: 'Dismiss',
+      checked: [
+        {
+          claim: 'The group is not focused on AI safety',
+          found: 'Its site says it covers the full spectrum of AI safety.',
+          supports: 'no',
+          sources: ['https://aisafetybrazil.org/'],
+        },
+      ],
+    })
+    expect(hit(correction, 'spectrum')?.excerpt?.label).toBe('Fable checked')
+    expect(hit(item({}), 'spectrum')).toBeNull()
+  })
+
   it('reads the source text the way the page words it', () => {
     const comb = item({
       sourceExcerpt:
