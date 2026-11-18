@@ -6481,7 +6481,6 @@ function Detail({
       }),
     })
   const reasonRef = useRef<RejectReasonControl>(null)
-  const editCount = Object.keys(activeEdits(d)).length
   const original: Record<string, unknown> =
     item.type === 'Change'
       ? {
@@ -8156,16 +8155,9 @@ function Detail({
               unfilled.length > 0 &&
               !d.busy &&
               blockedNote('fill', fillFirst(unfilled))}
-            {(editCount > 0 || leftCount > 0) && (
+            {leftCount > 0 && (
               <span className={styles.note}>
-                {[
-                  editCount > 0 &&
-                    `${editCount === 1 ? '1 edit goes' : `${editCount} edits go`} with it`,
-                  leftCount > 0 &&
-                    `${leftCount === 1 ? '1 field' : `${leftCount} fields`} left out`,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
+                {leftCount === 1 ? '1 field' : `${leftCount} fields`} left out
               </span>
             )}
           </div>
