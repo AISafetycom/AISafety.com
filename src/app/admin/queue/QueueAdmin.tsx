@@ -135,7 +135,7 @@ import {
 } from '@/lib/admin/queue-field-flags'
 import type { FableChange } from '@/lib/admin/queue-fable'
 import Position, { forgetOrder } from './Position'
-import MapSpot, { forgetMap, notePlaced } from './MapSpot'
+import MapSpot, { forgetMap, MoveOthersContext, notePlaced } from './MapSpot'
 import { spotOf, wantsSpot, withSpot } from '@/lib/admin/queue-spot'
 import type { Spot } from '@/lib/admin/map-spot'
 import Fireworks from './Fireworks'
@@ -1902,11 +1902,15 @@ type Action = Decision | 'undo' | 'reopen'
 
 export default function QueueAdmin({
   canEdit,
+  canMoveMap = false,
   me = null,
 }: {
   /** False for a view-only grant: the same queue with nothing to click that
    *  would decide anything. The API refuses those writes regardless. */
   canEdit: boolean
+  /** The map editor's edit grant: the map strip's other listings drag and
+   *  save. The map API checks the grant again on every write. */
+  canMoveMap?: boolean
   /** The signed-in admin's name, as their decisions are kept in each
    *  item's history: someone else's decision shows its name, your own
    *  does not (queue-history.ts). */
@@ -1914,7 +1918,9 @@ export default function QueueAdmin({
 }) {
   return (
     <MeContext.Provider value={me}>
-      <QueueInbox canEdit={canEdit} />
+      <MoveOthersContext.Provider value={canEdit && canMoveMap}>
+        <QueueInbox canEdit={canEdit} />
+      </MoveOthersContext.Provider>
     </MeContext.Provider>
   )
 }
