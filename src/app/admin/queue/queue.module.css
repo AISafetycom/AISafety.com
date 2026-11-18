@@ -2281,21 +2281,56 @@ select.input {
   resize: none;
 }
 
-.other {
-  width: auto;
-  min-width: 240px;
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 999px;
-}
-
 /* The reject panel's reason box, with the dictation mic inside it at the
-   right (16 Nov 2026); the mic is the chat's, sat in the pill. */
+   right (16 Nov 2026); the mic is the chat's, sat in the pill.
+
+   The box grows with its text (18 Nov 2026): wider first, up to the panel's
+   width, then onto more lines. `::after` is a hidden copy of the text in the
+   same grid cell as the textarea, so the copy sets the size and the textarea
+   fills it. The two must wrap alike, hence every text and box property here
+   is shared. One line is 32px high, a chip's height, and the corners are a
+   chip's too, so one line still reads as a pill. */
 .otherBox {
   position: relative;
-  display: inline-flex;
+  display: inline-grid;
+  min-width: 240px;
+  max-width: 100%;
 }
 
+.otherBox::after,
+.other {
+  grid-area: 1 / 1;
+  box-sizing: border-box;
+  min-width: 0;
+  margin: 0;
+  padding: 5px 12px;
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 16px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  letter-spacing: normal;
+  word-spacing: normal;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.otherBox::after {
+  content: attr(data-value) ' ';
+  visibility: hidden;
+  border-color: transparent;
+  pointer-events: none;
+}
+
+.other {
+  width: 100%;
+  height: auto;
+  overflow: hidden;
+  resize: none;
+}
+
+.otherBoxMic::after,
 .otherBoxMic .other {
   padding-right: 36px;
 }
