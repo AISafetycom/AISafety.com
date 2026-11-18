@@ -1,4 +1,9 @@
-import { canReviewQueue, currentAdmin, requireAccess } from '@/lib/admin/auth'
+import {
+  canEditMap,
+  canReviewQueue,
+  currentAdmin,
+  requireAccess,
+} from '@/lib/admin/auth'
 import QueueAdmin from './QueueAdmin'
 
 // Nothing here is prerendered: the page reads the queue live in the browser
@@ -17,6 +22,7 @@ export default async function QueueAdminPage() {
   return (
     <QueueAdmin
       canEdit={await canReviewQueue()}
+      canMoveMap={await canEditMap()}
       me={me?.name || me?.email || null}
     />
   )
