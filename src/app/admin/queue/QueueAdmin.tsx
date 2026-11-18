@@ -44,7 +44,7 @@ import {
   type FlagUpdate,
 } from '@/lib/admin/queue-flag'
 import {
-  sourceHost,
+  sourceLabels,
   supportsWord,
   type CheckedClaim,
 } from '@/lib/admin/queue-checked'
@@ -9690,13 +9690,14 @@ function Checked({ claims }: { claims: CheckedClaim[] }) {
         {claims.map((c, i) => {
           const fared = supportsWord(c.supports)
           const label = [c.claim, fared].filter(Boolean).join(' · ')
+          const names = sourceLabels(c.sources)
           return (
             <li key={i}>
               {label && <span className={styles.checkedClaim}>{label}</span>}
               <span>{c.found}</span>
               {c.sources.length > 0 && (
                 <span className={styles.checkedSources}>
-                  {c.sources.map(href => (
+                  {c.sources.map((href, j) => (
                     <a
                       key={href}
                       className={styles.checkedSource}
@@ -9705,7 +9706,7 @@ function Checked({ claims }: { claims: CheckedClaim[] }) {
                       rel="noopener noreferrer"
                       title={href}
                     >
-                      {sourceHost(href)}
+                      {names[j]}
                     </a>
                   ))}
                 </span>

@@ -70,6 +70,23 @@ export function sourceHost(href: string): string {
   }
 }
 
+/** Pure: what each of one claim's sources is shown by. The host alone,
+ *  unless two sources share a host: those also get their path (no query),
+ *  so two pages of one site do not read as the same link twice. */
+export function sourceLabels(hrefs: string[]): string[] {
+  const hosts = hrefs.map(sourceHost)
+  return hrefs.map((href, i) => {
+    const host = hosts[i]
+    if (hosts.filter(h => h === host).length < 2) return host
+    try {
+      const path = decodeURI(new URL(href).pathname).replace(/\/+$/, '')
+      return path ? host + path : host
+    } catch {
+      return host
+    }
+  })
+}
+
 /** Pure: the proposal's `checked` block as the claims to show, [] when it
  *  is absent or malformed. A claim with nothing found is left out, as is
  *  anything that is not text or not a link; the rest stand. */

@@ -4,6 +4,7 @@ import {
   MAX_SOURCES,
   checkedOf,
   sourceHost,
+  sourceLabels,
   sourceLink,
   supportsWord,
 } from './queue-checked'
@@ -207,6 +208,30 @@ describe('sourceLink', () => {
     expect(sourceLink('javascript:alert(1)')).toBeNull()
     expect(sourceLink('https://')).toBeNull()
     expect(sourceLink(undefined)).toBeNull()
+  })
+})
+
+describe('sourceLabels', () => {
+  it('names a source by its host', () => {
+    expect(
+      sourceLabels(['https://www.abria.com.br/apoio', 'https://luma.com/x1'])
+    ).toEqual(['abria.com.br', 'luma.com'])
+  })
+
+  it('adds the path when two sources share a host', () => {
+    expect(
+      sourceLabels([
+        'https://aisafetybrazil.org/',
+        'https://aisafetybrazil.org/nosso-time/',
+        'https://aisafetybrazil.org/wp-json/api/artigos?per_page=100',
+        'https://abria.org.br/a-abria/',
+      ])
+    ).toEqual([
+      'aisafetybrazil.org',
+      'aisafetybrazil.org/nosso-time',
+      'aisafetybrazil.org/wp-json/api/artigos',
+      'abria.org.br',
+    ])
   })
 })
 
