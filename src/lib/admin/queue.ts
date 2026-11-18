@@ -110,6 +110,13 @@ import {
   type Reopened,
   type Reopening,
 } from './queue-reopen'
+import {
+  historyOf,
+  withEntry,
+  type HistoryDid,
+  type HistoryEntry,
+  type Undid,
+} from './queue-history'
 
 export const QUEUE_TABLE_ID = 'tblonlKwIFJ7Aa8QN'
 const BROOM_ISSUES_TABLE_ID = 'tblntD3WITPEgjHRK'
@@ -152,6 +159,9 @@ const F = {
   // the Mac (queue-prepared.ts): a Change's picture and Fable's proposed
   // logo for an addition.
   preparedLogo: 'fldDL9JaohN0Kx4CL',
+  // Who decided, edited or undid the item on the page, and when: a JSON
+  // list, one entry per action (queue-history.ts).
+  history: 'fldjRsqYJAwR6CXpA',
 } as const
 
 export type QueueType = 'Add' | 'Change' | 'Rule'
@@ -337,6 +347,10 @@ export interface QueueItem {
    *  this read (queue-prepared.ts). A Change's pictures already point at
    *  them; an addition's logo flag names one. */
   preparedLogos?: PreparedFile[]
+  /** Who decided, edited or undid it on the page, and when, oldest first
+   *  (queue-history.ts). Empty for a row nobody has acted on since
+   *  18 Nov 2026. */
+  history?: HistoryEntry[]
 }
 
 export type NoReply = 'no email' | 'no notification'
@@ -895,6 +909,7 @@ function rowToItem(
     fieldFlags,
     checked,
     preparedLogos,
+    history: historyOf(f[F.history]),
   }
 }
 
@@ -937,6 +952,24 @@ export async function listDecided(): Promise<QueueItem[]> {
   params.set('filterByFormula', DECIDED_FORMULA)
   params.set('sort[0][field]', F.decidedAt)
   params.set('sort[0][direction]', 'desc')
+  const rows = await listAll<RawFields>(QUEUE_TABLE_ID, params)
+  return rows.map(r => {
+    const fields = { ...r.fields }
+    delete fields[F.rejectDrafts]
+    return rowToItem({ ...r, fields })
+  })
+}
+
+/** Every Queue row about one listing (its Target record), for the
+ *  listing's history on the page: who published it, who changed what since
+ *  (queue-history.ts). Read when an item or a found listing is opened. The
+ *  rejection replies written in advance are left off, as in listDecided. */
+export async function listForListing(record: string): Promise<QueueItem[]> {
+  if (!isRecordId(record)) return []
+  const params = new URLSearchParams()
+  params.set('returnFieldsByFieldId', 'true')
+  // isRecordId has checked the id is letters and digits only.
+  params.set('filterByFormula', `{${F.targetRecord}}='${record}'`)
   const rows = await listAll<RawFields>(QUEUE_TABLE_ID, params)
   return rows.map(r => {
     const fields = { ...r.fields }
@@ -1967,6 +2000,21 @@ function refreshCache(): void {
   revalidateTag('airtable-records', 'max')
 }
 
+/** The History field with one more entry: who did what to the item, for
+ *  the same write as the action itself (queue-history.ts). `by` is the
+ *  signed-in admin's name; null when the caller has nobody to name. */
+function stamped(
+  item: QueueItem,
+  by: string | null,
+  did: HistoryDid,
+  at: string,
+  more: { fields?: string[]; undid?: Undid | null } = {}
+): Record<string, unknown> {
+  return {
+    [F.history]: withEntry(item.history ?? [], { at, by, did, ...more }),
+  }
+}
+
 function requireOpen(item: QueueItem): void {
   if (item.status !== 'Pending' && item.status !== 'Failed') {
     throw new QueueError(
@@ -2283,10 +2331,15 @@ export async function acceptItem(
   pageEdits: Record<string, unknown>,
   replyDraft: string | null = null,
   keep: string[] = [],
-  publicWording: { choice: PublicChoice; seen: string | null } | null = null
+  publicWording: { choice: PublicChoice; seen: string | null } | null = null,
+  /** Who pressed it, for the row's history. */
+  by: string | null = null
 ): Promise<string[]> {
   requireOpen(item)
   const stamp = now()
+  // A change: the fields this accept writes to the listing, for the
+  // history line.
+  let wrote: string[] = []
   // A rule that brings wording for the public listing policy: the page says
   // what he chose for it, and which wording it showed him. Before the try,
   // so a refusal leaves the rule open, not Failed. 412, not 409: the rule is
@@ -2430,6 +2483,7 @@ export async function acceptItem(
         }
         if (Object.keys(shaped.fields).length > 0) {
           await patchRecord(to.table, to.record, shaped.fields)
+          wrote = Object.keys(shaped.fields)
         }
       }
       // The Broom flag row goes either way: an applied fix clears it, and
@@ -2450,6 +2504,7 @@ export async function acceptItem(
         [F.status]: 'Accepted',
         [F.decidedAt]: stamp,
         [F.error]: null,
+        ...stamped(item, by, 'accept', stamp),
         ...(item.rulePublic && publicWording
           ? {
               [F.edits]: JSON.stringify({ [PUBLIC_KEY]: publicWording.choice }),
@@ -2473,6 +2528,7 @@ export async function acceptItem(
     [F.appliedAt]: stamp,
     [F.edits]: Object.keys(saved).length ? JSON.stringify(saved) : null,
     [F.error]: null,
+    ...stamped(item, by, 'accept', stamp, { fields: wrote }),
   })
   refreshCache()
   return goneOf(saved[GONE_KEY])
@@ -2514,7 +2570,8 @@ export function agentInfo(email: string): AgentInfo | null {
 export async function rejectItem(
   item: QueueItem,
   reason: string,
-  reply: string | null = null
+  reply: string | null = null,
+  by: string | null = null
 ): Promise<void> {
   requireOpen(item)
   // The reason is optional (Bryce, 24 Sept 2026: "I should be able to
@@ -2535,6 +2592,7 @@ export async function rejectItem(
     [F.decidedAt]: stamp,
     [F.error]: null,
     [F.rejectReply]: words || null,
+    ...stamped(item, by, 'reject', stamp),
   }
   if (item.type === 'Change' && item.issueRow && isRecordId(item.issueRow)) {
     // A dismissed Broom flag is done with: clear the flag row now.
@@ -2547,9 +2605,15 @@ export async function rejectItem(
 /** "Review again in a week": the item leaves the list until then, and the
  *  Mac worker has Fable review it again when it is due. Nothing else on the
  *  row changes, so its edits and chat are there when it comes back. */
-export async function laterItem(item: QueueItem): Promise<void> {
+export async function laterItem(
+  item: QueueItem,
+  by: string | null = null
+): Promise<void> {
   requireOpen(item)
-  await patchQueueRow(item.id, { [F.reviewAgainOn]: reviewAgainAt(Date.now()) })
+  await patchQueueRow(item.id, {
+    [F.reviewAgainOn]: reviewAgainAt(Date.now()),
+    ...stamped(item, by, 'later', now()),
+  })
 }
 
 /** The row's Error once Delete has closed it. */
@@ -2568,7 +2632,10 @@ export const DELETED_NOTE = 'Deleted in the Queue'
  *  group. There is no Undo, so the page asks first. A live listing is
  *  never deleted: an addition published outside the Queue is refused, and
  *  one hidden there keeps its record. A change never touches its listing. */
-export async function deleteItem(item: QueueItem): Promise<void> {
+export async function deleteItem(
+  item: QueueItem,
+  by: string | null = null
+): Promise<void> {
   requireOpen(item)
   const table = item.targetTable ?? ''
   const record = item.targetRecord ?? ''
@@ -2600,6 +2667,7 @@ export async function deleteItem(item: QueueItem): Promise<void> {
   await patchQueueRow(item.id, {
     [F.status]: 'Closed',
     [F.error]: DELETED_NOTE,
+    ...stamped(item, by, 'delete', now()),
   })
 }
 
@@ -2761,7 +2829,8 @@ export function isFixable(item: QueueItem): boolean {
 
 export async function fixItem(
   item: QueueItem,
-  edits: Record<string, unknown>
+  edits: Record<string, unknown>,
+  by: string | null = null
 ): Promise<void> {
   if (!isFixable(item)) {
     throw new QueueError(
@@ -2831,6 +2900,7 @@ export async function fixItem(
   await patchRecord(t.table, t.record, shaped.fields)
   await patchQueueRow(item.id, {
     [F.edits]: JSON.stringify({ ...saved, ...edits }),
+    ...stamped(item, by, 'fix', now(), { fields: Object.keys(shaped.fields) }),
   })
   refreshCache()
 }
@@ -2856,7 +2926,10 @@ export async function forgetRowEdit(
  *  same one when it still exists, else one rebuilt from the row's saved
  *  copy – and then reopens it in one write. The page asks the Mac's agent
  *  to do that at once; the worker is the fallback. */
-export async function reopenItem(item: QueueItem): Promise<void> {
+export async function reopenItem(
+  item: QueueItem,
+  by: string | null = null
+): Promise<void> {
   if (item.type !== 'Add') {
     throw new QueueError('Only an addition can be reopened.', 400)
   }
@@ -2876,19 +2949,26 @@ export async function reopenItem(item: QueueItem): Promise<void> {
   await patchQueueRow(item.id, {
     [F.proposal]: JSON.stringify(withReopenMarker(raw, now()), null, 1),
     [F.error]: null,
+    ...stamped(item, by, 'reopen', now()),
   })
 }
 
 /** Takes a decision back. Answers with the fields of an applied change it
  *  could not put back (a picture with no copy to write), so the page can
  *  say the listing still holds what Accept wrote there. */
-export async function undoItem(item: QueueItem): Promise<string[]> {
+export async function undoItem(
+  item: QueueItem,
+  by: string | null = null
+): Promise<string[]> {
   // An item set aside: back in the list now.
   if (
     (item.status === 'Pending' || item.status === 'Failed') &&
     item.reviewAgainOn
   ) {
-    await patchQueueRow(item.id, { [F.reviewAgainOn]: null })
+    await patchQueueRow(item.id, {
+      [F.reviewAgainOn]: null,
+      ...stamped(item, by, 'undo', now(), { undid: 'later' }),
+    })
     return []
   }
   const reopen: Record<string, unknown> = {
@@ -2898,6 +2978,10 @@ export async function undoItem(item: QueueItem): Promise<string[]> {
     [F.rejectReason]: null,
     [F.error]: null,
     [F.rejectReply]: null,
+    // Every branch below reopens the row with this one write.
+    ...stamped(item, by, 'undo', now(), {
+      undid: item.status === 'Rejected' ? 'reject' : 'accept',
+    }),
   }
   // Accept and Reject both clear a Broom flag's row, and it cannot come
   // back. The reopened item lets go of it: the Mac worker takes a flag

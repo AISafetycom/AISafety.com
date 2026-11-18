@@ -1,6 +1,14 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import Image from 'next/image'
 import type { SaidBy } from '@/lib/admin/queue'
 import type {
@@ -99,6 +107,12 @@ import { SITE_PAGES } from '@/lib/site-pages'
 import { activityIcon } from '@/app/communities/activity-icon'
 import { isAcceptingApplications } from '@/lib/funding-status'
 import { goneFields, goneNote } from '@/lib/admin/queue-retired'
+import {
+  decidedBy,
+  lineText,
+  listingLines,
+  type HistoryRow,
+} from '@/lib/admin/queue-history'
 import { STATUS_ICONS as FUNDER_STATUS_ICONS } from '@/app/funding/card'
 import { APPLICATIONS_ICONS as ADVISOR_APPLICATIONS_ICONS } from '@/app/advisors/card'
 import { trainingTypeColor } from '@/lib/training-types'
@@ -680,6 +694,61 @@ function dayMonth(iso: string): string {
     day: 'numeric',
     month: 'long',
   })
+}
+
+/** "15 October 2026", in the viewer's own time zone. */
+function dayMonthYear(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  })
+}
+
+/** Who is signed in, under the name their decisions are kept by
+ *  (queue-history.ts); null when the page was not told. */
+const MeContext = createContext<string | null>(null)
+
+/** What a history line reads of an item. */
+function historyRow(item: QueueItem): HistoryRow {
+  return {
+    id: item.id,
+    type: item.type,
+    source: item.source,
+    status: item.status,
+    decidedAt: item.decidedAt,
+    declined: item.declined,
+    reviewAgainOn: item.reviewAgainOn,
+    // A copy of the item from before the page knew of histories has none.
+    history: item.history ?? [],
+    written:
+      item.type === 'Change'
+        ? item.changes
+            .map(c => c.field)
+            .filter(
+              k =>
+                !item.leftOut?.includes(k) &&
+                !item.gone?.includes(k) &&
+                !item.keptByFable?.includes(k)
+            )
+        : [],
+    proposed: item.type === 'Change' ? item.changes.map(c => c.field) : [],
+  }
+}
+
+/** Who made the decision an item shows, when that was someone other than
+ *  the person looking: your own decisions need no name beside them (Bryce,
+ *  18 Nov 2026, with a second person about to decide items). Nothing for a
+ *  decision with nobody on record. */
+function DecidedBy({ item, lead = '' }: { item: QueueItem; lead?: string }) {
+  const me = useContext(MeContext)
+  const by = decidedBy(historyRow(item))
+  if (!by || by === me) return null
+  return (
+    <span>
+      {lead}by {by}
+    </span>
+  )
 }
 
 /** Back from "Review again in a week": when it was set aside, while it is
@@ -1830,11 +1899,24 @@ type Action = Decision | 'undo' | 'reopen'
 
 export default function QueueAdmin({
   canEdit,
+  me = null,
 }: {
   /** False for a view-only grant: the same queue with nothing to click that
    *  would decide anything. The API refuses those writes regardless. */
   canEdit: boolean
+  /** The signed-in admin's name, as their decisions are kept in each
+   *  item's history: someone else's decision shows its name, your own
+   *  does not (queue-history.ts). */
+  me?: string | null
 }) {
+  return (
+    <MeContext.Provider value={me}>
+      <QueueInbox canEdit={canEdit} />
+    </MeContext.Provider>
+  )
+}
+
+function QueueInbox({ canEdit }: { canEdit: boolean }) {
   const [items, setItems] = useState<QueueItem[] | null>(null)
   // The list as it is now, for callbacks that must not go stale.
   const itemsRef = useRef(items)
@@ -3631,6 +3713,20 @@ export default function QueueAdmin({
     [showDecided]
   )
 
+  /** Open another item about the same listing, from a line of its history:
+   *  one still waiting as the list opens it, a decision as the search's
+   *  Earlier group does. */
+  const openRow = useCallback(
+    (row: QueueItem) => {
+      if (isOpen(row) && itemsRef.current?.some(i => i.id === row.id)) {
+        select(row.id)
+      } else {
+        openEarlier(row)
+      }
+    },
+    [openEarlier, select]
+  )
+
   const act = useCallback(
     async (
       item: QueueItem,
@@ -5172,6 +5268,7 @@ export default function QueueAdmin({
                 key={foundListing.record}
                 listing={foundListing}
                 earlier={ordered.earlierCount}
+                onOpen={openRow}
               />
             ) : pane === 'done' ? (
               <DoneList
@@ -5210,6 +5307,7 @@ export default function QueueAdmin({
                     }
                   : {})}
                 item={selected}
+                onOpenRow={openRow}
                 onFlag={body => updateFlag(selected, body)}
                 live={live[selected.id] ?? null}
                 onImage={(field, urls) => {
@@ -5829,6 +5927,7 @@ function Row({
                 {doneLabel(item)}
               </span>
               <span>{ago(decidedAtOf(item))}</span>
+              <DecidedBy item={item} />
             </>
           ) : (
             item.verdict && (
@@ -5895,6 +5994,7 @@ function EarlierRow({
       </span>
       <span className={styles.earlierWhat}>
         {doneLabel(item)} · {ago(decidedAtOf(item))}
+        <DecidedBy item={item} lead=" · " />
       </span>
     </button>
   )
@@ -5977,10 +6077,13 @@ function ListingRow({
 function ListingFound({
   listing,
   earlier,
+  onOpen,
 }: {
   listing: FoundListing
   /** How many earlier decisions the same search lists on the left. */
   earlier: number
+  /** Opens a Queue item about this listing, from a line of its history. */
+  onOpen: (row: QueueItem) => void
 }) {
   const nav =
     Object.values(SITE_PAGES).find(p => p.path === listing.page) ?? null
@@ -6077,8 +6180,126 @@ function ListingFound({
           <Fields part="main" {...fields} />
         </div>
         <Fields part="rest" {...fields} />
+        <History
+          key={`history:${listing.record}`}
+          item={null}
+          record={listing.record}
+          onOpen={onOpen}
+        />
       </div>
     </div>
+  )
+}
+
+/** How many lines a history shows before "Show all". */
+const HISTORY_SHOWN = 6
+
+/** The listing's history in the Queue (Bryce, 18 Nov 2026: "Stamp each
+ *  change with who made it … a name and an undo on each record"): every
+ *  Publish, Apply, Reject, edit after the decision and Undo made on the
+ *  page about it, newest first, each with who made it and the day. A line
+ *  from another item of the same listing opens that item, where its Undo
+ *  or Reopen is. A decision with nobody on record (made before 18 Nov
+ *  2026, or outside the page) shows without a name. It is history on the
+ *  listing, never a list of what one person did. Nothing shows until there
+ *  is a line to show. */
+function History({
+  item,
+  record,
+  onOpen,
+}: {
+  /** The item on show; null on a listing found by its record id. */
+  item: QueueItem | null
+  /** The listing, when there is one: its other Queue items are read too. */
+  record: string | null
+  onOpen: ((row: QueueItem) => void) | null
+}) {
+  const [others, setOthers] = useState<QueueItem[]>([])
+  const [all, setAll] = useState(false)
+  // Read again once anything has been decided on the item on show.
+  const version = item
+    ? `${item.status}/${item.decidedAt}/${item.reviewAgainOn}/${item.history?.length ?? 0}`
+    : ''
+  useEffect(() => {
+    if (!record) return
+    let live = true
+    fetch(`/api/admin/queue?history=${encodeURIComponent(record)}`, {
+      cache: 'no-store',
+    })
+      .then(res => {
+        if (!res.ok) throw new Error(`history read failed: ${res.status}`)
+        return res.json() as Promise<{ items?: QueueItem[] }>
+      })
+      .then(data => {
+        if (live) setOthers(data.items ?? [])
+      })
+      // The item's own lines still show; only the listing's other items
+      // are missing, and the next open reads them again.
+      .catch(e => console.warn('[admin-queue]', e))
+    return () => {
+      live = false
+    }
+  }, [record, version])
+  const rows = useMemo(() => {
+    const byId = new Map<string, QueueItem>()
+    for (const o of others) {
+      if (record && o.targetRecord === record) byId.set(o.id, o)
+    }
+    // The page's own copy of the item on show is the fresher one.
+    if (item) byId.set(item.id, item)
+    return byId
+  }, [others, item, record])
+  const lines = useMemo(
+    () => listingLines([...rows.values()].map(historyRow)),
+    [rows]
+  )
+  if (lines.length === 0) return null
+  const shown = all ? lines : lines.slice(0, HISTORY_SHOWN)
+  return (
+    <details className={`${styles.findingMore} ${styles.history}`} open>
+      <summary>History</summary>
+      <ul className={styles.historyList}>
+        {shown.map((l, i) => {
+          const row = rows.get(l.row)
+          const elsewhere = Boolean(row && l.row !== item?.id)
+          const body = (
+            <>
+              <span className={styles.historyWhat}>{lineText(l)}</span>
+              {l.by && <span>by {l.by}</span>}
+              <span
+                title={
+                  l.recorded
+                    ? new Date(l.at).toLocaleString('en-GB')
+                    : 'Nobody is on record for this one: it was decided before 18 November 2026, or outside the Queue'
+                }
+              >
+                {dayMonthYear(l.at)}
+              </span>
+            </>
+          )
+          return (
+            <li key={`${l.row}/${l.at}/${l.did}/${i}`}>
+              {elsewhere && row && onOpen ? (
+                <button
+                  className={styles.historyLine}
+                  onClick={() => onOpen(row)}
+                  title={`Opens that item: ${row.title}`}
+                >
+                  {body}
+                </button>
+              ) : (
+                <span className={styles.historyLine}>{body}</span>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+      {!all && lines.length > HISTORY_SHOWN && (
+        <button className={styles.historyAll} onClick={() => setAll(true)}>
+          Show all {lines.length}
+        </button>
+      )}
+    </details>
   )
 }
 
@@ -6153,6 +6374,7 @@ function Detail({
   claimed,
   blockedFlash = 0,
   readOnly,
+  onOpenRow = null,
   onFable,
   onFlag,
   onBack,
@@ -6206,6 +6428,9 @@ function Detail({
   claimed: Record<string, Spot>
   /** Bumped when A can't accept yet: the "first" note flashes red. */
   blockedFlash?: number
+  /** Opens another Queue item about the same listing, from a line of its
+   *  history. */
+  onOpenRow?: ((row: QueueItem) => void) | null
   /** A view-only session: no editing, no deciding. */
   readOnly: boolean
 }) {
@@ -7567,6 +7792,13 @@ function Detail({
             {fixNow?.error ?? d.error ?? item.error}
           </p>
         )}
+
+        <History
+          key={`history:${item.id}`}
+          item={item}
+          record={item.type === 'Rule' ? null : item.targetRecord}
+          onOpen={onOpenRow}
+        />
       </div>
 
       {showAside && (
@@ -7711,7 +7943,10 @@ function Detail({
             {replyLabel(item) && (
               <span className={styles.note}>{replyLabel(item)}</span>
             )}
-            <span className={styles.note}>{ago(decidedAtOf(item))}</span>
+            <span className={styles.note}>
+              {ago(decidedAtOf(item))}
+              <DecidedBy item={item} lead=" · " />
+            </span>
             {item.reopening && <ReopeningTag reopening={item.reopening} />}
             {onReopen && takeBack(item) === 'reopen' ? (
               <button
@@ -9901,6 +10136,7 @@ function DoneList({
                 {item.rejectReason && <span>{item.rejectReason}</span>}
                 {replyLabel(item) && <span>{replyLabel(item)}</span>}
                 <span>{ago(decidedAtOf(item))}</span>
+                <DecidedBy item={item} />
                 {item.reopening && <ReopeningTag reopening={item.reopening} />}
               </span>
             </span>

@@ -40,6 +40,7 @@ import {
   getPreviewListing,
   getQueueItem,
   handledOutside,
+  laterItem,
   mergeEdits,
   queueTargets,
   emailLinkOf,
@@ -2498,5 +2499,196 @@ describe('a listing found by its record id', () => {
     await expect(findListing(rid('round'))).rejects.toMatchObject({
       status: 502,
     })
+  })
+})
+
+describe('who did what, on the row’s history', () => {
+  const HISTORY = 'fldjRsqYJAwR6CXpA'
+  const DECIDED = 'fldtt7z4lYvAR5t94'
+  const PROPOSAL = 'fldgl9Ny2jnu8T0Da'
+  const REVIEW_AGAIN = 'fldm9eFBj0iWuN23P'
+  const schema = [
+    { id: 'fldName', name: 'Name', type: 'singleLineText' },
+    { id: 'fldDesc', name: 'Description', type: 'multilineText' },
+  ]
+  let patches: { path: string; fields: Record<string, unknown> }[]
+
+  beforeEach(() => {
+    patches = []
+    process.env.AIRTABLE_TOKEN = 'test-token'
+    process.env.AIRTABLE_BASE_ID = 'appTest'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({ tables: [{ id: FUNDING, fields: schema }] })
+      )
+    )
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(
+      async (path: string, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          const body = JSON.parse(String(init.body)) as {
+            fields: Record<string, unknown>
+          }
+          patches.push({ path, fields: body.fields })
+          return new Response('{}', { status: 200 })
+        }
+        if (init?.method === 'DELETE') return new Response('{}')
+        // The Queue row as Airtable holds it, with a saved copy to reopen.
+        if (path.startsWith(`${QUEUE}/`)) {
+          return Response.json({
+            id: rid('q1'),
+            fields: { [PROPOSAL]: JSON.stringify({ fields: { Name: 'X' } }) },
+          })
+        }
+        return Response.json({
+          id: rid('fund'),
+          fields: { Name: 'Old name', Description: 'Old words' },
+        })
+      }
+    )
+  })
+
+  const change = (over: Partial<QueueItem> = {}) =>
+    item({
+      type: 'Change',
+      source: 'Broom',
+      page: '/funding',
+      targetTable: FUNDING,
+      targetRecord: rid('fund'),
+      changes: [{ field: 'Name', from: 'Old name', to: 'New name' }],
+      ...over,
+    })
+
+  /** The last write to the Queue row, and the history it carries. */
+  const written = () => {
+    const row = patches.filter(p => p.path === `${QUEUE}/${rid('q1')}`).at(-1)
+    if (!row) throw new Error('the Queue row was not written')
+    return {
+      fields: row.fields,
+      entries: JSON.parse(String(row.fields[HISTORY])) as Record<
+        string,
+        unknown
+      >[],
+    }
+  }
+
+  it('names who applied a change and the fields it wrote, at the row’s Decided at', async () => {
+    await acceptItem(
+      change(),
+      { Description: 'Fresh words' },
+      null,
+      [],
+      null,
+      'Rob Example'
+    )
+    const { fields, entries } = written()
+    expect(fields[STATUS]).toBe('Applied')
+    expect(entries).toEqual([
+      {
+        at: fields[DECIDED],
+        by: 'Rob Example',
+        did: 'accept',
+        fields: ['Name', 'Description'],
+      },
+    ])
+  })
+
+  it('names who accepted a rule', async () => {
+    await acceptItem(
+      item({ type: 'Rule', targetTable: null, targetRecord: null }),
+      {},
+      null,
+      [],
+      null,
+      'Rob Example'
+    )
+    const { fields, entries } = written()
+    expect(fields[STATUS]).toBe('Accepted')
+    expect(entries).toEqual([
+      { at: fields[DECIDED], by: 'Rob Example', did: 'accept' },
+    ])
+  })
+
+  it('adds a reject after what the row already holds', async () => {
+    const earlier = {
+      at: '2026-11-17T00:00:00.000Z',
+      by: 'Bryce Example',
+      did: 'later' as const,
+    }
+    await rejectItem(
+      change({ history: [earlier] }),
+      'Out of scope',
+      null,
+      'Rob Example'
+    )
+    const { fields, entries } = written()
+    expect(entries).toEqual([
+      earlier,
+      { at: fields[DECIDED], by: 'Rob Example', did: 'reject' },
+    ])
+  })
+
+  it('names nobody when the caller has no name to give', async () => {
+    await rejectItem(change(), '')
+    expect(written().entries).toMatchObject([{ by: null, did: 'reject' }])
+  })
+
+  it('says what an undo took back', async () => {
+    await undoItem(change({ status: 'Rejected' }), 'Bryce Example')
+    expect(written().entries).toMatchObject([
+      { by: 'Bryce Example', did: 'undo', undid: 'reject' },
+    ])
+    patches = []
+    await undoItem(change({ status: 'Applied' }), 'Bryce Example')
+    expect(written().fields[STATUS]).toBe('Pending')
+    expect(written().entries).toMatchObject([
+      { by: 'Bryce Example', did: 'undo', undid: 'accept' },
+    ])
+  })
+
+  it('names who set an item aside, and who brought it back early', async () => {
+    await laterItem(change(), 'Rob Example')
+    expect(written().entries).toMatchObject([
+      { by: 'Rob Example', did: 'later' },
+    ])
+    patches = []
+    await undoItem(
+      change({ reviewAgainOn: '2099-01-01T00:00:00.000Z' }),
+      'Bryce Example'
+    )
+    const { fields, entries } = written()
+    expect(fields[REVIEW_AGAIN]).toBeNull()
+    expect(fields[STATUS]).toBeUndefined()
+    expect(entries).toMatchObject([
+      { by: 'Bryce Example', did: 'undo', undid: 'later' },
+    ])
+  })
+
+  it('names who fixed a field after the decision, and which', async () => {
+    await fixItem(
+      change({ status: 'Applied' }),
+      { Description: 'Fresh words' },
+      'Rob Example'
+    )
+    expect(written().entries).toMatchObject([
+      { by: 'Rob Example', did: 'fix', fields: ['Description'] },
+    ])
+  })
+
+  it('names who deleted an item, and who reopened a declined one', async () => {
+    await deleteItem(change(), 'Rob Example')
+    expect(written().fields[ERROR]).toBe(DELETED_NOTE)
+    expect(written().entries).toMatchObject([
+      { by: 'Rob Example', did: 'delete' },
+    ])
+    patches = []
+    await reopenItem(
+      item({ status: 'Rejected', declined: true }),
+      'Bryce Example'
+    )
+    expect(written().entries).toMatchObject([
+      { by: 'Bryce Example', did: 'reopen' },
+    ])
   })
 })
