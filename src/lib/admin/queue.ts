@@ -2549,7 +2549,12 @@ export interface AgentInfo {
 
 const AGENT_TOKEN_LIFE_SECONDS = 12 * 60 * 60
 
-export function agentInfo(email: string): AgentInfo | null {
+export function agentInfo(
+  email: string,
+  /** The admin's name, which the Mac keeps on an item's history when a
+   *  chat reply they asked for changes the listing (queue-history.ts). */
+  name: string | null = null
+): AgentInfo | null {
   const secret = process.env.QUEUE_AGENT_SECRET
   if (!secret || !email) return null
   const port = Number(process.env.QUEUE_AGENT_PORT) || 8790
@@ -2559,6 +2564,7 @@ export function agentInfo(email: string): AgentInfo | null {
       v: 1,
       kind: 'queue-agent',
       email,
+      ...(name?.trim() ? { name: name.trim().slice(0, 100) } : {}),
       iat,
       exp: iat + AGENT_TOKEN_LIFE_SECONDS,
     },

@@ -6197,7 +6197,8 @@ const HISTORY_SHOWN = 6
 /** The listing's history in the Queue (Bryce, 18 Nov 2026: "Stamp each
  *  change with who made it … a name and an undo on each record"): every
  *  Publish, Apply, Reject, edit after the decision and Undo made on the
- *  page about it, newest first, each with who made it and the day. A line
+ *  page about it, and every change Fable made to it from an item's chat
+ *  (with who asked), newest first, each with who made it and the day. A line
  *  from another item of the same listing opens that item, where its Undo
  *  or Reopen is. A decision with nobody on record (made before 18 Nov
  *  2026, or outside the page) shows without a name. It is history on the
@@ -6265,7 +6266,12 @@ function History({
           const body = (
             <>
               <span className={styles.historyWhat}>{lineText(l)}</span>
-              {l.by && <span>by {l.by}</span>}
+              {/* Fable's own change names whoever asked for it in the chat. */}
+              {l.by && (
+                <span>
+                  {l.did === 'fable' ? 'asked by' : 'by'} {l.by}
+                </span>
+              )}
               <span
                 title={
                   l.recorded

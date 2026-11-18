@@ -2692,3 +2692,28 @@ describe('who did what, on the row’s history', () => {
     ])
   })
 })
+
+describe('the token the page shows the Mac agent', () => {
+  it('carries the admin’s name, for the history of what Fable changes', async () => {
+    const { sealToken } = await import('./session')
+    const { agentInfo } = await import('./queue')
+    const sealed = vi.mocked(sealToken)
+    sealed.mockReset()
+    process.env.QUEUE_AGENT_SECRET = 'test-secret'
+    try {
+      agentInfo('a@example.org', '  Rob Example ')
+      expect(sealed.mock.calls[0][0]).toMatchObject({
+        kind: 'queue-agent',
+        email: 'a@example.org',
+        name: 'Rob Example',
+      })
+      // No name to give: the token is as it was before, with none.
+      agentInfo('a@example.org')
+      agentInfo('a@example.org', '   ')
+      expect(sealed.mock.calls[1][0]).not.toHaveProperty('name')
+      expect(sealed.mock.calls[2][0]).not.toHaveProperty('name')
+    } finally {
+      delete process.env.QUEUE_AGENT_SECRET
+    }
+  })
+})

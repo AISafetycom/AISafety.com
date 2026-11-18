@@ -172,7 +172,7 @@ export async function GET(req: NextRequest) {
       const closed = new Set(await closeHandledRows(items))
       if (closed.size) items = items.filter(i => !closed.has(i.id))
     }
-    return json({ items, agent: agentInfo(me?.email ?? '') })
+    return json({ items, agent: agentInfo(me?.email ?? '', me?.name ?? null) })
   } catch (e) {
     return failure(e)
   }

@@ -72,6 +72,35 @@ describe('historyOf', () => {
   })
 })
 
+describe('an entry the Mac wrote', () => {
+  it('reads Fable’s change with who asked, as Python writes it', () => {
+    // json.dumps with compact separators, the name of whoever sent the message.
+    const raw =
+      '[{"at":"2026-11-18T05:00:00Z","by":"Rob Example","did":"fable","fields":["Logo","Name"]}]'
+    expect(historyOf(raw)).toEqual([
+      {
+        at: '2026-11-18T05:00:00Z',
+        by: 'Rob Example',
+        did: 'fable',
+        fields: ['Logo', 'Name'],
+      },
+    ])
+  })
+  it('is no decision: the row’s own decision still stands beside it', () => {
+    const r = row({
+      history: [
+        { at: AT, by: 'Rob', did: 'accept' },
+        { at: LATER, by: 'Bryce', did: 'fable', fields: ['Logo'] },
+      ],
+    })
+    expect(decidedBy(r)).toBe('Rob')
+    expect(rowLines(r).map(l => [l.did, l.by])).toEqual([
+      ['accept', 'Rob'],
+      ['fable', 'Bryce'],
+    ])
+  })
+})
+
 describe('withEntry', () => {
   it('adds the entry after what the row holds', () => {
     const before: HistoryEntry[] = [{ at: AT, by: 'A', did: 'accept' }]
@@ -267,6 +296,12 @@ describe('lineText', () => {
     expect(lineText(line({ did: 'fix', fields: ['Name'] }))).toBe('Edited Name')
     expect(lineText(line({ did: 'reopen' }))).toBe('Reopened')
     expect(lineText(line({ did: 'delete' }))).toBe('Deleted')
+  })
+  it('says what Fable changed from the chat', () => {
+    expect(lineText(line({ did: 'fable', fields: ['Logo', 'Name'] }))).toBe(
+      'Fable changed Logo and Name'
+    )
+    expect(lineText(line({ did: 'fable' }))).toBe('Fable changed the listing')
   })
   it('says what an undo took back', () => {
     expect(lineText(line({ did: 'undo', undid: 'accept' }))).toBe(

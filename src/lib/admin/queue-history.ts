@@ -14,8 +14,14 @@
   nothing here lists a person's actions, and nothing is recorded for
   opening, reading or drafting.
 
-  What is not here: anything done outside the page. A row the Mac closed,
-  a listing approved in Airtable itself and a decision from before
+  The Mac adds one kind of entry itself (`fable`, ~/Queue chat.py): when a
+  reply in an item's Fable chat has changed the listing, with the fields
+  and the name of whoever sent the message (Bryce, the same day: "Include
+  the name of the user that prompted it"). The page's token to the Mac
+  carries that name (agentInfo in queue.ts).
+
+  What is not here: anything else done outside the page. A row the Mac
+  closed, a listing approved in Airtable itself and a decision from before
   18 Nov 2026 have no entry, so they show without a name.
 
   Dependency-free, so the page and the server share it.
@@ -29,6 +35,8 @@ export type HistoryDid =
   | 'fix'
   | 'reopen'
   | 'delete'
+  // Written by the Mac: Fable changed the listing from the item's chat.
+  | 'fable'
 
 const DID: readonly string[] = [
   'accept',
@@ -38,6 +46,7 @@ const DID: readonly string[] = [
   'fix',
   'reopen',
   'delete',
+  'fable',
 ]
 
 /** What an Undo took back. */
@@ -47,10 +56,12 @@ const UNDID: readonly string[] = ['accept', 'reject', 'later']
 export interface HistoryEntry {
   /** When, ISO. A decision's is the row's Decided at. */
   at: string
-  /** The admin's name; null when the caller had none to give. */
+  /** The admin's name; null when the caller had none to give. For `fable`,
+   *  whoever asked Fable in the chat. */
   by: string | null
   did: HistoryDid
-  /** accept of a change: the fields written · fix: the fields edited. */
+  /** accept of a change: the fields written · fix: the fields edited ·
+   *  fable: the fields Fable changed. */
   fields?: string[]
   /** undo: what it took back. */
   undid?: Undid
@@ -274,6 +285,10 @@ export function lineText(line: HistoryLine): string {
       return 'Set aside for a week'
     case 'fix':
       return fields.length > 0 ? `Edited ${nameList(fields)}` : 'Edited'
+    case 'fable':
+      return fields.length > 0
+        ? `Fable changed ${nameList(fields)}`
+        : 'Fable changed the listing'
     case 'reopen':
       return 'Reopened'
     case 'delete':
