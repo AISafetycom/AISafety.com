@@ -64,6 +64,7 @@ import {
   type Passed,
 } from './queue-passed'
 import { ruleTestOf, type RuleTest } from './queue-rule-test'
+import { CHECKED_KEY, checkedOf, type CheckedClaim } from './queue-checked'
 import {
   FIELD_FLAGS_KEY,
   fieldFlagsOf,
@@ -328,6 +329,10 @@ export interface QueueItem {
    *  `field_flags`, queue-field-flags.ts);
    *  null until the Mac has run it. */
   fieldFlags?: FieldFlags | null
+  /** A requested change: what Fable checked on public pages before its
+   *  verdict, claim by claim (the proposal's `checked`, queue-checked.ts);
+   *  empty when the Mac checked nothing. */
+  checked?: CheckedClaim[]
   /** The files on the row's Prepared logo field, with links fresh from
    *  this read (queue-prepared.ts). A Change's pictures already point at
    *  them; an addition's logo flag names one. */
@@ -691,10 +696,12 @@ function rowToItem(
   let declinedBefore: DeclinedBefore | null = null
   let passed: Passed | null = null
   let fieldFlags: FieldFlags | null = null
+  let checked: CheckedClaim[] = []
   const preparedLogos = preparedFilesOf(f[F.preparedLogo], isExpiredAttachment)
   if (isRecord(proposal)) {
     passed = passedOf(proposal.passed)
     fieldFlags = fieldFlagsOf(proposal[FIELD_FLAGS_KEY])
+    checked = checkedOf(proposal[CHECKED_KEY])
     reopening = reopeningOf(proposal.reopen)
     pushback = pushbackOf(proposal.pushback)
     reopened = reopenedOf(proposal.reopened)
@@ -764,7 +771,8 @@ function rowToItem(
           k !== 'pushback' &&
           k !== 'reopened' &&
           k !== 'passed' &&
-          k !== FIELD_FLAGS_KEY
+          k !== FIELD_FLAGS_KEY &&
+          k !== CHECKED_KEY
         )
           rest[k] = v
       }
@@ -885,6 +893,7 @@ function rowToItem(
     declinedBefore,
     passed,
     fieldFlags,
+    checked,
     preparedLogos,
   }
 }
