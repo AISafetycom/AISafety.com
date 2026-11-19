@@ -8,7 +8,11 @@ import {
   isDictationKey,
   joinWords,
   micProblem,
+  carryOver,
+  finalWords,
+  onScreen,
   quietestCut,
+  settledWords,
   wavBytes,
 } from './queue-dictation'
 
@@ -150,6 +154,17 @@ describe('Recording', () => {
   })
 })
 
+describe('Recording.framesAtLeast', () => {
+  it('counts the loud frames since a point', () => {
+    const rec = new Recording()
+    const frame = (v: number) => new Float32Array(FRAME).fill(v)
+    for (const v of [0.2, 0.2, 0.001, 0.001, 0.2]) rec.push(frame(v))
+    expect(rec.framesAtLeast(0, 0.03)).toBe(3)
+    expect(rec.framesAtLeast(2 * FRAME, 0.03)).toBe(1)
+    expect(rec.framesAtLeast(5 * FRAME, 0.03)).toBe(0)
+  })
+})
+
 describe('quietestCut', () => {
   it('finds the pause between words', () => {
     const levels = [
@@ -175,6 +190,176 @@ describe('quietestCut', () => {
 
   it('copes with a range shorter than the window', () => {
     expect(quietestCut(Array(10).fill(0.1), 2, 8, 15)).toBe(5)
+  })
+})
+
+describe('settledWords', () => {
+  it('shows nothing from a single guess', () => {
+    expect(settledWords('', '', 'Please shorten the description')).toBe('')
+  })
+
+  it('shows the words two guesses agree on, but not the newest last word', () => {
+    expect(
+      settledWords(
+        '',
+        'Please shorten the description.',
+        'Please shorten the description so it'
+      )
+    ).toBe('Please shorten the')
+    expect(settledWords('', 'Please shorten the', 'Please shorten the')).toBe(
+      'Please shorten'
+    )
+  })
+
+  it('holds back a full stop given at a pause', () => {
+    const atPause = 'so it fits under the cap.'
+    expect(settledWords('so it fits', atPause, atPause)).toBe(
+      'so it fits under the'
+    )
+  })
+
+  it('never takes words back', () => {
+    // One word heard differently: it stays as shown, new words follow it.
+    expect(
+      settledWords(
+        'Please shorten the',
+        'Please shorten a description so',
+        'Please shorten a description so it'
+      )
+    ).toBe('Please shorten the description so')
+    // Capitals and punctuation do not count as a difference (and the last
+    // word's comma had been held back, so it takes the newest guess's).
+    expect(
+      settledWords(
+        'Check the Events page,',
+        'check the events page and the',
+        'check the events page and the map'
+      )
+    ).toBe('Check the Events page and the')
+    // The guesses went another way (words shifted): the screen waits.
+    expect(
+      settledWords(
+        'You can not miss the',
+        'You cannot miss the deadline on',
+        'You cannot miss the deadline on Friday'
+      )
+    ).toBe('You can not miss the')
+    // Fewer agreed words than are on screen: the screen stays.
+    expect(
+      settledWords('Please shorten the', 'Please short', 'Please shorten')
+    ).toBe('Please shorten the')
+  })
+
+  it('grows when the guesses carry on from what is shown', () => {
+    expect(
+      settledWords(
+        'Please shorten the',
+        'Please shorten the description so it fits',
+        'Please shorten the description so it fits under'
+      )
+    ).toBe('Please shorten the description so it fits')
+  })
+
+  it('only ever grows over a run of guesses', () => {
+    const guesses = [
+      'Please',
+      'Please shorten the.',
+      'Please shorten the description.',
+      'Please shorten the description so it.',
+      'Please shorten the description, so it fits under the cab.',
+      'Please shorten the description so it fits under the cap,',
+      'Please shorten the description so it fits under the cap, and check.',
+    ]
+    let shown = ''
+    let before = ''
+    for (const now of guesses) {
+      const next = settledWords(shown, before, now)
+      expect(next.startsWith(shown)).toBe(true)
+      // The one-off mishearing never reached the screen.
+      expect(next).not.toContain('cab')
+      shown = next
+      before = now
+    }
+    expect(shown).toBe(
+      'Please shorten the description so it fits under the cap,'
+    )
+  })
+})
+
+describe('onScreen', () => {
+  it('holds back the last word punctuation', () => {
+    expect(onScreen(['Check the deadline.', 'Then the'])).toBe(
+      'Check the deadline. Then the'
+    )
+    expect(onScreen(['Please shorten the description.'])).toBe(
+      'Please shorten the description'
+    )
+    expect(onScreen(['', ''])).toBe('')
+  })
+
+  it('takes the next guess punctuation once words follow it', () => {
+    // On screen: "Please shorten the description" (its full stop held back).
+    expect(
+      settledWords(
+        'Please shorten the description.',
+        'Please shorten the description so it fits',
+        'Please shorten the description so it fits under'
+      )
+    ).toBe('Please shorten the description so it fits')
+  })
+})
+
+describe('finalWords', () => {
+  it('keeps the screen where only capitals or punctuation differ', () => {
+    expect(
+      finalWords(
+        'Please shorten the description so it fits under the cap and',
+        'Please shorten the description so it fits under the cap, and check it.'
+      )
+    ).toBe(
+      'Please shorten the description so it fits under the cap and check it.'
+    )
+  })
+
+  it('lets the last word on screen gain its punctuation', () => {
+    expect(finalWords('Check the 4th of', 'Check the 4th of February.')).toBe(
+      'Check the 4th of February.'
+    )
+    expect(finalWords('Thank them', 'Thank them.')).toBe('Thank them.')
+  })
+
+  it('takes the final words where a word differs', () => {
+    expect(finalWords('fits under the cab', 'fits under the cap.')).toBe(
+      'fits under the cap.'
+    )
+  })
+
+  it('takes the final words when nothing was on screen', () => {
+    expect(finalWords('', 'Check it.')).toBe('Check it.')
+  })
+})
+
+describe('carryOver', () => {
+  it('keeps the screen as it is across a cut, past the cut too', () => {
+    expect(
+      carryOver(
+        'Check the Events page. If it is not, trim',
+        'Check the events page.'
+      )
+    ).toEqual({ done: 'Check the Events page.', rest: 'If it is not, trim' })
+  })
+
+  it('adds the piece words the screen had not shown yet', () => {
+    expect(carryOver('Check the', 'Check the events page.')).toEqual({
+      done: 'Check the events page.',
+      rest: '',
+    })
+  })
+
+  it('lets the piece words win when the screen went another way', () => {
+    expect(
+      carryOver('You can not miss the', 'You cannot miss the deadline.')
+    ).toEqual({ done: 'You cannot miss the deadline.', rest: '' })
   })
 })
 

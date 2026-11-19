@@ -1143,7 +1143,8 @@ export default function Chat({
   // The Mac turns the recording into words (~/Queue/dictate.py), so they
   // are as good as its Whisper model and nothing goes to another service.
   // Since 17 Nov 2026 the words show in the box as he speaks (the box is
-  // read-only meanwhile), and holding ⌘ after ⌘D is hold-to-talk.
+  // read-only meanwhile), and holding ⌘ after ⌘D is hold-to-talk. Since 19
+  // Nov 2026 only words that have stopped changing show (see useDictation).
   const textRef = useRef(text)
   textRef.current = text
   const submitRef = useRef(submit)

@@ -45,7 +45,8 @@ export function micProblem(name: string): string {
 // show the text as I'm speaking, just like Claude Code does"). The page keeps
 // the recording as plain 16 kHz samples, the rate the Mac's model reads, and
 // about once a second sends what he has said so far; the words on screen
-// catch up each time. A long dictation is cut into pieces at a pause, so no
+// catch up each time, though only with words that have stopped changing
+// (`settledWords`, 19 Nov 2026). A long dictation is cut into pieces at a pause, so no
 // one call gets slow: a piece's words are kept once it is cut, and only the
 // open piece is sent again.
 
@@ -144,6 +145,19 @@ export class Recording {
     }
   }
 
+  /** How many frames from `from` (a sample number) on are at `level` or
+   *  louder: how much was said since then. */
+  framesAtLeast(from: number, level: number): number {
+    let n = 0
+    for (
+      let f = Math.max(0, Math.floor(from / FRAME));
+      f < this.levels.length;
+      f++
+    )
+      if (this.levels[f] >= level) n++
+    return n
+  }
+
   /** The loudest frame from..to (sample numbers); 0 when there is none. */
   loudest(from: number, to = this.end): number {
     let max = 0
@@ -179,6 +193,107 @@ export function quietestCut(
     }
   }
   return at + Math.floor(width / 2)
+}
+
+/** The open piece's words to show (19 Nov 2026, Bryce: "I don't like how
+ *  it changes the whole time, because I think at first that it got it
+ *  wrong, but then it changes it to correct", and "The quality of the
+ *  transcription is priority"). Every guess is still made from the whole
+ *  piece, so the words are as good as before; but a new word goes on screen
+ *  only once two guesses in a row agree on it, and never while it is the
+ *  newest guess's last word (often half-heard, or given a full stop at a
+ *  pause). Words on screen are never taken back: new words are added after
+ *  them while the guesses still match them (ignoring capitals and
+ *  punctuation, and one word heard differently); when the guesses go
+ *  another way, the screen waits. `shown` is what is on screen now,
+ *  `before` and `now` the last two guesses. */
+export function settledWords(
+  shown: string,
+  before: string,
+  now: string
+): string {
+  const a = wordsOf(before)
+  const b = wordsOf(now)
+  const s = wordsOf(shown)
+  let n = s.length
+  while (n < a.length && n < b.length - 1 && a[n] === b[n]) n++
+  if (n === s.length) return shown
+  if (differences(s, a) > 1 || differences(s, b) > 1) return shown
+  const out = [...s, ...b.slice(s.length, n)]
+  // The last word's own punctuation was held back from the screen
+  // (`onScreen`): now that words follow it, it takes the newest guess's.
+  const last = s.length - 1
+  if (last >= 0 && bare(s[last]) === bare(b[last])) {
+    out[last] =
+      s[last].replace(TRAILING, '') + (b[last].match(TRAILING)?.[0] ?? '')
+  }
+  return out.join(' ')
+}
+
+/** Punctuation at the end of a word. */
+const TRAILING = /[.,!?;:]+$/
+
+/** The words as the screen shows them while he speaks: the last word's
+ *  punctuation waits until the next word comes, because a guess tends to
+ *  end on a full stop wherever the audio stops. */
+export function onScreen(parts: readonly string[]): string {
+  return joinWords(parts).replace(TRAILING, '')
+}
+
+/** The final words, put in the box when he stops. Where they differ from
+ *  the screen only in capitals or punctuation, the screen's words stay and
+ *  the rest is added after them, so nothing he has seen changes for
+ *  nothing. Where a word itself differs, the final words win: they are
+ *  made from the whole recording, and the quality of the words comes
+ *  first. */
+export function finalWords(screen: string, final: string): string {
+  const sw = wordsOf(screen)
+  const fw = wordsOf(final)
+  if (!sw.length || sw.length > fw.length) return final
+  if (sw.some((w, i) => bare(w) !== bare(fw[i]))) return final
+  const last = sw.length - 1
+  // The last word on screen may still grow its punctuation (that only adds
+  // to the end).
+  const end = fw[last].startsWith(sw[last]) ? fw[last] : sw[last]
+  return [...sw.slice(0, last), end, ...fw.slice(sw.length)].join(' ')
+}
+
+/** Where a piece is cut while words are on screen: the screen keeps what
+ *  it shows, as `done` (the cut piece) and `rest` (past the cut, which the
+ *  next piece's guesses carry on from). Only when the piece's own words
+ *  went another way from the screen (more than one word) do they replace
+ *  it. */
+export function carryOver(
+  screen: string,
+  kept: string
+): { done: string; rest: string } {
+  const sw = wordsOf(screen)
+  const kw = wordsOf(kept)
+  if (differences(sw, kw) > 1) return { done: kept, rest: '' }
+  if (sw.length >= kw.length) {
+    return {
+      done: sw.slice(0, kw.length).join(' '),
+      rest: sw.slice(kw.length).join(' '),
+    }
+  }
+  return { done: [...sw, ...kw.slice(sw.length)].join(' '), rest: '' }
+}
+
+function wordsOf(text: string): string[] {
+  return text.split(/\s+/).filter(Boolean)
+}
+
+/** A word without its capitals and punctuation. */
+function bare(word: string): string {
+  return word.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
+}
+
+/** How many of the words both have, side by side, differ. */
+function differences(x: readonly string[], y: readonly string[]): number {
+  let n = 0
+  for (let i = 0; i < Math.min(x.length, y.length); i++)
+    if (bare(x[i]) !== bare(y[i])) n++
+  return n
 }
 
 /** The pieces' words as one text. */
