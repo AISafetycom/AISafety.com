@@ -42,6 +42,7 @@ import { URL_KEYS, listingLink } from '@/lib/admin/queue-link'
 import { LEFT_OUT_KEY, withLeftOut } from '@/lib/admin/queue-left-out'
 import {
   heldRepeat,
+  rulePopKey,
   shortcutAllowed,
   takesTyping,
   type ItemView,
@@ -4346,6 +4347,31 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
       // holding X asked "delete?", confirmed it on the first repeat, then
       // deleted the items after it, and Delete has no Undo).
       if (heldRepeat(e)) return
+      // A rule card over the dimmed page takes the keys (queue-keys.ts).
+      if (popUp) {
+        const busy = draft(popUp.id).busy
+        const rejecting = popRejecting === popUp.id
+        const k = rulePopKey(e.key, { rejecting, busy })
+        if (k.do !== 'pass') {
+          e.preventDefault()
+          if (k.do === 'apply') {
+            void act(popUp, 'accept', {}, { inPlace: true })
+          } else if (k.do === 'reasons') {
+            setPopRejecting(popUp.id)
+          } else if (k.do === 'reject') {
+            const chip = popUp.rejectChips[k.chip]
+            if (chip) {
+              void act(popUp, 'reject', { reason: chip }, { inPlace: true })
+            }
+          } else if (k.do === 'view') {
+            openPop(popUp)
+          } else if (k.do === 'back') {
+            if (rejecting) setPopRejecting(null)
+            else closePop(popUp.id)
+          }
+          return
+        }
+      }
       const item = selected
       const d = item ? draft(item.id) : FRESH
       // A key that acts on the item waits until that item is what the pane
@@ -4699,21 +4725,6 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
             void act(item, 'reopen')
           }
           break
-        case 'g':
-          // Apply the rule that popped up, where he is (Bryce, 10 Nov
-          // 2026). G and V are the left-hand keys still free.
-          if (popUp && !draft(popUp.id).busy) {
-            e.preventDefault()
-            void act(popUp, 'accept', {}, { inPlace: true })
-          }
-          break
-        case 'v':
-          // View the rule that popped up in full, on the Rules tab.
-          if (popUp) {
-            e.preventDefault()
-            openPop(popUp)
-          }
-          break
         case 't':
           // Today's decisions and back to the queue, as the "done today"
           // link up top does (Bryce, 21 Oct 2026).
@@ -4734,13 +4745,7 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
           break
         case 'Escape':
           if (showHelp) setShowHelp(false)
-          else if (popUp) {
-            // The card is on top of everything while it shows: Esc backs
-            // out of its Reject reasons first, then puts it away (it stays
-            // on the Rules tab).
-            if (popRejecting === popUp.id) setPopRejecting(null)
-            else closePop(popUp.id)
-          } else if (item && d.editing) {
+          else if (item && d.editing) {
             // An open field editor closes wherever the focus is: a click on
             // the blank part of a choice editor takes focus off its buttons,
             // and Esc then went nowhere (Bryce, 10 Oct 2026, on a Type field).
@@ -5685,11 +5690,12 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
                 again
               </dd>
               <dt>
-                <kbd>G</kbd> / <kbd>V</kbd>
+                <kbd>A</kbd> / <kbd>R</kbd> / <kbd>V</kbd>
               </dt>
               <dd>
-                when a new rule pops up, apply it where you are / view it in
-                full on the Rules tab
+                when a new rule pops up, apply it / reject it, then a number
+                picks the reason / view it on the Rules tab; Esc puts it away,
+                and other keys wait until it has gone
               </dd>
               <dt>
                 <kbd>⌘</kbd> <kbd>Z</kbd>
@@ -9899,13 +9905,14 @@ function RulePopUp({
       </div>
       {rejecting ? (
         <div className={styles.chips}>
-          {item.rejectChips.map(chip => (
+          {item.rejectChips.map((chip, i) => (
             <button
               key={chip}
               className={styles.chip}
               disabled={draft.busy}
               onClick={() => onReject(chip)}
             >
+              {i < 9 && <kbd>{i + 1}</kbd>}
               <span>{chip}</span>
             </button>
           ))}
@@ -9921,7 +9928,7 @@ function RulePopUp({
             onClick={onApply}
           >
             <Icon src={ICON.check} size={12} />
-            Apply <kbd>G</kbd>
+            Apply <kbd>A</kbd>
           </button>
           <button
             className={`${styles.button} ${styles.danger}`}
@@ -9929,7 +9936,7 @@ function RulePopUp({
             onClick={() => onRejecting(true)}
           >
             <Icon src={ICON.x} size={12} />
-            Reject
+            Reject <kbd>R</kbd>
           </button>
           <button className={styles.ghost} onClick={onOpen}>
             View <kbd>V</kbd>

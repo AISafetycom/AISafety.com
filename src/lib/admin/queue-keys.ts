@@ -84,3 +84,43 @@ export function shortcutAllowed(key: string, scene: KeyScene): boolean {
   if (needs.view === 'detail' && scene.view !== 'detail') return false
   return !(needs.noEditor && scene.editing)
 }
+
+/** What a key does while a new rule's card is up over the dimmed page. The
+ *  card takes the standard keys (Bryce, 19 Nov 2026: "like A for apply and
+ *  R for reject"): A applies it, R shows its reasons and a number picks
+ *  one, V opens it on the Rules tab, Esc backs out of the reasons or puts
+ *  the card away. U (Undo, on the toast above the shade) and "?" go on as
+ *  usual (`pass`); every other key does nothing (`none`), so nothing
+ *  changes unseen behind the card. */
+export type RulePopKey =
+  | { do: 'apply' }
+  | { do: 'reasons' }
+  | { do: 'reject'; chip: number }
+  | { do: 'view' }
+  | { do: 'back' }
+  | { do: 'pass' }
+  | { do: 'none' }
+
+export function rulePopKey(
+  key: string,
+  card: { rejecting: boolean; busy: boolean }
+): RulePopKey {
+  const idle = !card.rejecting && !card.busy
+  switch (key) {
+    case 'a':
+      return idle ? { do: 'apply' } : { do: 'none' }
+    case 'r':
+      return idle ? { do: 'reasons' } : { do: 'none' }
+    case 'v':
+      return { do: 'view' }
+    case 'Escape':
+      return { do: 'back' }
+    case 'u':
+    case '?':
+      return { do: 'pass' }
+  }
+  if (/^[1-9]$/.test(key) && card.rejecting && !card.busy) {
+    return { do: 'reject', chip: Number(key) - 1 }
+  }
+  return { do: 'none' }
+}
