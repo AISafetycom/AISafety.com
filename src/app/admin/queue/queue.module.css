@@ -2480,7 +2480,8 @@ select.input {
   gap: 14px;
   width: min(560px, calc(100vw - 48px));
   max-height: calc(100vh - 48px - var(--pop-lift, 0px));
-  overflow-y: auto;
+  /* .rulePopBody scrolls instead, keeping the head and buttons in view */
+  overflow: hidden;
   padding: 18px 22px 22px;
   background: var(--q-panel);
   color: var(--q-text);
@@ -2530,6 +2531,21 @@ select.input {
   font-weight: 600;
   line-height: 1.35;
   overflow-wrap: anywhere;
+}
+
+/* Everything between the head and the buttons: the part that scrolls when
+   the wording is long. */
+.rulePopBody {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Quotes stand out from the card, which shares their usual background. */
+.rulePop .quote {
+  background: var(--q-panel-2);
 }
 
 /* The summary's first sentence, under the rule: lighter, so the rule is

@@ -72,6 +72,7 @@ import {
   leadSentence,
   OUTCOME_LABEL,
   ruleTestShort,
+  type RuleTest,
   type RuleTestResult,
 } from '@/lib/admin/queue-rule-test'
 import {
@@ -9678,10 +9679,6 @@ function RuleCard({
   )
   const from = item.ruleInstant
   const test = item.ruleTest
-  const needsYou =
-    test?.results.filter(
-      r => r.outcome === 'breaks' || r.outcome === 'unclear'
-    ) ?? []
   const others =
     test?.results.filter(
       r => r.outcome !== 'breaks' && r.outcome !== 'unclear'
@@ -9697,26 +9694,7 @@ function RuleCard({
       others.length > 0 ||
       Boolean(item.appliesTo) ||
       Boolean(item.ruleWording))
-  const wording = (
-    <>
-      {item.ruleWording && (
-        // The rule as it will read (9 Sept 2026: no diffs on the card;
-        // 5 Oct 2026: the words a click away).
-        <>
-          <h3 className={styles.h3}>Exact wording</h3>
-          <blockquote className={styles.quote}>{item.ruleWording}</blockquote>
-        </>
-      )}
-      {item.ruleWas && (
-        <>
-          <h3 className={styles.h3}>Replaces</h3>
-          <blockquote className={`${styles.quote} ${styles.from}`}>
-            {item.ruleWas}
-          </blockquote>
-        </>
-      )}
-    </>
-  )
+  const wording = <RuleWording item={item} />
   return (
     <section className={styles.block}>
       {from?.listing && (
@@ -9737,22 +9715,9 @@ function RuleCard({
           minutes.
         </p>
       ) : (
-        <p className={styles.ruleStat}>
-          <span>{ruleTestShort(test)}</span>
-          {RULE_OUTCOMES.filter(o => test.counts[o] > 0).map(o => (
-            <span key={o} className={styles.ruleTestOutcome} data-outcome={o}>
-              {OUTCOME_LABEL[o]} {test.counts[o]}
-            </span>
-          ))}
-        </p>
+        <RuleTestStat test={test} />
       )}
-      {needsYou.length > 0 && (
-        <ul className={styles.ruleTest}>
-          {needsYou.map(r => (
-            <RuleTestLine key={r.row} result={r} />
-          ))}
-        </ul>
-      )}
+      <RuleNeedsYou test={test} />
       {item.rulePublic && (
         // Outside the fold: Apply puts these words on the public page, so
         // they are always read first.
@@ -9789,11 +9754,67 @@ function RuleCard({
 
 const RULE_OUTCOMES = ['breaks', 'unclear', 'fixes', 'keeps'] as const
 
+/** The rule as it will read in the rulebook, and the words it replaces when
+ *  it rewrites one (9 Sept 2026: no diffs on the card). */
+function RuleWording({ item }: { item: QueueItem }) {
+  return (
+    <>
+      {item.ruleWording && (
+        <>
+          <h3 className={styles.h3}>Exact wording</h3>
+          <blockquote className={styles.quote}>{item.ruleWording}</blockquote>
+        </>
+      )}
+      {item.ruleWas && (
+        <>
+          <h3 className={styles.h3}>Replaces</h3>
+          <blockquote className={`${styles.quote} ${styles.from}`}>
+            {item.ruleWas}
+          </blockquote>
+        </>
+      )}
+    </>
+  )
+}
+
+/** One line on the test on his past decisions, its counts as labels. */
+function RuleTestStat({ test }: { test: RuleTest }) {
+  return (
+    <p className={styles.ruleStat}>
+      <span>{ruleTestShort(test)}</span>
+      {RULE_OUTCOMES.filter(o => test.counts[o] > 0).map(o => (
+        <span key={o} className={styles.ruleTestOutcome} data-outcome={o}>
+          {OUTCOME_LABEL[o]} {test.counts[o]}
+        </span>
+      ))}
+    </p>
+  )
+}
+
+/** The test results that need him, spelled out: where the rule goes
+ *  against one of his past decisions, or Fable can't tell. */
+function RuleNeedsYou({ test }: { test: RuleTest | null }) {
+  const needsYou =
+    test?.results.filter(
+      r => r.outcome === 'breaks' || r.outcome === 'unclear'
+    ) ?? []
+  if (needsYou.length === 0) return null
+  return (
+    <ul className={styles.ruleTest}>
+      {needsYou.map(r => (
+        <RuleTestLine key={r.row} result={r} />
+      ))}
+    </ul>
+  )
+}
+
 /** A rule drafted minutes after one decision, as it pops up centered over
  *  the dimmed page: the listing it came from, the rule itself (its title),
- *  the first sentence of its summary, its test, any wording for the public
- *  listing policy (always in view, as Apply publishes it), and the
- *  decision. Anything more is a click away on the Rules tab. */
+ *  the first sentence of its summary, its exact wording and any it
+ *  replaces, its test with the results that need him, any wording for the
+ *  public listing policy (always in view, as Apply publishes it), and the
+ *  decision. Enough to decide on the card (Bryce, 19 Nov 2026); the Rules
+ *  tab adds the background and the chat. */
 function RulePopUp({
   item,
   draft,
@@ -9824,7 +9845,6 @@ function RulePopUp({
     item.summary ?? 'No summary was written for this rule.'
   )
   const test = item.ruleTest
-  const against = test?.counts.breaks ?? 0
   return (
     <aside
       className={styles.rulePop}
@@ -9849,24 +9869,34 @@ function RulePopUp({
           the actual rule being proposed as well"). The summary's first
           sentence is often the story of his decision, which on its own
           never said what would change. */}
-      <p className={styles.rulePopLead}>{item.title}</p>
-      {item.summary && <p className={styles.rulePopWhy}>{lead}</p>}
-      <p className={styles.note}>
-        {test
-          ? against
-            ? `${ruleTestShort(test)}, against you on ${against}`
-            : ruleTestShort(test)
-          : 'Being tested on your past decisions…'}
-      </p>
-      {item.rulePublic && (
-        <PublicWording
-          wording={item.rulePublic}
-          internal={draft.keepInternal ?? item.rulePublicChoice === 'internal'}
-          onInternal={onInternal}
-          disabled={draft.busy}
-        />
-      )}
-      {draft.error && <p className={styles.error}>{draft.error}</p>}
+      {/* Only the middle scrolls, so a long wording never pushes the
+          buttons out of reach. */}
+      <div className={styles.rulePopBody}>
+        <p className={styles.rulePopLead}>{item.title}</p>
+        {item.summary && <p className={styles.rulePopWhy}>{lead}</p>}
+        {/* The words that go into the rulebook, on the card itself, so
+            Apply never needs V first (Bryce, 19 Nov 2026). */}
+        <RuleWording item={item} />
+        {/* A listing-policy row is only its wording: no test runs on it. */}
+        {!item.rulePublicPolicy &&
+          (test ? (
+            <RuleTestStat test={test} />
+          ) : (
+            <p className={styles.note}>Being tested on your past decisions…</p>
+          ))}
+        <RuleNeedsYou test={test} />
+        {item.rulePublic && (
+          <PublicWording
+            wording={item.rulePublic}
+            internal={
+              draft.keepInternal ?? item.rulePublicChoice === 'internal'
+            }
+            onInternal={onInternal}
+            disabled={draft.busy}
+          />
+        )}
+        {draft.error && <p className={styles.error}>{draft.error}</p>}
+      </div>
       {rejecting ? (
         <div className={styles.chips}>
           {item.rejectChips.map(chip => (
