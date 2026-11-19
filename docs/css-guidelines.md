@@ -2,6 +2,8 @@
 
 This project uses a **constraint-based design system**. These rules ensure visual consistency and prevent arbitrary styling decisions. **Always use utility classes from `globals.css` first.** Only create new classes in rare cases when utility classes can't solve the problem. The most important part of this system is the file 'globals.css', which defines the styling for the entire site. Familiarize yourself with this file! Please read this walkthrough of the sections in that file.
 
+These rules cover the pages visitors see. The admin area (`src/app/admin/`, `src/lib/admin/`) is exempt. An automatic check stops new code from breaking the rules that a script can judge: see [The automatic check](#the-automatic-check) at the end.
+
 ## Walkthrough 'globals.css'
 
 ### 1. Variables
@@ -279,3 +281,61 @@ Where to put new classes:
 - **Used in one component** → `ComponentName.module.css`
 - **Used on one page** → `page.module.css`
 - **Truly reusable utility** → `globals.css` (rare)
+
+## The automatic check
+
+`npm run check:styles` holds new code to the rules above. It runs in three places: after Claude Code edits a `.css` or `.tsx` file (set up in `.claude/settings.json`), on every commit, and in CI on every pull request, where a failure blocks the merge.
+
+### What it does
+
+**It fails** when a change adds any of these to a user-facing file:
+
+| What                                                                                                                                                   | Rule name          |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------ |
+| A hex, `rgb()` or `rgba()` color instead of `var(--…)`                                                                                                 | `hard-coded-color` |
+| A new CSS variable outside `globals.css`                                                                                                               | `new-variable`     |
+| `font-size`, `font-weight` or `font-family`                                                                                                            | `font`             |
+| A `box-shadow` written by hand (`var(--shadow…)` and `none` are fine)                                                                                  | `box-shadow`       |
+| An `@media` width other than 991px                                                                                                                     | `breakpoint`       |
+| A new class that is a copy of one `globals.css` class, or made only of utility classes                                                                 | `duplicate-class`  |
+| A color, font or hand-written shadow in an inline `style={…}`                                                                                          | `inline-style`     |
+| A class named like a button (`.submitButton`, `.cta-btn`), a `button { … }` selector, or an element using such a class, anywhere but `<Button>` itself | `styled-button`    |
+
+Each message gives the file and line, and names the class, variable or component to use instead.
+
+**It adds a note, without failing,** for a hand-written spacing, flex, gap, color or cursor line that has an exact utility class (`gap: 16px` when `.gap-16px` exists), for a class that rebuilds a bigger global class such as `.divider`, for a new raw `<button>`, and for a new variable in `globals.css`. These are notes because a class that really needs its own CSS often has one of these lines in it (`Button.module.css` does). A class made of nothing else fails, as above.
+
+**It does not judge** spacing and sizes that have no utility class (`margin-top: 13px`), whether a new class was needed at all, hover and other states, or anything visual. Those still need a person.
+
+### Only new code, and no list to maintain
+
+Existing code is left alone. Each changed file is compared with the same file on `main`, rule by rule, and the check fails only when the file has more of something than it has there. So:
+
+- Code that already breaks a rule passes until someone adds to it. Rewording or moving it within its file is fine.
+- When a file is cleaned up, its new, lower count becomes the limit as soon as that change is merged. There is nothing to update by hand.
+- A new file starts at zero.
+
+To see what is already there, as a clean-up list:
+
+```bash
+npm run check:styles -- --all                          # counts by rule and by file
+npm run check:styles -- --all src/app/media/page.module.css   # everything in one file
+npm run check:styles -- --all --rule hard-coded-color  # one rule everywhere
+```
+
+### Exceptions
+
+When a rule is wrong for one line, put a comment on the line above it with the rule name and the reason:
+
+```css
+/* style-check: allow box-shadow (focus ring, agreed with Melissa) */
+box-shadow: 0 0 0 2px var(--teal-300);
+```
+
+In TSX, use `// style-check: allow inline-style (reason)` or `{/* style-check: allow styled-button (reason) */}`. Without a reason the comment does nothing. Every new exception is listed in the check's output and marked on the pull request, so ask Melissa before adding one.
+
+Link-preview images (files that use `next/og`) are skipped for inline styles, since classes and variables don't exist there.
+
+### Changing the rules
+
+The rules are in `scripts/style-rules.mjs`, with a test for each in `scripts/style-rules.test.mjs`. The check reads the palette and utility classes from `globals.css` every time it runs, so it follows the design system as it changes. The lists at the top of the file say which folders are exempt and where buttons may be styled.

@@ -2,11 +2,12 @@ import { defineConfig } from 'vitest/config'
 import { fileURLToPath } from 'node:url'
 
 // Unit tests for pure modules only (no DOM, no Next runtime). Files end in
-// .test.ts and live next to what they test.
+// .test.ts and live next to what they test. The style check's rules
+// (scripts/style-rules.mjs) are tested the same way.
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'scripts/**/*.test.mjs'],
     // `npm run build` runs these tests on Vercel too, where VERCEL_ENV is
     // "production" for the live site's build. Start every test outside the
     // live site, as on CI and locally; a test that needs it stubs it itself.
