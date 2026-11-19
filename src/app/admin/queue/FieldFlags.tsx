@@ -18,6 +18,11 @@
   Its Use writes the file onto the record the way a picture dropped into
   the logo slot does (the record is unpublished; Publish takes it live),
   and Undo puts the old one back while the page still holds it.
+
+  Since 19 Nov 2026 (Bryce: "Let's make Fable's field changes just go
+  through automatically. No need to tell me about them.") the Mac writes
+  each flag straight onto the unpublished record and keeps it off the row's
+  list, so this panel shows only a flag the record refused.
 */
 
 import { useState, type ReactNode } from 'react'
@@ -106,14 +111,10 @@ export default function FieldFlags({
       setBusy(null)
     }
   }
-  if (check.flags.length === 0 && check.pictures.length === 0) {
-    return (
-      <p className={own.none}>
-        Fable checked {check.checked > 0 ? `all ${check.checked}` : 'the'}{' '}
-        fields and would change nothing.
-      </p>
-    )
-  }
+  // Nothing left to offer: the Mac has put every flag on the record itself
+  // (19 Nov 2026), or there were none. Bryce: "No need to tell me about
+  // them", so no line either way.
+  if (check.flags.length === 0 && check.pictures.length === 0) return null
   const shown = shownFlags(check.flags, live, edits, canEditField)
   // Every flag overtaken (edited by hand, changed from the chat): nothing
   // left to say.

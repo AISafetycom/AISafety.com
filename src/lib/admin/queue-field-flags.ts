@@ -15,6 +15,12 @@
   button that puts the value into the page's edits – so, like any edit,
   nothing reaches the listing before Publish.
 
+  Since 19 Nov 2026 (Bryce: "Let's make Fable's field changes just go
+  through automatically. No need to tell me about them.") the Mac writes
+  each flag straight onto the unpublished record and moves it to the
+  block's `applied` list, which this file does not read. `flags` keeps only
+  one the record refused, so the page has nothing to show for the rest.
+
   `from` is the value the flag was judged against (the record with the
   page's edits over it). A flag whose field no longer reads that way has
   been overtaken – edited by hand, changed from the chat – and is dropped.
