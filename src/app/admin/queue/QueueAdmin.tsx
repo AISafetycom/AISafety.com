@@ -9789,11 +9789,11 @@ function RuleCard({
 
 const RULE_OUTCOMES = ['breaks', 'unclear', 'fixes', 'keeps'] as const
 
-/** A rule drafted minutes after one decision, as it pops up over the page:
- *  the listing it came from, the rule itself (its title), the first
- *  sentence of its summary, its test, any wording for the public listing
- *  policy (always in view, as Apply publishes it), and the decision.
- *  Anything more is a click away on the Rules tab. */
+/** A rule drafted minutes after one decision, as it pops up centered over
+ *  the dimmed page: the listing it came from, the rule itself (its title),
+ *  the first sentence of its summary, its test, any wording for the public
+ *  listing policy (always in view, as Apply publishes it), and the
+ *  decision. Anything more is a click away on the Rules tab. */
 function RulePopUp({
   item,
   draft,

@@ -2466,25 +2466,28 @@ select.input {
    the bottom-left corner: clear of the decision toast (centred) and of
    the chat (right). */
 .rulePop {
+  /* Centered over the dimmed page (Bryce, 19 Nov 2026: "it might as well
+     pop up centered and bigger"). Inset with auto margins centers it in the
+     room left above the decision toast: --pop-lift is the toast's height
+     while one shows (set by the page). */
   position: fixed;
-  left: 24px;
-  /* --pop-lift is the decision toast's height while one shows (set by the
-     page), so the card moves up out of its way */
-  bottom: calc(24px + var(--pop-lift, 0px));
+  inset: 24px 24px calc(24px + var(--pop-lift, 0px));
+  margin: auto;
+  height: fit-content;
   transition: bottom 0.2s ease;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  width: min(400px, calc(100vw - 48px));
+  gap: 14px;
+  width: min(560px, calc(100vw - 48px));
   max-height: calc(100vh - 48px - var(--pop-lift, 0px));
   overflow-y: auto;
-  padding: 12px 14px 14px;
+  padding: 18px 22px 22px;
   background: var(--q-panel);
   color: var(--q-text);
   border: 1px solid var(--q-border-strong);
-  border-radius: 12px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
-  font-size: 13.5px;
+  border-radius: 14px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  font-size: 15px;
   /* over its shade, which is over the admin header (z-index 50) */
   z-index: 53;
   animation: rulePopIn 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both;
@@ -2518,13 +2521,14 @@ select.input {
 
 .rulePopFrom {
   color: var(--q-text-2);
-  font-size: 12.5px;
+  font-size: 13.5px;
   overflow-wrap: anywhere;
 }
 
 .rulePopLead {
+  font-size: 18px;
   font-weight: 600;
-  line-height: 1.4;
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
@@ -2537,11 +2541,11 @@ select.input {
 
 @keyframes rulePopIn {
   from {
-    transform: translateY(calc(100% + 24px));
+    transform: translateY(12px) scale(0.97);
     opacity: 0;
   }
   to {
-    transform: translateY(0);
+    transform: none;
     opacity: 1;
   }
 }
