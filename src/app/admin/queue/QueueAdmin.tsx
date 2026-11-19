@@ -4784,14 +4784,19 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
   const doneToday = ordered.done.filter(i => decidedSince(i, dayStart)).length
   // Rows the Mac's daily check took out this past week because their date
   // went by before he decided them (Bryce, 16 Nov 2026: "somehow I know
-  // when this has happened"), less the ones whose line he closed.
+  // when this has happened"), less the ones whose line he closed. Only the
+  // open tab's (Bryce, 19 Nov 2026: "should only show under additions or
+  // changes, whichever one is the one").
   const takenOut = useMemo(
     () =>
       unseenTakenOut(
-        (items ?? []).map(takenOutOf).filter((t): t is TakenOut => t !== null),
+        (items ?? [])
+          .filter(i => kindOf(i) === kind)
+          .map(takenOutOf)
+          .filter((t): t is TakenOut => t !== null),
         takenOutSeen
       ),
-    [items, takenOutSeen]
+    [items, kind, takenOutSeen]
   )
   const closeTakenOut = () => {
     setTakenOutSeen(prev => {
