@@ -4166,6 +4166,9 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
     popCandidate && popCandidate.id !== selectedId ? popCandidate : null
   const popSeenId =
     popCandidate && popCandidate.id === selectedId ? popCandidate.id : null
+  // The page dims behind the card while it shows, so the card is all that
+  // stands out (Bryce, 19 Nov 2026: "Otherwise, things look a bit messy").
+  const [shadeShown, shadeClosing] = useClosing(!!popUp)
   // A rule pops up as it is written, its test still running on the Mac:
   // the list is read again until the result is in, so it fills in on the
   // card.
@@ -4730,7 +4733,13 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
           break
         case 'Escape':
           if (showHelp) setShowHelp(false)
-          else if (item && d.editing) {
+          else if (popUp) {
+            // The card is on top of everything while it shows: Esc backs
+            // out of its Reject reasons first, then puts it away (it stays
+            // on the Rules tab).
+            if (popRejecting === popUp.id) setPopRejecting(null)
+            else closePop(popUp.id)
+          } else if (item && d.editing) {
             // An open field editor closes wherever the focus is: a click on
             // the blank part of a choice editor takes focus off its buttons,
             // and Esc then went nowhere (Bryce, 10 Oct 2026, on a Type field).
@@ -4765,6 +4774,7 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
     clearSearch,
     ordered.done,
     popUp,
+    popRejecting,
     itemView,
   ])
 
@@ -5394,7 +5404,7 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
         <div
           key={toast.item.id}
           ref={toastRef}
-          className={`${styles.toast} ${toastLeaving ? styles.toastLeaving : ''}`}
+          className={`${styles.toast} ${toastLeaving ? styles.toastLeaving : ''} ${popUp ? styles.toastOverShade : ''}`}
           role="status"
           onClick={e => {
             if ((e.target as HTMLElement).closest('button, a')) return
@@ -5519,6 +5529,16 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
             </button>
           )}
         </div>
+      )}
+
+      {shadeShown && (
+        // A click on the dimmed page puts the card away, as its × does.
+        <div
+          className={`${styles.rulePopShade} ${shadeClosing ? motion.fadeOut : motion.fade}`}
+          onClick={() => popUp && closePop(popUp.id)}
+          inert={shadeClosing}
+          aria-hidden="true"
+        />
       )}
 
       {popUp && (

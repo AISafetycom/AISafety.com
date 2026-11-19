@@ -2485,8 +2485,23 @@ select.input {
   border-radius: 12px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
   font-size: 13.5px;
-  z-index: 21;
+  /* over its shade, which is over the admin header (z-index 50) */
+  z-index: 53;
   animation: rulePopIn 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* The page behind a rule card, header included, dimmed while it shows
+   (Bryce, 19 Nov 2026). The decision toast stays above it, so Undo is
+   still in reach. */
+.rulePopShade {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 52;
+}
+
+.toastOverShade {
+  z-index: 53;
 }
 
 .rulePop p,
