@@ -42,6 +42,7 @@ import { URL_KEYS, listingLink } from '@/lib/admin/queue-link'
 import { LEFT_OUT_KEY, withLeftOut } from '@/lib/admin/queue-left-out'
 import {
   heldRepeat,
+  rulePopKey,
   shortcutAllowed,
   takesTyping,
   type ItemView,
@@ -72,6 +73,7 @@ import {
   leadSentence,
   OUTCOME_LABEL,
   ruleTestShort,
+  type RuleTest,
   type RuleTestResult,
 } from '@/lib/admin/queue-rule-test'
 import {
@@ -4166,6 +4168,9 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
     popCandidate && popCandidate.id !== selectedId ? popCandidate : null
   const popSeenId =
     popCandidate && popCandidate.id === selectedId ? popCandidate.id : null
+  // The page dims behind the card while it shows, so the card is all that
+  // stands out (Bryce, 19 Nov 2026: "Otherwise, things look a bit messy").
+  const [shadeShown, shadeClosing] = useClosing(!!popUp)
   // A rule pops up as it is written, its test still running on the Mac:
   // the list is read again until the result is in, so it fills in on the
   // card.
@@ -4342,6 +4347,31 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
       // holding X asked "delete?", confirmed it on the first repeat, then
       // deleted the items after it, and Delete has no Undo).
       if (heldRepeat(e)) return
+      // A rule card over the dimmed page takes the keys (queue-keys.ts).
+      if (popUp) {
+        const busy = draft(popUp.id).busy
+        const rejecting = popRejecting === popUp.id
+        const k = rulePopKey(e.key, { rejecting, busy })
+        if (k.do !== 'pass') {
+          e.preventDefault()
+          if (k.do === 'apply') {
+            void act(popUp, 'accept', {}, { inPlace: true })
+          } else if (k.do === 'reasons') {
+            setPopRejecting(popUp.id)
+          } else if (k.do === 'reject') {
+            const chip = popUp.rejectChips[k.chip]
+            if (chip) {
+              void act(popUp, 'reject', { reason: chip }, { inPlace: true })
+            }
+          } else if (k.do === 'view') {
+            openPop(popUp)
+          } else if (k.do === 'back') {
+            if (rejecting) setPopRejecting(null)
+            else closePop(popUp.id)
+          }
+          return
+        }
+      }
       const item = selected
       const d = item ? draft(item.id) : FRESH
       // A key that acts on the item waits until that item is what the pane
@@ -4695,21 +4725,6 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
             void act(item, 'reopen')
           }
           break
-        case 'g':
-          // Apply the rule that popped up, where he is (Bryce, 10 Nov
-          // 2026). G and V are the left-hand keys still free.
-          if (popUp && !draft(popUp.id).busy) {
-            e.preventDefault()
-            void act(popUp, 'accept', {}, { inPlace: true })
-          }
-          break
-        case 'v':
-          // View the rule that popped up in full, on the Rules tab.
-          if (popUp) {
-            e.preventDefault()
-            openPop(popUp)
-          }
-          break
         case 't':
           // Today's decisions and back to the queue, as the "done today"
           // link up top does (Bryce, 21 Oct 2026).
@@ -4765,6 +4780,7 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
     clearSearch,
     ordered.done,
     popUp,
+    popRejecting,
     itemView,
   ])
 
@@ -5394,7 +5410,7 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
         <div
           key={toast.item.id}
           ref={toastRef}
-          className={`${styles.toast} ${toastLeaving ? styles.toastLeaving : ''}`}
+          className={`${styles.toast} ${toastLeaving ? styles.toastLeaving : ''} ${popUp ? styles.toastOverShade : ''}`}
           role="status"
           onClick={e => {
             if ((e.target as HTMLElement).closest('button, a')) return
@@ -5519,6 +5535,16 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
             </button>
           )}
         </div>
+      )}
+
+      {shadeShown && (
+        // A click on the dimmed page puts the card away, as its × does.
+        <div
+          className={`${styles.rulePopShade} ${shadeClosing ? motion.fadeOut : motion.fade}`}
+          onClick={() => popUp && closePop(popUp.id)}
+          inert={shadeClosing}
+          aria-hidden="true"
+        />
       )}
 
       {popUp && (
@@ -5664,11 +5690,12 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
                 again
               </dd>
               <dt>
-                <kbd>G</kbd> / <kbd>V</kbd>
+                <kbd>A</kbd> / <kbd>R</kbd> / <kbd>V</kbd>
               </dt>
               <dd>
-                when a new rule pops up, apply it where you are / view it in
-                full on the Rules tab
+                when a new rule pops up, apply it / reject it, then a number
+                picks the reason / view it on the Rules tab; Esc puts it away,
+                and other keys wait until it has gone
               </dd>
               <dt>
                 <kbd>⌘</kbd> <kbd>Z</kbd>
@@ -9658,10 +9685,6 @@ function RuleCard({
   )
   const from = item.ruleInstant
   const test = item.ruleTest
-  const needsYou =
-    test?.results.filter(
-      r => r.outcome === 'breaks' || r.outcome === 'unclear'
-    ) ?? []
   const others =
     test?.results.filter(
       r => r.outcome !== 'breaks' && r.outcome !== 'unclear'
@@ -9677,26 +9700,7 @@ function RuleCard({
       others.length > 0 ||
       Boolean(item.appliesTo) ||
       Boolean(item.ruleWording))
-  const wording = (
-    <>
-      {item.ruleWording && (
-        // The rule as it will read (9 Sept 2026: no diffs on the card;
-        // 5 Oct 2026: the words a click away).
-        <>
-          <h3 className={styles.h3}>Exact wording</h3>
-          <blockquote className={styles.quote}>{item.ruleWording}</blockquote>
-        </>
-      )}
-      {item.ruleWas && (
-        <>
-          <h3 className={styles.h3}>Replaces</h3>
-          <blockquote className={`${styles.quote} ${styles.from}`}>
-            {item.ruleWas}
-          </blockquote>
-        </>
-      )}
-    </>
-  )
+  const wording = <RuleWording item={item} />
   return (
     <section className={styles.block}>
       {from?.listing && (
@@ -9717,22 +9721,9 @@ function RuleCard({
           minutes.
         </p>
       ) : (
-        <p className={styles.ruleStat}>
-          <span>{ruleTestShort(test)}</span>
-          {RULE_OUTCOMES.filter(o => test.counts[o] > 0).map(o => (
-            <span key={o} className={styles.ruleTestOutcome} data-outcome={o}>
-              {OUTCOME_LABEL[o]} {test.counts[o]}
-            </span>
-          ))}
-        </p>
+        <RuleTestStat test={test} />
       )}
-      {needsYou.length > 0 && (
-        <ul className={styles.ruleTest}>
-          {needsYou.map(r => (
-            <RuleTestLine key={r.row} result={r} />
-          ))}
-        </ul>
-      )}
+      <RuleNeedsYou test={test} />
       {item.rulePublic && (
         // Outside the fold: Apply puts these words on the public page, so
         // they are always read first.
@@ -9769,11 +9760,67 @@ function RuleCard({
 
 const RULE_OUTCOMES = ['breaks', 'unclear', 'fixes', 'keeps'] as const
 
-/** A rule drafted minutes after one decision, as it pops up over the page:
- *  the listing it came from, the rule itself (its title), the first
- *  sentence of its summary, its test, any wording for the public listing
- *  policy (always in view, as Apply publishes it), and the decision.
- *  Anything more is a click away on the Rules tab. */
+/** The rule as it will read in the rulebook, and the words it replaces when
+ *  it rewrites one (9 Sept 2026: no diffs on the card). */
+function RuleWording({ item }: { item: QueueItem }) {
+  return (
+    <>
+      {item.ruleWording && (
+        <>
+          <h3 className={styles.h3}>Exact wording</h3>
+          <blockquote className={styles.quote}>{item.ruleWording}</blockquote>
+        </>
+      )}
+      {item.ruleWas && (
+        <>
+          <h3 className={styles.h3}>Replaces</h3>
+          <blockquote className={`${styles.quote} ${styles.from}`}>
+            {item.ruleWas}
+          </blockquote>
+        </>
+      )}
+    </>
+  )
+}
+
+/** One line on the test on his past decisions, its counts as labels. */
+function RuleTestStat({ test }: { test: RuleTest }) {
+  return (
+    <p className={styles.ruleStat}>
+      <span>{ruleTestShort(test)}</span>
+      {RULE_OUTCOMES.filter(o => test.counts[o] > 0).map(o => (
+        <span key={o} className={styles.ruleTestOutcome} data-outcome={o}>
+          {OUTCOME_LABEL[o]} {test.counts[o]}
+        </span>
+      ))}
+    </p>
+  )
+}
+
+/** The test results that need him, spelled out: where the rule goes
+ *  against one of his past decisions, or Fable can't tell. */
+function RuleNeedsYou({ test }: { test: RuleTest | null }) {
+  const needsYou =
+    test?.results.filter(
+      r => r.outcome === 'breaks' || r.outcome === 'unclear'
+    ) ?? []
+  if (needsYou.length === 0) return null
+  return (
+    <ul className={styles.ruleTest}>
+      {needsYou.map(r => (
+        <RuleTestLine key={r.row} result={r} />
+      ))}
+    </ul>
+  )
+}
+
+/** A rule drafted minutes after one decision, as it pops up centered over
+ *  the dimmed page: the listing it came from, the rule itself (its title),
+ *  the first sentence of its summary, its exact wording and any it
+ *  replaces, its test with the results that need him, any wording for the
+ *  public listing policy (always in view, as Apply publishes it), and the
+ *  decision. Enough to decide on the card (Bryce, 19 Nov 2026); the Rules
+ *  tab adds the background and the chat. */
 function RulePopUp({
   item,
   draft,
@@ -9804,7 +9851,6 @@ function RulePopUp({
     item.summary ?? 'No summary was written for this rule.'
   )
   const test = item.ruleTest
-  const against = test?.counts.breaks ?? 0
   return (
     <aside
       className={styles.rulePop}
@@ -9829,33 +9875,44 @@ function RulePopUp({
           the actual rule being proposed as well"). The summary's first
           sentence is often the story of his decision, which on its own
           never said what would change. */}
-      <p className={styles.rulePopLead}>{item.title}</p>
-      {item.summary && <p className={styles.rulePopWhy}>{lead}</p>}
-      <p className={styles.note}>
-        {test
-          ? against
-            ? `${ruleTestShort(test)}, against you on ${against}`
-            : ruleTestShort(test)
-          : 'Being tested on your past decisions…'}
-      </p>
-      {item.rulePublic && (
-        <PublicWording
-          wording={item.rulePublic}
-          internal={draft.keepInternal ?? item.rulePublicChoice === 'internal'}
-          onInternal={onInternal}
-          disabled={draft.busy}
-        />
-      )}
-      {draft.error && <p className={styles.error}>{draft.error}</p>}
+      {/* Only the middle scrolls, so a long wording never pushes the
+          buttons out of reach. */}
+      <div className={styles.rulePopBody}>
+        <p className={styles.rulePopLead}>{item.title}</p>
+        {item.summary && <p className={styles.rulePopWhy}>{lead}</p>}
+        {/* The words that go into the rulebook, on the card itself, so
+            Apply never needs V first (Bryce, 19 Nov 2026). */}
+        <RuleWording item={item} />
+        {/* A listing-policy row is only its wording: no test runs on it. */}
+        {!item.rulePublicPolicy &&
+          (test ? (
+            <RuleTestStat test={test} />
+          ) : (
+            <p className={styles.note}>Being tested on your past decisions…</p>
+          ))}
+        <RuleNeedsYou test={test} />
+        {item.rulePublic && (
+          <PublicWording
+            wording={item.rulePublic}
+            internal={
+              draft.keepInternal ?? item.rulePublicChoice === 'internal'
+            }
+            onInternal={onInternal}
+            disabled={draft.busy}
+          />
+        )}
+        {draft.error && <p className={styles.error}>{draft.error}</p>}
+      </div>
       {rejecting ? (
         <div className={styles.chips}>
-          {item.rejectChips.map(chip => (
+          {item.rejectChips.map((chip, i) => (
             <button
               key={chip}
               className={styles.chip}
               disabled={draft.busy}
               onClick={() => onReject(chip)}
             >
+              {i < 9 && <kbd>{i + 1}</kbd>}
               <span>{chip}</span>
             </button>
           ))}
@@ -9871,7 +9928,7 @@ function RulePopUp({
             onClick={onApply}
           >
             <Icon src={ICON.check} size={12} />
-            Apply <kbd>G</kbd>
+            Apply <kbd>A</kbd>
           </button>
           <button
             className={`${styles.button} ${styles.danger}`}
@@ -9879,7 +9936,7 @@ function RulePopUp({
             onClick={() => onRejecting(true)}
           >
             <Icon src={ICON.x} size={12} />
-            Reject
+            Reject <kbd>R</kbd>
           </button>
           <button className={styles.ghost} onClick={onOpen}>
             View <kbd>V</kbd>
