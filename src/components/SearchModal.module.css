@@ -94,61 +94,9 @@
 .browse-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  padding: 6px;
-}
-
-.browse-card {
-  background-color: transparent;
-  border: 1px solid var(--teal-800);
-  border-radius: 12px;
-  text-align: left;
-  /* iOS Safari renders <button> text in its system blue by default. */
-  color: inherit;
-  transition:
-    background-color var(--hover-transition),
-    border-color var(--hover-transition);
-}
-
-.browse-card:focus-visible:not(:disabled) {
-  background-color: var(--teal-800);
-  border-color: var(--teal-400);
-  outline: none;
-}
-
-/* Hover-only styles. Touch devices skip these so a tap mid-scroll
-   doesn't latch a sticky highlight on the card. */
-@media (hover: hover) {
-  .browse-card:hover:not(:disabled) {
-    background-color: var(--teal-800);
-    border-color: var(--teal-400);
-  }
-}
-
-.browse-card:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.browse-card-icon {
-  flex: none;
-  width: 28px;
-  height: 28px;
-  background-color: var(--white);
-  border-radius: 14px;
-}
-
-.browse-card-title {
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.browse-card-count {
-  flex: none;
-  color: var(--teal-grey-300);
-  font-variant-numeric: tabular-nums;
+  gap: 12px;
+  /* 24px here + the results area's 8px = 32px around the pills. */
+  padding: 24px;
 }
 
 /* Uppercase letter-spacing conflicts with paragraph-* classes. */
