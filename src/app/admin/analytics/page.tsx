@@ -453,6 +453,12 @@ function labelFor(e: {
     const value = e.label ?? '?'
     return `Filtered by ${displayFilterGroup(page, group)}: ${displayFilterValue(page, group, value)}`
   }
+  if (e.type === 'filter_remove') {
+    const page = e.page ?? ''
+    const group = e.source ?? '?'
+    const value = e.label ?? '?'
+    return `Removed filter ${displayFilterGroup(page, group)}: ${displayFilterValue(page, group, value)}`
+  }
   // A newsletter signup error's reason is a short code; spell it out.
   if (e.type === 'newsletter_signup_error')
     return `Newsletter signup error: ${newsletterErrorLabel(e.source)}`
@@ -933,6 +939,10 @@ async function AnalyticsView({
     : pageTotal
   const positionTotal = data.byPosition.reduce((sum, r) => sum + r.count, 0)
   const filterTotal = data.filterGroups.reduce((sum, r) => sum + r.count, 0)
+  const filterRemovalTotal = data.filterRemovals.reduce(
+    (sum, r) => sum + r.count,
+    0
+  )
   const filterShareByPage = new Map(
     data.filterShareByPage.map(r => [r.name, r])
   )
@@ -1721,7 +1731,7 @@ async function AnalyticsView({
                     />
                     <p className={styles.caption}>
                       A use = a visitor turning a filter value on; switching a
-                      value off isn&apos;t counted.{' '}
+                      value off is counted under Filters removed.{' '}
                       {data.filterUsers.toLocaleString()} visitor
                       {data.filterUsers === 1 ? '' : 's'} filtered this page
                       this period; the Total row&apos;s % of visitors is the
@@ -1738,6 +1748,28 @@ async function AnalyticsView({
                       total={filterTotal}
                       totalShare={data.anyFilterShare ?? undefined}
                     />
+                  </Panel>
+                  <Panel title="Filters removed">
+                    {data.filterRemovals.length > 0 ? (
+                      <CountTable
+                        rows={data.filterRemovals}
+                        labelHead="Filter: value"
+                        countHead="Removals"
+                        total={filterRemovalTotal}
+                        totalShare={data.anyFilterRemoveShare ?? undefined}
+                      />
+                    ) : (
+                      <p className={styles.caption}>
+                        No filter removals on this page this period.
+                      </p>
+                    )}
+                    <p className={styles.caption}>
+                      A removal = a visitor switching a filter value off again
+                      (unticking it, removing a city, or moving a range back to
+                      its full span). The Total row&apos;s % of visitors is the
+                      share who removed any filter. Recording since 20 November
+                      2026.
+                    </p>
                   </Panel>
                 </div>
               )}
