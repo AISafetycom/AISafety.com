@@ -1,7 +1,8 @@
 /* The newsletters, one ruled row each, like the past issues list on each
    newsletter's own page. Spacing, type and colours come from utility
-   classes; this is only the list reset, the rules, the link's hover and
-   the honeypot. */
+   classes, and the Past issues links use .link from globals.css (the
+   footer's hover); this is only the list reset, the rules and the
+   honeypot. */
 
 .rows {
   list-style: none;
@@ -10,15 +11,11 @@
 }
 
 .row {
-  border-top: 1px solid var(--teal-grey-700);
+  border-top: 1px solid var(--teal-800);
 }
 
 .row:last-child {
-  border-bottom: 1px solid var(--teal-grey-700);
-}
-
-.link:hover {
-  color: var(--teal-300);
+  border-bottom: 1px solid var(--teal-800);
 }
 
 /* Honeypot field: moved off-screen rather than display:none so naive bots

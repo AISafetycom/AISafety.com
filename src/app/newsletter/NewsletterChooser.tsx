@@ -257,7 +257,7 @@ function NewsletterRows({
             <p className="paragraph-small padding-top-8px">
               <a
                 href={n.archive}
-                className={`color-teal-300 ${styles.link}`}
+                className="link"
                 onClick={() =>
                   trackEvent('newsletter_page_click', {
                     page: TRACKING_PAGE,

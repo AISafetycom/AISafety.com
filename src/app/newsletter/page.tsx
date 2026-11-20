@@ -37,16 +37,28 @@ export default function NewslettersPage() {
     archive: archivePath(key),
   }))
   return (
-    <div className="container-default">
-      <PageHeader
-        title="Newsletters"
-        description="New events, training programs, and funding opportunities addressing existential risk from AI, in your inbox."
-      />
-      <div className="width-7-col padding-bottom-56px">
-        <NewsletterChooser
-          newsletters={newsletters}
-          offered={offeredNewsletters()}
-        />
+    // Centered on the narrow grid, like /listing-policy and /subscribed
+    // (Melissa, 17 Nov 2026).
+    <div className="container-narrow">
+      <div className="flex justify-center">
+        <div className="width-9-col-narrow padding-bottom-56px">
+          <PageHeader
+            title="Newsletters"
+            description={
+              <>
+                New{' '}
+                <span className="color-teal-300">
+                  events, training programs, and funding opportunities
+                </span>{' '}
+                addressing existential risk from AI, in your inbox.
+              </>
+            }
+          />
+          <NewsletterChooser
+            newsletters={newsletters}
+            offered={offeredNewsletters()}
+          />
+        </div>
       </div>
     </div>
   )
