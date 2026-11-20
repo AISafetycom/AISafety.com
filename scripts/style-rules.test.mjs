@@ -138,28 +138,97 @@ describe('CSS rules', () => {
     expect(found[0].hint).toContain('className="flex items-center gap-16px"')
   })
 
-  it('a class with a state or mobile override is a note, not a failure', () => {
+  it('a class with a mobile override is judged line by line', () => {
     const found = css(
       '.row { display: flex }\n@media (max-width: 991px) { .row { display: none } }'
     )
-    expect(rulesIn(found)).toEqual(['utility-available'])
+    expect(rulesIn(found)).toEqual(['flex'])
   })
 
-  it('hand-written spacing and flex inside a real class are notes', () => {
+  it('hand-written spacing and flex inside a real class fail', () => {
     const found = css(
       '.pill {\n  display: flex;\n  gap: 8px;\n  height: 40px;\n  padding: 0 16px 0 4px;\n  border-radius: 20px;\n}'
     )
-    expect(rulesIn(found)).toEqual(['utility-available', 'utility-available'])
+    expect(rulesIn(found)).toEqual(['flex', 'spacing', 'spacing'])
+    expect(found.map(f => f.line)).toEqual([2, 3, 5])
     expect(found[0].hint).toContain('"flex"')
     expect(found[1].hint).toContain('"gap-8px"')
+    expect(found[2].hint).toContain('"padding-right-16px padding-left-4px"')
+  })
+
+  it('spacing names its utility class, side by side for a shorthand', () => {
+    const one = css('.card { position: relative; padding-top: 40px }')
+    expect(rulesIn(one)).toEqual(['spacing'])
+    expect(one[0].hint).toContain('"padding-top-40px"')
+    expect(one[0].hint).toContain('shrink on mobile')
+    const two = css('.card { position: relative; padding: 12px 24px }')
+    expect(two[0].hint).toContain(
+      '"padding-top-12px padding-right-24px padding-bottom-12px padding-left-24px"'
+    )
+    expect(
+      css('.card { position: relative; margin-inline: 1rem }')[0].hint
+    ).toContain('"margin-left-16px margin-right-16px"')
+  })
+
+  it('spacing off the scale says which steps are nearest', () => {
+    const found = css('.card { position: relative; margin-bottom: 45px }')
+    expect(rulesIn(found)).toEqual(['spacing'])
+    expect(found[0].hint).toContain('45px is not on the spacing scale')
+    expect(found[0].hint).toContain('use 40px or 56px')
+  })
+
+  it('zero, auto and percentages are not hand-written spacing', () => {
+    expect(
+      css('.card { position: relative; margin: 0 auto; padding: 0; gap: 0px }')
+    ).toEqual([])
+  })
+
+  it('spacing and flex fail in mobile overrides and states too', () => {
+    const found = css(
+      '@media (max-width: 991px) {\n  .card { padding-top: 16px }\n  .row { flex-direction: column }\n}\n.card:hover { gap: 4px }'
+    )
+    expect(rulesIn(found)).toEqual(['spacing', 'flex', 'spacing'])
+    expect(found[0].hint).toContain('design decision for Melissa')
+    expect(found[1].hint).toContain('"flex-col-mobile"')
+  })
+
+  it('flex lines name their utility class, or say none fits', () => {
+    const found = css(
+      '.card { position: relative; display: flex; align-items: center; justify-content: space-around }'
+    )
+    expect(rulesIn(found)).toEqual(['flex', 'flex', 'flex'])
+    expect(found[0].hint).toContain('"flex"')
+    expect(found[1].hint).toContain('"items-center"')
+    expect(found[2].hint).toContain('No utility class does this')
+    expect(
+      rulesIn(css('.card { position: relative; display: block }'))
+    ).not.toContain('flex')
+  })
+
+  it('inside shared components, spacing and flex stay notes', () => {
+    const file = 'src/components/Tooltip.module.css'
+    const found = css(
+      '.tip { position: absolute; display: flex; gap: 8px; padding: 0 11px }',
+      file
+    )
+    expect(rulesIn(found)).toEqual(['utility-available', 'utility-available'])
+    expect(
+      rulesIn(
+        tsx(
+          `export default function A() {\n  return <div style={{ marginTop: 45, display: 'flex' }} />\n}`,
+          'src/components/Tooltip.tsx'
+        )
+      )
+    ).toEqual([])
   })
 
   it('a class that rebuilds a bigger global class is a note', () => {
     const found = css(
       '.rule { height: 1px; background-color: var(--teal-800); margin: 3px 0 }'
     )
-    expect(rulesIn(found)).toEqual(['utility-available'])
-    expect(found[0].what).toContain('.divider')
+    expect(rulesIn(found)).toEqual(['spacing', 'utility-available'])
+    expect(found[0].hint).toContain('3px is not on the spacing scale')
+    expect(found[1].what).toContain('.divider')
   })
 
   it('classes named like buttons, and button element selectors', () => {
@@ -211,6 +280,20 @@ describe('TSX rules', () => {
         )
       )
     ).toEqual(['inline-style'])
+  })
+
+  it('inline spacing and flex, but not computed values', () => {
+    const found = tsx(
+      `export default function A({ depth }: { depth: number }) {\n  return (\n    <div\n      style={{\n        marginTop: 45,\n        padding: '8px 16px',\n        paddingLeft: depth * 16,\n        margin: 0,\n        display: 'flex',\n      }}\n    />\n  )\n}`
+    )
+    expect(found.map(f => [f.rule, f.line])).toEqual([
+      ['inline-style', 5],
+      ['inline-style', 6],
+      ['inline-style', 9],
+    ])
+    expect(found[0].hint).toContain('45px is not on the spacing scale')
+    expect(found[1].hint).toContain('"padding-top-8px padding-right-16px')
+    expect(found[2].hint).toContain('"flex"')
   })
 
   it('leaves data-driven styles, variables and link-preview images alone', () => {
@@ -318,6 +401,22 @@ describe('only what a change adds', () => {
       'font',
       'hard-coded-color',
     ])
+  })
+
+  it('existing spacing and flex pass until someone adds to them', () => {
+    const before =
+      '.row { display: flex; gap: 16px }\n.card { position: relative }\n'
+    // .row is all utilities, so in a new file it is one duplicate-class
+    // failure; already there, it is counted line by line on both sides.
+    expect(addedTo(PAGE, before, `${before}\n`, ds)).toEqual([])
+    expect(
+      addedTo(
+        PAGE,
+        before,
+        before.replace('relative }', 'relative; margin-bottom: 45px }'),
+        ds
+      ).map(f => [f.rule, f.line])
+    ).toEqual([['spacing', 2]])
   })
 
   it('a class that was already there never becomes a "new" duplicate', () => {

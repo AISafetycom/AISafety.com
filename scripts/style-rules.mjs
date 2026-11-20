@@ -21,6 +21,12 @@ export const BUTTON_FILES = [
   'src/components/Button.module.css',
 ]
 
+/** Shared components: the design system's own pieces live here, and they
+    often need spacing no utility class has (Button's padding is 0 17px, 16px
+    plus its 1px border). So hand-written spacing and flex fail on pages but
+    stay notes in here. Melissa's call to change. */
+export const COMPONENTS = 'src/components/'
+
 /** The site's one breakpoint: `max-width: 991px` (and its other side,
     `min-width: 992px`). */
 const BREAKPOINT_MAX = 991
@@ -44,10 +50,15 @@ export const RULES = {
   },
   'inline-style': { level: 'error', title: 'Inline style' },
   'styled-button': { level: 'error', title: 'Hand-styled button' },
-  // Spacing, flex and gap written by hand are notes, not failures: a class
-  // that genuinely needs its own CSS (a component's shape, a hover state)
-  // often has one of these lines in it, Button.module.css included. A class
-  // made of nothing else is a `duplicate-class` error instead.
+  // Melissa, 20 Nov 2026: spacing and flex are never written by hand ("best to
+  // never see '40px' or the disastrous '45px'"). Spacing comes from the
+  // padding-*, margin-* and gap-* classes, which also shrink on mobile by
+  // themselves; flex from flex, flex-col, items-*, justify-* and so on.
+  spacing: { level: 'error', title: 'Hand-written spacing' },
+  flex: { level: 'error', title: 'Hand-written flex' },
+  // Other single lines a utility class covers (a color, a cursor) are notes:
+  // a class that genuinely needs its own CSS often has one in it. A class made
+  // of nothing else is a `duplicate-class` error instead.
   'utility-available': {
     level: 'warn',
     title: 'A utility class already does this',
@@ -275,10 +286,22 @@ export function readDesignSystem(globalsCss) {
     if (size) textStyles.push({ name, size, weight })
   }
 
+  // The spacing scale: every px step the padding-*, margin-* and gap-*
+  // classes offer (4, 8, 12, 16, 24 and so on).
+  const spacingScale = [
+    ...new Set(
+      [...utilities.keys()]
+        .map(k => /^(?:padding|margin)-\w+: (\d+)px$|^gap: (\d+)px$/.exec(k))
+        .filter(Boolean)
+        .map(m => Number(m[1] ?? m[2]))
+    ),
+  ].sort((a, b) => a - b)
+
   return {
     variables,
     colorVariables,
     utilities,
+    spacingScale,
     bySignature,
     bundles,
     textStyles,
@@ -360,6 +383,129 @@ function shadowAllowed(value) {
 const BUTTON_HINT =
   'Buttons are never styled by hand. Use <Button> from src/components/Button.tsx (variant: white, teal, teal-alt, clear or clear-border; size: default or small; iconPosition="only" for an icon button). For a link that looks like a button: <Button as={Link} href="…">. If no variant fits, that is a design decision for Melissa, not a new class.'
 
+const SPACING_PROP =
+  /^(?:(?:padding|margin)(?:-(?:top|right|bottom|left|inline|block)(?:-(?:start|end))?)?|(?:row-|column-)?gap)$/
+const FLEX_PROPS = [
+  'flex-direction',
+  'flex-wrap',
+  'justify-content',
+  'align-items',
+]
+const LENGTH = /(-?(?:\d+\.?\d*|\.\d+))(px|rem|em)\b/gi
+const ONE_LENGTH = /^(-?(?:\d+\.?\d*|\.\d+))(px|rem)$/i
+const MELISSAS_CALL =
+  'If it truly has to differ on mobile or in a state such as :hover, that is a design decision for Melissa.'
+
+/** Non-zero lengths in a value: [{ text, px }] (px is null for em). */
+function lengthsIn(value) {
+  return [...value.matchAll(LENGTH)]
+    .filter(m => Number(m[1]) !== 0)
+    .map(m => ({
+      text: m[0],
+      px:
+        m[2].toLowerCase() === 'em'
+          ? null
+          : Number(m[1]) * (m[2].toLowerCase() === 'rem' ? 16 : 1),
+    }))
+}
+
+const isFlexLine = d =>
+  (d.prop === 'display' && /^(?:inline-)?flex$/.test(normalize(d.value))) ||
+  FLEX_PROPS.includes(d.prop)
+
+/** A spacing line as one-sided lines: padding: 8px 16px → padding-top 8px, …
+    null when it can't be split that way. */
+function spacingSides(prop, value) {
+  const v = value.trim().split(/\s+/)
+  if (prop === 'gap') return v.length === 1 ? [['gap', v[0]]] : null
+  const m =
+    /^(padding|margin)(?:-(top|right|bottom|left|inline|block)(?:-(start|end))?)?$/.exec(
+      prop
+    )
+  if (!m || v.length > 4) return null
+  const [, base, axis, end] = m
+  if (!axis) {
+    const [t, r = t, b = t, l = r] = v
+    return [
+      [`${base}-top`, t],
+      [`${base}-right`, r],
+      [`${base}-bottom`, b],
+      [`${base}-left`, l],
+    ]
+  }
+  if (axis === 'inline' || axis === 'block') {
+    const [first, last] =
+      axis === 'inline' ? ['left', 'right'] : ['top', 'bottom']
+    if (end) return [[`${base}-${end === 'start' ? first : last}`, v[0]]]
+    return [
+      [`${base}-${first}`, v[0]],
+      [`${base}-${last}`, v[1] ?? v[0]],
+    ]
+  }
+  return [[`${base}-${axis}`, v[0]]]
+}
+
+/** The utility classes that do what a spacing line does, or null. */
+function spacingClasses(d, ds) {
+  const sides = spacingSides(d.prop, d.value)
+  if (!sides) return null
+  const out = []
+  for (const [prop, value] of sides) {
+    if (!lengthsIn(value).length) continue // 0, auto
+    const m = ONE_LENGTH.exec(value)
+    if (!m) return null
+    const px = Number(m[1]) * (m[2].toLowerCase() === 'rem' ? 16 : 1)
+    const cls = ds.utilities.get(`${prop}: ${px}px`)?.[0]
+    if (!cls) return null
+    out.push(cls)
+  }
+  return out.length ? [...new Set(out)].join(' ') : null
+}
+
+function spacingHint(d, ds, inPlainClass) {
+  const scale = ds.spacingScale
+  const parts = []
+  for (const l of lengthsIn(d.value)) {
+    if (l.px !== null && scale.includes(l.px)) continue
+    const n = l.px === null ? NaN : Math.abs(l.px)
+    const steps = [
+      ...new Set([scale.findLast(s => s <= n), scale.find(s => s >= n)]),
+    ].filter(s => s !== undefined)
+    parts.push(
+      `${l.text} is not on the spacing scale (${scale.join(', ')}px)${l.px > 0 && steps.length ? `: use ${steps.map(s => `${s}px`).join(' or ')}` : ''}.`
+    )
+  }
+  const classes = spacingClasses(d, ds)
+  parts.push(
+    classes
+      ? `Put "${classes}" in the element's className and delete this line. The spacing classes also shrink on mobile by themselves.`
+      : 'Spacing comes only from the padding-*, margin-* and gap-* classes in globals.css, which also shrink on mobile by themselves.'
+  )
+  if (!inPlainClass) parts.push(MELISSAS_CALL)
+  return parts.join(' ')
+}
+
+function flexHint(d, ds, inPlainClass, at = []) {
+  const mobileColumn =
+    d.prop === 'flex-direction' &&
+    normalize(d.value) === 'column' &&
+    at.some(a => a.includes(`max-width: ${BREAKPOINT_MAX}px`))
+  if (mobileColumn)
+    return 'Put "flex-col-mobile" in the element\'s className and delete this line: it stacks the row on mobile.'
+  const cls = ds.utilities.get(declKey(d))?.[0]
+  const all = [...ds.utilities]
+    .filter(([k]) =>
+      /^(?:display: flex|flex-direction|flex-wrap|justify-content|align-items):/.test(
+        k
+      )
+    )
+    .map(([, c]) => c[0])
+  const hint = cls
+    ? `Put "${cls}" in the element's className and delete this line.`
+    : `No utility class does this. Layout comes from the flex classes in globals.css (${all.join(', ')}); if none fits, that is a design decision for Melissa.`
+  return inPlainClass || !cls ? hint : `${hint} ${MELISSAS_CALL}`
+}
+
 const BUTTON_CLASS = /(?:button|btn)$/i
 const BUTTON_IN_SELECTOR =
   /\.[\w-]*(?:button|btn)(?![\w-])|(?:^|[\s>+~,(])button(?![\w-])/i
@@ -426,6 +572,14 @@ export function checkCss(text, ds, file = '', knownClasses = new Set()) {
     }
 
     const where = n.isAt ? n.selector : [...n.at, n.selector].join(' ')
+    // Somewhere a utility class on the element can stand in for the line: a
+    // plain top-level class, not a state, a mobile override or a child.
+    const inPlainClass =
+      !n.isAt &&
+      !n.at.length &&
+      !n.parents.length &&
+      PLAIN_CLASS.test(n.selector)
+    const start = findings.length
 
     // Buttons: a class named like a button, or a `button` element selector.
     // :global(…) names another library's classes (the map's own controls),
@@ -476,6 +630,22 @@ export function checkCss(text, ds, file = '', knownClasses = new Set()) {
         failed.add(d)
         add('box-shadow', d.line, shown, shadowHint(ds), key)
       }
+      if (n.isAt || file.startsWith(COMPONENTS)) continue // see COMPONENTS
+      if (SPACING_PROP.test(d.prop) && lengthsIn(d.value).length) {
+        failed.add(d)
+        add('spacing', d.line, shown, spacingHint(d, ds, inPlainClass), key)
+      }
+      if (isFlexLine(d)) {
+        failed.add(d)
+        add('flex', d.line, shown, flexHint(d, ds, inPlainClass, n.at), key)
+      }
+    }
+    // A class made of nothing but utilities is one duplicate-class failure,
+    // not also one spacing or flex failure per line.
+    const dropLineFailures = () => {
+      for (let i = findings.length - 1; i >= start; i--)
+        if (['spacing', 'flex'].includes(findings[i].rule))
+          findings.splice(i, 1)
     }
 
     // A plain `.class { … }` rule at the top level, compared with globals.css
@@ -489,6 +659,7 @@ export function checkCss(text, ds, file = '', knownClasses = new Set()) {
     const copyOf = ds.bySignature.get(signature(n.decls))
     const asUtilities = n.decls.map(d => ds.utilities.get(declKey(d))?.[0])
     if (standsAlone && copyOf) {
+      dropLineFailures()
       add(
         'duplicate-class',
         n.line,
@@ -499,6 +670,7 @@ export function checkCss(text, ds, file = '', knownClasses = new Set()) {
       continue
     }
     if (standsAlone && asUtilities.every(Boolean)) {
+      dropLineFailures()
       add(
         'duplicate-class',
         n.line,
@@ -666,6 +838,46 @@ export function checkTsx(text, ds, ts, file = '') {
           continue
         }
         const texts = literalTexts(value)
+        // Spacing and flex: only literal values. A computed one (an indent
+        // that grows with depth) can't be a utility class.
+        const prop = name.replace(/[A-Z]/g, c => `-${c.toLowerCase()}`)
+        const number =
+          ts.isNumericLiteral(value) ||
+          (ts.isPrefixUnaryExpression(value) &&
+            ts.isNumericLiteral(value.operand))
+            ? value.getText(sf)
+            : null
+        const literal =
+          ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value)
+            ? value.text
+            : null
+        const spacingValue = number !== null ? `${number}px` : literal
+        const linesFail = !file.startsWith(COMPONENTS)
+        if (
+          linesFail &&
+          SPACING_PROP.test(prop) &&
+          spacingValue &&
+          lengthsIn(spacingValue).length
+        ) {
+          reported.add(p.pos)
+          add(
+            'inline-style',
+            p,
+            shown,
+            spacingHint({ prop, value: spacingValue }, ds, true)
+          )
+          continue
+        }
+        if (linesFail && literal && isFlexLine({ prop, value: literal })) {
+          reported.add(p.pos)
+          add(
+            'inline-style',
+            p,
+            shown,
+            flexHint({ prop, value: literal }, ds, true)
+          )
+          continue
+        }
         const colors = texts.flatMap(colorsIn)
         if (colors.length) {
           reported.add(p.pos)
@@ -845,11 +1057,16 @@ export function added(before, after) {
 export function addedTo(path, oldText, newText, ds, ts) {
   if (path === GLOBALS)
     return added(oldText ? checkGlobals(oldText) : [], checkGlobals(newText))
-  if (path.endsWith('.css'))
+  // Both sides know the file's old classes, so a class that was already there
+  // is judged the same way before and after (line by line, never as a
+  // duplicate) and only what changed can add to a count.
+  if (path.endsWith('.css')) {
+    const known = classesIn(oldText)
     return added(
-      oldText ? checkCss(oldText, ds, path) : [],
-      checkCss(newText, ds, path, classesIn(oldText))
+      oldText ? checkCss(oldText, ds, path, known) : [],
+      checkCss(newText, ds, path, known)
     )
+  }
   return added(
     oldText ? checkTsx(oldText, ds, ts, path) : [],
     checkTsx(newText, ds, ts, path)

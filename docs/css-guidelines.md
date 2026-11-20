@@ -298,14 +298,18 @@ Where to put new classes:
 | A `box-shadow` written by hand (`var(--shadow…)` and `none` are fine)                                                                                  | `box-shadow`       |
 | An `@media` width other than 991px                                                                                                                     | `breakpoint`       |
 | A new class that is a copy of one `globals.css` class, or made only of utility classes                                                                 | `duplicate-class`  |
-| A color, font or hand-written shadow in an inline `style={…}`                                                                                          | `inline-style`     |
+| Hand-written spacing: any `px`, `rem` or `em` in a `padding`, `margin` or `gap` line, on the scale (`40px`) or off it (`45px`)                         | `spacing`          |
+| Hand-written flex: `display: flex`, `flex-direction`, `flex-wrap`, `justify-content` or `align-items`                                                  | `flex`             |
+| A color, font, shadow, spacing or flex line in an inline `style={…}`                                                                                   | `inline-style`     |
 | A class named like a button (`.submitButton`, `.cta-btn`), a `button { … }` selector, or an element using such a class, anywhere but `<Button>` itself | `styled-button`    |
 
 Each message gives the file and line, and names the class, variable or component to use instead.
 
-**It adds a note, without failing,** for a hand-written spacing, flex, gap, color or cursor line that has an exact utility class (`gap: 16px` when `.gap-16px` exists), for a class that rebuilds a bigger global class such as `.divider`, for a new raw `<button>`, and for a new variable in `globals.css`. These are notes because a class that really needs its own CSS often has one of these lines in it (`Button.module.css` does). A class made of nothing else fails, as above.
+Spacing and flex fail everywhere on pages, mobile overrides and `:hover` included: the spacing classes already shrink on mobile by themselves, and `.flex-col-mobile` stacks a row. A value off the scale (4, 8, 12, 16, 24, 32, 40, 56, 80, 104, 128, 192px) gets the nearest steps named. `0`, `auto` and computed values (an indent that grows with depth) are fine. In shared components (`src/components/`), hand-written spacing and flex are notes instead, since the design system's own pieces need some (`Button` has `padding: 0 17px`). Melissa decided on 20 November 2026 that these fail; the components exception is open for her.
 
-**It does not judge** spacing and sizes that have no utility class (`margin-top: 13px`), whether a new class was needed at all, hover and other states, or anything visual. Those still need a person.
+**It adds a note, without failing,** for another hand-written line that has an exact utility class (a color or a cursor), for a class that rebuilds a bigger global class such as `.divider`, for a new raw `<button>`, and for a new variable in `globals.css`. These are notes because a class that really needs its own CSS often has one of these lines in it. A class made of nothing else fails, as above.
+
+**It does not judge** sizes (`width`, `height`), whether a new class was needed at all, hover and other states, or anything visual. Those still need a person.
 
 ### Only new code, and no list to maintain
 
