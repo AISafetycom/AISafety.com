@@ -46,8 +46,9 @@ export default function NewslettersPage() {
             title="Newsletters"
             description={
               <>
+                New{' '}
                 <span className="color-teal-300">
-                  New events, training programs, and funding opportunities
+                  events, training programs, and funding opportunities
                 </span>{' '}
                 addressing existential risk from AI, in your inbox.
               </>
