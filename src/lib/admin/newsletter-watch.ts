@@ -45,7 +45,8 @@
   within 50 of the limit (at 5,000 ActiveCampaign stops EVERY campaign).
 
   Once per sent issue or wave on 6/7/8 (not Updates' small list, see
-  HEALTH_CHECK_LISTS), 18 hours after it finished: a health
+  HEALTH_CHECK_LISTS), 24 hours after a whole-list send finished or 18 hours
+  after a wave did (healthAfterHours): a health
   check (bounces, unsubscribes, spam complaints, verified opens) with a
   green/amber/red verdict, emailed and stored for the page. A red one cancels
   the waves of that issue still scheduled (above); amber cancels nothing.
@@ -54,7 +55,7 @@
   the issue's next wave, or after its last wave (or a whole-list send)
   before the next issue, and says so. Three days after the send finished
   its numbers are read once more: bounces and spam complaints keep coming
-  in after the 18-hour check, and when they (or unsubscribes) now give a
+  in after the first check, and when they (or unsubscribes) now give a
   worse verdict, that's an alert of its own. The recheck cancels nothing.
 
   Upstash keys (the site's analytics database; no expiry on any of them):
@@ -99,7 +100,7 @@ export { MAX_UNSEGMENTED_SEND, NEWSLETTER_WARMUP }
 
 /** Lists real subscribers are on. */
 const REAL_LISTS = ['6', '7', '8', '9']
-/** Lists whose sends get the 18-hour health check and whose drafts must not
+/** Lists whose sends get the health check and whose drafts must not
  *  sit around (the lists the imported readers are on: Events and Training,
  *  and Funding from its move day). Their waves are the ones canceled after a
  *  red or missing verdict. */
@@ -144,9 +145,18 @@ const DEFAULT_CONTACT_LIMIT = 5000
 const OVERSEND_FACTOR = 1.2
 const OVERSEND_SLACK = 10
 
-const HEALTH_AFTER = 18 * HOUR
+/** When a send's health check is due, in hours after it finished: 24 for a
+ *  whole-list send (Bryce, 20 November 2026: the numbers are fuller a day
+ *  on), 18 for a wave, whose verdict the next wave waits on and which starts
+ *  WAVE_SPACING_HOURS (24) after the one before it (WAVE_MIN_GAP_HOURS and
+ *  VERDICT_LEAD_MINUTES in newsletter.ts / newsletter-warmup.ts assume 18). */
+const HEALTH_AFTER_WHOLE_HOURS = 24
+const HEALTH_AFTER_WAVE_HOURS = 18
+function healthAfterHours(r: { wave: number | null }): number {
+  return r.wave != null ? HEALTH_AFTER_WAVE_HOURS : HEALTH_AFTER_WHOLE_HOURS
+}
 /** The second look at a checked send: bounces and spam complaints keep
- *  arriving for a day or two after the 18-hour check (a soft bounce tried
+ *  arriving for a day or two after the first check (a soft bounce tried
  *  again, a complaint a mail service passes on late). */
 const RECHECK_AFTER = 3 * DAY
 /** Below this many recipients (the rehearsals to three test addresses) the
@@ -756,7 +766,7 @@ const STATUS_WORDS: Record<string, string> = {
   '7': 'held for review',
 }
 
-/** The 18-hour verdict. Red means "hold the next wave" (after an issue's
+/** The health check's verdict. Red means "hold the next wave" (after an issue's
  *  last wave or a whole-list send, "look before the next issue"); amber
  *  "look first". Unsubscribes stay amber at worst: the first issue after the move invites
  *  readers to leave the list they don't want. Complaints only come from
@@ -809,7 +819,7 @@ const VERDICT_RANK: Record<HealthVerdict, number> = {
 /** The three-day recheck's news, or null: the verdict on what keeps coming
  *  in after a send (bounces, spam complaints, unsubscribes; opens only rise,
  *  so they're left out on both sides) when it's now worse than it was at
- *  the 18-hour check. */
+ *  the first check. */
 export function recheckNews(
   first: HealthNumbers,
   now: HealthNumbers
@@ -824,7 +834,7 @@ export function recheckNews(
   return { verdict: is.verdict, reasons: is.reasons }
 }
 
-/** What changed since the 18-hour check, one item a number that grew:
+/** What changed since the first check, one item a number that grew:
  *  "hard bounces 10 → 25". */
 function recheckChanges(first: HealthNumbers, now: HealthNumbers): string[] {
   const rows: Array<[string, keyof HealthNumbers]> = [
@@ -982,7 +992,7 @@ export function healthMail(r: HealthRecord, origin: string): Mail {
   ]
   const lead =
     r.verdict === 'green'
-      ? `${label} looks healthy 18 hours after it finished sending.${next === 'wave' ? ' Fine to go ahead with the next wave.' : ''}`
+      ? `${label} looks healthy ${healthAfterHours(r)} hours after it finished sending.${next === 'wave' ? ' Fine to go ahead with the next wave.' : ''}`
       : r.verdict === 'amber'
         ? `${label} needs a look before the next ${next}: ${r.reasons.join('; ')}.`
         : next === 'wave'
@@ -1427,7 +1437,8 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
       summary.errors.push(`account: ${errorText(err)}`)
     }
 
-    // ── Health, 18 hours after a send on 6/7/8 finished ──
+    // ── Health, 24 hours after a whole-list send on 6/7/8 finished (18
+    //    after a wave) ──
     if (campaignsOk) {
       const due = relevant.filter(({ c, lists }) => {
         const finished = timeOf(c.ldate)
@@ -1435,7 +1446,7 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
           c.status === '5' &&
           lists.some(l => ISSUE_LISTS.includes(l)) &&
           finished != null &&
-          nowMs - finished >= HEALTH_AFTER &&
+          nowMs - finished >= healthAfterHours(waveOf(c.name)) * HOUR &&
           nowMs - finished <= RECENT
         )
       })
@@ -1529,7 +1540,7 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
 
     // ── A second look, three days after a checked send finished ──
     // Once per send: its numbers read again. When bounces, complaints or
-    // unsubscribes now give a worse verdict than at the 18-hour check, it's
+    // unsubscribes now give a worse verdict than at the first check, it's
     // raised as its own alert (and emailed). It cancels nothing: waves are
     // held on the 18-hour verdict alone.
     if (campaignsOk) {
@@ -1557,7 +1568,7 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
       for (let i = 0; i < due.length; i++) {
         const { c } = due[i]
         const first = firsts[i]
-        // No 18-hour check to compare with (a send from before the watcher
+        // No first check to compare with (a send from before the watcher
         // ran), or a rehearsal: nothing to recheck.
         if (!first || first.smallSample) continue
         let again = seconds[i]
@@ -1603,7 +1614,7 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
           severity: again.worse.verdict,
           title: `${shortLabel(first.name, c.id)} 3-day recheck: now ${again.worse.verdict}`,
           detail: [
-            `Read again three days after it finished: ${again.worse.reasons.join('; ')}. At the 18-hour check it was ${first.verdict}.`,
+            `Read again three days after it finished: ${again.worse.reasons.join('; ')}. At the ${healthAfterHours(first)}-hour check it was ${first.verdict}.`,
             ...(changes.length
               ? [
                   `Since then: ${changes.join(', ')}. Sent to ${num(again.numbers.sendAmt)}.`,
