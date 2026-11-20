@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import FilterPopover from './FilterPopover'
 import RangeSlider from './RangeSlider'
-import { trackFilterApply } from '@/lib/analytics'
+import { trackFilterApply, trackFilterRemove } from '@/lib/analytics'
 import { trackedFilterGroup, trackedFilterValue } from '@/lib/filter-tracking'
 import styles from './FilterRange.module.css'
 
@@ -12,7 +12,8 @@ interface FilterRangeProps {
   /** Optional 16×16 svg icon (path in /images) shown before the label. */
   icon?: string
   /** Analytics page name (e.g. 'Funding'). When set, a narrowed range records
-   *  a filter_apply event under this page and the filter's title. */
+   *  a filter_apply event under this page and the filter's title, and moving
+   *  it back to the full span a filter_remove. */
   trackingPage?: string
   /** What each slider position stands for, lowest to highest. */
   labels: string[]
@@ -41,18 +42,35 @@ export default function FilterRange({
   const [lo, hi] = value
   const active = lo > 0 || hi < labels.length - 1
 
+  // The last range recorded as applied, so moving the handles back to the
+  // full span can record which range was switched off.
+  const lastApplied = useRef<string | null>(null)
+
   // One filter_apply once the handles stop moving, not one per step dragged.
   // It logs the pill's own wording ("up to $100k", "$25k+"), so the
-  // dashboard's rows read the way the pill does.
+  // dashboard's rows read the way the pill does. Back at the full span, one
+  // filter_remove for the range that was on (none if it was never recorded).
   useEffect(() => {
-    if (!trackingPage || !active) return
+    if (!trackingPage) return
+    const group = trackedFilterGroup(trackingPage, title)
+    if (!active) {
+      if (lastApplied.current != null) {
+        trackFilterRemove(
+          trackingPage,
+          group,
+          trackedFilterValue(trackingPage, group, lastApplied.current)
+        )
+        lastApplied.current = null
+      }
+      return
+    }
     const timer = setTimeout(() => {
-      const group = trackedFilterGroup(trackingPage, title)
       trackFilterApply(
         trackingPage,
         group,
         trackedFilterValue(trackingPage, group, summary)
       )
+      lastApplied.current = summary
     }, 800)
     return () => clearTimeout(timer)
   }, [trackingPage, title, summary, active])

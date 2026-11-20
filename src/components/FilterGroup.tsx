@@ -1,6 +1,6 @@
 'use client'
 
-import { trackFilterApply } from '@/lib/analytics'
+import { trackFilterApply, trackFilterRemove } from '@/lib/analytics'
 import { trackedFilterGroup, trackedFilterValue } from '@/lib/filter-tracking'
 
 interface FilterGroupProps {
@@ -13,7 +13,8 @@ interface FilterGroupProps {
   // and counts still run on the raw option values; only the display changes.
   labels?: Record<string, string>
   /** Analytics page name (e.g. 'Jobs'). When set, turning a value on records
-   *  a filter_apply event under this page and the group's title. Renamed
+   *  a filter_apply event under this page and the group's title (turning it
+   *  off, a filter_remove). Renamed
    *  titles and options keep logging their original names via
    *  lib/filter-tracking, so history stays in one line. */
   trackingPage?: string
@@ -40,13 +41,12 @@ export default function FilterGroup({
               type="checkbox"
               checked={selected.includes(option)}
               onChange={() => {
-                if (trackingPage && !selected.includes(option)) {
+                if (trackingPage) {
                   const group = trackedFilterGroup(trackingPage, title)
-                  trackFilterApply(
-                    trackingPage,
-                    group,
-                    trackedFilterValue(trackingPage, group, option)
-                  )
+                  const value = trackedFilterValue(trackingPage, group, option)
+                  if (selected.includes(option))
+                    trackFilterRemove(trackingPage, group, value)
+                  else trackFilterApply(trackingPage, group, value)
                 }
                 onToggle(option)
               }}
