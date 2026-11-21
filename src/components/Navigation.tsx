@@ -14,6 +14,7 @@ import {
   useState,
 } from 'react'
 import { SearchButton, SearchProvider } from './SearchTrigger'
+import { typeForPath } from '@/lib/search'
 import {
   trackNavOverflowOpen,
   type NavOverflowOpenMethod,
@@ -433,7 +434,14 @@ export default function Navigation({
               variant="clear"
               icon="/images/icons/search-large.svg"
               iconPosition="only"
-              aria-label="Search this page or site-wide"
+              // "This page" only where search can be narrowed to the page's
+              // own listings; elsewhere (homepage, /about, /donation-guide)
+              // the visitor can still pick one of the resource pages.
+              aria-label={
+                typeForPath(pathname)
+                  ? 'Search this page or site-wide'
+                  : 'Search a page or site-wide'
+              }
               // Below, the long label would run past the right edge of the page.
               tooltipPosition="left"
               className={styles['nav-search-button']}
