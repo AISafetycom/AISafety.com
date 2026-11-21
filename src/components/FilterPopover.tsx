@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import Button from './Button'
 import Icon from './Icon'
 import styles from './FilterPopover.module.css'
 
@@ -10,6 +11,9 @@ interface FilterPopoverProps {
   label: string
   /** Fill the pill: a filter is on. */
   active: boolean
+  /** Switches the whole filter off. While the filter is on, an × takes the
+   *  chevron's place and runs this. */
+  onClear: () => void
   /** Optional 16×16 svg icon (path in /images) shown before the label. */
   icon?: string
   /** Runs each time the popover opens, e.g. to empty a search box. */
@@ -26,6 +30,7 @@ interface FilterPopoverProps {
 export default function FilterPopover({
   label,
   active,
+  onClear,
   icon,
   onOpen,
   measureKey,
@@ -107,12 +112,36 @@ export default function FilterPopover({
       >
         {icon && <Icon src={icon} />}
         {label}
-        <Icon
-          src="/images/icons/chevron-down.svg"
-          size={16}
-          className={styles.chevron}
-        />
+        {!active && (
+          <Icon
+            src="/images/icons/chevron-down.svg"
+            size={16}
+            className={styles.chevron}
+          />
+        )}
       </button>
+
+      {/* The ×, over the room the active pill leaves at its right end. It
+          sits beside the pill's button, not in it: a button can't hold
+          another button. */}
+      {active && (
+        <span className={`${styles.clearSlot} flex`}>
+          <Button
+            variant="clear"
+            size="xs"
+            iconPosition="only"
+            icon="/images/icons/x-small.svg"
+            iconSize={12}
+            aria-label={`Clear ${label}`}
+            tooltip="Clear filter"
+            onClick={() => {
+              onClear()
+              // The × leaves with the filter, so focus goes to the pill.
+              buttonRef.current?.focus()
+            }}
+          />
+        </span>
+      )}
 
       {open && (
         <div

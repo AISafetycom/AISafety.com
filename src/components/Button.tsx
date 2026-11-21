@@ -35,6 +35,7 @@ type Look =
       icon?: string
       /** Where the icon sits. Default 'trailing'. */
       iconPosition?: 'preceding' | 'trailing'
+      iconSize?: never
       tooltip?: never
       tooltipPosition?: never
     }
@@ -47,6 +48,8 @@ type Look =
       children?: never
       icon: string
       iconPosition: 'only'
+      /** 12 swaps in the 12px icon (the x-small ×, say) at either size. */
+      iconSize?: 12
       'aria-label': string
       /** Tooltip text, if it should differ from the aria-label. false turns
           the tooltip off. */
@@ -88,6 +91,7 @@ export default function Button<C extends ElementType = 'button'>(
     size: sizeProp,
     icon,
     iconPosition = 'trailing',
+    iconSize: iconSizeProp,
     className = '',
     loading = false,
     tooltip,
@@ -116,9 +120,9 @@ export default function Button<C extends ElementType = 'button'>(
     .filter(Boolean)
     .join(' ')
 
-  // Icon-only buttons: a 24px icon at small (40px), 16px at xs (32px).
-  // Buttons with a label always use 16px.
-  const iconSize = iconOnly && size === 'small' ? 24 : 16
+  // Icon-only buttons: a 24px icon at small (40px), 16px at xs (32px),
+  // unless iconSize asks for 12px. Buttons with a label always use 16px.
+  const iconSize = iconSizeProp ?? (iconOnly && size === 'small' ? 24 : 16)
   const iconEl = loading ? (
     <Icon
       src={

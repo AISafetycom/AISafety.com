@@ -12,6 +12,9 @@ interface FilterDropdownProps {
   options: string[]
   selected: string[]
   counts: Record<string, number>
+  /** Switches one value on or off. The pill's × calls it once per ticked
+   *  value in a row, so it must build on the latest state (a functional
+   *  update: setX(current => ...)), not on `selected` as last rendered. */
   onToggle: (value: string) => void
   /** Optional 16×16 svg icon (path in /images) shown before the label. */
   icon?: string
@@ -56,10 +59,23 @@ export default function FilterDropdown({
         ? `${title}: ${selected[0]}`
         : `${title}: ${selected[0]} +${selected.length - 1}`
 
+  const toggle = (option: string) => {
+    if (trackingPage) {
+      const group = trackedFilterGroup(trackingPage, title)
+      const value = trackedFilterValue(trackingPage, group, option)
+      if (selected.includes(option))
+        trackFilterRemove(trackingPage, group, value)
+      else trackFilterApply(trackingPage, group, value)
+    }
+    onToggle(option)
+  }
+
   return (
     <FilterPopover
       label={label}
       active={selected.length > 0}
+      // The × unticks every value, each recorded as unticking it would be.
+      onClear={() => selected.forEach(toggle)}
       icon={icon}
       // Each opening starts from the full list; a search changes the
       // popover's width, so it is re-fitted to the screen as you type.
@@ -90,16 +106,7 @@ export default function FilterDropdown({
             <input
               type="checkbox"
               checked={selected.includes(option)}
-              onChange={() => {
-                if (trackingPage) {
-                  const group = trackedFilterGroup(trackingPage, title)
-                  const value = trackedFilterValue(trackingPage, group, option)
-                  if (selected.includes(option))
-                    trackFilterRemove(trackingPage, group, value)
-                  else trackFilterApply(trackingPage, group, value)
-                }
-                onToggle(option)
-              }}
+              onChange={() => toggle(option)}
               className="checkbox"
             />
             <span className="paragraph-small color-white">
