@@ -1,6 +1,13 @@
 'use client'
 
-import { useState, useMemo, useRef, useLayoutEffect } from 'react'
+import {
+  useState,
+  useMemo,
+  useRef,
+  useLayoutEffect,
+  type Dispatch,
+  type SetStateAction,
+} from 'react'
 import FilterBar from '@/components/FilterBar'
 import FilterDropdown from '@/components/FilterDropdown'
 import ListingCard from '@/components/ListingCard'
@@ -75,11 +82,10 @@ export default function SelfStudyClient({ courses }: SelfStudyClientProps) {
 
   const toggleFilter = (
     value: string,
-    current: string[],
-    setter: (v: string[]) => void
+    setter: Dispatch<SetStateAction<string[]>>
   ) => {
     savedScrollY.current = window.scrollY
-    setter(
+    setter(current =>
       current.includes(value)
         ? current.filter(v => v !== value)
         : [...current, value]
@@ -110,9 +116,7 @@ export default function SelfStudyClient({ courses }: SelfStudyClientProps) {
           options={categoryOptions}
           selected={selectedCategories}
           counts={categoryCounts}
-          onToggle={v =>
-            toggleFilter(v, selectedCategories, setSelectedCategories)
-          }
+          onToggle={v => toggleFilter(v, setSelectedCategories)}
         />
         <FilterDropdown
           trackingPage="Self-study"
@@ -121,7 +125,7 @@ export default function SelfStudyClient({ courses }: SelfStudyClientProps) {
           options={typeOptions}
           selected={selectedTypes}
           counts={typeCounts}
-          onToggle={v => toggleFilter(v, selectedTypes, setSelectedTypes)}
+          onToggle={v => toggleFilter(v, setSelectedTypes)}
         />
       </FilterBar>
 

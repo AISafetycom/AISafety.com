@@ -21,13 +21,26 @@
   cursor: pointer;
 }
 
+/* An active pill has no chevron; its right padding leaves room for the ×
+   (4px gap, the 32px button, 4px to the edge). */
 .pill.pillActive {
   background: var(--teal-800);
   color: var(--white);
+  padding-right: 40px;
 }
 
-/* The leading Icon and the chevron both use currentColor, so they follow the
-   pill's text color to white automatically when active — no recolor needed. */
+/* The × button, centered on the pill's height and 4px in from its edge, so
+   its round hover fill sits inside the pill's round end. */
+.clearSlot {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+}
+
+/* The leading Icon, the chevron and the × all use currentColor, so they
+   follow the pill's text color to white automatically when active — no
+   recolor needed. */
 .chevron {
   transition: transform var(--hover-transition);
 }
