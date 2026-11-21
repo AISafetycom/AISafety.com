@@ -23,7 +23,7 @@ export default function MapOrgCard({ org, placement }: MapOrgCardProps) {
   return (
     // Only the title is a link, as on ListingCard, so the rest of the text
     // can be selected; a click anywhere on the card opens it (CardClicks).
-    <div id={org.id} className="card" data-card="">
+    <div id={org.id} className="card cursor-pointer" data-card="">
       <div className="flex items-center gap-16px padding-bottom-24px">
         <div className="featured-img">
           {org.logo && (

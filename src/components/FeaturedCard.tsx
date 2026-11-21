@@ -87,9 +87,10 @@ export default function FeaturedCard({
 
   return (
     <li
-      className={`${styles.card} ${href ? '' : styles.cardStatic} ${className ?? ''}`}
+      className={`${styles.card} ${href ? 'cursor-pointer' : styles.cardStatic} ${className ?? ''}`}
       style={gradientStyle}
-      // A click anywhere on the card opens the title link (CardClicks).
+      // A click anywhere on the card opens the title link (CardClicks). The
+      // pointer also lets iPhones send that click from a tap on plain text.
       data-card={href ? '' : undefined}
     >
       {accentClass ? (

@@ -1147,12 +1147,6 @@ select.text-field {
   transform: scale(1);
 }
 
-/* A card that opens its title link from a click anywhere on it (CardClicks).
-   The pointer also lets iPhones send that click from a tap on plain text. */
-[data-card] {
-  cursor: pointer;
-}
-
 .featured-img {
   display: flex;
   justify-content: center;
