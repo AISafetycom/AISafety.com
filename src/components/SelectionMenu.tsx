@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { usePathname } from 'next/navigation'
 import Button from '@/components/Button'
+import Icon from '@/components/Icon'
 import { trackSelectionMenu, trackedPath } from '@/lib/analytics'
 import { selectionFormLink } from '@/lib/selection-feedback'
 import styles from './SelectionMenu.module.css'
@@ -23,6 +24,17 @@ const NAV_CLEARANCE = 96
 
 // How long "Copied" shows before the menu goes away.
 const COPIED_SHOWN_MS = 1000
+
+// The menu's icons. They're drawn once, out of sight, as each page loads, so
+// the browser already has them when the menu first appears; otherwise each
+// arrives a moment after the menu. (A plain <link rel="preload"> isn't used
+// by Chrome for an <Icon>, whose shape is a CSS mask.)
+const ICONS = {
+  copy: '/images/icons/copy.svg',
+  copied: '/images/icons/check.svg',
+  correction: '/images/icons/pencil.svg',
+  feedback: '/images/icons/chat.svg',
+}
 
 interface Menu {
   text: string
@@ -82,7 +94,9 @@ function readSelection(pathname: string): Menu | null {
 
 export default function SelectionMenu() {
   const pathname = usePathname()
+  // The last menu stays in the page after it closes, so it can fade out.
   const [menu, setMenu] = useState<Menu | null>(null)
+  const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   // Whether the selection was made by touch: a phone shows its own menu
@@ -100,8 +114,11 @@ export default function SelectionMenu() {
 
     function update() {
       const next = readSelection(pathname)
-      setMenu(next)
-      setCopied(false)
+      if (next) {
+        setMenu(next)
+        setCopied(false)
+      }
+      setOpen(!!next)
       // Counted once per selection, not each time it is looked at again.
       if (next && next.text !== shownFor)
         trackSelectionMenu('open', next.listing)
@@ -114,7 +131,7 @@ export default function SelectionMenu() {
       pressing = true
       touchRef.current = e.pointerType === 'touch'
       window.clearTimeout(timer)
-      setMenu(null)
+      setOpen(false)
     }
 
     // The press is over: look once the browser has settled the selection
@@ -136,7 +153,7 @@ export default function SelectionMenu() {
     }
 
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') setMenu(null)
+      if (e.key === 'Escape') setOpen(false)
     }
 
     document.addEventListener('pointerdown', onPointerDown, true)
@@ -160,7 +177,7 @@ export default function SelectionMenu() {
   // would put it under the nav bar or the selection was made by touch.
   useLayoutEffect(() => {
     const el = menuRef.current
-    if (!menu || !el) return
+    if (!menu || !open || !el) return
     const touch = touchRef.current
     const gap = touch ? 24 : 8
     const { offsetWidth: width, offsetHeight: height } = el
@@ -173,17 +190,27 @@ export default function SelectionMenu() {
     const above = !touch && topAbove - window.scrollY > NAV_CLEARANCE
     el.style.left = `${left}px`
     el.style.top = `${above ? topAbove : menu.box.bottom + gap}px`
-  }, [menu, copied])
+  }, [menu, open, copied])
 
   // After a copy, "Copied" shows for a moment, then the menu goes: its job
   // is done. The selection stays, so it's clear what was copied.
   useEffect(() => {
     if (!copied) return
-    const timer = window.setTimeout(() => setMenu(null), COPIED_SHOWN_MS)
+    const timer = window.setTimeout(() => setOpen(false), COPIED_SHOWN_MS)
     return () => window.clearTimeout(timer)
   }, [copied])
 
-  if (!menu) return null
+  if (off) return null
+
+  const icons = (
+    <span className="visually-hidden">
+      {Object.values(ICONS).map(src => (
+        <Icon key={src} src={src} />
+      ))}
+    </span>
+  )
+
+  if (!menu) return icons
 
   async function copy(text: string, listing: Menu['listing']) {
     try {
@@ -203,19 +230,21 @@ export default function SelectionMenu() {
 
   const formLabel = menu.listing ? 'Suggest a correction' : 'Give feedback'
 
-  return createPortal(
+  const menuEl = createPortal(
     <div
       ref={menuRef}
       role="toolbar"
       aria-label="Selected text"
-      className={`drop-shadow-dark ${styles.menu}`}
+      className={`drop-shadow-dark border-plus-fill items-center ${styles.menu} ${open ? styles.open : ''}`}
+      // While it fades out it can't be pressed, and screen readers skip it.
+      inert={!open}
       // Pressing the menu must not clear the selection it is about.
       onMouseDown={e => e.preventDefault()}
     >
       <Button
         variant="clear"
         size="small"
-        icon={copied ? '/images/icons/check.svg' : '/images/icons/copy.svg'}
+        icon={copied ? ICONS.copied : ICONS.copy}
         iconPosition="preceding"
         onClick={() => copy(menu.text, menu.listing)}
       >
@@ -228,9 +257,7 @@ export default function SelectionMenu() {
         rel="noopener noreferrer"
         variant="clear"
         size="small"
-        icon={
-          menu.listing ? '/images/icons/pencil.svg' : '/images/icons/chat.svg'
-        }
+        icon={menu.listing ? ICONS.correction : ICONS.feedback}
         iconPosition="preceding"
         onClick={() =>
           trackSelectionMenu(
@@ -244,5 +271,12 @@ export default function SelectionMenu() {
       </Button>
     </div>,
     document.body
+  )
+
+  return (
+    <>
+      {icons}
+      {menuEl}
+    </>
   )
 }
