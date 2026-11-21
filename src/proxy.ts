@@ -1,5 +1,6 @@
 import type { NextFetchEvent, NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
+import { isLiveSiteHost } from '@/lib/live-site'
 
 // AI assistants (ChatGPT, Claude, Perplexity, ...) fetch pages without running
 // JavaScript, so the Matomo snippet in layout.tsx never sees them. They do
@@ -31,8 +32,7 @@ export function proxy(request: NextRequest, event: NextFetchEvent) {
 
     // Only the real site reports to Matomo — preview deploys and localhost
     // would otherwise pollute the report with test hits.
-    const host = request.nextUrl.hostname
-    if (host === 'aisafety.com' || host === 'www.aisafety.com') {
+    if (isLiveSiteHost(request.nextUrl.hostname)) {
       // waitUntil: the ping happens after the response is sent, so bots (and
       // humans, if a bot UA ever overlaps) are never slowed down. Failures are
       // swallowed — analytics must never break a page.
