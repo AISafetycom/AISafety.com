@@ -3,10 +3,12 @@ import { Inter } from 'next/font/google'
 import Script from 'next/script'
 import { Suspense } from 'react'
 import './globals.css'
+import CardClicks from '@/components/CardClicks'
 import LayoutShell from '@/components/LayoutShell'
 import MatomoRouteTracker from '@/components/MatomoRouteTracker'
 import PreviewBanner from '@/components/PreviewBanner'
 import ScrollToHash from '@/components/ScrollToHash'
+import SelectionMenu from '@/components/SelectionMenu'
 import { fetchAllCounts } from '@/lib/data/counts'
 import { LIVE_SITE_HOSTS } from '@/lib/live-site'
 import { isPreviewRequest } from '@/lib/preview'
@@ -105,6 +107,8 @@ export default async function RootLayout({
         </Suspense>
         <LayoutShell counts={counts} preview={preview}>
           <ScrollToHash />
+          <CardClicks />
+          <SelectionMenu />
           {children}
         </LayoutShell>
         <PreviewBanner />
