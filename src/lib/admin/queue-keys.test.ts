@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   heldRepeat,
+  rulePopKey,
   shortcutAllowed,
   takesTyping,
   type KeyScene,
@@ -105,6 +106,46 @@ describe('shortcutAllowed', () => {
       'v',
     ]) {
       expect(shortcutAllowed(key, help)).toBe(false)
+    }
+  })
+})
+
+describe('rulePopKey', () => {
+  const idle = { rejecting: false, busy: false }
+  const reasons = { rejecting: true, busy: false }
+
+  it('A applies and R shows the reasons on an idle card', () => {
+    expect(rulePopKey('a', idle)).toEqual({ do: 'apply' })
+    expect(rulePopKey('r', idle)).toEqual({ do: 'reasons' })
+  })
+
+  it('a number picks a reason only while the reasons show', () => {
+    expect(rulePopKey('1', reasons)).toEqual({ do: 'reject', chip: 0 })
+    expect(rulePopKey('3', reasons)).toEqual({ do: 'reject', chip: 2 })
+    expect(rulePopKey('1', idle)).toEqual({ do: 'none' })
+    expect(rulePopKey('0', reasons)).toEqual({ do: 'none' })
+  })
+
+  it('A does not apply while the reasons show or a decision is on its way', () => {
+    expect(rulePopKey('a', reasons)).toEqual({ do: 'none' })
+    expect(rulePopKey('a', { rejecting: false, busy: true })).toEqual({
+      do: 'none',
+    })
+    expect(rulePopKey('1', { rejecting: true, busy: true })).toEqual({
+      do: 'none',
+    })
+  })
+
+  it('V views, Esc backs out, U and ? go on as usual', () => {
+    expect(rulePopKey('v', idle)).toEqual({ do: 'view' })
+    expect(rulePopKey('Escape', reasons)).toEqual({ do: 'back' })
+    expect(rulePopKey('u', idle)).toEqual({ do: 'pass' })
+    expect(rulePopKey('?', idle)).toEqual({ do: 'pass' })
+  })
+
+  it('every other key does nothing behind the card', () => {
+    for (const key of ['x', 'w', 'Tab', 'ArrowDown', 'Enter', 'g', 't', '/']) {
+      expect(rulePopKey(key, idle)).toEqual({ do: 'none' })
     }
   })
 })

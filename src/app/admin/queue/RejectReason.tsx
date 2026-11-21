@@ -14,8 +14,8 @@ import { useDictation } from './useDictation'
 // again puts the words in the box, Enter puts them in and rejects, Esc
 // throws the recording away. The Mac turns the recording into words
 // (~/Queue/dictate.py), so nothing goes to another service. Since 17 Nov
-// 2026 the words show in the box as he speaks, and holding ⌘ after ⌘D is
-// hold-to-talk.
+// 2026 the words show in the box as he speaks (only words that have stopped
+// changing, since 19 Nov 2026), and holding ⌘ after ⌘D is hold-to-talk.
 //
 // The box grows with what is in it (Bryce, 18 Nov 2026: "the text field
 // should expand if the text is too long"): wider first, up to the panel's

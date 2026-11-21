@@ -23,14 +23,6 @@
   opacity: 0.85;
 }
 
-/* A check that found nothing: one quiet line, so "checked and fine" reads
-   differently from "not checked yet". */
-.none {
-  margin: 0;
-  font-size: 12.5px;
-  color: var(--q-muted);
-}
-
 .flag {
   display: grid;
   gap: 4px;
