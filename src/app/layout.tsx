@@ -10,6 +10,7 @@ import PreviewBanner from '@/components/PreviewBanner'
 import ScrollToHash from '@/components/ScrollToHash'
 import SelectionMenu from '@/components/SelectionMenu'
 import { fetchAllCounts } from '@/lib/data/counts'
+import { LIVE_SITE_HOSTS } from '@/lib/live-site'
 import { isPreviewRequest } from '@/lib/preview'
 
 const inter = Inter({
@@ -62,36 +63,43 @@ export default async function RootLayout({
         />
         <Script id="matomo" strategy="afterInteractive">
           {`
-            var _paq = window._paq = window._paq || [];
-            _paq.push(["disableCookies"]);
-            // 'aisafety_no_track' mirrors OPTOUT_KEY in src/lib/analytics.ts —
-            // browsers opted out via the privacy page (or admin) send Matomo
-            // nothing, matching the first-party analytics behavior.
-            var noTrack = false;
-            try { noTrack = !!localStorage.getItem('aisafety_no_track'); } catch (e) {}
-            if (!noTrack) {
-              // An org's private page (/stats/<token>) goes in as '/stats',
-              // never its token (trackedPath in src/lib/analytics.ts).
-              if (location.pathname.indexOf('/stats/') === 0)
-                _paq.push(['setCustomUrl', location.origin + '/stats']);
-              // The same for a candidate's work test (/work-test/<token>).
-              if (location.pathname.indexOf('/work-test/') === 0)
-                _paq.push(['setCustomUrl', location.origin + '/work-test']);
-              // The newsletters page opened from an issue's "Manage
-              // subscriptions" link carries the reader's key in its
-              // #fragment (src/lib/newsletter-manage-link.ts): never send it.
-              if (location.pathname === '/newsletter')
-                _paq.push(['setCustomUrl', location.origin + '/newsletter']);
-              _paq.push(['trackPageView']);
-              _paq.push(['enableLinkTracking']);
+            // Only the live site loads Matomo (LIVE_SITE_HOSTS in
+            // src/lib/live-site.ts): dev servers and Vercel previews never
+            // fetch the script or send a hit. Without window._paq, the route
+            // tracker and the click events in src/lib/analytics.ts skip
+            // Matomo too.
+            if (${JSON.stringify(LIVE_SITE_HOSTS)}.indexOf(location.hostname) !== -1) {
+              var _paq = window._paq = window._paq || [];
+              _paq.push(["disableCookies"]);
+              // 'aisafety_no_track' mirrors OPTOUT_KEY in src/lib/analytics.ts —
+              // browsers opted out via the privacy page (or admin) send Matomo
+              // nothing, matching the first-party analytics behavior.
+              var noTrack = false;
+              try { noTrack = !!localStorage.getItem('aisafety_no_track'); } catch (e) {}
+              if (!noTrack) {
+                // An org's private page (/stats/<token>) goes in as '/stats',
+                // never its token (trackedPath in src/lib/analytics.ts).
+                if (location.pathname.indexOf('/stats/') === 0)
+                  _paq.push(['setCustomUrl', location.origin + '/stats']);
+                // The same for a candidate's work test (/work-test/<token>).
+                if (location.pathname.indexOf('/work-test/') === 0)
+                  _paq.push(['setCustomUrl', location.origin + '/work-test']);
+                // The newsletters page opened from an issue's "Manage
+                // subscriptions" link carries the reader's key in its
+                // #fragment (src/lib/newsletter-manage-link.ts): never send it.
+                if (location.pathname === '/newsletter')
+                  _paq.push(['setCustomUrl', location.origin + '/newsletter']);
+                _paq.push(['trackPageView']);
+                _paq.push(['enableLinkTracking']);
+              }
+              (function() {
+                var u="https://aisafety.matomo.cloud/";
+                _paq.push(['setTrackerUrl', u+'matomo.php']);
+                _paq.push(['setSiteId', '1']);
+                var d=document, g=d.createElement('script'), s=d.getElementsByTagName('script')[0];
+                g.async=true; g.src='https://cdn.matomo.cloud/aisafety.matomo.cloud/matomo.js'; s.parentNode.insertBefore(g,s);
+              })();
             }
-            (function() {
-              var u="https://aisafety.matomo.cloud/";
-              _paq.push(['setTrackerUrl', u+'matomo.php']);
-              _paq.push(['setSiteId', '1']);
-              var d=document, g=d.createElement('script'), s=d.getElementsByTagName('script')[0];
-              g.async=true; g.src='https://cdn.matomo.cloud/aisafety.matomo.cloud/matomo.js'; s.parentNode.insertBefore(g,s);
-            })();
           `}
         </Script>
         <Suspense fallback={null}>
