@@ -21,10 +21,12 @@ export const BUTTON_FILES = [
   'src/components/Button.module.css',
 ]
 
-/** Shared components: the design system's own pieces live here, and they
-    often need spacing no utility class has (Button's padding is 0 17px, 16px
-    plus its 1px border). So hand-written spacing and flex fail on pages but
-    stay notes in here. Melissa's call to change. */
+/** Shared components: the design system's own pieces live here, and they set
+    their own spacing and flex in their own CSS. So in here, spacing on the
+    scale (8px, 16px) and flex are allowed, and only spacing OFF the scale
+    (45px) fails. A deliberate odd value takes an exception comment: Button's
+    0 17px is one (17px plus its 1px border = Figma's 18px). Melissa, 21 Nov
+    2026: "for now allow that. including for when i used the 17px". */
 export const COMPONENTS = 'src/components/'
 
 /** The site's one breakpoint: `max-width: 991px` (and its other side,
@@ -462,19 +464,36 @@ function spacingClasses(d, ds) {
   return out.length ? [...new Set(out)].join(' ') : null
 }
 
-function spacingHint(d, ds, inPlainClass) {
+/** The lengths in a value that are off the spacing scale (an em counts as
+    off it; a negative step of the scale, as on it). */
+function offScale(value, ds) {
+  return lengthsIn(value).filter(
+    l => l.px === null || !ds.spacingScale.includes(Math.abs(l.px))
+  )
+}
+
+/** "45px is not on the spacing scale (…): use 40px or 56px." per length. */
+function offScaleNotes(value, ds) {
   const scale = ds.spacingScale
-  const parts = []
-  for (const l of lengthsIn(d.value)) {
-    if (l.px !== null && scale.includes(l.px)) continue
+  return offScale(value, ds).map(l => {
     const n = l.px === null ? NaN : Math.abs(l.px)
     const steps = [
       ...new Set([scale.findLast(s => s <= n), scale.find(s => s >= n)]),
     ].filter(s => s !== undefined)
-    parts.push(
-      `${l.text} is not on the spacing scale (${scale.join(', ')}px)${l.px > 0 && steps.length ? `: use ${steps.map(s => `${s}px`).join(' or ')}` : ''}.`
-    )
-  }
+    return `${l.text} is not on the spacing scale (${scale.join(', ')}px)${l.px > 0 && steps.length ? `: use ${steps.map(s => `${s}px`).join(' or ')}` : ''}.`
+  })
+}
+
+/** For a shared component, where only spacing off the scale fails. */
+function componentSpacingHint(value, ds) {
+  return [
+    ...offScaleNotes(value, ds),
+    'Shared components may set their own spacing, but only on the scale. If this value is deliberate (Button\'s 17px goes with its 1px border to make Figma\'s 18px), put a "style-check: allow spacing (reason)" comment above the line.',
+  ].join(' ')
+}
+
+function spacingHint(d, ds, inPlainClass) {
+  const parts = offScaleNotes(d.value, ds)
   const classes = spacingClasses(d, ds)
   parts.push(
     classes
@@ -630,7 +649,15 @@ export function checkCss(text, ds, file = '', knownClasses = new Set()) {
         failed.add(d)
         add('box-shadow', d.line, shown, shadowHint(ds), key)
       }
-      if (n.isAt || file.startsWith(COMPONENTS)) continue // see COMPONENTS
+      if (n.isAt) continue
+      if (file.startsWith(COMPONENTS)) {
+        // See COMPONENTS: only spacing off the scale fails in here.
+        if (SPACING_PROP.test(d.prop) && offScale(d.value, ds).length) {
+          failed.add(d)
+          add('spacing', d.line, shown, componentSpacingHint(d.value, ds), key)
+        }
+        continue
+      }
       if (SPACING_PROP.test(d.prop) && lengthsIn(d.value).length) {
         failed.add(d)
         add('spacing', d.line, shown, spacingHint(d, ds, inPlainClass), key)
@@ -866,6 +893,18 @@ export function checkTsx(text, ds, ts, file = '') {
             shown,
             spacingHint({ prop, value: spacingValue }, ds, true)
           )
+          continue
+        }
+        // In a shared component, inline spacing is held to the same rule as
+        // its CSS: on the scale is fine, off it fails (see COMPONENTS).
+        if (
+          !linesFail &&
+          SPACING_PROP.test(prop) &&
+          spacingValue &&
+          offScale(spacingValue, ds).length
+        ) {
+          reported.add(p.pos)
+          add('spacing', p, shown, componentSpacingHint(spacingValue, ds))
           continue
         }
         if (linesFail && literal && isFlexLine({ prop, value: literal })) {

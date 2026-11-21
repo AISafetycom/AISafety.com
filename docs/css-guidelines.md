@@ -290,22 +290,24 @@ Where to put new classes:
 
 **It fails** when a change adds any of these to a user-facing file:
 
-| What                                                                                                                                                   | Rule name          |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------ |
-| A hex, `rgb()` or `rgba()` color instead of `var(--…)`                                                                                                 | `hard-coded-color` |
-| A new CSS variable outside `globals.css`                                                                                                               | `new-variable`     |
-| `font-size`, `font-weight` or `font-family`                                                                                                            | `font`             |
-| A `box-shadow` written by hand (`var(--shadow…)` and `none` are fine)                                                                                  | `box-shadow`       |
-| An `@media` width other than 991px                                                                                                                     | `breakpoint`       |
-| A new class that is a copy of one `globals.css` class, or made only of utility classes                                                                 | `duplicate-class`  |
-| Hand-written spacing: any `px`, `rem` or `em` in a `padding`, `margin` or `gap` line, on the scale (`40px`) or off it (`45px`)                         | `spacing`          |
-| Hand-written flex: `display: flex`, `flex-direction`, `flex-wrap`, `justify-content` or `align-items`                                                  | `flex`             |
-| A color, font, shadow, spacing or flex line in an inline `style={…}`                                                                                   | `inline-style`     |
-| A class named like a button (`.submitButton`, `.cta-btn`), a `button { … }` selector, or an element using such a class, anywhere but `<Button>` itself | `styled-button`    |
+| What                                                                                                                                                       | Rule name          |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| A hex, `rgb()` or `rgba()` color instead of `var(--…)`                                                                                                     | `hard-coded-color` |
+| A new CSS variable outside `globals.css`                                                                                                                   | `new-variable`     |
+| `font-size`, `font-weight` or `font-family`                                                                                                                | `font`             |
+| A `box-shadow` written by hand (`var(--shadow…)` and `none` are fine)                                                                                      | `box-shadow`       |
+| An `@media` width other than 991px                                                                                                                         | `breakpoint`       |
+| A new class that is a copy of one `globals.css` class, or made only of utility classes                                                                     | `duplicate-class`  |
+| Hand-written spacing: any `px`, `rem` or `em` in a `padding`, `margin` or `gap` line, on the scale (`40px`) or off it (`45px`); in components, off it only | `spacing`          |
+| Hand-written flex: `display: flex`, `flex-direction`, `flex-wrap`, `justify-content` or `align-items`                                                      | `flex`             |
+| A color, font, shadow, spacing or flex line in an inline `style={…}`                                                                                       | `inline-style`     |
+| A class named like a button (`.submitButton`, `.cta-btn`), a `button { … }` selector, or an element using such a class, anywhere but `<Button>` itself     | `styled-button`    |
 
 Each message gives the file and line, and names the class, variable or component to use instead.
 
-Spacing and flex fail everywhere on pages, mobile overrides and `:hover` included: the spacing classes already shrink on mobile by themselves, and `.flex-col-mobile` stacks a row. A value off the scale (4, 8, 12, 16, 24, 32, 40, 56, 80, 104, 128, 192px) gets the nearest steps named. `0`, `auto` and computed values (an indent that grows with depth) are fine. In shared components (`src/components/`), hand-written spacing and flex are notes instead, since the design system's own pieces need some (`Button` has `padding: 0 17px`). Melissa decided on 20 November 2026 that these fail; the components exception is open for her.
+Spacing and flex fail everywhere on pages, mobile overrides and `:hover` included: the spacing classes already shrink on mobile by themselves, and `.flex-col-mobile` stacks a row. A value off the scale (4, 8, 12, 16, 24, 32, 40, 56, 80, 104, 128, 192px) gets the nearest steps named. `0`, `auto` and computed values (an indent that grows with depth) are fine. Melissa decided on 20 November 2026 that these fail.
+
+Shared components (`src/components/`) set their own spacing and flex, since they are the design system's own pieces. In there, flex and spacing on the scale (`gap: 8px`, `padding: 0 16px`) are fine, and only spacing off the scale (`45px`, `1.5em`) fails, in CSS and in an inline `style` alike. A deliberate odd value takes an exception (below). `Button`'s `padding: 0 17px` is one: with its 1px border it makes the 18px side padding in Figma. Melissa, 21 November 2026.
 
 **It adds a note, without failing,** for another hand-written line that has an exact utility class (a color or a cursor), for a class that rebuilds a bigger global class such as `.divider`, for a new raw `<button>`, and for a new variable in `globals.css`. These are notes because a class that really needs its own CSS often has one of these lines in it. A class made of nothing else fails, as above.
 

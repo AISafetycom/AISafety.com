@@ -205,21 +205,45 @@ describe('CSS rules', () => {
     ).not.toContain('flex')
   })
 
-  it('inside shared components, spacing and flex stay notes', () => {
-    const file = 'src/components/Tooltip.module.css'
+  it('inside shared components, spacing on the scale and flex are allowed', () => {
     const found = css(
-      '.tip { position: absolute; display: flex; gap: 8px; padding: 0 11px }',
-      file
+      '.pill {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  padding: 0 16px 0 4px;\n  margin-left: -8px;\n}',
+      'src/components/Pill.module.css'
     )
-    expect(rulesIn(found)).toEqual(['utility-available', 'utility-available'])
+    expect(rulesIn(found)).not.toContain('spacing')
+    expect(rulesIn(found)).not.toContain('flex')
     expect(
-      rulesIn(
-        tsx(
-          `export default function A() {\n  return <div style={{ marginTop: 45, display: 'flex' }} />\n}`,
-          'src/components/Tooltip.tsx'
-        )
+      tsx(
+        `export default function A() {\n  return <div style={{ marginTop: 16, display: 'flex' }} />\n}`,
+        'src/components/Tooltip.tsx'
       )
     ).toEqual([])
+  })
+
+  it('inside shared components, spacing off the scale fails', () => {
+    const found = css(
+      '.tip {\n  position: absolute;\n  padding: 0 11px;\n  margin-top: 1.5em;\n}',
+      'src/components/Tooltip.module.css'
+    )
+    expect(rulesIn(found)).toEqual(['spacing', 'spacing'])
+    expect(found.map(f => f.line)).toEqual([3, 4])
+    expect(found[0].hint).toContain('11px is not on the spacing scale')
+    expect(found[0].hint).toContain('use 8px or 12px')
+    expect(found[0].hint).toContain('style-check: allow spacing (reason)')
+    const inline = tsx(
+      `export default function A() {\n  return <div style={{ marginTop: 45 }} />\n}`,
+      'src/components/Tooltip.tsx'
+    )
+    expect(rulesIn(inline)).toEqual(['spacing'])
+    expect(inline[0].hint).toContain('use 40px or 56px')
+  })
+
+  it("an allow comment covers a component's deliberate odd spacing", () => {
+    const found = css(
+      ".button {\n  height: 48px;\n  /* style-check: allow spacing (17px + the 1px border = Figma's 18px) */\n  padding: 0 17px;\n}",
+      'src/components/Button.module.css'
+    )
+    expect(rulesIn(found)).toEqual(['exception'])
   })
 
   it('a class that rebuilds a bigger global class is a note', () => {
