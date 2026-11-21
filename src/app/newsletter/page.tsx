@@ -15,7 +15,7 @@ import NewsletterChooser from './NewsletterChooser'
 //
 // Each newsletter's own page (/newsletter/events, …) stays the one to link
 // for that newsletter; this one is for all of them, and the footer's
-// Newsletters heading leads here. Updates is a box to tick like the others
+// "All newsletters" link leads here. Updates is a box to tick like the others
 // since it moved from Substack (November 2026). A visitor is only offered
 // the newsletters whose signup forms exist in ActiveCampaign
 // (offeredNewsletters); a reader managing their own sees them all.
