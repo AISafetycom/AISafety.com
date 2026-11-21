@@ -176,6 +176,12 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   // press email link, 'jump' = one of the two entry buttons that glide down
   // the page), `label` says which one, `url` the file or mailto.
   'press_action',
+  // The menu that appears over text a visitor selects (SelectionMenu):
+  // `source` is what happened ('open' = the menu appeared, 'copy', or
+  // 'correction' / 'feedback' = that form was opened from it), `page` the
+  // path, and, when the text is on a listing's card, `label` the listing's
+  // name and `listingId` its record. Never carries the selected text.
+  'selection_menu',
   'chatbot_open',
   'chatbot_message',
   'chatbot_click',

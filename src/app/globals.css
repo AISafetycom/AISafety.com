@@ -893,6 +893,9 @@ label {
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+  /* Text a visitor selects and copies holds only what they can see, never
+     a screen-reader note like "(opens in new tab)". */
+  user-select: none;
 }
 
 /* Display */
