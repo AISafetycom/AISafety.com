@@ -43,16 +43,6 @@
   padding-bottom: 8px;
 }
 
-.pageLink {
-  color: var(--teal-300);
-  font-weight: 600;
-}
-
-.lastUpdated {
-  color: var(--teal-grey-300);
-  padding-top: 24px;
-}
-
 .footer {
   padding-top: 8px;
 }
