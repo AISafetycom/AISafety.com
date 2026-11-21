@@ -114,6 +114,10 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   // A visitor turning a filter value on (sidebar checkbox or dropdown option).
   // `source` is the filter group's title, `label` the value picked.
   'filter_apply',
+  // A visitor turning a filter value off again (unticking it, removing a city,
+  // or moving a range slider back to its full span). Same fields as
+  // filter_apply; `label` is the value switched off.
+  'filter_remove',
   // A click on a page's contribute buttons: the "Add a …" / "Suggest a
   // correction" rows or an extra action row. `source` slugs the button
   // ('add' | 'correction' | 'extra'), `label` is its visible text.
@@ -811,6 +815,9 @@ export interface DashboardData {
   /** Distinct visitors who turned on at least one filter on the selected page
    *  in range. */
   filterUsers: number
+  /** The selected page's filter removals per 'Group: Value' pair, ranked: how
+   *  often visitors switch a value off again (recorded since 20 Nov 2026). */
+  filterRemovals: Counted[]
   /** Per page with filter activity: distinct visitors who turned on at least
    *  one filter vs the page's distinct visitors. */
   filterShareByPage: VisitorShare[]
@@ -896,6 +903,9 @@ export interface DashboardData {
    *  Not the sum of the `filterGroupShare` rows — a visitor who used three
    *  filters counts once here. Null when no page is selected. */
   anyFilterShare: VisitorShare | null
+  /** Distinct visitors who switched ANY filter value off on `selectedPage` vs
+   *  the page's distinct visitors. Null when no page is selected. */
+  anyFilterRemoveShare: VisitorShare | null
   /** Contribute buttons' footer: distinct visitors who clicked ANY contribute
    *  button on `selectedPage` vs the page's distinct visitors. */
   anyContributeShare: VisitorShare | null
@@ -1002,6 +1012,8 @@ const EMPTY: Omit<DashboardData, 'source'> = {
   filterGroups: [],
   filterValues: [],
   filterUsers: 0,
+  filterRemovals: [],
+  anyFilterRemoveShare: null,
   filterShareByPage: [],
   clickShareByPage: [],
   contributeByPage: [],
@@ -1359,6 +1371,8 @@ type PageFields = Pick<
   | 'filterGroups'
   | 'filterValues'
   | 'filterUsers'
+  | 'filterRemovals'
+  | 'anyFilterRemoveShare'
   | 'listingShare'
   | 'anyListingShare'
   | 'positionShare'
@@ -2016,6 +2030,13 @@ function aggregatePage(
   const filterUsers = uniqueUsers(
     filterHits.filter(e => e.page === selectedPage)
   )
+  // Filter removals: a visitor switching a value off again. Same unique-mode
+  // dedupe as activations (one per visitor per group+value per day).
+  const removalHits = inRange.filter(
+    e => e.type === 'filter_remove' && e.page === selectedPage
+  )
+  const pageRemovals = unique ? uniqueFilterApplies(removalHits) : removalHits
+  const filterRemovals = tally(pageRemovals.map(filterValueName))
 
   // The selected page's own tables all share one "% of visitors" denominator:
   // that page's distinct page-view visitors. Rows are keyed exactly like the
@@ -2061,6 +2082,7 @@ function aggregatePage(
   const filterGroupShare = shareOnPage(pageFilters, filterGroupName)
   const filterValueShare = shareOnPage(pageFilters, filterValueName)
   const anyFilterShare = anyOnPage(pageFilters, 'Any filter')
+  const anyFilterRemoveShare = anyOnPage(removalHits, 'Any filter')
 
   const contributeButtons = tally(
     site.contributeClicks
@@ -2192,6 +2214,8 @@ function aggregatePage(
     filterGroups,
     filterValues,
     filterUsers,
+    filterRemovals,
+    anyFilterRemoveShare,
     listingShare,
     anyListingShare,
     positionShare,

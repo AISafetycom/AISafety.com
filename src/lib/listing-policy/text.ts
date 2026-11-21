@@ -42,6 +42,7 @@ These are real problems, they're just not what this site covers:
 - Bias and fairness, deepfakes, misinformation and AI persuasion, content moderation, surveillance, privacy and civil liberties, child safety, copyright, job displacement and the economic impact of AI, AI for good, and AI literacy about near-term harms.
 - Machine ethics and moral-reasoning evaluations, meaning work on whether models judge right and wrong, even when it is framed in alignment or x-risk terms. Work whose own subject is alignment or loss of control and that includes an ethics track is judged normally.
 - AI welfare, digital minds, AI consciousness, AI and animals.
+- "Better futures" work, meaning how well the future goes if humanity survives, even when some sessions cover x-risk. S-risk and gradual disempowerment still count.
 - General AI policy, AI diplomacy, and great-power competition or export controls framed as geopolitics.
 - Tracking AI capabilities or the economics of AI without any safety work.
 - Enterprise AI security, AI for cybersecurity, adversarial ML without a safety motivation, and general tech, startup, or venture activity.
@@ -52,7 +53,7 @@ Advancing capabilities counts against a listing. The map shows the major AI comp
 
 ## What's the bar for the page I submitted to?
 
-Each page adds its own bar, and seriousness is a separate gate: on topic isn't the same as ready. If the only public link is an application form, with nothing that describes the program, that counts a little against it.
+Each page adds its own bar, and seriousness is a separate gate: on topic isn't the same as ready. If the only public link is an application form, with nothing that describes the program, that counts a little against it. A form that describes the program in detail counts as its page when we can check who runs it.
 
 **/map** – the field map of key organizations, programs, and projects.
 - The bar is higher here than for any of our other pages.
@@ -73,31 +74,35 @@ Each page adds its own bar, and seriousness is a separate gate: on topic isn't t
 - The event's own page needs to be finished. A placeholder page ("more info coming", a one-line description) isn't ready to list. Suggest it again once the page is done.
 - Protests: a movement's major or coordinated protests are listed, not a local chapter's own small protest.
 - A community's first meetup can be listed. Its later meetups and socials are covered by the community's own listing.
-- The same goes for a regular reading group. We list its first session only, even when a later week's reading is about x-risk.
+- A regular reading group is listed once, and it doesn't have to be its first session. Later sessions are covered by that listing, even when a week's reading is about x-risk. A community's reading group gets this one listing on top of its first meetup.
 - We also look at the care in an event's own materials – wrong or inconsistent details count against it, and an informal event from a group we don't already list has more to prove.
+- Beyond the rules above, small size alone doesn't hold back an on-topic event. It only counts alongside another problem, such as careless materials.
 
 **/training** – fellowships, courses, bootcamps, immersive workshops.
 - If it's really a job (a manager, an open-ended role, or a single position on a careers page), it belongs on /jobs, not here.
 - A salary alone doesn't make it a job. A research residency people apply to in intake rounds, where residents pursue their own research for a fixed term, is listed here even when paid.
 - Expression-of-interest programs are too early.
 - So is a program with no dates yet. A confirmed cohort whose applications open later can be listed, but only once it has a start date, an end date, or an application deadline.
+- A call for mentors isn't a listing on its own. If the program's participant round has dates, we list that round instead, even before its applications open.
 - Individual projects or streams within a larger program aren't listed, only the round itself.
 - Rationalist or effective altruism programs that aren't labeled AI safety can be listed if the link to the field is real.
+- A student group's small program can be listed when people outside the group can apply.
 - Standing programs live under the Recurring tab, but each new cohort generally still gets its own dated listing. Courses that re-run every few weeks are the exception: only the first cohort gets a dated listing, and the Recurring entry covers the rest.
-- A program earns a Recurring listing once it has at least two rounds run or announced. One finished round plus an announced next round is enough. A first round on its own gets a dated listing only.
+- A program can earn a Recurring listing once it has at least two rounds run or announced. One finished round plus an announced next round counts. A first round on its own gets a dated listing only.
+- Two rounds aren't enough alone. A Recurring listing also needs a program run at a professional level, so a university group's program has its rounds listed one at a time.
 
 **/funding** – funders, grant programs, and funding platforms.
 - The funder must explicitly and demonstrably fund AI x-risk work. Theoretical openness doesn't count, so general funders are out, though their dedicated safety programs are listed.
-- Cash only, no API credits or compute.
+- Cash only, no API credits or compute. The money has to be the main offer. A small stipend alongside engineering time or compute isn't funding.
 - A micro-grant for one narrow task isn't listed, such as a few thousand dollars to write one report on the funder's own project. Small grants for any in-scope work are fine, and so is a well-funded call on a single topic.
-- Fellowships where you do the work as part of a program go on /training. A grant-style one (a stipend, no employer) can go here.
+- Fellowships where you do the work as part of a program go on /training. A grant-style one (a stipend you can live or work on, no employer) can go here.
 - Funders that are closed for now or invitation-only stay on the page, flagged as not accepting.
 
 **/communities** – local and online groups people can join.
 - A group needs its own joinable space (e.g. a channel in someone else's server doesn't count).
 - The main question is whether the group addresses x-risk: a multi-cause group where x-risk is only a sliver doesn't clear it.
 - Being new isn't held against you, nor is being national. A group that hasn't held its first meetup yet can still be listed, and a site that calls itself pre-launch isn't a strike.
-- We look for a real organizer, a home people can find (a site, a join link, or an open discussion space), and x-risk framing there. A group whose only footprint is a few event pages and a LinkedIn page is marginal but likely to be accepted.
+- We look for a home people can find (a site, a join link, or an open discussion space) and x-risk framing there. The bar here is low, so a thin site that doesn't name an organizer can still be listed. A group whose only footprint is a few event pages and a LinkedIn page is marginal but likely to be accepted.
 - A listed network's chapters are covered by the parent listing.
 - Coworking hubs go here, not on /map, although one that also runs its own programs can earn a /map entry too.
 
@@ -115,6 +120,7 @@ Each page adds its own bar, and seriousness is a separate gate: on topic isn't t
 
 **/founders** – incubators, accelerators, fiscal sponsors, venture funds, and tools for starting an AI safety organization.
 - Cause-general ones qualify if the organization addresses AI x-risk.
+- A directory that mostly lists what our own pages already cover (founder programs, funders, events) isn't added.
 
 **/advisors** – advising services: mostly career and contribution advice, plus some coaching and operational support.
 - Advisers are people you can talk to. An AI chatbot or automated advice tool isn't listed, however good the organization behind it.
@@ -134,7 +140,7 @@ Sometimes that's a fair point.
 - Many calls are close.
 - Some listings predate today's bar, which keeps sharpening.
 - A few are deliberate one-off exceptions.
-- We make mistakes. We're a small nonprofit with 1.5 salaried employees.
+- We make mistakes. We're a small nonprofit with 1.25 salaried employees.
 
 An existing listing isn't a guarantee, and we review and remove listings often.
 
@@ -144,5 +150,5 @@ An existing listing isn't a guarantee, and we review and remove listings often.
 - **Tell us if we misread you.** If we missed x-risk work on your site or picked the wrong page, show us where. Reply to our email or use the "Send us an email" button.
 - **Suggest a correction.** If you think another listing shouldn't be there, use "Suggest correction" on that page and say why.
 
-Last updated: 30 October 2026
+Last updated: 17 November 2026
 `

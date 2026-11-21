@@ -1,4 +1,9 @@
-import { canReviewQueue, requireAccess } from '@/lib/admin/auth'
+import {
+  canEditMap,
+  canReviewQueue,
+  currentAdmin,
+  requireAccess,
+} from '@/lib/admin/auth'
 import QueueAdmin from './QueueAdmin'
 
 // Nothing here is prerendered: the page reads the queue live in the browser
@@ -11,5 +16,14 @@ export default async function QueueAdminPage() {
   await requireAccess('queue')
   // View-only sessions get the same page without the deciding parts; the
   // API refuses their writes regardless.
-  return <QueueAdmin canEdit={await canReviewQueue()} />
+  // The name this person's decisions are kept under (queue-history.ts), so
+  // the page can tell their own from someone else's.
+  const me = await currentAdmin()
+  return (
+    <QueueAdmin
+      canEdit={await canReviewQueue()}
+      canMoveMap={await canEditMap()}
+      me={me?.name || me?.email || null}
+    />
+  )
 }

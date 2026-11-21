@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   fableChangesOf,
   wentOut,
@@ -17,6 +17,15 @@ import Icon from '@/components/Icon'
 import type { AgentInfo, QueueItem } from '@/lib/admin/queue'
 import { reviewNewerThanChat } from '@/lib/admin/queue-reopen'
 import { insertDictated, isDictationKey } from '@/lib/admin/queue-dictation'
+import {
+  markdownOf,
+  parseInline,
+  parseMarkdown,
+  plainText,
+  type Block,
+  type DomNode,
+  type Inline,
+} from '@/lib/admin/queue-markdown'
 import styles from './queue.module.css'
 import { useDictation } from './useDictation'
 
@@ -63,6 +72,13 @@ interface Pending {
   size: number
   /** An object URL for the thumbnail (pictures only). */
   url?: string
+}
+
+/** A message the Mac is holding until the replies before it are done. */
+interface Held {
+  text: string
+  at: string
+  attachments?: Attachment[]
 }
 
 const MAX_FILES = 8
@@ -294,9 +310,6 @@ export interface Decided {
   /** The reply draft that went with the decision; null when none did. */
   reply: string | null
 }
-const LINK_RE = /https?:\/\/[^\s<>)\]]+/g
-const INLINE_RE = /(\*\*[^*\n]+\*\*|`[^`\n]+`|https?:\/\/[^\s<>)\]]+)/g
-const BULLET_RE = /^\s*(?:[-•*]|\d+[.)])\s+/
 
 /** The Description length cap for the item's page – the numbers in
  *  ~/Comb/description-rules.md section 1 (events and training 150–220,
@@ -378,7 +391,8 @@ export default function Chat({
 }) {
   // null while the history is loading
   const [messages, setMessages] = useState<Msg[] | null>(null)
-  // The Mac is still answering a message sent earlier (page reloaded).
+  // The Mac is still answering a message sent earlier (page reloaded), or
+  // is holding messages it has yet to answer.
   const [pending, setPending] = useState(false)
   // The reply being streamed now.
   const [live, setLive] = useState<Part[] | null>(null)
@@ -397,12 +411,19 @@ export default function Chat({
   const [quote, setQuote] = useState<string | null>(
     () => draftOf(item.id)?.quote ?? null
   )
-  // Messages typed while Fable was still answering. Sending one stops the
-  // reply being written (the Mac kills that call; what it wrote stays, with
-  // a note) and this goes as soon as its stream ends – like the Claude Code
-  // app (Bryce, 15 Sept 2026: "make it interrupt it"). Several in a row go
-  // in order.
+  // Messages typed while Fable was still answering wait their turn: the
+  // reply being written is finished first, and each waiting message goes
+  // as soon as the one before it has been answered, in order – like the
+  // Claude Code app (Bryce, 18 Nov 2026: "sending another message should
+  // behave just like in Claude Code, where the previous message gets
+  // answered first"). From 15 Sept 2026 until then a new message stopped
+  // the reply being written. Only Stop stops a reply now.
   const [queued, setQueued] = useState<{ text: string; files: Pending[] }[]>([])
+  // Waiting messages the Mac is holding: sent to it while it was still
+  // answering (the panel closed with messages waiting, or another window
+  // sent one). It answers them by itself, in order, and they come before
+  // the ones still waiting on this page.
+  const [held, setHeld] = useState<Held[]>([])
   // Files waiting to go with the next message, and whether one is being
   // dragged over the panel right now.
   const [files, setFiles] = useState<Pending[]>(
@@ -626,6 +647,7 @@ export default function Chat({
       error?: string
       messages?: Msg[]
       pending?: boolean
+      waiting?: Held[]
     }
     if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
     const list = data.messages ?? []
@@ -651,6 +673,14 @@ export default function Chat({
     loadedRef.current = true
     setMessages(list)
     setPending(Boolean(data.pending))
+    // An older helper on the Mac sends no waiting list.
+    setHeld(
+      Array.isArray(data.waiting)
+        ? data.waiting.filter(
+            w => w && typeof w.text === 'string' && typeof w.at === 'string'
+          )
+        : []
+    )
     return { list, pending: Boolean(data.pending) }
   }, [call, markSeen])
 
@@ -729,7 +759,7 @@ export default function Chat({
     box.scrollTop = box.scrollHeight
     // Only the opening reads the item: a list refresh must not scroll.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, live, note, queued])
+  }, [messages, live, note, queued, held])
 
   // Select words anywhere in the panel (Fable's verdict included) and a
   // Reply button appears by them; it quotes them into the next message,
@@ -739,7 +769,8 @@ export default function Chat({
     const read = () => {
       const box = inputRef.current?.closest<HTMLElement>('[data-chat-scroll]')
       const sel = window.getSelection()
-      const picked = sel?.toString().trim() ?? ''
+      // As Markdown, so a quoted link keeps its address (quoteOf).
+      const picked = sel ? quoteOf(sel) : ''
       if (
         !box ||
         !sel ||
@@ -900,8 +931,8 @@ export default function Chat({
   }
 
   /** Enter: what was typed goes now; while Fable is still answering it
-   *  stops that reply and goes right after (the Mac takes one message per
-   *  item at a time). */
+   *  waits its turn and goes when that reply is done (the Mac takes one
+   *  message per item at a time). */
   const submit = (typedText: string = text) => {
     const typed = typedText.trim()
     if (!typed && !quote && files.length === 0) return
@@ -915,10 +946,9 @@ export default function Chat({
     setFiles([])
     if (inputRef.current) inputRef.current.style.height = 'auto'
     if (busy || pending) {
+      // The reply being written carries on; the effect below sends this
+      // one when it ends.
       setQueued(q => [...q, { text: msg, files: going }])
-      // The Mac stops the call being written; its stream ends with what
-      // was written so far, and the effect below sends this one.
-      void call('/chat/interrupt', {}).catch(() => {})
       return
     }
     void deliver(msg, going)
@@ -945,15 +975,13 @@ export default function Chat({
     setError(null)
     setBusy(true)
     const sent = asSent(going)
-    setMessages(m => [
-      ...(m ?? []),
-      {
-        role: 'you',
-        text: msg,
-        at: new Date().toISOString(),
-        ...(sent.length ? { attachments: sent } : {}),
-      },
-    ])
+    const mine: Msg = {
+      role: 'you',
+      text: msg,
+      at: new Date().toISOString(),
+      ...(sent.length ? { attachments: sent } : {}),
+    }
+    setMessages(m => [...(m ?? []), mine])
     seenRef.current = (seenRef.current ?? 0) + 1
     setLive([])
     // Every reply ends with a done or error event; a stream that stops
@@ -974,6 +1002,32 @@ export default function Chat({
         '/chat',
         attachments.length ? { message: msg, attachments } : { message: msg }
       )
+      if (res.status === 202) {
+        // The Mac was still answering, or holds earlier messages: it keeps
+        // this one and answers it in turn. It is on the Mac's waiting list
+        // now, not in the thread, so the copy put there above comes back
+        // out and the thread is read again (the pending poll then lands
+        // the replies as they finish).
+        const data = (await res.json().catch(() => ({}))) as { at?: string }
+        setMessages(m => (m ?? []).filter(x => x !== mine))
+        seenRef.current = Math.max(0, (seenRef.current ?? 1) - 1)
+        setLive(null)
+        setNote(null)
+        try {
+          await loadHistory()
+        } catch {
+          setHeld(h => [
+            ...h,
+            {
+              text: msg,
+              at: data.at ?? mine.at,
+              ...(sent.length ? { attachments: sent } : {}),
+            },
+          ])
+          setPending(true)
+        }
+        return
+      }
       if (!res.ok || !res.body) {
         const data = (await res.json().catch(() => ({}))) as { error?: string }
         throw new Error(data.error ?? `HTTP ${res.status}`)
@@ -1020,8 +1074,8 @@ export default function Chat({
   }
 
   // The next waiting message goes the moment the reply before it ends –
-  // stopped or finished (or the Mac finishes one it was still writing after
-  // a reload).
+  // finished or stopped with Stop – and the Mac has none of its own left
+  // to answer (one it was still writing after a reload, or ones it holds).
   const deliverRef = useRef(deliver)
   deliverRef.current = deliver
   const queuedRef = useRef(queued)
@@ -1035,40 +1089,46 @@ export default function Chat({
   }, [busy, pending, queued])
 
   // Messages still waiting when the panel closes – Bryce moved to another
-  // item before the stopped reply ended – go anyway, as one message. The Mac
-  // answers in the background and the item shows under "Fable chats".
-  // Before, they were thrown away, and the reply they had stopped was never
-  // answered (8 Oct 2026, Mexico Tech Policy Panel).
+  // item before the reply ahead of them ended – go to the Mac anyway, each
+  // as its own message and in order. The Mac holds them (202) until that
+  // reply is done, answers them in the background, and the item shows
+  // under "Fable chats". Before 8 Oct 2026 they were thrown away (Mexico
+  // Tech Policy Panel); until 18 Nov 2026 they went as one joined message.
   const callRef = useRef(call)
   callRef.current = call
   useEffect(
     () => () => {
       const waiting = queuedRef.current
       if (waiting.length === 0) return
-      const msg = waiting
-        .map(q => q.text)
-        .filter(Boolean)
-        .join('\n\n')
-      const going = waiting.flatMap(q => q.files)
       void (async () => {
-        const attachments = await Promise.all(
-          going.map(async f => ({
-            name: f.name,
-            type: f.type,
-            data: await base64Of(f.file),
-          }))
-        )
-        const res = await callRef.current(
-          '/chat',
-          attachments.length ? { message: msg, attachments } : { message: msg }
-        )
-        if (!res.ok) {
-          console.warn(
-            `Queue chat: a waiting message was not taken (HTTP ${res.status})`
+        for (const q of waiting) {
+          const attachments = await Promise.all(
+            q.files.map(async f => ({
+              name: f.name,
+              type: f.type,
+              data: await base64Of(f.file),
+            }))
           )
+          const body = attachments.length
+            ? { message: q.text, attachments }
+            : { message: q.text }
+          let res = await callRef.current('/chat', body)
+          if (res.status === 409) {
+            // A helper on the Mac from before 18 Nov 2026 takes no message
+            // while it answers: it stops that reply and answers both, as
+            // it always did.
+            await callRef.current('/chat/interrupt', {}).catch(() => {})
+            res = await callRef.current('/chat', body)
+          }
+          if (!res.ok) {
+            console.warn(
+              `Queue chat: a waiting message was not taken (HTTP ${res.status})`
+            )
+          }
+          // A 200 is the reply's stream: the Mac keeps answering after the
+          // page lets go of it. A 202 is the Mac holding the message.
+          await res.body?.cancel()
         }
-        // The Mac keeps answering after the page lets go of the stream.
-        await res.body?.cancel()
       })().catch(e => {
         console.warn('Queue chat: a waiting message did not reach the Mac', e)
       })
@@ -1082,6 +1142,9 @@ export default function Chat({
   // words in the box, Enter puts them in and sends, Esc throws them away.
   // The Mac turns the recording into words (~/Queue/dictate.py), so they
   // are as good as its Whisper model and nothing goes to another service.
+  // Since 17 Nov 2026 the words show in the box as he speaks (the box is
+  // read-only meanwhile), and holding ⌘ after ⌘D is hold-to-talk. Since 19
+  // Nov 2026 only words that have stopped changing show (see useDictation).
   const textRef = useRef(text)
   textRef.current = text
   const submitRef = useRef(submit)
@@ -1091,12 +1154,24 @@ export default function Chat({
     text: string
     retry?: () => void
   } | null>(null)
+  // The box as it was when dictation started, and where the words go.
+  const liveAt = useRef<{ text: string; from: number; to: number } | null>(null)
+  const markStart = () => {
+    const el = inputRef.current
+    const now = textRef.current
+    liveAt.current =
+      el && document.activeElement === el
+        ? { text: now, from: el.selectionStart, to: el.selectionEnd }
+        : { text: now, from: now.length, to: now.length }
+  }
   const dictation = useDictation({
     meterRef: micRef,
-    transcribe: async audio => {
+    transcribe: async (audio, { context, partial }) => {
       const res = await call('/chat/dictate', {
         audio: await base64Of(audio),
         type: audio.type,
+        context,
+        partial,
       })
       const data = (await res.json().catch(() => ({}))) as {
         text?: string
@@ -1105,24 +1180,56 @@ export default function Chat({
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
       return data.text ?? ''
     },
+    warm: () => {
+      call('/chat/dictate', { warm: true }).catch(e =>
+        console.warn('Queue chat: the Mac did not get dictation ready', e)
+      )
+    },
+    onLive: words => {
+      const at = liveAt.current
+      if (!at) return
+      if (!words) liveAt.current = null
+      if (!mountedRef.current) {
+        // Gone to another item: its draft may hold the words so far.
+        if (!words) {
+          const d = draftOf(item.id)
+          saveDraft(item.id, at.text, d?.quote ?? null)
+        }
+        return
+      }
+      const next = words
+        ? insertDictated(at.text, at.from, at.to, words)
+        : { text: at.text, caret: at.to }
+      setText(next.text)
+      requestAnimationFrame(() => {
+        const box = inputRef.current
+        if (!box) return
+        box.setSelectionRange(next.caret, next.caret)
+        grow(box)
+      })
+    },
     onWords: (words, send) => {
       setHeard(null)
+      const at = liveAt.current
+      liveAt.current = null
       if (!mountedRef.current) {
         // Bryce moved to another item while it listened: the words wait in
-        // this item's draft.
+        // this item's draft, in place of the words so far.
         const d = draftOf(item.id)
-        const was = d?.text ?? ''
+        const was = at?.text ?? d?.text ?? ''
+        const [from, to] = at ? [at.from, at.to] : [was.length, was.length]
         saveDraft(
           item.id,
-          insertDictated(was, was.length, was.length, words).text,
+          insertDictated(was, from, to, words).text,
           d?.quote ?? null
         )
         return
       }
       const el = inputRef.current
-      const now = textRef.current
-      const [from, to] =
-        el && document.activeElement === el
+      const now = at?.text ?? textRef.current
+      const [from, to] = at
+        ? [at.from, at.to]
+        : el && document.activeElement === el
           ? [el.selectionStart, el.selectionEnd]
           : [now.length, now.length]
       const next = insertDictated(now, from, to, words)
@@ -1143,10 +1250,15 @@ export default function Chat({
   })
   const listening =
     dictation.state === 'listening' || dictation.state === 'starting'
-  const toggleDictation = () => {
+  /** The mic (`key` false) or ⌘D (`key` true, which can be held to talk). */
+  const toggleDictation = (key = false) => {
     setHeard(null)
-    if (dictation.state === 'off') inputRef.current?.focus()
-    dictation.toggle()
+    if (dictation.state === 'off') {
+      inputRef.current?.focus()
+      markStart()
+    }
+    if (key) dictation.press()
+    else dictation.toggle()
   }
   const toggleRef = useRef(toggleDictation)
   toggleRef.current = toggleDictation
@@ -1158,17 +1270,18 @@ export default function Chat({
       if (e.defaultPrevented || !isDictationKey(e, mac)) return
       // Not the browser's bookmark (Cmd+D).
       e.preventDefault()
-      if (!e.repeat) toggleRef.current()
+      if (!e.repeat) toggleRef.current(true)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [dictate])
 
   // Stop: the Mac kills the reply being written and keeps what it wrote,
-  // with "You stopped this reply" under it. Nothing new is coming, so it
-  // does not answer the stopped message later either (Bryce, 24 Oct 2026:
-  // "The fable chat should have a stop button"). Messages waiting to go
-  // still go – each has its own Remove.
+  // with "You stopped this reply" under it, and does not answer the stopped
+  // message later either (Bryce, 24 Oct 2026: "The fable chat should have
+  // a stop button"). It is the only thing that stops a reply: a new message
+  // waits its turn. Messages waiting to go still go, in order – each has
+  // its own Remove.
   const [stopping, setStopping] = useState(false)
   useEffect(() => {
     if (!busy && !pending) setStopping(false)
@@ -1187,6 +1300,25 @@ export default function Chat({
     setError(`Could not stop Fable – ${why}`)
   }
 
+  /** Remove on a message the Mac is holding: it comes off the Mac's list.
+   *  One the Mac has just started answering is in the thread by then, and
+   *  the re-read shows it there. */
+  const unqueue = async (at: string) => {
+    try {
+      const res = await call('/chat/unqueue', { at })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setHeld(h => h.filter(x => x.at !== at))
+      setError(null)
+    } catch (e) {
+      const why =
+        e instanceof Error && e.message.startsWith('HTTP')
+          ? e.message
+          : 'the Mac agent did not answer.'
+      setError(`Could not remove it – ${why}`)
+    }
+    await loadHistory().catch(() => {})
+  }
+
   const startOver = async () => {
     if (busy || pending) return
     try {
@@ -1194,6 +1326,7 @@ export default function Chat({
       if (res.ok) {
         setMessages([])
         setQueued([])
+        setHeld([])
       }
     } catch {
       setError('The Mac agent did not answer.')
@@ -1220,6 +1353,18 @@ export default function Chat({
 
   const thread = messages ?? []
   const hasThread = thread.length > 0 || live !== null
+  // Something in the box to send: while Fable answers, the round button is
+  // then Send rather than Stop.
+  const hasDraft = text.trim() !== '' || quote !== null || files.length > 0
+  /** Enter, or the Send button. While it listens the words go in first,
+   *  then it sends; still asking for the microphone, what is typed goes. */
+  const send = () => {
+    if (dictation.state === 'off') submit()
+    else if (dictation.state === 'starting') {
+      dictation.finish('cancel')
+      submit()
+    } else if (!dictation.finish('send')) submit()
+  }
 
   return (
     <div
@@ -1291,12 +1436,32 @@ export default function Chat({
               Fable is still answering an earlier message…
             </p>
           )}
+          {held.map(h => (
+            <div
+              key={`h${h.at}`}
+              className={`${styles.chatMsg} ${styles.chatQueued}`}
+            >
+              <span className={styles.chatWho}>You · waiting</span>
+              <YouText
+                text={h.text}
+                attachments={h.attachments}
+                fetchFile={fetchFile}
+              />
+              <button
+                type="button"
+                className={styles.chatLink}
+                onClick={() => void unqueue(h.at)}
+              >
+                Remove
+              </button>
+            </div>
+          ))}
           {queued.map((q, i) => (
             <div
               key={`q${i}`}
               className={`${styles.chatMsg} ${styles.chatQueued}`}
             >
-              <span className={styles.chatWho}>You · sending</span>
+              <span className={styles.chatWho}>You · waiting</span>
               <YouText text={q.text} attachments={asSent(q.files)} />
               <button
                 type="button"
@@ -1325,7 +1490,9 @@ export default function Chat({
       <div className={styles.chatInputRow}>
         {quote && (
           <div className={styles.chatQuoteChip}>
-            <span className={styles.chatQuoteText}>{quote}</span>
+            <span className={styles.chatQuoteText}>
+              {drawInline(parseInline(quote))}
+            </span>
             <button
               type="button"
               className={styles.chatQuoteX}
@@ -1382,6 +1549,9 @@ export default function Chat({
                         : 'Ask Fable, or say what should change…'
             }
             value={text}
+            // The words show here as he speaks; typing would land in the
+            // middle of them.
+            readOnly={dictate && dictation.state !== 'off'}
             onChange={e => setText(e.target.value)}
             onInput={e => grow(e.currentTarget)}
             onPaste={e => {
@@ -1393,21 +1563,9 @@ export default function Chat({
               }
             }}
             onKeyDown={e => {
-              if (
-                e.key === 'Enter' &&
-                !e.shiftKey &&
-                dictation.state !== 'off'
-              ) {
-                // Enter while it listens: the words go in, then it sends.
+              if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
-                if (dictation.state === 'starting') {
-                  // Still asking for the microphone: send what is typed.
-                  dictation.finish('cancel')
-                  submit()
-                } else if (!dictation.finish('send')) submit()
-              } else if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                submit()
+                send()
               } else if (e.key === 'Escape' && listening) {
                 e.preventDefault()
                 e.stopPropagation()
@@ -1448,7 +1606,7 @@ export default function Chat({
               disabled={dictation.state === 'transcribing'}
               // The box keeps the cursor, so the words go where it is.
               onMouseDown={e => e.preventDefault()}
-              onClick={toggleDictation}
+              onClick={() => toggleDictation()}
             >
               {dictation.state === 'transcribing' ? (
                 <span className={styles.chatMicBusy} />
@@ -1468,23 +1626,49 @@ export default function Chat({
           >
             <Icon src="/images/icons/paperclip.svg" size={16} />
           </button>
-          {(busy || pending) && (
-            <button
-              type="button"
-              className={styles.chatStop}
-              aria-label="Stop Fable"
-              title={stopping ? 'Stopping…' : 'Stop Fable'}
-              disabled={stopping}
-              onClick={() => void stop()}
-            >
-              <span className={styles.chatStopSquare} />
-            </button>
-          )}
+          {/* While Fable answers: Send when there is something to send
+              (it waits its turn), Stop when the box is empty – as in the
+              Claude Code app. Until 18 Nov 2026 it was always Stop, and a
+              click meant to send a typed message stopped the reply. */}
+          {(busy || pending) &&
+            (hasDraft ? (
+              <button
+                type="button"
+                className={styles.chatSend}
+                aria-label="Send"
+                title="Send – Fable answers it after this reply"
+                // The box keeps the cursor for the next message.
+                onMouseDown={e => e.preventDefault()}
+                onClick={send}
+              >
+                <Icon src="/images/icons/arrow-up.svg" size={16} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                className={styles.chatStop}
+                aria-label="Stop Fable"
+                title={stopping ? 'Stopping…' : 'Stop Fable'}
+                disabled={stopping}
+                onClick={() => void stop()}
+              >
+                <span className={styles.chatStopSquare} />
+              </button>
+            ))}
         </div>
         {dictation.state === 'listening' && (
           <p className={styles.chatDictating}>
-            <kbd>⌘D</kbd> puts the words in · <kbd>Enter</kbd> sends ·{' '}
-            <kbd>Esc</kbd> cancels
+            {dictation.holding ? (
+              <>
+                Let go of <kbd>⌘</kbd> to put the words in · <kbd>Esc</kbd>{' '}
+                cancels
+              </>
+            ) : (
+              <>
+                <kbd>⌘D</kbd> puts the words in · <kbd>Enter</kbd> sends ·{' '}
+                <kbd>Esc</kbd> cancels
+              </>
+            )}
           </p>
         )}
         {heard && (
@@ -1513,7 +1697,11 @@ export default function Chat({
           // its height while Fable answers (the box looked cut off at the
           // bottom edge without it – Bryce, 15 Sept 2026).
           <div className={styles.chatHint}>
-            <span>{queued.length > 0 ? `${queued.length} waiting` : ''}</span>
+            <span>
+              {held.length + queued.length > 0
+                ? `${held.length + queued.length} waiting`
+                : ''}
+            </span>
             {!busy && !pending && (
               <button
                 type="button"
@@ -1552,8 +1740,10 @@ function YouText({
   return (
     <div className={styles.chatYou}>
       {quoted.length > 0 && (
+        // His quote of the panel is Markdown (quoteOf): its links, bold
+        // and code show as they did where he picked them.
         <blockquote className={styles.chatQuoteBlock}>
-          {quoted.join('\n')}
+          {drawInline(parseInline(quoted.join('\n')))}
         </blockquote>
       )}
       {rest}
@@ -2140,122 +2330,154 @@ function CardFoot({
   )
 }
 
-/** Just enough markdown: paragraphs, bullet lists, fenced code, **bold**,
- *  `code`, links. Fable writes short replies; anything fancier shows as
- *  text. */
+/** Fable's Markdown, drawn. queue-markdown.ts reads it (and says what a
+ *  link may be); this only turns its blocks into the panel's own lean
+ *  elements: a heading is a bold line, a table is plain rows. Until 18 Nov
+ *  2026 a link with a label, a numbered list, a quote or a table showed as
+ *  typed (Bryce: "please make Markdown come through properly, like
+ *  links"). */
 function Markdown({ text }: { text: string }) {
-  const blocks: React.ReactNode[] = []
-  const lines = text.split('\n')
-  let para: string[] = []
-  let list: string[] = []
-  let code: string[] | null = null
-  let n = 0
-  const flushPara = () => {
-    if (para.length) {
-      blocks.push(
-        <p key={n++}>
-          {para.map((l, i) => (
-            <span key={i}>
-              {i > 0 && <br />}
-              {inline(l)}
-            </span>
-          ))}
-        </p>
-      )
-      para = []
-    }
-  }
-  const flushList = () => {
-    if (list.length) {
-      blocks.push(
-        <ul key={n++}>
-          {list.map((l, i) => (
-            <li key={i}>{inline(l)}</li>
-          ))}
-        </ul>
-      )
-      list = []
-    }
-  }
-  for (const raw of lines) {
-    if (code !== null) {
-      if (raw.trim().startsWith('```')) {
-        blocks.push(
-          <pre key={n++} className={styles.chatPre}>
-            {code.join('\n')}
-          </pre>
-        )
-        code = null
-      } else {
-        code.push(raw)
-      }
-      continue
-    }
-    const line = raw.replace(/\s+$/, '')
-    if (line.trim().startsWith('```')) {
-      flushPara()
-      flushList()
-      code = []
-    } else if (line.trim() === '') {
-      flushPara()
-      flushList()
-    } else if (BULLET_RE.test(line)) {
-      flushPara()
-      list.push(line.replace(BULLET_RE, ''))
-    } else if (/^#{1,4}\s/.test(line)) {
-      flushPara()
-      flushList()
-      blocks.push(
-        <p key={n++} className={styles.chatHead}>
-          {inline(line.replace(/^#+\s/, ''))}
-        </p>
-      )
-    } else if (list.length && /^\s{2,}/.test(raw)) {
-      // a wrapped bullet continues the last one
-      list[list.length - 1] += ' ' + line.trim()
-    } else {
-      flushList()
-      para.push(line)
-    }
-  }
-  if (code !== null) {
-    blocks.push(
-      <pre key={n++} className={styles.chatPre}>
-        {code.join('\n')}
-      </pre>
-    )
-  }
-  flushPara()
-  flushList()
-  return <>{blocks}</>
+  const blocks = useMemo(() => parseMarkdown(text), [text])
+  return <>{drawBlocks(blocks)}</>
 }
 
-function inline(s: string): React.ReactNode[] {
-  const out: React.ReactNode[] = []
-  let last = 0
-  let n = 0
-  for (const m of s.matchAll(INLINE_RE)) {
-    const i = m.index ?? 0
-    if (i > last) out.push(s.slice(last, i))
-    const tok = m[0]
-    if (tok.startsWith('**')) {
-      out.push(<strong key={n++}>{tok.slice(2, -2)}</strong>)
-    } else if (tok.startsWith('`')) {
-      out.push(<code key={n++}>{tok.slice(1, -1)}</code>)
-    } else if (LINK_RE.test(tok)) {
-      LINK_RE.lastIndex = 0
-      const trimmed = tok.replace(/[.,;:]+$/, '')
-      out.push(
-        <a key={n++} href={trimmed} target="_blank" rel="noreferrer">
-          {trimmed.replace(/^https?:\/\//, '')}
-        </a>
-      )
-      if (trimmed.length < tok.length) out.push(tok.slice(trimmed.length))
-    } else {
-      out.push(tok)
+function drawBlocks(blocks: Block[]): React.ReactNode[] {
+  return blocks.map((b, i) => {
+    switch (b.t) {
+      case 'p':
+        return <p key={i}>{drawInline(b.kids)}</p>
+      case 'head':
+        return (
+          <p key={i} className={styles.chatHead}>
+            {drawInline(b.kids)}
+          </p>
+        )
+      case 'code':
+        return (
+          <pre key={i} className={styles.chatPre}>
+            {b.text}
+          </pre>
+        )
+      case 'quote':
+        return <blockquote key={i}>{drawBlocks(b.blocks)}</blockquote>
+      case 'rule':
+        return <hr key={i} />
+      case 'list': {
+        // An item's first paragraph sits on the bullet's own line; a list
+        // or a paragraph under it follows.
+        const items = b.items.map((item, j) => (
+          <li key={j}>
+            {item[0]?.t === 'p'
+              ? drawInline(item[0].kids)
+              : drawBlocks(item.slice(0, 1))}
+            {drawBlocks(item.slice(1))}
+          </li>
+        ))
+        return b.ordered ? (
+          <ol key={i} start={b.start}>
+            {items}
+          </ol>
+        ) : (
+          <ul key={i}>{items}</ul>
+        )
+      }
+      case 'table': {
+        const at = (k: number) =>
+          b.align[k] ? { textAlign: b.align[k] ?? undefined } : undefined
+        return (
+          <div key={i} className={styles.chatTableWrap}>
+            <table className={styles.chatTable}>
+              <thead>
+                <tr>
+                  {b.head.map((cell, k) => (
+                    <th key={k} style={at(k)}>
+                      {drawInline(cell)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {b.rows.map((row, r) => (
+                  <tr key={r}>
+                    {row.map((cell, k) => (
+                      <td key={k} style={at(k)}>
+                        {drawInline(cell)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      }
     }
-    last = i + tok.length
+  })
+}
+
+function drawInline(kids: Inline[]): React.ReactNode[] {
+  return kids.map((k, i) => {
+    switch (k.t) {
+      case 'text':
+        return k.text
+      case 'br':
+        return <br key={i} />
+      case 'code':
+        return <code key={i}>{k.text}</code>
+      case 'strong':
+        return <strong key={i}>{drawInline(k.kids)}</strong>
+      case 'em':
+        return <em key={i}>{drawInline(k.kids)}</em>
+      case 'del':
+        return <del key={i}>{drawInline(k.kids)}</del>
+      case 'link':
+        // Only ever an http(s) address (webAddress). `data-auto` marks
+        // one written bare, so a quote of it carries the whole address.
+        return (
+          <a
+            key={i}
+            href={k.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            {...(k.auto ? { 'data-auto': '' } : {})}
+          >
+            {drawInline(k.kids)}
+          </a>
+        )
+      case 'file': {
+        // A file on the Mac: a web page cannot open it, so it is its
+        // label and where it is, never a link.
+        const label = plainText(k.kids)
+          .trim()
+          .replace(/^\/(?:Users|home)\/[^/]+\//, '~/')
+        return label === k.path ? (
+          <code key={i}>{k.path}</code>
+        ) : (
+          <span key={i}>
+            {drawInline(k.kids)} (<code>{k.path}</code>)
+          </span>
+        )
+      }
+    }
+  })
+}
+
+/** What is selected in the panel, as Markdown for the Reply quote: a link
+ *  goes with its label and whole address, so Fable still sees where it
+ *  pointed (the selection's own text is the label alone). A selection
+ *  inside one link is that link. */
+function quoteOf(sel: Selection): string {
+  if (sel.rangeCount === 0 || sel.isCollapsed) return ''
+  const range = sel.getRangeAt(0)
+  const text = markdownOf(range.cloneContents() as unknown as DomNode)
+  if (!text) return sel.toString().trim()
+  const within = range.commonAncestorContainer
+  const a = (
+    within.nodeType === 1 ? (within as Element) : within.parentElement
+  )?.closest('a[href]')
+  const href = a?.getAttribute('href') ?? ''
+  if (a && /^https?:\/\//i.test(href)) {
+    return a.hasAttribute('data-auto') ? href : `[${text}](${href})`
   }
-  if (last < s.length) out.push(s.slice(last))
-  return out
+  return text
 }

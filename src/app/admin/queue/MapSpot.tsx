@@ -6,15 +6,31 @@
 
   It opens on a suggested spot among the listings of the same category
   (src/lib/admin/map-spot.ts). The pin drags; a listing with no spot is
-  placed with a click. Nothing here writes to Airtable: a suggested spot goes
-  out with Publish, and a dragged one becomes two edits (x and y) on the
-  card like any other, written when Publish is pressed.
+  placed with a click. The new listing's place is never written from here:
+  a suggested spot goes out with Publish, and a dragged one becomes two
+  edits (x and y) on the card like any other, written when Publish is
+  pressed.
 
-  The canvas is the map editor's own (MapEditorCanvas), told to drag this
-  one pin only. Nothing here touches the public /map.
+  The other listings drag too, for someone who may also edit the map (the
+  mapEditor area): to make room, say. Those moves are the map editor's own,
+  saved to Airtable as each pin is dropped, through /api/admin/map (x and y
+  only, refused if the listing moved since the map was read), with an Undo.
+  Listings another open addition has placed in its own edits stay put: their
+  place belongs to that item.
+
+  The canvas is the map editor's own (MapEditorCanvas). Nothing here touches
+  the public /map's code; a moved listing reaches it like any edit in the
+  map editor.
 */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import MapEditorCanvas, {
   type CanvasControls,
 } from '@/app/admin/map/MapEditorCanvas'
@@ -38,6 +54,13 @@ import styles from './queue.module.css'
 import own from './MapSpot.module.css'
 
 const API = '/api/admin/queue?map=1'
+/** The map editor's own write: one listing's x and y. */
+const MOVE_API = '/api/admin/map'
+
+/** True when the person signed in may also edit the map (the mapEditor
+ *  area's edit grant): then the strip's other pins drag and save. The API
+ *  checks the grant again on every write. */
+export const MoveOthersContext = createContext(false)
 
 // ─── The map as it stands, read once and shared between items ──────────────
 
@@ -45,9 +68,9 @@ const API = '/api/admin/queue?map=1'
 const FRESH_MS = 2 * 60 * 1000
 
 let mapRead: { at: number; records: Promise<EditorRecord[]> } | null = null
-/** Listings published from this page a little while ago, by record: where
- *  they went. A read of the map may predate them, so they are laid over it,
- *  and the next suggestion keeps clear of them. Kept for a while after the
+/** Listings published from this page a little while ago, or moved on a
+ *  strip, by record: where they went. A read of the map may predate them,
+ *  so they are laid over it, and the next suggestion keeps clear of them. Kept for a while after the
  *  write lands too, since a strip already open still holds the older read;
  *  then dropped, so a later move in the map editor is not overruled. */
 const justPlaced = new Map<string, Spot & { at: number }>()
@@ -106,6 +129,70 @@ export function forgetMap(record?: string | null) {
   if (record) justPlaced.delete(record)
 }
 
+// ─── Moving another listing ────────────────────────────────────────────────
+
+type MoveResult =
+  | { kind: 'saved'; at: Spot }
+  /** It had moved since the map was read: where it is now (null = off the
+   *  map). Nothing was written. */
+  | { kind: 'stale'; at: Spot | null }
+  | { kind: 'failed'; error: string }
+
+/** Saves are sent one at a time, in the order they were made, so an Undo
+ *  pressed straight after a drop goes out after that drop's save. */
+let moveChain: Promise<unknown> = Promise.resolve()
+
+function saveMove(id: string, to: Spot, expected: Spot): Promise<MoveResult> {
+  const run = async (): Promise<MoveResult> => {
+    let res: Response
+    try {
+      res = await fetch(MOVE_API, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, x: to.x, y: to.y, expected }),
+      })
+    } catch (e) {
+      return {
+        kind: 'failed',
+        error: e instanceof Error ? e.message : String(e),
+      }
+    }
+    const data = (await res.json().catch(() => ({}))) as {
+      record?: { x: number | null; y: number | null }
+      current?: { x: number | null; y: number | null }
+      error?: string
+    }
+    const spotOfPair = (p?: { x: number | null; y: number | null }) =>
+      p && p.x !== null && p.y !== null ? { x: p.x, y: p.y } : null
+    if (res.ok) {
+      const at = spotOfPair(data.record)
+      if (at) return { kind: 'saved', at }
+      return { kind: 'failed', error: 'the answer had no x and y' }
+    }
+    if (res.status === 409)
+      return { kind: 'stale', at: spotOfPair(data.current) }
+    return { kind: 'failed', error: data.error ?? `HTTP ${res.status}` }
+  }
+  const result = moveChain.then(run, run)
+  moveChain = result
+  return result
+}
+
+/** One move made on this strip, for Undo. */
+interface Moved {
+  id: string
+  name: string
+  from: Spot
+  to: Spot
+}
+
+type MoveNote =
+  | { kind: 'saving'; text: string }
+  | { kind: 'saved'; text: string }
+  | { kind: 'error'; text: string }
+
+const fmt = (n: number) => n.toFixed(1)
+
 // ─── What the picture shows under a spot ───────────────────────────────────
 
 /** The background image, drawn small and read back, so a suggestion can
@@ -155,6 +242,9 @@ function readGround(): Promise<Ground | null> {
 }
 
 // ─── The strip ─────────────────────────────────────────────────────────────
+
+/** Added to the hint when the other listings drag too. */
+const OTHERS_HINT = ' · other listings save as you drop them'
 
 /** How close the strip opens on the spot. */
 const OPEN_ZOOM = 3
@@ -218,6 +308,12 @@ export default function MapSpot({
     focusOn: () => {},
   })
   const sectionRef = useRef<HTMLElement>(null)
+  const moveOthers = useContext(MoveOthersContext) && canEdit
+  /** Other listings moved on this strip, where they now show (null = no
+   *  longer on the map). Laid over the read until the strip closes. */
+  const [moved, setMoved] = useState<Record<string, Spot | null>>({})
+  const [history, setHistory] = useState<Moved[]>([])
+  const [note, setNote] = useState<MoveNote | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -307,9 +403,15 @@ export default function MapSpot({
       // On top of everything, wherever /map would stack it.
       order: Number.MAX_SAFE_INTEGER,
     }
-    return [...others, pin]
+    const shown = others.flatMap(r => {
+      if (!(r.id in moved)) return [r]
+      const to = moved[r.id]
+      return to ? [{ ...r, x: to.x, y: to.y }] : []
+    })
+    return [...shown, pin]
   }, [
     others,
+    moved,
     map,
     record,
     title,
@@ -345,6 +447,85 @@ export default function MapSpot({
 
   const move = (x: number, y: number) => onMove(tidySpot(x, y))
 
+  // Which pins drag: the new listing, and with the map grant every other
+  // one except those another open addition holds in its edits.
+  const dragIds = useMemo(() => {
+    const ids = new Set([record])
+    if (moveOthers) {
+      for (const r of records) if (!(r.id in claimed)) ids.add(r.id)
+    }
+    return ids
+  }, [record, records, claimed, moveOthers])
+
+  /** Moves another listing and saves it: `kind` 'undo' puts one back. */
+  const shift = (
+    r: EditorRecord,
+    from: Spot,
+    to: Spot,
+    kind: 'move' | 'undo'
+  ) => {
+    const name = r.labelName || r.title
+    setMoved(m => ({ ...m, [r.id]: to }))
+    setNote({
+      kind: 'saving',
+      text: kind === 'undo' ? `Putting ${name} back…` : `Saving ${name}…`,
+    })
+    void saveMove(r.id, to, from).then(result => {
+      if (result.kind === 'saved') {
+        justPlaced.set(r.id, { ...result.at, at: Date.now() })
+        setMoved(m => ({ ...m, [r.id]: result.at }))
+        if (kind === 'move') {
+          setHistory(h => [...h, { id: r.id, name, from, to: result.at }])
+        }
+        setNote({
+          kind: 'saved',
+          text:
+            kind === 'undo'
+              ? `Put ${name} back at (${fmt(result.at.x)}, ${fmt(result.at.y)}).`
+              : `Saved ${name} at (${fmt(result.at.x)}, ${fmt(result.at.y)}).`,
+        })
+      } else if (result.kind === 'stale') {
+        // What Airtable holds is the truth now: show that, write nothing.
+        if (result.at) justPlaced.set(r.id, { ...result.at, at: Date.now() })
+        else justPlaced.delete(r.id)
+        forgetMap()
+        setMoved(m => ({ ...m, [r.id]: result.at }))
+        // An older Undo for it would now put back the wrong place.
+        setHistory(h => h.filter(e => e.id !== r.id))
+        setNote({
+          kind: 'error',
+          text: result.at
+            ? `${name} had been moved elsewhere since the map was read, so nothing was saved. It now shows where it is, at (${fmt(result.at.x)}, ${fmt(result.at.y)}).`
+            : `${name} had been taken off the map since it was read, so nothing was saved.`,
+        })
+      } else {
+        setMoved(m => ({ ...m, [r.id]: from }))
+        if (kind === 'undo') {
+          setHistory(h => [...h, { id: r.id, name, from: to, to: from }])
+        }
+        setNote({
+          kind: 'error',
+          text: `${name} was not ${kind === 'undo' ? 'put back' : 'moved'} (${result.error.replace(/\.$/, '')}).`,
+        })
+      }
+    })
+  }
+
+  const dropped = (id: string, x: number, y: number) => {
+    if (id === record) return move(x, y)
+    const r = records.find(p => p.id === id)
+    if (!r || r.x === null || r.y === null) return
+    shift(r, { x: r.x, y: r.y }, tidySpot(x, y), 'move')
+  }
+
+  const undoMove = () => {
+    const last = history[history.length - 1]
+    const r = last && records.find(p => p.id === last.id)
+    if (!last || !r) return
+    setHistory(h => h.slice(0, -1))
+    shift(r, last.to, last.from, 'undo')
+  }
+
   const state: React.ReactNode = error ? (
     <span className={own.error}>
       The map could not be read ({error}).{' '}
@@ -365,11 +546,13 @@ export default function MapSpot({
     <span className={own.muted}>
       {edited ? 'Your spot' : 'The spot on the record'}
       {canEdit && ' · drag the pin to move it'}
+      {moveOthers && OTHERS_HINT}
     </span>
   ) : suggested ? (
     <span className={own.muted}>
       Suggested spot{area ? ` in ${area}` : ''}
       {canEdit && ' · drag the pin to move it'}
+      {moveOthers && OTHERS_HINT}
     </span>
   ) : (
     <span className={own.unplaced}>
@@ -410,6 +593,18 @@ export default function MapSpot({
           </button>
         )}
       </div>
+      {note && (
+        <div className={own.line} role="status">
+          <span className={note.kind === 'error' ? own.error : own.muted}>
+            {note.text}
+          </span>
+          {note.kind !== 'saving' && history.length > 0 && (
+            <button type="button" className={own.link} onClick={undoMove}>
+              Undo
+            </button>
+          )}
+        </div>
+      )}
       {!error && (
         <div className={own.frame}>
           <MapEditorCanvas
@@ -417,13 +612,13 @@ export default function MapSpot({
             selectedId={record}
             placeModeId={canEdit && ready && !at ? record : null}
             previewPublic={false}
-            onDrop={(_id, x, y) => move(x, y)}
+            onDrop={dropped}
             onSelect={() => {}}
             onPlaceClick={move}
             onDragStateChange={() => {}}
             controlsRef={controlsRef}
             readOnly={!canEdit}
-            onlyId={record}
+            dragIds={dragIds}
             quietWheel
           />
         </div>

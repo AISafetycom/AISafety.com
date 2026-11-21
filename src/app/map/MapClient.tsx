@@ -3,8 +3,8 @@
 import dynamic from 'next/dynamic'
 import { useState, useMemo, useRef, useLayoutEffect, useCallback } from 'react'
 import Button from '@/components/Button'
-import FilterGroup from '@/components/FilterGroup'
-import FilterSidebar from '@/components/FilterSidebar'
+import FilterBar from '@/components/FilterBar'
+import FilterDropdown from '@/components/FilterDropdown'
 import ContributeButtons from '@/components/ContributeButtons'
 import RelativeDate from '@/components/RelativeDate'
 import MapOrgCard from './MapOrgCard'
@@ -203,13 +203,21 @@ export default function MapClient({
 
   const savedScrollY = useRef<number | null>(null)
 
+  // Both toggles build on the latest state (functional updates), so a
+  // control that switches off several values in one go works.
   const toggleCategory = (category: string) => {
     savedScrollY.current = window.scrollY
-    if (selectedCategories.includes(category)) {
-      setSelectedCategories(selectedCategories.filter(c => c !== category))
-    } else {
-      setSelectedCategories([...selectedCategories, category])
-    }
+    setSelectedCategories(current =>
+      current.includes(category)
+        ? current.filter(c => c !== category)
+        : [...current, category]
+    )
+  }
+
+  const toggleStatus = (status: string) => {
+    savedScrollY.current = window.scrollY
+    if (status === 'Active') setShowActive(current => !current)
+    else setShowInactive(current => !current)
   }
 
   useLayoutEffect(() => {
@@ -266,6 +274,27 @@ export default function MapClient({
               />
             </div>
 
+            <FilterBar count={filteredOrgs.length} noun="listing">
+              <FilterDropdown
+                trackingPage="Map"
+                title="Category"
+                icon="/images/icons/category.svg"
+                options={categories}
+                selected={selectedCategories}
+                counts={categoryCounts}
+                onToggle={toggleCategory}
+              />
+              <FilterDropdown
+                trackingPage="Map"
+                title="Status"
+                icon="/images/icons/activity.svg"
+                options={['Active', 'No longer active']}
+                selected={groups.status.selected}
+                counts={statusCounts}
+                onToggle={toggleStatus}
+              />
+            </FilterBar>
+
             <div className="collection-list padding-bottom-16px">
               {filteredOrgs.map(org => (
                 <MapOrgCard
@@ -283,31 +312,6 @@ export default function MapClient({
           </div>
 
           <div className="hide-mobile width-3-col">
-            <FilterSidebar>
-              <FilterGroup
-                trackingPage="Map"
-                title="Category"
-                options={categories}
-                selected={selectedCategories}
-                counts={categoryCounts}
-                onToggle={toggleCategory}
-              />
-              <FilterGroup
-                trackingPage="Map"
-                title="Status"
-                options={['Active', 'No longer active']}
-                selected={[
-                  ...(showActive ? ['Active'] : []),
-                  ...(showInactive ? ['No longer active'] : []),
-                ]}
-                counts={statusCounts}
-                onToggle={status => {
-                  savedScrollY.current = window.scrollY
-                  if (status === 'Active') setShowActive(!showActive)
-                  else setShowInactive(!showInactive)
-                }}
-              />
-            </FilterSidebar>
             <ContributeButtons
               trackingPage="Map"
               suggestEntryUrl={suggestEntryLink}

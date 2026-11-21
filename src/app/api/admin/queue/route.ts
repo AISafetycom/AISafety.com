@@ -20,6 +20,9 @@
        that record id as it is in Airtable now, whichever resource table
        holds it and whether or not the Queue ever did (null when none has
        it): what the search shows for a pasted id – queue-listing.ts
+  GET  /api/admin/queue?history=<rec>          → { items } – every Queue row
+       about the listing with that record id, for its history on the page:
+       who published it and who changed what since – queue-history.ts
   GET  /api/admin/queue?order=<tbl>            → { order } – the page's published
        listings by Sort, for placing an addition (null for a table with no Sort)
   GET  /api/admin/queue?map=1                  → { records } – every Field map
@@ -51,6 +54,10 @@
   when QUEUE_AGENT_SECRET is not set): the page calls it after an accept so
   a Gmail reply draft lands at once instead of on the worker's next pass.
 
+  Every action that decides, edits or undoes something (all but edit and
+  flag) is written onto the row's History with the signed-in admin's name,
+  in the same write – queue-history.ts.
+
   Every accept writes to the live base, so the route re-reads the row first
   and refuses anything already decided (409). No fresh-session requirement:
   an accept is no more dangerous than a map-editor save, and the point of
@@ -74,6 +81,7 @@ import {
   getTargetFields,
   laterItem,
   listDecided,
+  listForListing,
   listQueue,
   QueueError,
   rejectItem,
@@ -137,6 +145,8 @@ export async function GET(req: NextRequest) {
     }
     const listing = req.nextUrl.searchParams.get('listing')
     if (listing) return json({ listing: await findListing(listing) })
+    const history = req.nextUrl.searchParams.get('history')
+    if (history) return json({ items: await listForListing(history) })
     const orderOf = req.nextUrl.searchParams.get('order')
     if (orderOf) return json({ order: await getPageOrder(orderOf) })
     const target = req.nextUrl.searchParams.get('target')
@@ -162,7 +172,7 @@ export async function GET(req: NextRequest) {
       const closed = new Set(await closeHandledRows(items))
       if (closed.size) items = items.filter(i => !closed.has(i.id))
     }
-    return json({ items, agent: agentInfo(me?.email ?? '') })
+    return json({ items, agent: agentInfo(me?.email ?? '', me?.name ?? null) })
   } catch (e) {
     return failure(e)
   }
@@ -199,6 +209,8 @@ export async function POST(req: NextRequest) {
     const item = await getQueueItem(id)
     if (!item) return json({ error: 'That item no longer exists.' }, 404)
     const me = await currentAdmin()
+    // The name the row's history keeps for this action.
+    const by = me?.name || me?.email || null
     let notPutBack: string[] = []
     if (action === 'accept') {
       const choice = publicChoiceOf(body.public)
@@ -218,13 +230,15 @@ export async function POST(req: NextRequest) {
               seen:
                 typeof body.publicSeen === 'string' ? body.publicSeen : null,
             }
-          : null
+          : null,
+        by
       )
     } else if (action === 'reject') {
       await rejectItem(
         item,
         typeof body.reason === 'string' ? body.reason : '',
-        typeof body.rejectReply === 'string' ? body.rejectReply : null
+        typeof body.rejectReply === 'string' ? body.rejectReply : null,
+        by
       )
     } else if (action === 'edit') {
       await saveEdits(
@@ -237,13 +251,13 @@ export async function POST(req: NextRequest) {
       )
       return json({ item: await getQueueItem(id) })
     } else if (action === 'fix') {
-      await fixItem(item, sanitiseEdits(body.edits))
+      await fixItem(item, sanitiseEdits(body.edits), by)
     } else if (action === 'later') {
-      await laterItem(item)
+      await laterItem(item, by)
     } else if (action === 'delete') {
-      await deleteItem(item)
+      await deleteItem(item, by)
     } else if (action === 'reopen') {
-      await reopenItem(item)
+      await reopenItem(item, by)
     } else if (action === 'flag') {
       if (body.undo === true) {
         await unflagItem(item)
@@ -253,7 +267,7 @@ export async function POST(req: NextRequest) {
         await flagItem(item, parsed.flag)
       }
     } else {
-      notPutBack = await undoItem(item)
+      notPutBack = await undoItem(item, by)
     }
     console.log(
       `[admin-queue] ${action} ${item.type} ${item.id} "${item.title}" by ${me?.name ?? me?.email ?? '?'}${notPutBack.length ? ` – not put back: ${notPutBack.join(', ')}` : ''}`

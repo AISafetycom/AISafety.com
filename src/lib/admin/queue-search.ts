@@ -178,6 +178,7 @@ export function itemParts(
     row.source === undefined ? item.sourceExcerpt : row.source
   )
   add('Fable', item.reasons)
+  for (const c of item.checked ?? []) add('Fable checked', c.found)
   add('Note', item.note)
   add('Reply', item.replyDraft)
   add('Rejected', item.rejectReason)
