@@ -2,7 +2,6 @@ import Link from 'next/link'
 import Image from 'next/image'
 import FooterLink from './FooterLink'
 import UpButton from './UpButton'
-import styles from './Footer.module.css'
 import Button from '@/components/Button'
 
 export default function Footer() {
@@ -65,18 +64,14 @@ export default function Footer() {
               </div>
             </div>
 
-            {/* Third footer column. Its heading leads to the page with every
-                newsletter on it (/newsletter), where visitors sign up to
-                several at once. */}
+            {/* Third footer column. Its heading is plain text like the other
+                columns' (a heading that is also a link isn't something sites
+                do, and it had 1 click in its first month; Melissa, 21 Nov
+                2026). The page with every newsletter on it is the last link
+                instead. */}
             <div>
-              <h2
-                className={`paragraph-small-bold padding-bottom-16px ${styles.headingLink}`}
-              >
-                <FooterLink
-                  href="/newsletter"
-                  section="Newsletters"
-                  label="Newsletters"
-                />
+              <h2 className="paragraph-small-bold padding-bottom-16px">
+                Newsletters
               </h2>
               <div className="paragraph-small flex flex-col gap-8px link-group">
                 {/* Each newsletter has a page of its own (signup box, past
@@ -101,6 +96,15 @@ export default function Footer() {
                   href="/newsletter/updates"
                   section="Newsletters"
                   label="AISafety.com Updates"
+                />
+                {/* /newsletter: sign up to several at once. "All newsletters",
+                    not "Manage", because a visitor from here sees the signup
+                    form; a reader's own settings open only from the link in
+                    an email. */}
+                <FooterLink
+                  href="/newsletter"
+                  section="Newsletters"
+                  label="All newsletters"
                 />
               </div>
             </div>
