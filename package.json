@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "check:icons": "node scripts/check-icon-sizes.mjs",
+    "check:styles": "node scripts/check-styles.mjs",
     "prebuild": "node scripts/check-icon-sizes.mjs && node scripts/pin-preview-keys.mjs",
     "build": "vitest run && next build",
     "start": "next start",

@@ -1,7 +1,8 @@
 # Runs on every pull request and on every push to main.
 #
 # Two jobs run in parallel:
-#   checks  type-check, lint, unit tests (fast, no network)
+#   checks  type-check, lint, unit tests, and (on pull requests) the style
+#           check for new CSS (fast, no network)
 #   smoke   production build, then a real Chromium opens every public page
 #           and calls every Data API endpoint (see e2e/smoke.spec.ts)
 #
@@ -30,6 +31,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Two commits, so the style check below can see main (HEAD^1).
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
@@ -39,6 +43,12 @@ jobs:
       - run: npm run type-check
       - run: npm run lint
       - run: npm test
+      # New styling on user-facing pages has to follow the design system
+      # (docs/css-guidelines.md, "The automatic check"). On a pull request,
+      # HEAD is GitHub's merge of the branch into main, so its first parent
+      # (HEAD^1) is main, and the check compares each changed file with that.
+      - if: github.event_name == 'pull_request'
+        run: npm run check:styles -- --base HEAD^1
 
   smoke:
     name: Build and smoke-test in a browser

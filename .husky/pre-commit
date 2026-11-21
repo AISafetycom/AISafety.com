@@ -5,3 +5,7 @@ npx lint-staged
 
 # Icons must render at their file's native size (12/16/24/32)
 node scripts/check-icon-sizes.mjs
+
+# New styling on user-facing pages must follow the design system
+# (docs/css-guidelines.md). Compares this branch with main; /admin is exempt.
+node scripts/check-styles.mjs --soft
