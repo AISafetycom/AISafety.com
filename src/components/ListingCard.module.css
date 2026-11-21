@@ -28,8 +28,7 @@
 /* Only the title is a link, so a screen reader announces a short name and the
    rest of the card's text can be selected; CardClicks opens the link from a
    click anywhere else on the card. This box over the card (.card is
-   position: relative) only draws the keyboard focus ring around the card
-   rather than the title, and lets clicks through to the text beneath. */
+   position: relative) lets clicks through to the text beneath. */
 .titleLink::after {
   content: '';
   position: absolute;
@@ -48,7 +47,11 @@
   outline: none;
 }
 
-.titleLink:focus-visible::after {
+/* The keyboard focus ring goes around the card rather than the title. It is
+   drawn by the card itself, not the box above: /jobs skips drawing cards off
+   the screen (content-visibility), which clips anything a card's contents
+   draw outside it and would cut off a ring drawn by the box. */
+.card:has(.titleLink:focus-visible) {
   outline: 2px solid var(--teal-400);
   outline-offset: 2px;
 }
