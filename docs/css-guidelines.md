@@ -314,7 +314,7 @@ Shared components (`src/components/`) set their own spacing and flex, since they
 
 **It adds a note, without failing,** for another hand-written line that has an exact utility class (a color or a cursor), for a class that rebuilds a bigger global class such as `.divider`, for a new raw `<button>`, and for a new variable in `globals.css`. These are notes because a class that really needs its own CSS often has one of these lines in it. A class made of nothing else fails, as above. One more note, `class-on-two-tags`, is for a module class put on two kinds of HTML tag in the same file: a note because a row that is a link in one case and plain text in another is sometimes right.
 
-**It does not judge** sizes (`width`, `height`), whether a new class was needed at all, hover and other states, or anything visual. Those still need a person to look at the page. Before that, every change to what visitors see gets an independent review (by a fresh Claude Code subagent, or a person who did not write it) against [`design-review-checklist.md`](design-review-checklist.md), which lists the judgment checks that can be made from the code.
+**It does not judge** sizes (`width`, `height`), whether a new class was needed at all, hover and other states, or anything visual. Those still need a person to look at the page. Before that comes an independent review against [`design-review-checklist.md`](design-review-checklist.md), which lists the judgment checks that can be made from the code.
 
 ### Only new code, and no list to maintain
 

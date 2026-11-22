@@ -366,16 +366,23 @@ describe('TSX rules', () => {
     expect(found[0].hint).toContain('aria-label shows by itself')
   })
 
-  it('a tooltip switched off in brackets, with `as const`, or through a const', () => {
+  it('a tooltip switched off in brackets or with `as const` counts too', () => {
     const found = tsx(
-      `import Button from '@/components/Button'\nconst OFF = false\nconst NONE = '' as const\nexport default function A() {\n  return (\n    <>\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={(false)} />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={false as const} />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={OFF} />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={NONE} />\n    </>\n  )\n}`
+      `import Button from '@/components/Button'\nexport default function A() {\n  return (\n    <>\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={(false)} />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={false as const} />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={('' as const)} />\n    </>\n  )\n}`
     )
     expect(rulesIn(found)).toEqual([
       'tooltip-off',
       'tooltip-off',
       'tooltip-off',
-      'tooltip-off',
     ])
+  })
+
+  it('a tooltip that comes from a variable is left to the reviewer', () => {
+    const found = tsx(
+      `import Button from '@/components/Button'\nconst OFF = false\nexport default function A({ on }: { on: boolean }) {\n  let label = ''\n  if (on) label = 'Copy link'\n  return (\n    <>\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Copy" tooltip={label} />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={OFF} />\n    </>\n  )\n}`
+    )
+    // It may be set while the page runs, so the script can't tell.
+    expect(found).toEqual([])
   })
 
   it('an icon button that keeps its tooltip, or words it differently, is fine', () => {
@@ -428,6 +435,16 @@ describe('TSX rules', () => {
     expect(found[0].line).toBe(10)
     expect(found[0].what).toBe(
       'styles.row is on <div> (line 10) as well as <a> (line 7)'
+    )
+  })
+
+  it('<input>, <select> and <textarea> count as one kind', () => {
+    const found = tsx(
+      `import styles from './Form.module.css'\nexport default function A() {\n  return (\n    <>\n      <input className={\`text-field \${styles.field}\`} />\n      <textarea className={\`text-field \${styles.field}\`} />\n      <select className={\`text-field \${styles.field}\`} />\n      <label className={styles.field}>Name</label>\n    </>\n  )\n}`
+    )
+    expect(rulesIn(found)).toEqual(['class-on-two-tags'])
+    expect(found[0].what).toBe(
+      'styles.field is on <label> (line 8) as well as <input> (line 5)'
     )
   })
 

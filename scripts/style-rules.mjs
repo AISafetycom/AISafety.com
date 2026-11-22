@@ -1020,25 +1020,21 @@ export function checkTsx(text, ds, ts, file = '') {
     return out
   }
 
-  /** tooltip={false} or tooltip="", also in brackets, with `as const`, or
-      through a const in this file. A value worked out while the page runs
-      (a condition, a prop) is the design reviewer's to judge. */
+  /** tooltip={false} or tooltip="" written out, also in brackets or with
+      `as const`. A value that comes from a variable, a prop or a condition
+      is the design reviewer's to judge: it may be set while the page runs. */
   const switchedOff = attr => {
     const init = attr.initializer
     if (!init) return false
     if (ts.isStringLiteral(init)) return init.text.trim() === ''
     let value = ts.isJsxExpression(init) ? init.expression : null
-    for (let hops = 0; value && hops < 5; hops++) {
-      if (
-        ts.isParenthesizedExpression(value) ||
+    while (
+      value &&
+      (ts.isParenthesizedExpression(value) ||
         ts.isAsExpression(value) ||
-        ts.isSatisfiesExpression(value)
-      )
-        value = value.expression
-      else if (ts.isIdentifier(value) && objects.has(value.text))
-        value = objects.get(value.text)
-      else break
-    }
+        ts.isSatisfiesExpression(value))
+    )
+      value = value.expression
     if (!value) return false
     if (value.kind === ts.SyntaxKind.FalseKeyword) return true
     return ts.isStringLiteralLike(value) && value.text.trim() === ''
@@ -1071,7 +1067,14 @@ export function checkTsx(text, ds, ts, file = '') {
     // Which HTML tags each module class is put on. <Link> renders an <a>, so
     // it counts as one; other components are left out, since what they
     // render is their own business.
-    const htmlTag = tag === 'Link' ? 'a' : tag
+    // <input>, <select> and <textarea> are one kind here: a form field's
+    // class belongs on all three, as .text-field is.
+    const htmlTag =
+      tag === 'Link'
+        ? 'a'
+        : ['select', 'textarea'].includes(tag)
+          ? 'input'
+          : tag
     if (attr('className') && /^[a-z]/.test(htmlTag))
       for (const cls of new Set(moduleClasses(attr('className')))) {
         const tags = tagsOfClass.get(cls) ?? new Map()
