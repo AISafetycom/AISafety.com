@@ -1,5 +1,7 @@
 import Link from 'next/link'
 import Button from '@/components/Button'
+import TextField from '@/components/TextField'
+import PopoverDemo from './PopoverDemo'
 
 /* The design system, in public: every shared component in every variant,
    matching the Figma components. Add a section here for each new shared
@@ -140,6 +142,36 @@ export default function DesignSystemPage() {
           </section>
         ))}
       </div>
+
+      <h2 className="padding-top-40px padding-bottom-12px">Text fields</h2>
+      <p className="paragraph-small color-teal-grey-300 padding-bottom-24px">
+        The label, the box and an error message. Click into one to see its focus
+        state. A text area grows as you type.
+      </p>
+      <div className="flex flex-col gap-24px width-6-col">
+        <TextField label="Label" />
+        <TextField label="Label" defaultValue="Input text" />
+        <TextField label="Label" optional />
+        <TextField
+          label="Label"
+          defaultValue="Input text"
+          error="Error message"
+        />
+        <TextField as="textarea" label="Text area" />
+        <TextField
+          as="select"
+          label="Dropdown"
+          options={['First choice', 'Second choice']}
+        />
+      </div>
+
+      <h2 className="padding-top-40px padding-bottom-12px">Popover</h2>
+      <p className="paragraph-small color-teal-grey-300 padding-bottom-24px">
+        Holds anything: a filter&apos;s options, a form. It opens under what
+        opened it (above when there&apos;s no room) and closes on Escape or a
+        click outside.
+      </p>
+      <PopoverDemo />
     </main>
   )
 }

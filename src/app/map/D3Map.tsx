@@ -8,6 +8,8 @@ import MapControls from '@/components/MapControls'
 import MapSearch, { NO_MAP_SEARCH_CONTROL } from './MapSearch'
 import type { MapSearchControl } from './MapSearch'
 import { trackListingClick, trackListingHover } from '@/lib/analytics'
+import { isPlainClick, openFeedbackForm } from '@/lib/feedback-form'
+import { CORRECTIONS_FORM } from '@/lib/selection-feedback'
 import { withUtm } from '@/lib/utm'
 import { positionTooltip } from '@/lib/mapTooltip'
 import { MAP_BACKGROUND_URL } from '@/lib/map-images'
@@ -341,13 +343,42 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
       const linkEl = itemGroup
         .append(hasLink ? 'a' : 'g')
         .attr('class', 'mapItem')
+      // The "Suggest correction" item opens the site's own correction form
+      // by itself (FeedbackPopover), not the Airtable form in a new tab.
+      const siteForm = !!hasLink && org.link.startsWith(CORRECTIONS_FORM)
       if (hasLink) {
         linkEl
           .attr('xlink:href', withUtm(org.link, 'Map'))
           .attr('target', '_blank')
           .attr('rel', 'noopener noreferrer')
+          .attr('aria-haspopup', siteForm ? 'dialog' : null)
           .style('cursor', 'pointer')
           .on('click', event => {
+            // The correction form opens on the first click or tap (its
+            // tooltip would only repeat its name). A Cmd-click still opens
+            // the Airtable form.
+            if (siteForm) {
+              trackListingClick(
+                'Map',
+                org.title,
+                org.link,
+                org.id,
+                undefined,
+                'map',
+                firstCategory || undefined
+              )
+              if (!isPlainClick(event)) return
+              event.preventDefault()
+              // Its hover label would sit over the form's heading.
+              hideTooltip()
+              openFeedbackForm({
+                kind: 'correction',
+                entry: 'map',
+                trigger: event.currentTarget as SVGElement,
+                fallbackHref: org.link,
+              })
+              return
+            }
             // Mobile: first tap shows the tooltip instead of opening the
             // link. Second tap of the tooltip itself opens it. Matches the
             // pattern used on the /communities map.

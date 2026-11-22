@@ -360,6 +360,11 @@ label {
   color: var(--green-300);
 }
 
+/* Error text (css-guidelines: "Which color for what") */
+.color-red-300 {
+  color: var(--red-300);
+}
+
 /* Accent background colors */
 .bg-orange-300 {
   background-color: var(--orange-300);

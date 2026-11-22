@@ -182,6 +182,15 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   // path, and, when the text is on a listing's card, `label` the listing's
   // name and `listingId` its record. Never carries the selected text.
   'selection_menu',
+  // The site's correction and feedback form (FeedbackPopover): `source` is
+  // how far it got ('open', 'sent', or 'error' = sending failed), `label`
+  // which form and where it was opened from ('correction/selection',
+  // 'feedback/footer', 'correction/contribute', 'correction/map',
+  // 'correction/page' = a link in a page's text, 'feedback/chatbot'), `page`
+  // the path, and, when
+  // the text was on a listing's card, `listingId` its record. Never carries
+  // what the visitor typed.
+  'feedback_form',
   'chatbot_open',
   'chatbot_message',
   'chatbot_click',

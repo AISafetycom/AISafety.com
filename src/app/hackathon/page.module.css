@@ -83,15 +83,6 @@
   list-style: circle;
 }
 
-/* .text-field is a fixed-height single-line input; let textareas grow. */
-.textarea {
-  height: auto;
-  min-height: 80px;
-  padding: 14px 16px;
-  resize: vertical;
-  overflow-y: hidden;
-}
-
 /* Post-submit thank-you box on /hackathon/details. Fill and border come from
    the global .border-plus-fill class, spacing from padding utilities; only the
    corner radius has no utility, and it matches .card. */

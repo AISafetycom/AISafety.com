@@ -61,10 +61,9 @@ export default function FilterDropdown({
       label={label}
       active={selected.length > 0}
       icon={icon}
-      // Each opening starts from the full list; a search changes the
-      // popover's width, so it is re-fitted to the screen as you type.
+      // Each opening starts from the full list. (A search changes the
+      // popover's width; <Popover> re-fits itself to the screen.)
       onOpen={() => setQuery('')}
-      measureKey={needle}
     >
       {searchable && (
         <SearchBar

@@ -36,15 +36,7 @@
   transform: rotate(180deg);
 }
 
-/* Fill + border come from the global .border-plus-fill class; shadow from
-   the global .drop-shadow-dark class. */
-/* Hangs under the pill in the page, so it scrolls with it. The sideways nudge
-   that keeps it on screen is set inline by FilterPopover.tsx. */
-.popover {
-  position: absolute;
-  top: calc(100% + 8px);
-  z-index: 10;
-  width: max-content;
-  border-radius: 16px;
+/* The <Popover>'s padding around the filter's options. */
+.panel {
   padding: 20px;
 }

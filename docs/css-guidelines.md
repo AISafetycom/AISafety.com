@@ -191,11 +191,13 @@ It renders a `<button>`. For a link that looks like a button, pass the link with
 
 ### 10. Forms
 
-Use `.text-field` and `.checkbox` for form elements. Don't create custom input styles.
+Use the `<TextField>` component (`src/components/TextField.tsx`) for a labeled text box, text area or dropdown: it puts the label above the global `.text-field` box, adds "(optional)" when asked, grows a text area as it's typed in, and shows an error message under the box in red. Use `.checkbox` for checkboxes. Don't create custom input styles.
 
 ```tsx
 // Good
-<input type="text" className="text-field" />
+<TextField label="Email" type="email" required />
+<TextField as="textarea" label="What's wrong?" />
+<TextField as="select" label="Which page?" options={pages} />
 <input type="checkbox" className="checkbox" />
 
 // Bad

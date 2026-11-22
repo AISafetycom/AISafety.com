@@ -1,0 +1,18 @@
+/* <TextField> — a label, the global .text-field box, and an error message.
+   Only what .text-field doesn't already do lives here. */
+
+/* A text area starts at about two lines and grows with its text (the
+   height is set in TextField.tsx as it's typed in). */
+.textarea {
+  height: auto;
+  min-height: 80px;
+  padding: 16px;
+  resize: vertical;
+  overflow-y: hidden;
+}
+
+/* Error state, from the Figma text input set: a red border (the message
+   under the box is .color-red-300). */
+.field [aria-invalid='true'] {
+  border-color: var(--red-300);
+}

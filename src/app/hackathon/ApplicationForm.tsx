@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import styles from './page.module.css'
 import Button from '@/components/Button'
+import TextField from '@/components/TextField'
 
 const EMPTY = {
   name: '',
@@ -12,10 +13,6 @@ const EMPTY = {
   anythingElse: '',
   // Honeypot – hidden from people, filled in by naive bots.
   website: '',
-}
-
-function Optional() {
-  return <em className="color-teal-grey-300">(optional)</em>
 }
 
 export default function ApplicationForm() {
@@ -30,13 +27,7 @@ export default function ApplicationForm() {
         HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
       >
     ) => {
-      const el = e.target
-      // Textareas grow with their content instead of scrolling internally.
-      if (el instanceof HTMLTextAreaElement) {
-        el.style.height = 'auto'
-        el.style.height = `${el.scrollHeight + 2}px`
-      }
-      setForm({ ...form, [field]: el.value })
+      setForm({ ...form, [field]: e.target.value })
     }
   }
 
@@ -93,74 +84,54 @@ export default function ApplicationForm() {
         Applications have closed
       </h3>
 
-      <div className={`${styles.field} ${styles.full}`}>
-        <label className="paragraph-small color-teal-grey-300" htmlFor="name">
-          Name
-        </label>
-        <input
-          id="name"
-          type="text"
-          className="text-field"
-          value={form.name}
-          onChange={set('name')}
-          required
-        />
-      </div>
+      <TextField
+        className={styles.full}
+        label="Name"
+        id="name"
+        value={form.name}
+        onChange={set('name')}
+        required
+      />
 
-      <div className={`${styles.field} ${styles.full}`}>
-        <label className="paragraph-small color-teal-grey-300" htmlFor="email">
-          Email
-        </label>
-        <input
-          id="email"
-          type="email"
-          className="text-field"
-          value={form.email}
-          onChange={set('email')}
-          required
-        />
-      </div>
+      <TextField
+        className={styles.full}
+        label="Email"
+        id="email"
+        type="email"
+        value={form.email}
+        onChange={set('email')}
+        required
+      />
 
-      <div className={`${styles.field} ${styles.full}`}>
-        <label className="paragraph-small color-teal-grey-300" htmlFor="skills">
-          What skills or experience could you bring to this hackathon?
-        </label>
-        <textarea
-          id="skills"
-          className={`text-field ${styles.textarea}`}
-          value={form.skills}
-          onChange={set('skills')}
-          required
-        />
-      </div>
+      <TextField
+        as="textarea"
+        className={styles.full}
+        label="What skills or experience could you bring to this hackathon?"
+        id="skills"
+        value={form.skills}
+        onChange={set('skills')}
+        required
+      />
 
-      <div className={`${styles.field} ${styles.full}`}>
-        <label className="paragraph-small color-teal-grey-300" htmlFor="links">
-          Please share any personal links e.g. LinkedIn, LessWrong, CV, etc.{' '}
-          <Optional />
-        </label>
-        <textarea
-          id="links"
-          className={`text-field ${styles.textarea}`}
-          value={form.links}
-          onChange={set('links')}
-        />
-      </div>
+      <TextField
+        as="textarea"
+        className={styles.full}
+        label="Please share any personal links e.g. LinkedIn, LessWrong, CV, etc."
+        optional
+        id="links"
+        value={form.links}
+        onChange={set('links')}
+      />
 
-      <div className={`${styles.field} ${styles.full}`}>
-        <label
-          className="paragraph-small color-teal-grey-300"
-          htmlFor="anythingElse"
-        >
-          Anything else you&apos;d like us to know? <Optional />
-        </label>
-        <textarea
-          id="anythingElse"
-          className={`text-field ${styles.textarea}`}
-          value={form.anythingElse}
-          onChange={set('anythingElse')}
-        />
-      </div>
+      <TextField
+        as="textarea"
+        className={styles.full}
+        label="Anything else you'd like us to know?"
+        optional
+        id="anythingElse"
+        value={form.anythingElse}
+        onChange={set('anythingElse')}
+      />
 
       <div className={styles.hp} aria-hidden="true">
         <label htmlFor="website">Website</label>
@@ -179,7 +150,7 @@ export default function ApplicationForm() {
           {busy ? 'Applying…' : 'Apply'}
         </Button>
         {error && (
-          <p className="paragraph-small color-orange-300 margin-top-16px">
+          <p className="paragraph-small color-red-300 margin-top-16px">
             {error}
           </p>
         )}

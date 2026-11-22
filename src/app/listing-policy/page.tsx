@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { Fragment } from 'react'
+import FeedbackFormLink from '@/components/FeedbackFormLink'
 import RelativeDate from '@/components/RelativeDate'
 import { LISTING_POLICY_MD } from '@/lib/listing-policy/text'
 import {
@@ -160,14 +161,13 @@ export default function ListingPolicyPage() {
               Send us an email
             </a>
             {' · '}
-            <a
+            <FeedbackFormLink
+              kind="correction"
               href={CORRECTION_FORM}
-              target="_blank"
-              rel="noopener noreferrer"
               className="link"
             >
               Suggest a correction
-            </a>
+            </FeedbackFormLink>
           </p>
         </div>
       </div>

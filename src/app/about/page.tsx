@@ -1,6 +1,7 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import Button from '@/components/Button'
+import FeedbackFormLink from '@/components/FeedbackFormLink'
 import Icon from '@/components/Icon'
 import styles from './page.module.css'
 
@@ -260,11 +261,10 @@ export default function AboutPage() {
               thoughts, we&apos;re listening.
             </p>
             <Button
-              as="a"
+              as={FeedbackFormLink}
+              kind="feedback"
               variant="clear-border"
               href="https://airtable.com/appF8XfZUGXtfi40E/pageXZp18w3Sqm1Z7/form?prefill_Page=about&hide_Page=true"
-              target="_blank"
-              rel="noopener noreferrer"
             >
               Give us your take
             </Button>
@@ -285,11 +285,10 @@ export default function AboutPage() {
             suggest corrections using the button below.
           </p>
           <Button
-            as="a"
+            as={FeedbackFormLink}
+            kind="correction"
             variant="clear-border"
             href="https://airtable.com/appF8XfZUGXtfi40E/pagndDvdya1DSqoxN/form"
-            target="_blank"
-            rel="noopener noreferrer"
           >
             Suggest a correction
           </Button>

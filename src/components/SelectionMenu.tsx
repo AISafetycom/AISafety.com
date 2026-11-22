@@ -6,14 +6,15 @@ import { usePathname } from 'next/navigation'
 import Button from '@/components/Button'
 import Icon from '@/components/Icon'
 import { trackSelectionMenu, trackedPath } from '@/lib/analytics'
+import { openFeedbackForm } from '@/lib/feedback-form'
 import { selectionFormLink } from '@/lib/selection-feedback'
 import styles from './SelectionMenu.module.css'
 
 // The small menu that appears by text a visitor selects in a page's main
-// content: Copy, and a button that opens one of the site's forms with the
-// selected text, where it came from and a link back already filled in.
-// Text on a listing's card leads to the corrections form ("Suggest a
-// correction"); text anywhere else to the feedback form ("Give feedback").
+// content or the footer: Copy, and a button that opens the site's correction or feedback
+// form (FeedbackPopover) right there, with the selected text in it. Text on a
+// listing's card leads to "Suggest a correction"; text anywhere else to
+// "Give feedback".
 
 // Pages where the menu stays away: signed-in tools and private links.
 const OFF_PATHS = ['/admin', '/work-test', '/stats']
@@ -40,6 +41,8 @@ interface Menu {
   text: string
   /** The selection's box, in page coordinates. */
   box: { left: number; right: number; top: number; bottom: number }
+  /** The Airtable form with the text filled in: offered by the site's form
+   *  if sending fails. */
   formHref: string
   /** The listing whose card the text is on, when it is on one. */
   listing?: { name: string; id?: string }
@@ -54,7 +57,8 @@ function readSelection(pathname: string): Menu | null {
   const range = selection.getRangeAt(0)
   const node = range.commonAncestorContainer
   const el = node instanceof Element ? node : node.parentElement
-  if (!el?.closest('main')) return null
+  // A page's content and the footer; never the nav.
+  if (!el?.closest('main, footer')) return null
   const rect = range.getBoundingClientRect()
   if (rect.width === 0 && rect.height === 0) return null
 
@@ -251,23 +255,28 @@ export default function SelectionMenu() {
         {copied ? 'Copied' : 'Copy'}
       </Button>
       <Button
-        as="a"
-        href={menu.formHref}
-        target="_blank"
-        rel="noopener noreferrer"
         variant="clear"
         size="small"
         icon={menu.listing ? ICONS.correction : ICONS.feedback}
         iconPosition="preceding"
-        onClick={() =>
-          trackSelectionMenu(
-            menu.listing ? 'correction' : 'feedback',
-            menu.listing
-          )
-        }
+        aria-haspopup="dialog"
+        onClick={e => {
+          const kind = menu.listing ? 'correction' : 'feedback'
+          trackSelectionMenu(kind, menu.listing)
+          // The form takes the menu's place, under the selected text.
+          setOpen(false)
+          openFeedbackForm({
+            kind,
+            entry: 'selection',
+            trigger: e.currentTarget,
+            anchor: menu.box,
+            quote: menu.text,
+            listing: menu.listing,
+            fallbackHref: menu.formHref,
+          })
+        }}
       >
         {formLabel}
-        <span className="visually-hidden"> (opens in new tab)</span>
       </Button>
     </div>,
     document.body

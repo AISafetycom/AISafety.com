@@ -1,0 +1,26 @@
+/* <Popover> — the site's popover panel. Fill and border come from the global
+   .border-plus-fill class, the shadow from .drop-shadow-extra-dark. Where it
+   sits (left, and top when floating) is set in Popover.tsx. The padding
+   belongs to what it holds, so each use sets its own. */
+.popover {
+  position: absolute;
+  width: max-content;
+  border-radius: 16px;
+}
+
+/* Hangs under its parent, in the page, so it scrolls with it. */
+.inline {
+  top: calc(100% + 8px);
+  z-index: 10;
+}
+
+/* Floats over the page, above everything there but the nav: the sticky
+   filter bar (20), the Field map's zoom controls and search (95), and the
+   chatbot (96 to 100), whose own buttons open the correction form. Its spot
+   is set before it's painted; until then it waits at the top of the page,
+   not the end, so it never lengthens the page. */
+.floating {
+  top: 0;
+  left: 0;
+  z-index: 101;
+}

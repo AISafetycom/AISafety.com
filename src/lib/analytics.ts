@@ -397,6 +397,35 @@ export function trackSelectionMenu(
   })
 }
 
+/** How far a visitor got with the site's correction and feedback form
+ *  (FeedbackPopover): it opening, it being sent, or sending failing. */
+export type FeedbackFormStage = 'open' | 'sent' | 'error'
+
+/**
+ * Track the site's correction and feedback form. `kind` is which form,
+ * `entry` where it was opened from (the selection menu, the footer, a page's
+ * "Suggest a correction" button, the Field map's "Suggest correction" item,
+ * a link in a page's text, the chatbot); `listingId` the card's listing when the
+ * text was on one. What the visitor typed is never recorded.
+ */
+export function trackFeedbackForm(
+  stage: FeedbackFormStage,
+  kind: 'correction' | 'feedback',
+  entry: 'selection' | 'footer' | 'contribute' | 'map' | 'page' | 'chatbot',
+  listingId?: string
+): void {
+  if (typeof window === 'undefined') return
+  if (isTrackingOptedOut()) return
+  window._paq?.push(['trackEvent', 'Feedback form', stage, `${kind}/${entry}`])
+  sendTrackEvent({
+    type: 'feedback_form',
+    page: trackedPath(window.location.pathname),
+    source: stage,
+    label: `${kind}/${entry}`,
+    listingId,
+  })
+}
+
 /**
  * Track an action on the press and media page (/media). `label` names the
  * thing ('Copied short boilerplate', 'Downloaded press kit'), `url` is the
