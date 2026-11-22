@@ -58,6 +58,13 @@ export const RULES = {
   // themselves; flex from flex, flex-col, items-*, justify-* and so on.
   spacing: { level: 'error', title: 'Hand-written spacing' },
   flex: { level: 'error', title: 'Hand-written flex' },
+  // "Icon-only buttons … need an aria-label, which also shows as a tooltip"
+  // (docs/css-guidelines.md, Buttons). A correction pop-up switched one off
+  // on 22 Nov 2026 and every check passed, so now this one catches it.
+  'tooltip-off': {
+    level: 'error',
+    title: 'Icon button with its tooltip switched off',
+  },
   // Other single lines a utility class covers (a color, a cursor) are notes:
   // a class that genuinely needs its own CSS often has one in it. A class made
   // of nothing else is a `duplicate-class` error instead.
@@ -66,6 +73,14 @@ export const RULES = {
     title: 'A utility class already does this',
   },
   'raw-button': { level: 'warn', title: 'New <button> element' },
+  // One class, one kind of element (docs/claude.md, "HTML Consistency"):
+  // browsers style <a>, <button>, <div> and <p> differently, so one class on
+  // two of them can look different on each. A note, because a row that is a
+  // link in one case and plain in another is sometimes right.
+  'class-on-two-tags': {
+    level: 'warn',
+    title: 'One class on two kinds of element',
+  },
   'design-system-variable': {
     level: 'warn',
     title: 'New variable in globals.css',
@@ -984,6 +999,38 @@ export function checkTsx(text, ds, ts, file = '') {
     return out.filter(Boolean)
   }
 
+  /** The classes in a className that come from this file's CSS module
+      (styles.row, styles['row']), as "styles.row". */
+  const moduleClasses = attr => {
+    const out = []
+    if (!attr.initializer) return out
+    walk(attr.initializer, n => {
+      const fromModule =
+        (ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n)) &&
+        ts.isIdentifier(n.expression) &&
+        cssModules.has(n.expression.text)
+      if (!fromModule) return
+      if (ts.isPropertyAccessExpression(n))
+        out.push(`${n.expression.text}.${n.name.text}`)
+      else if (ts.isStringLiteralLike(n.argumentExpression))
+        out.push(`${n.expression.text}.${n.argumentExpression.text}`)
+    })
+    return out
+  }
+
+  /** tooltip={false} or tooltip="": the two plain ways to switch it off. */
+  const switchedOff = attr => {
+    const init = attr.initializer
+    if (!init) return false
+    if (ts.isStringLiteral(init)) return init.text.trim() === ''
+    const value = ts.isJsxExpression(init) ? init.expression : null
+    if (!value) return false
+    if (value.kind === ts.SyntaxKind.FalseKeyword) return true
+    return ts.isStringLiteralLike(value) && value.text.trim() === ''
+  }
+
+  const tagsOfClass = new Map() // "styles.row" → Map(tag → first element)
+
   walk(sf, node => {
     if (!ts.isJsxOpeningElement(node) && !ts.isJsxSelfClosingElement(node))
       return
@@ -992,6 +1039,28 @@ export function checkTsx(text, ds, ts, file = '') {
     const attr = name => attrs.find(a => a.name.getText(sf) === name)
 
     if (attr('style') && !drawsImage) checkStyle(attr('style'))
+
+    if (
+      tag === 'Button' &&
+      !BUTTON_FILES.includes(file) &&
+      attr('tooltip') &&
+      switchedOff(attr('tooltip'))
+    )
+      add(
+        'tooltip-off',
+        attr('tooltip'),
+        `<Button ${attr('tooltip').getText(sf)}>`,
+        'Every icon-only button shows its label as a tooltip on hover and keyboard focus (docs/css-guidelines.md, "Buttons"). Delete this prop and the aria-label shows by itself; for different words, pass tooltip="…". If this button truly must not show one, that is a design decision for Melissa.'
+      )
+
+    // Which HTML elements each module class is put on (components are left
+    // out: what they render is their own business).
+    if (attr('className') && /^[a-z]/.test(tag))
+      for (const cls of new Set(moduleClasses(attr('className')))) {
+        const tags = tagsOfClass.get(cls) ?? new Map()
+        if (!tags.has(tag)) tags.set(tag, node)
+        tagsOfClass.set(cls, tags)
+      }
 
     if (BUTTON_FILES.includes(file) || tag === 'Button') return
     const classAttr = attr('className')
@@ -1013,6 +1082,19 @@ export function checkTsx(text, ds, ts, file = '') {
         `<button> ${classNames(classAttr).join(' ')}`
       )
   })
+
+  for (const [cls, tags] of tagsOfClass) {
+    if (tags.size < 2) continue
+    const names = [...tags.keys()].sort()
+    const shown = names.map(t => `<${t}>`).join(' and ')
+    add(
+      'class-on-two-tags',
+      [...tags.values()][1],
+      `${cls} is on ${shown}`,
+      `Browsers give ${shown} different built-in styles, so one class can look different on each. Use the same element everywhere the class goes, or give each element its own class. If it is on purpose (a row that is a link in one case and plain text in another), say so in the pull request.`,
+      `${cls} ${names.join(' ')}`
+    )
+  }
 
   return applyAllows(findings, tsxAllows(text))
 }

@@ -351,6 +351,52 @@ describe('TSX rules', () => {
     )
     expect(rulesIn(found)).toEqual(['raw-button'])
   })
+
+  it('an icon button with its tooltip switched off', () => {
+    const found = tsx(
+      `import Button from '@/components/Button'\nexport default function A() {\n  return (\n    <>\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={false} />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip="" />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={''} />\n    </>\n  )\n}`
+    )
+    expect(rulesIn(found)).toEqual([
+      'tooltip-off',
+      'tooltip-off',
+      'tooltip-off',
+    ])
+    expect(found[0].line).toBe(5)
+    expect(found[0].what).toBe('<Button tooltip={false}>')
+    expect(found[0].hint).toContain('aria-label shows by itself')
+  })
+
+  it('an icon button that keeps its tooltip, or words it differently, is fine', () => {
+    const found = tsx(
+      `import Button from '@/components/Button'\nexport default function A({ open }: { open: boolean }) {\n  return (\n    <>\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip="Close the menu" />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={open ? false : undefined} />\n      <Popover tooltip={false} />\n    </>\n  )\n}`
+    )
+    // The conditional one is the design reviewer's to judge
+    // (docs/design-review-checklist.md), not the script's.
+    expect(found).toEqual([])
+  })
+
+  it('a switched-off tooltip can be allowed with a reason', () => {
+    const found = tsx(
+      `import Button from '@/components/Button'\nexport default function A() {\n  return (\n    <Button\n      icon="/images/icons/x.svg"\n      iconPosition="only"\n      aria-label="Close"\n      // style-check: allow tooltip-off (label is printed beside it, agreed with Melissa)\n      tooltip={false}\n    />\n  )\n}`
+    )
+    expect(rulesIn(found)).toEqual(['exception'])
+  })
+
+  it('one module class on two kinds of element is a note', () => {
+    const found = tsx(
+      `import styles from './Popover.module.css'\nexport default function A({ href }: { href?: string }) {\n  return (\n    <>\n      <p className={\`\${styles.note} paragraph-small\`}>One</p>\n      <div className={styles.note}>Two</div>\n      <span className={styles['note']}>Three</span>\n    </>\n  )\n}`
+    )
+    expect(rulesIn(found)).toEqual(['class-on-two-tags'])
+    expect(found[0].line).toBe(6)
+    expect(found[0].what).toBe('styles.note is on <div> and <p> and <span>')
+  })
+
+  it('utility classes, and module classes passed to components, may go anywhere', () => {
+    const found = tsx(
+      `import Link from 'next/link'\nimport styles from './page.module.css'\nexport default function A() {\n  return (\n    <>\n      <p className="flex gap-8px">One</p>\n      <div className="flex gap-8px">Two</div>\n      <div className={styles.row}>Three</div>\n      <div className={styles.row}>Four</div>\n      <Link href="/events" className={styles.row}>Five</Link>\n    </>\n  )\n}`
+    )
+    expect(found).toEqual([])
+  })
 })
 
 describe('exceptions', () => {

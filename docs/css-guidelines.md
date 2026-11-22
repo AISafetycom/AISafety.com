@@ -304,6 +304,7 @@ Where to put new classes:
 | Hand-written flex: `display: flex`, `flex-direction`, `flex-wrap`, `justify-content` or `align-items`                                                      | `flex`             |
 | A color, font, shadow, spacing or flex line in an inline `style={…}`                                                                                       | `inline-style`     |
 | A class named like a button (`.submitButton`, `.cta-btn`), a `button { … }` selector, or an element using such a class, anywhere but `<Button>` itself     | `styled-button`    |
+| An icon-only `<Button>` with its tooltip switched off (`tooltip={false}` or an empty `tooltip`)                                                            | `tooltip-off`      |
 
 Each message gives the file and line, and names the class, variable or component to use instead.
 
@@ -311,9 +312,9 @@ Spacing and flex fail everywhere on pages, mobile overrides and `:hover` include
 
 Shared components (`src/components/`) set their own spacing and flex, since they are the design system's own pieces. In there, flex and spacing on the scale (`gap: 8px`, `padding: 0 16px`) are fine, and only spacing off the scale (`45px`, `1.5em`) fails, in CSS and in an inline `style` alike. A deliberate odd value takes an exception (below). `Button`'s `padding: 0 17px` is one: with its 1px border it makes the 18px side padding in Figma. Melissa, 21 November 2026.
 
-**It adds a note, without failing,** for another hand-written line that has an exact utility class (a color or a cursor), for a class that rebuilds a bigger global class such as `.divider`, for a new raw `<button>`, and for a new variable in `globals.css`. These are notes because a class that really needs its own CSS often has one of these lines in it. A class made of nothing else fails, as above.
+**It adds a note, without failing,** for another hand-written line that has an exact utility class (a color or a cursor), for a class that rebuilds a bigger global class such as `.divider`, for a new raw `<button>`, for one module class put on two kinds of element in the same file (`class-on-two-tags`), and for a new variable in `globals.css`. These are notes because a class that really needs its own CSS often has one of these lines in it. A class made of nothing else fails, as above.
 
-**It does not judge** sizes (`width`, `height`), whether a new class was needed at all, hover and other states, or anything visual. Those still need a person.
+**It does not judge** sizes (`width`, `height`), whether a new class was needed at all, hover and other states, or anything visual. Those still need a person: [`design-review-checklist.md`](design-review-checklist.md) lists those checks, and every change to what visitors see gets an independent review against it before it is pushed.
 
 ### Only new code, and no list to maintain
 
