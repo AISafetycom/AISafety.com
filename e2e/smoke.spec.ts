@@ -55,9 +55,10 @@ const LISTING_PAGES = RESOURCE_PAGES.filter(
 // so this selector finds listing cards without depending on class names.
 const LISTING_LINK = 'a[href*="utm_source=aisafety.com"]'
 
-// Links to the site's own forms, channels and files, which are not another
-// organization's site, so they stay untagged. Everything else that leaves
-// aisafety.com must carry the UTM tags.
+// Links to the site's own forms, channels and files, and the credits the
+// communities map draws, are not visits sent to another organization, so
+// they stay untagged. Everything else that leaves aisafety.com must carry
+// the UTM tags.
 const OWN_DESTINATIONS = [
   'airtable.com', // suggestion, correction and feedback forms, shared views
   'discord.gg', // invites to the site's own Discord servers
@@ -65,6 +66,8 @@ const OWN_DESTINATIONS = [
   'app.notion.com', // the hackathon's own project list
   'creativecommons.org', // the Data API's license, linked by its exact URL
   'public.blob.vercel-storage.com', // the site's own files (press kit)
+  'mapbox.com', // the communities map's attribution, drawn by Mapbox
+  'openstreetmap.org', // the same attribution
 ]
 
 /** Outbound links on the page without the site's UTM tags. A link that
