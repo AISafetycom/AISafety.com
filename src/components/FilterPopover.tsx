@@ -125,7 +125,7 @@ export default function FilterPopover({
           sits beside the pill's button, not in it: a button can't hold
           another button. */}
       {active && (
-        <span className={`${styles.clearSlot} flex`}>
+        <span className={`${styles.clearSlot} flex items-center`}>
           <Button
             variant="clear"
             size="xs"
@@ -134,6 +134,8 @@ export default function FilterPopover({
             iconSize={12}
             aria-label={`Clear ${label}`}
             tooltip="Clear filter"
+            // Above, so the pill's open list can't cover it.
+            tooltipPosition="above"
             onClick={() => {
               onClear()
               // The × leaves with the filter, so focus goes to the pill.

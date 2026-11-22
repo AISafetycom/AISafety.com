@@ -63,9 +63,9 @@ type Look =
 export type ButtonProps<C extends ElementType = 'button'> = Look & {
   /** The element or component to render. Default 'button'. */
   as?: C
-  /** Spins the repeat icon (at the button's icon size) in place of the
-      icon while something is on its way (a form sending, say). The button
-      keeps its normal colors. */
+  /** Spins the repeat icon (at the button's base icon size, never at
+      iconSize's 12px) in place of the icon while something is on its way (a
+      form sending, say). The button keeps its normal colors. */
   loading?: boolean
   className?: string
 } & Omit<
@@ -122,15 +122,17 @@ export default function Button<C extends ElementType = 'button'>(
 
   // Icon-only buttons: a 24px icon at small (40px), 16px at xs (32px),
   // unless iconSize asks for 12px. Buttons with a label always use 16px.
-  const iconSize = iconSizeProp ?? (iconOnly && size === 'small' ? 24 : 16)
+  // The spinner keeps the base size, since its files come only at 16 and 24.
+  const baseIconSize = iconOnly && size === 'small' ? 24 : 16
+  const iconSize = iconSizeProp ?? baseIconSize
   const iconEl = loading ? (
     <Icon
       src={
-        iconSize === 24
+        baseIconSize === 24
           ? '/images/icons/repeat-large.svg'
           : '/images/icons/repeat.svg'
       }
-      size={iconSize}
+      size={baseIconSize}
       className={styles.spinner}
     />
   ) : icon ? (
