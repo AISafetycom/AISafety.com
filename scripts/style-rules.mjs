@@ -73,10 +73,12 @@ export const RULES = {
     title: 'A utility class already does this',
   },
   'raw-button': { level: 'warn', title: 'New <button> element' },
-  // One class, one kind of element (docs/claude.md, "HTML Consistency"):
-  // browsers style <a>, <button>, <div> and <p> differently, so one class on
-  // two of them can look different on each. A note, because a row that is a
-  // link in one case and plain in another is sometimes right.
+  // docs/claude.md ("HTML Consistency") asks for the same tag wherever a
+  // shared class goes, because browsers style <a>, <button>, <div> and <p>
+  // differently. This applies the same idea to a file's own module classes,
+  // where a script can see it (a review found one on 22 Nov 2026). A note,
+  // because a row that is a link in one case and plain in another is
+  // sometimes right.
   'class-on-two-tags': {
     level: 'warn',
     title: 'One class on two kinds of element',
