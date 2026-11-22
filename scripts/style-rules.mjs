@@ -1020,12 +1020,25 @@ export function checkTsx(text, ds, ts, file = '') {
     return out
   }
 
-  /** tooltip={false} or tooltip="": the two plain ways to switch it off. */
+  /** tooltip={false} or tooltip="", also in brackets, with `as const`, or
+      through a const in this file. A value worked out while the page runs
+      (a condition, a prop) is the design reviewer's to judge. */
   const switchedOff = attr => {
     const init = attr.initializer
     if (!init) return false
     if (ts.isStringLiteral(init)) return init.text.trim() === ''
-    const value = ts.isJsxExpression(init) ? init.expression : null
+    let value = ts.isJsxExpression(init) ? init.expression : null
+    for (let hops = 0; value && hops < 5; hops++) {
+      if (
+        ts.isParenthesizedExpression(value) ||
+        ts.isAsExpression(value) ||
+        ts.isSatisfiesExpression(value)
+      )
+        value = value.expression
+      else if (ts.isIdentifier(value) && objects.has(value.text))
+        value = objects.get(value.text)
+      else break
+    }
     if (!value) return false
     if (value.kind === ts.SyntaxKind.FalseKeyword) return true
     return ts.isStringLiteralLike(value) && value.text.trim() === ''
@@ -1105,7 +1118,7 @@ export function checkTsx(text, ds, ts, file = '') {
       add(
         'class-on-two-tags',
         node,
-        `${cls} is on <${tag}> as well as <${home}>`,
+        `${cls} is on <${tag}> (line ${lineOf(node)}) as well as <${home}> (line ${lineOf(tags.get(home).node)})`,
         `Browsers give <${home}> and <${tag}> different built-in styles, so one class can look different on each. Use the same element everywhere the class goes, or give each element its own class. If it is on purpose (a row that is a link in one case and plain text in another), say so in the pull request.`,
         `${cls} <${tag}>`
       )

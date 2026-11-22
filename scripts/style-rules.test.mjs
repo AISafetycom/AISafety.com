@@ -366,6 +366,18 @@ describe('TSX rules', () => {
     expect(found[0].hint).toContain('aria-label shows by itself')
   })
 
+  it('a tooltip switched off in brackets, with `as const`, or through a const', () => {
+    const found = tsx(
+      `import Button from '@/components/Button'\nconst OFF = false\nconst NONE = '' as const\nexport default function A() {\n  return (\n    <>\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={(false)} />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={false as const} />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={OFF} />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={NONE} />\n    </>\n  )\n}`
+    )
+    expect(rulesIn(found)).toEqual([
+      'tooltip-off',
+      'tooltip-off',
+      'tooltip-off',
+      'tooltip-off',
+    ])
+  })
+
   it('an icon button that keeps its tooltip, or words it differently, is fine', () => {
     const found = tsx(
       `import Button from '@/components/Button'\nexport default function A({ open }: { open: boolean }) {\n  return (\n    <>\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip="Close the menu" />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={open ? false : undefined} />\n      <Popover tooltip={false} />\n    </>\n  )\n}`
@@ -389,8 +401,12 @@ describe('TSX rules', () => {
     // One note for each further tag, so a third tag later is a new note.
     expect(rulesIn(found)).toEqual(['class-on-two-tags', 'class-on-two-tags'])
     expect(found.map(f => f.line)).toEqual([6, 7])
-    expect(found[0].what).toBe('styles.note is on <div> as well as <p>')
-    expect(found[1].what).toBe('styles.note is on <span> as well as <p>')
+    expect(found[0].what).toBe(
+      'styles.note is on <div> (line 6) as well as <p> (line 5)'
+    )
+    expect(found[1].what).toBe(
+      'styles.note is on <span> (line 7) as well as <p> (line 5)'
+    )
   })
 
   it('the note lands on the odd one out, wherever it is in the file', () => {
@@ -399,7 +415,9 @@ describe('TSX rules', () => {
     )
     expect(rulesIn(found)).toEqual(['class-on-two-tags'])
     expect(found[0].line).toBe(5)
-    expect(found[0].what).toBe('styles.row is on <p> as well as <div>')
+    expect(found[0].what).toBe(
+      'styles.row is on <p> (line 5) as well as <div> (line 6)'
+    )
   })
 
   it('<Link> counts as an <a>; other components are not counted', () => {
@@ -408,7 +426,9 @@ describe('TSX rules', () => {
     )
     expect(rulesIn(found)).toEqual(['class-on-two-tags'])
     expect(found[0].line).toBe(10)
-    expect(found[0].what).toBe('styles.row is on <div> as well as <a>')
+    expect(found[0].what).toBe(
+      'styles.row is on <div> (line 10) as well as <a> (line 7)'
+    )
   })
 
   it('utility classes may go on any element', () => {
