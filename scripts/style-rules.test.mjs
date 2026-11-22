@@ -393,6 +393,15 @@ describe('TSX rules', () => {
     expect(found[1].what).toBe('styles.note is on <span> as well as <p>')
   })
 
+  it('the note lands on the odd one out, wherever it is in the file', () => {
+    const found = tsx(
+      `import styles from './page.module.css'\nexport default function A() {\n  return (\n    <>\n      <p className={styles.row}>New, above the others</p>\n      <div className={styles.row}>One</div>\n      <div className={styles.row}>Two</div>\n    </>\n  )\n}`
+    )
+    expect(rulesIn(found)).toEqual(['class-on-two-tags'])
+    expect(found[0].line).toBe(5)
+    expect(found[0].what).toBe('styles.row is on <p> as well as <div>')
+  })
+
   it('<Link> counts as an <a>; other components are not counted', () => {
     const found = tsx(
       `import Link from 'next/link'\nimport TrackedLink from '@/components/TrackedLink'\nimport styles from './page.module.css'\nexport default function A() {\n  return (\n    <>\n      <Link href="/events" className={styles.row}>One</Link>\n      <a href="https://example.org" className={styles.row}>Two</a>\n      <TrackedLink href="/jobs" className={styles.row}>Three</TrackedLink>\n      <div className={styles.row}>Four</div>\n    </>\n  )\n}`

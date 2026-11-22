@@ -1060,7 +1060,11 @@ export function checkTsx(text, ds, ts, file = '') {
     if (attr('className') && /^[a-z]/.test(htmlTag))
       for (const cls of new Set(moduleClasses(attr('className')))) {
         const tags = tagsOfClass.get(cls) ?? new Map()
-        if (!tags.has(htmlTag)) tags.set(htmlTag, node)
+        const seen = tags.get(htmlTag)
+        tags.set(htmlTag, {
+          node: seen?.node ?? node,
+          uses: (seen?.uses ?? 0) + 1,
+        })
         tagsOfClass.set(cls, tags)
       }
 
@@ -1086,17 +1090,24 @@ export function checkTsx(text, ds, ts, file = '') {
   })
 
   // One note for each further tag a class is put on, so a class already on
-  // two tags gets a new note when a change puts it on a third.
+  // two tags gets a new note when a change puts it on a third. The tag a
+  // class is on most often counts as its own (the first one, in a tie), so
+  // the note lands on the odd one out rather than on whichever comes later.
   for (const [cls, tags] of tagsOfClass) {
-    const [[first], ...others] = [...tags]
-    for (const [tag, node] of others)
+    if (tags.size < 2) continue
+    const [home] = [...tags].reduce((best, entry) =>
+      entry[1].uses > best[1].uses ? entry : best
+    )
+    for (const [tag, { node }] of tags) {
+      if (tag === home) continue
       add(
         'class-on-two-tags',
         node,
-        `${cls} is on <${tag}> as well as <${first}>`,
-        `Browsers give <${first}> and <${tag}> different built-in styles, so one class can look different on each. Use the same element everywhere the class goes, or give each element its own class. If it is on purpose (a row that is a link in one case and plain text in another), say so in the pull request.`,
+        `${cls} is on <${tag}> as well as <${home}>`,
+        `Browsers give <${home}> and <${tag}> different built-in styles, so one class can look different on each. Use the same element everywhere the class goes, or give each element its own class. If it is on purpose (a row that is a link in one case and plain text in another), say so in the pull request.`,
         `${cls} <${tag}>`
       )
+    }
   }
 
   return applyAllows(findings, tsxAllows(text))
