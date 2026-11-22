@@ -5,10 +5,23 @@ import { NextRequest } from 'next/server'
 // admin mail stubbed: what reaches Airtable, what the form is told, and that
 // the owner is emailed the row only once it is saved.
 
-const h = vi.hoisted(() => ({
-  tasks: [] as (() => unknown)[],
-  sendAdminMail: vi.fn(async () => true),
-}))
+const h = vi.hoisted(() => {
+  // The route builds its Upstash rate limiter when it loads, from these. The
+  // Vercel build has them set, and the limiter's own requests would then go
+  // through the pretend fetch below; the tests here run without a limiter.
+  for (const key of [
+    'KV_REST_API_URL',
+    'KV_REST_API_TOKEN',
+    'UPSTASH_REDIS_REST_URL',
+    'UPSTASH_REDIS_REST_TOKEN',
+  ]) {
+    delete process.env[key]
+  }
+  return {
+    tasks: [] as (() => unknown)[],
+    sendAdminMail: vi.fn(async () => true),
+  }
+})
 
 vi.mock('next/server', async importOriginal => ({
   ...(await importOriginal<typeof import('next/server')>()),
