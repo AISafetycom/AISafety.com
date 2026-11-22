@@ -1,5 +1,6 @@
 import ApplicationForm from './ApplicationForm'
 import styles from './page.module.css'
+import { withUtm } from '@/lib/utm'
 
 const OG_DESCRIPTION = 'A four-day, in-person hackathon to improve the site.'
 
@@ -48,7 +49,7 @@ export default function HackathonPage() {
             <strong>Where</strong>
             <br />
             <a
-              href="https://www.ceealar.org"
+              href={withUtm('https://www.ceealar.org', 'Hackathon')}
               target="_blank"
               rel="noopener noreferrer"
               className="color-teal-300"

@@ -55,6 +55,36 @@ const LISTING_PAGES = RESOURCE_PAGES.filter(
 // so this selector finds listing cards without depending on class names.
 const LISTING_LINK = 'a[href*="utm_source=aisafety.com"]'
 
+// Links to the site's own forms, channels and files, which are not another
+// organization's site, so they stay untagged. Everything else that leaves
+// aisafety.com must carry the UTM tags.
+const OWN_DESTINATIONS = [
+  'airtable.com', // suggestion, correction and feedback forms, shared views
+  'discord.gg', // invites to the site's own Discord servers
+  'every.org', // the site's own donation page (footer)
+  'app.notion.com', // the hackathon's own project list
+  'creativecommons.org', // the Data API's license, linked by its exact URL
+  'public.blob.vercel-storage.com', // the site's own files (press kit)
+]
+
+/** Outbound links on the page without the site's UTM tags. A link that
+ *  slips through (a new page, a new component) fails here instead of
+ *  quietly sending visitors to an org as unattributed traffic. */
+async function untaggedOutboundLinks(page: Page): Promise<string[]> {
+  const hrefs = await page
+    .locator('a[href^="http"]')
+    .evaluateAll(links => links.map(a => a.getAttribute('href') ?? ''))
+  return hrefs.filter(href => {
+    const { hostname, searchParams } = new URL(href)
+    const host = hostname.replace(/^www\./, '')
+    if (host === 'aisafety.com' || host === 'localhost') return false
+    if (OWN_DESTINATIONS.some(d => host === d || host.endsWith(`.${d}`))) {
+      return false
+    }
+    return searchParams.get('utm_source') !== 'aisafety.com'
+  })
+}
+
 /** Collect uncaught exceptions and console errors (hydration mismatches,
  *  failed renders, broken imports all surface here in a production build). */
 function watchForErrors(page: Page): string[] {
@@ -125,8 +155,27 @@ test.describe('public pages', () => {
       await page.waitForLoadState('load')
       await page.waitForTimeout(1000)
       expect(errors).toEqual([])
+      expect(await untaggedOutboundLinks(page)).toEqual([])
     })
   }
+})
+
+test.describe('site search', () => {
+  test('results that link to other sites carry the UTM tags', async ({
+    page,
+  }) => {
+    await page.goto('/training')
+    await page.getByRole('button', { name: 'Search', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: 'Search AISafety.com' })
+    await dialog.locator('input').fill('fellowship')
+    // Results are listings, most of them on other sites.
+    const results = dialog.locator('a[data-result-index]')
+    await expect(results.first()).toBeVisible()
+    expect(
+      await dialog.locator('a[data-result-index][href^="http"]').count()
+    ).toBeGreaterThan(3)
+    expect(await untaggedOutboundLinks(page)).toEqual([])
+  })
 })
 
 test.describe('retired pages', () => {
