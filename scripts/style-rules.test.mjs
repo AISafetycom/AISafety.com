@@ -384,16 +384,27 @@ describe('TSX rules', () => {
 
   it('one module class on two kinds of element is a note', () => {
     const found = tsx(
-      `import styles from './Popover.module.css'\nexport default function A({ href }: { href?: string }) {\n  return (\n    <>\n      <p className={\`\${styles.note} paragraph-small\`}>One</p>\n      <div className={styles.note}>Two</div>\n      <span className={styles['note']}>Three</span>\n    </>\n  )\n}`
+      `import styles from './Popover.module.css'\nexport default function A() {\n  return (\n    <>\n      <p className={\`\${styles.note} paragraph-small\`}>One</p>\n      <div className={styles.note}>Two</div>\n      <span className={styles['note']}>Three</span>\n      <p className={styles.note}>Four</p>\n    </>\n  )\n}`
     )
-    expect(rulesIn(found)).toEqual(['class-on-two-tags'])
-    expect(found[0].line).toBe(6)
-    expect(found[0].what).toBe('styles.note is on <div> and <p> and <span>')
+    // One note for each further tag, so a third tag later is a new note.
+    expect(rulesIn(found)).toEqual(['class-on-two-tags', 'class-on-two-tags'])
+    expect(found.map(f => f.line)).toEqual([6, 7])
+    expect(found[0].what).toBe('styles.note is on <div> as well as <p>')
+    expect(found[1].what).toBe('styles.note is on <span> as well as <p>')
   })
 
-  it('utility classes, and module classes passed to components, may go anywhere', () => {
+  it('<Link> counts as an <a>; other components are not counted', () => {
     const found = tsx(
-      `import Link from 'next/link'\nimport styles from './page.module.css'\nexport default function A() {\n  return (\n    <>\n      <p className="flex gap-8px">One</p>\n      <div className="flex gap-8px">Two</div>\n      <div className={styles.row}>Three</div>\n      <div className={styles.row}>Four</div>\n      <Link href="/events" className={styles.row}>Five</Link>\n    </>\n  )\n}`
+      `import Link from 'next/link'\nimport TrackedLink from '@/components/TrackedLink'\nimport styles from './page.module.css'\nexport default function A() {\n  return (\n    <>\n      <Link href="/events" className={styles.row}>One</Link>\n      <a href="https://example.org" className={styles.row}>Two</a>\n      <TrackedLink href="/jobs" className={styles.row}>Three</TrackedLink>\n      <div className={styles.row}>Four</div>\n    </>\n  )\n}`
+    )
+    expect(rulesIn(found)).toEqual(['class-on-two-tags'])
+    expect(found[0].line).toBe(10)
+    expect(found[0].what).toBe('styles.row is on <div> as well as <a>')
+  })
+
+  it('utility classes may go on any element', () => {
+    const found = tsx(
+      `import styles from './page.module.css'\nexport default function A() {\n  return (\n    <>\n      <p className="flex gap-8px">One</p>\n      <div className="flex gap-8px">Two</div>\n      <div className={styles.row}>Three</div>\n      <div className={styles.row}>Four</div>\n    </>\n  )\n}`
     )
     expect(found).toEqual([])
   })

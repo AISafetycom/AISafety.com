@@ -1053,12 +1053,14 @@ export function checkTsx(text, ds, ts, file = '') {
         'Every icon-only button shows its label as a tooltip on hover and keyboard focus (docs/css-guidelines.md, "Buttons"). Delete this prop and the aria-label shows by itself; for different words, pass tooltip="…". If this button truly must not show one, that is a design decision for Melissa.'
       )
 
-    // Which HTML elements each module class is put on (components are left
-    // out: what they render is their own business).
-    if (attr('className') && /^[a-z]/.test(tag))
+    // Which HTML tags each module class is put on. <Link> renders an <a>, so
+    // it counts as one; other components are left out, since what they
+    // render is their own business.
+    const htmlTag = tag === 'Link' ? 'a' : tag
+    if (attr('className') && /^[a-z]/.test(htmlTag))
       for (const cls of new Set(moduleClasses(attr('className')))) {
         const tags = tagsOfClass.get(cls) ?? new Map()
-        if (!tags.has(tag)) tags.set(tag, node)
+        if (!tags.has(htmlTag)) tags.set(htmlTag, node)
         tagsOfClass.set(cls, tags)
       }
 
@@ -1083,17 +1085,18 @@ export function checkTsx(text, ds, ts, file = '') {
       )
   })
 
+  // One note for each further tag a class is put on, so a class already on
+  // two tags gets a new note when a change puts it on a third.
   for (const [cls, tags] of tagsOfClass) {
-    if (tags.size < 2) continue
-    const names = [...tags.keys()].sort()
-    const shown = names.map(t => `<${t}>`).join(' and ')
-    add(
-      'class-on-two-tags',
-      [...tags.values()][1],
-      `${cls} is on ${shown}`,
-      `Browsers give ${shown} different built-in styles, so one class can look different on each. Use the same element everywhere the class goes, or give each element its own class. If it is on purpose (a row that is a link in one case and plain text in another), say so in the pull request.`,
-      `${cls} ${names.join(' ')}`
-    )
+    const [[first], ...others] = [...tags]
+    for (const [tag, node] of others)
+      add(
+        'class-on-two-tags',
+        node,
+        `${cls} is on <${tag}> as well as <${first}>`,
+        `Browsers give <${first}> and <${tag}> different built-in styles, so one class can look different on each. Use the same element everywhere the class goes, or give each element its own class. If it is on purpose (a row that is a link in one case and plain text in another), say so in the pull request.`,
+        `${cls} <${tag}>`
+      )
   }
 
   return applyAllows(findings, tsxAllows(text))

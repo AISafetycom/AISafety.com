@@ -1,6 +1,8 @@
 # Design review checklist
 
-Melissa's rules are in [`css-guidelines.md`](css-guidelines.md). `npm run check:styles` holds new code to the ones a script can judge. This list is the rest: the judgment rules a script can't check, written as short checks.
+Melissa's rules are in [`css-guidelines.md`](css-guidelines.md). `npm run check:styles` holds new code to the ones a script can judge. This list is the rest: the judgment rules a script can't check, written as short checks that can be made from the code. It comes before Melissa's own look at the page, not instead of it.
+
+The list is hers to own. Each check comes from her guide, from the notes in `CLAUDE.md` and `docs/claude.md`, from her comments in the shared components, or from something a review caught. She can change or remove any line.
 
 Every change to what visitors see gets an independent design review against this list before it is pushed (see [How a review runs](#how-a-review-runs)). The list grows by one line each time something slips through, so each mistake can happen only once (see [Adding to this list](#adding-to-this-list)).
 
@@ -51,7 +53,7 @@ The reviewer changes no code. After the report, the author fixes each finding, a
 - **C1.** Headings are `<h1>` to `<h3>`, with no class that changes their type, picked by the page's outline and not by size. Text that works as a heading is a heading element, not a bold `<p>` or a `<div>`.
 - **C2.** Text sizes step down, never up: the text under a heading or label is not larger than it. Default `<p>` text is 17px. In a compact piece (a pop-up, a card, a menu, a form hint) it usually needs `paragraph-small` or `paragraph-xs`, like its neighbors. (From the corrections pop-up, 22 November 2026: a default `<p>` sat under a smaller heading.)
 - **C3.** Every `<p>` that isn't default body text has a paragraph class, and no CSS sets type. The script catches `font-size`, `font-weight`, and `font-family`. `line-height`, `letter-spacing`, and `text-transform` are the reviewer's to catch.
-- **C4.** One class, one kind of element. A class goes on the same HTML tag everywhere it is used, because browsers style `<a>`, `<button>`, `<div>`, and `<p>` differently. (The script adds a note within one file. The reviewer also checks other files that use the class. From the corrections pop-up, 22 November 2026.)
+- **C4.** One class, one kind of element. A class that styles one thing (a class from a `.module.css` file, or a global one such as `.card` or `.link`) goes on the same HTML tag everywhere it is used, because browsers style `<a>`, `<button>`, `<div>`, and `<p>` differently. Utility classes (`flex`, the spacing, paragraph and color classes) go on any element, and `.text-field` is for `<input>` and `<textarea>` alike. (The script adds a note for a module class on two HTML tags within one file, counting `<Link>` as `<a>`. Other components, a tag picked while the page runs, and other files that use the class are the reviewer's to check. From the corrections pop-up, 22 November 2026.)
 - **C5.** The element fits the job: `<Button>` for an action, a link for going somewhere, `<ul>` and `<li>` for a list, a `<label>` tied to each field.
 - **C6.** Teal links outside buttons take `.link` (or `.link-group` on a wrapper), never `.color-teal-300`, so they lighten on hover.
 
