@@ -89,6 +89,24 @@ export default function DesignSystemPage() {
                 aria-label="Open"
                 disabled
               />
+              {/* iconSize={12}: the 12px icon, as on a filter pill's ×. */}
+              <Button
+                variant={variant}
+                size="xs"
+                icon="/images/icons/x-small.svg"
+                iconSize={12}
+                iconPosition="only"
+                aria-label="Clear filter"
+              />
+              <Button
+                variant={variant}
+                size="xs"
+                icon="/images/icons/x-small.svg"
+                iconSize={12}
+                iconPosition="only"
+                aria-label="Clear filter"
+                disabled
+              />
             </div>
           </section>
         ))}
