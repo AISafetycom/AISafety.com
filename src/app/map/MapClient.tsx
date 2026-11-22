@@ -7,7 +7,8 @@ import FilterBar from '@/components/FilterBar'
 import FilterDropdown from '@/components/FilterDropdown'
 import ContributeButtons from '@/components/ContributeButtons'
 import RelativeDate from '@/components/RelativeDate'
-import MapOrgCard from './MapOrgCard'
+import ListingCard from '@/components/ListingCard'
+import { mapArea, mapOrgCardProps } from './card'
 import SearchBar from '@/components/SearchBar'
 import { trackCardsButtonClick } from '@/lib/analytics'
 import CardsViewTracker from '@/components/CardsViewTracker'
@@ -278,7 +279,7 @@ export default function MapClient({
               <FilterDropdown
                 trackingPage="Map"
                 title="Category"
-                icon="/images/icons/category.svg"
+                icon="/images/icons/tag.svg"
                 options={categories}
                 selected={selectedCategories}
                 counts={categoryCounts}
@@ -295,20 +296,26 @@ export default function MapClient({
               />
             </FilterBar>
 
-            <div className="collection-list padding-bottom-16px">
+            <ul role="list" className="collection-list padding-bottom-16px">
               {filteredOrgs.map(org => (
-                <MapOrgCard
+                <ListingCard
                   key={org.id}
-                  org={org}
+                  {...mapOrgCardProps(org)}
+                  trackingPage="Map"
+                  listingId={org.id}
                   placement={placements.get(org.id)}
+                  trackingSource="cards"
+                  trackingArea={mapArea(org)}
                 />
               ))}
               {filteredOrgs.length === 0 && (
-                <p className="paragraph-small color-teal-grey-300">
-                  Nothing found.
-                </p>
+                <li>
+                  <p className="paragraph-small color-teal-grey-300">
+                    Nothing found.
+                  </p>
+                </li>
               )}
-            </div>
+            </ul>
           </div>
 
           <div className="hide-mobile width-3-col">

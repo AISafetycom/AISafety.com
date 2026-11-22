@@ -20,7 +20,7 @@ import { advisorCardProps } from '@/app/advisors/card'
 import { founderResourceCardProps } from '@/app/founders/card'
 import { mediaChannelCardProps } from '@/app/media-channels/card'
 import { projectCardProps } from '@/app/projects/card'
-import MapOrgCard from '@/app/map/MapOrgCard'
+import { mapOrgCardProps } from '@/app/map/card'
 import type { Community } from '@/lib/data/communities'
 import type { EventListing } from '@/lib/data/events'
 import type { RecurringProgram, TrainingProgram } from '@/lib/data/training'
@@ -341,7 +341,7 @@ function Card({ kind, listing }: { kind: PreviewKind; listing: unknown }) {
     case 'project':
       return listingCard(projectCardProps(listing as Project))
     case 'mapOrg':
-      return <MapOrgCard org={listing as MapOrg} />
+      return listingCard(mapOrgCardProps(listing as MapOrg))
   }
 }
 
