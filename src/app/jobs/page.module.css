@@ -1,0 +1,16 @@
+/* Each card's real height is recorded once it has been drawn (the "auto"),
+   so a card that later skips drawing (below) keeps its size and nothing
+   moves. 480px stands in for a card that hasn't been drawn yet (one a filter
+   change brought back): about as tall as the tallest card, so drawing it
+   pulls the page up rather than pushing it down. Width is left to the grid. */
+.cards > li {
+  contain-intrinsic-size: none auto 480px;
+}
+
+/* From the visitor's first filter change on, cards off the screen skip
+   layout and painting, so a change redraws only the cards in view instead
+   of all of them (581). Not from the start: the first full draw is what
+   records every card's height. */
+.skipOffscreen > li {
+  content-visibility: auto;
+}

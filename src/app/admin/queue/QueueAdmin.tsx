@@ -1,6 +1,14 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import Image from 'next/image'
 import type { SaidBy } from '@/lib/admin/queue'
 import type {
@@ -34,6 +42,7 @@ import { URL_KEYS, listingLink } from '@/lib/admin/queue-link'
 import { LEFT_OUT_KEY, withLeftOut } from '@/lib/admin/queue-left-out'
 import {
   heldRepeat,
+  rulePopKey,
   shortcutAllowed,
   takesTyping,
   type ItemView,
@@ -43,6 +52,11 @@ import {
   verdictWords,
   type FlagUpdate,
 } from '@/lib/admin/queue-flag'
+import {
+  sourceLabels,
+  supportsWord,
+  type CheckedClaim,
+} from '@/lib/admin/queue-checked'
 import { rejectReplyFor, shownDeclineChip } from '@/lib/admin/queue-decline'
 import {
   afterUndoFailed,
@@ -50,6 +64,7 @@ import {
   type Reopening,
 } from '@/lib/admin/queue-reopen'
 import { discordAppLink, replyToCopy } from '@/lib/admin/queue-discord'
+import { formEmailFollows } from '@/lib/admin/queue-form-email'
 import {
   alreadyRepliedOf,
   type AlreadyReplied,
@@ -58,6 +73,7 @@ import {
   leadSentence,
   OUTCOME_LABEL,
   ruleTestShort,
+  type RuleTest,
   type RuleTestResult,
 } from '@/lib/admin/queue-rule-test'
 import {
@@ -94,6 +110,12 @@ import { SITE_PAGES } from '@/lib/site-pages'
 import { activityIcon } from '@/app/communities/activity-icon'
 import { isAcceptingApplications } from '@/lib/funding-status'
 import { goneFields, goneNote } from '@/lib/admin/queue-retired'
+import {
+  decidedBy,
+  lineText,
+  listingLines,
+  type HistoryRow,
+} from '@/lib/admin/queue-history'
 import { STATUS_ICONS as FUNDER_STATUS_ICONS } from '@/app/funding/card'
 import { APPLICATIONS_ICONS as ADVISOR_APPLICATIONS_ICONS } from '@/app/advisors/card'
 import { trainingTypeColor } from '@/lib/training-types'
@@ -115,7 +137,7 @@ import {
 } from '@/lib/admin/queue-field-flags'
 import type { FableChange } from '@/lib/admin/queue-fable'
 import Position, { forgetOrder } from './Position'
-import MapSpot, { forgetMap, notePlaced } from './MapSpot'
+import MapSpot, { forgetMap, MoveOthersContext, notePlaced } from './MapSpot'
 import { spotOf, wantsSpot, withSpot } from '@/lib/admin/queue-spot'
 import type { Spot } from '@/lib/admin/map-spot'
 import Fireworks from './Fireworks'
@@ -675,6 +697,61 @@ function dayMonth(iso: string): string {
     day: 'numeric',
     month: 'long',
   })
+}
+
+/** "15 October 2026", in the viewer's own time zone. */
+function dayMonthYear(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  })
+}
+
+/** Who is signed in, under the name their decisions are kept by
+ *  (queue-history.ts); null when the page was not told. */
+const MeContext = createContext<string | null>(null)
+
+/** What a history line reads of an item. */
+function historyRow(item: QueueItem): HistoryRow {
+  return {
+    id: item.id,
+    type: item.type,
+    source: item.source,
+    status: item.status,
+    decidedAt: item.decidedAt,
+    declined: item.declined,
+    reviewAgainOn: item.reviewAgainOn,
+    // A copy of the item from before the page knew of histories has none.
+    history: item.history ?? [],
+    written:
+      item.type === 'Change'
+        ? item.changes
+            .map(c => c.field)
+            .filter(
+              k =>
+                !item.leftOut?.includes(k) &&
+                !item.gone?.includes(k) &&
+                !item.keptByFable?.includes(k)
+            )
+        : [],
+    proposed: item.type === 'Change' ? item.changes.map(c => c.field) : [],
+  }
+}
+
+/** Who made the decision an item shows, when that was someone other than
+ *  the person looking: your own decisions need no name beside them (Bryce,
+ *  18 Nov 2026, with a second person about to decide items). Nothing for a
+ *  decision with nobody on record. */
+function DecidedBy({ item, lead = '' }: { item: QueueItem; lead?: string }) {
+  const me = useContext(MeContext)
+  const by = decidedBy(historyRow(item))
+  if (!by || by === me) return null
+  return (
+    <span>
+      {lead}by {by}
+    </span>
+  )
 }
 
 /** Back from "Review again in a week": when it was set aside, while it is
@@ -1645,8 +1722,10 @@ interface Toast {
 }
 
 /** What the page tells the Mac agent to do after a decision: save the
- *  accept's reply draft, or write and save a rejection's. */
-type AgentAction = 'gmail_draft' | 'reject_draft' | 'reopen'
+ *  accept's reply draft, write and save a rejection's, or bring the form's
+ *  email in step with an item nobody waits on a reply for (read once he
+ *  has dealt with it, unread again after an Undo). */
+type AgentAction = 'gmail_draft' | 'reject_draft' | 'reopen' | 'mark_read'
 
 interface AgentResult {
   ok: boolean
@@ -1825,11 +1904,30 @@ type Action = Decision | 'undo' | 'reopen'
 
 export default function QueueAdmin({
   canEdit,
+  canMoveMap = false,
+  me = null,
 }: {
   /** False for a view-only grant: the same queue with nothing to click that
    *  would decide anything. The API refuses those writes regardless. */
   canEdit: boolean
+  /** The map editor's edit grant: the map strip's other listings drag and
+   *  save. The map API checks the grant again on every write. */
+  canMoveMap?: boolean
+  /** The signed-in admin's name, as their decisions are kept in each
+   *  item's history: someone else's decision shows its name, your own
+   *  does not (queue-history.ts). */
+  me?: string | null
 }) {
+  return (
+    <MeContext.Provider value={me}>
+      <MoveOthersContext.Provider value={canEdit && canMoveMap}>
+        <QueueInbox canEdit={canEdit} />
+      </MoveOthersContext.Provider>
+    </MeContext.Provider>
+  )
+}
+
+function QueueInbox({ canEdit }: { canEdit: boolean }) {
   const [items, setItems] = useState<QueueItem[] | null>(null)
   // The list as it is now, for callbacks that must not go stale.
   const itemsRef = useRef(items)
@@ -3626,6 +3724,20 @@ export default function QueueAdmin({
     [showDecided]
   )
 
+  /** Open another item about the same listing, from a line of its history:
+   *  one still waiting as the list opens it, a decision as the search's
+   *  Earlier group does. */
+  const openRow = useCallback(
+    (row: QueueItem) => {
+      if (isOpen(row) && itemsRef.current?.some(i => i.id === row.id)) {
+        select(row.id)
+      } else {
+        openEarlier(row)
+      }
+    },
+    [openEarlier, select]
+  )
+
   const act = useCallback(
     async (
       item: QueueItem,
@@ -3805,6 +3917,16 @@ export default function QueueAdmin({
           delete next[item.id]
           return next
         })
+        // A form item with nobody to reply to: its email in Gmail is read
+        // once he has dealt with the item in any way, and unread again
+        // after an Undo (Bryce, 18 Nov 2026). The Mac re-reads the row and
+        // decides; its worker catches a call that never arrived.
+        if (agent && formEmailFollows(updated, action)) {
+          void callAgent(agent, '/act', {
+            id: updated.id,
+            action: 'mark_read',
+          })
+        }
         if (decision) {
           forget()
           if (action === 'delete') {
@@ -4046,6 +4168,9 @@ export default function QueueAdmin({
     popCandidate && popCandidate.id !== selectedId ? popCandidate : null
   const popSeenId =
     popCandidate && popCandidate.id === selectedId ? popCandidate.id : null
+  // The page dims behind the card while it shows, so the card is all that
+  // stands out (Bryce, 19 Nov 2026: "Otherwise, things look a bit messy").
+  const [shadeShown, shadeClosing] = useClosing(!!popUp)
   // A rule pops up as it is written, its test still running on the Mac:
   // the list is read again until the result is in, so it fills in on the
   // card.
@@ -4222,6 +4347,31 @@ export default function QueueAdmin({
       // holding X asked "delete?", confirmed it on the first repeat, then
       // deleted the items after it, and Delete has no Undo).
       if (heldRepeat(e)) return
+      // A rule card over the dimmed page takes the keys (queue-keys.ts).
+      if (popUp) {
+        const busy = draft(popUp.id).busy
+        const rejecting = popRejecting === popUp.id
+        const k = rulePopKey(e.key, { rejecting, busy })
+        if (k.do !== 'pass') {
+          e.preventDefault()
+          if (k.do === 'apply') {
+            void act(popUp, 'accept', {}, { inPlace: true })
+          } else if (k.do === 'reasons') {
+            setPopRejecting(popUp.id)
+          } else if (k.do === 'reject') {
+            const chip = popUp.rejectChips[k.chip]
+            if (chip) {
+              void act(popUp, 'reject', { reason: chip }, { inPlace: true })
+            }
+          } else if (k.do === 'view') {
+            openPop(popUp)
+          } else if (k.do === 'back') {
+            if (rejecting) setPopRejecting(null)
+            else closePop(popUp.id)
+          }
+          return
+        }
+      }
       const item = selected
       const d = item ? draft(item.id) : FRESH
       // A key that acts on the item waits until that item is what the pane
@@ -4575,21 +4725,6 @@ export default function QueueAdmin({
             void act(item, 'reopen')
           }
           break
-        case 'g':
-          // Apply the rule that popped up, where he is (Bryce, 10 Nov
-          // 2026). G and V are the left-hand keys still free.
-          if (popUp && !draft(popUp.id).busy) {
-            e.preventDefault()
-            void act(popUp, 'accept', {}, { inPlace: true })
-          }
-          break
-        case 'v':
-          // View the rule that popped up in full, on the Rules tab.
-          if (popUp) {
-            e.preventDefault()
-            openPop(popUp)
-          }
-          break
         case 't':
           // Today's decisions and back to the queue, as the "done today"
           // link up top does (Bryce, 21 Oct 2026).
@@ -4645,6 +4780,7 @@ export default function QueueAdmin({
     clearSearch,
     ordered.done,
     popUp,
+    popRejecting,
     itemView,
   ])
 
@@ -4664,14 +4800,19 @@ export default function QueueAdmin({
   const doneToday = ordered.done.filter(i => decidedSince(i, dayStart)).length
   // Rows the Mac's daily check took out this past week because their date
   // went by before he decided them (Bryce, 16 Nov 2026: "somehow I know
-  // when this has happened"), less the ones whose line he closed.
+  // when this has happened"), less the ones whose line he closed. Only the
+  // open tab's (Bryce, 19 Nov 2026: "should only show under additions or
+  // changes, whichever one is the one").
   const takenOut = useMemo(
     () =>
       unseenTakenOut(
-        (items ?? []).map(takenOutOf).filter((t): t is TakenOut => t !== null),
+        (items ?? [])
+          .filter(i => kindOf(i) === kind)
+          .map(takenOutOf)
+          .filter((t): t is TakenOut => t !== null),
         takenOutSeen
       ),
-    [items, takenOutSeen]
+    [items, kind, takenOutSeen]
   )
   const closeTakenOut = () => {
     setTakenOutSeen(prev => {
@@ -5167,6 +5308,7 @@ export default function QueueAdmin({
                 key={foundListing.record}
                 listing={foundListing}
                 earlier={ordered.earlierCount}
+                onOpen={openRow}
               />
             ) : pane === 'done' ? (
               <DoneList
@@ -5205,6 +5347,7 @@ export default function QueueAdmin({
                     }
                   : {})}
                 item={selected}
+                onOpenRow={openRow}
                 onFlag={body => updateFlag(selected, body)}
                 live={live[selected.id] ?? null}
                 onImage={(field, urls) => {
@@ -5267,7 +5410,7 @@ export default function QueueAdmin({
         <div
           key={toast.item.id}
           ref={toastRef}
-          className={`${styles.toast} ${toastLeaving ? styles.toastLeaving : ''}`}
+          className={`${styles.toast} ${toastLeaving ? styles.toastLeaving : ''} ${popUp ? styles.toastOverShade : ''}`}
           role="status"
           onClick={e => {
             if ((e.target as HTMLElement).closest('button, a')) return
@@ -5392,6 +5535,16 @@ export default function QueueAdmin({
             </button>
           )}
         </div>
+      )}
+
+      {shadeShown && (
+        // A click on the dimmed page puts the card away, as its × does.
+        <div
+          className={`${styles.rulePopShade} ${shadeClosing ? motion.fadeOut : motion.fade}`}
+          onClick={() => popUp && closePop(popUp.id)}
+          inert={shadeClosing}
+          aria-hidden="true"
+        />
       )}
 
       {popUp && (
@@ -5537,11 +5690,12 @@ export default function QueueAdmin({
                 again
               </dd>
               <dt>
-                <kbd>G</kbd> / <kbd>V</kbd>
+                <kbd>A</kbd> / <kbd>R</kbd> / <kbd>V</kbd>
               </dt>
               <dd>
-                when a new rule pops up, apply it where you are / view it in
-                full on the Rules tab
+                when a new rule pops up, apply it / reject it, then a number
+                picks the reason / view it on the Rules tab; Esc puts it away,
+                and other keys wait until it has gone
               </dd>
               <dt>
                 <kbd>⌘</kbd> <kbd>Z</kbd>
@@ -5824,6 +5978,7 @@ function Row({
                 {doneLabel(item)}
               </span>
               <span>{ago(decidedAtOf(item))}</span>
+              <DecidedBy item={item} />
             </>
           ) : (
             item.verdict && (
@@ -5890,6 +6045,7 @@ function EarlierRow({
       </span>
       <span className={styles.earlierWhat}>
         {doneLabel(item)} · {ago(decidedAtOf(item))}
+        <DecidedBy item={item} lead=" · " />
       </span>
     </button>
   )
@@ -5972,10 +6128,13 @@ function ListingRow({
 function ListingFound({
   listing,
   earlier,
+  onOpen,
 }: {
   listing: FoundListing
   /** How many earlier decisions the same search lists on the left. */
   earlier: number
+  /** Opens a Queue item about this listing, from a line of its history. */
+  onOpen: (row: QueueItem) => void
 }) {
   const nav =
     Object.values(SITE_PAGES).find(p => p.path === listing.page) ?? null
@@ -6072,8 +6231,132 @@ function ListingFound({
           <Fields part="main" {...fields} />
         </div>
         <Fields part="rest" {...fields} />
+        <History
+          key={`history:${listing.record}`}
+          item={null}
+          record={listing.record}
+          onOpen={onOpen}
+        />
       </div>
     </div>
+  )
+}
+
+/** How many lines a history shows before "Show all". */
+const HISTORY_SHOWN = 6
+
+/** The listing's history in the Queue (Bryce, 18 Nov 2026: "Stamp each
+ *  change with who made it … a name and an undo on each record"): every
+ *  Publish, Apply, Reject, edit after the decision and Undo made on the
+ *  page about it, and every change Fable made to it from an item's chat
+ *  (with who asked), newest first, each with who made it and the day. A line
+ *  from another item of the same listing opens that item, where its Undo
+ *  or Reopen is. A decision with nobody on record (made before 18 Nov
+ *  2026, or outside the page) shows without a name. It is history on the
+ *  listing, never a list of what one person did. Nothing shows until there
+ *  is a line to show. */
+function History({
+  item,
+  record,
+  onOpen,
+}: {
+  /** The item on show; null on a listing found by its record id. */
+  item: QueueItem | null
+  /** The listing, when there is one: its other Queue items are read too. */
+  record: string | null
+  onOpen: ((row: QueueItem) => void) | null
+}) {
+  const [others, setOthers] = useState<QueueItem[]>([])
+  const [all, setAll] = useState(false)
+  // Read again once anything has been decided on the item on show.
+  const version = item
+    ? `${item.status}/${item.decidedAt}/${item.reviewAgainOn}/${item.history?.length ?? 0}`
+    : ''
+  useEffect(() => {
+    if (!record) return
+    let live = true
+    fetch(`/api/admin/queue?history=${encodeURIComponent(record)}`, {
+      cache: 'no-store',
+    })
+      .then(res => {
+        if (!res.ok) throw new Error(`history read failed: ${res.status}`)
+        return res.json() as Promise<{ items?: QueueItem[] }>
+      })
+      .then(data => {
+        if (live) setOthers(data.items ?? [])
+      })
+      // The item's own lines still show; only the listing's other items
+      // are missing, and the next open reads them again.
+      .catch(e => console.warn('[admin-queue]', e))
+    return () => {
+      live = false
+    }
+  }, [record, version])
+  const rows = useMemo(() => {
+    const byId = new Map<string, QueueItem>()
+    for (const o of others) {
+      if (record && o.targetRecord === record) byId.set(o.id, o)
+    }
+    // The page's own copy of the item on show is the fresher one.
+    if (item) byId.set(item.id, item)
+    return byId
+  }, [others, item, record])
+  const lines = useMemo(
+    () => listingLines([...rows.values()].map(historyRow)),
+    [rows]
+  )
+  if (lines.length === 0) return null
+  const shown = all ? lines : lines.slice(0, HISTORY_SHOWN)
+  return (
+    <details className={`${styles.findingMore} ${styles.history}`} open>
+      <summary>History</summary>
+      <ul className={styles.historyList}>
+        {shown.map((l, i) => {
+          const row = rows.get(l.row)
+          const elsewhere = Boolean(row && l.row !== item?.id)
+          const body = (
+            <>
+              <span className={styles.historyWhat}>{lineText(l)}</span>
+              {/* Fable's own change names whoever asked for it in the chat. */}
+              {l.by && (
+                <span>
+                  {l.did === 'fable' ? 'asked by' : 'by'} {l.by}
+                </span>
+              )}
+              <span
+                title={
+                  l.recorded
+                    ? new Date(l.at).toLocaleString('en-GB')
+                    : 'Nobody is on record for this one: it was decided before 18 November 2026, or outside the Queue'
+                }
+              >
+                {dayMonthYear(l.at)}
+              </span>
+            </>
+          )
+          return (
+            <li key={`${l.row}/${l.at}/${l.did}/${i}`}>
+              {elsewhere && row && onOpen ? (
+                <button
+                  className={styles.historyLine}
+                  onClick={() => onOpen(row)}
+                  title={`Opens that item: ${row.title}`}
+                >
+                  {body}
+                </button>
+              ) : (
+                <span className={styles.historyLine}>{body}</span>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+      {!all && lines.length > HISTORY_SHOWN && (
+        <button className={styles.historyAll} onClick={() => setAll(true)}>
+          Show all {lines.length}
+        </button>
+      )}
+    </details>
   )
 }
 
@@ -6148,6 +6431,7 @@ function Detail({
   claimed,
   blockedFlash = 0,
   readOnly,
+  onOpenRow = null,
   onFable,
   onFlag,
   onBack,
@@ -6201,6 +6485,9 @@ function Detail({
   claimed: Record<string, Spot>
   /** Bumped when A can't accept yet: the "first" note flashes red. */
   blockedFlash?: number
+  /** Opens another Queue item about the same listing, from a line of its
+   *  history. */
+  onOpenRow?: ((row: QueueItem) => void) | null
   /** A view-only session: no editing, no deciding. */
   readOnly: boolean
 }) {
@@ -6245,7 +6532,6 @@ function Detail({
       }),
     })
   const reasonRef = useRef<RejectReasonControl>(null)
-  const editCount = Object.keys(activeEdits(d)).length
   const original: Record<string, unknown> =
     item.type === 'Change'
       ? {
@@ -6314,7 +6600,8 @@ function Detail({
   )
   const fableFields = new Map(fableChanges.map(c => [c.field, c]))
   // The fields Fable would change, from its field check after a Publish or
-  // Unsure verdict (queue-field-flags.ts): under the verdict while the item
+  // Unsure verdict, or a one-off pass on Don't publish (queue-field-flags.ts,
+  // FLAG_VERDICTS): under the verdict while the item
   // can still be edited, and marked on the fields themselves while open.
   const flagCheck =
     item.type === 'Add' && FLAG_VERDICTS.has(item.verdict ?? '') && draftable
@@ -7035,7 +7322,10 @@ function Detail({
   // The side panel: the verdict with its reasons, and under it the chat
   // with Fable (when the Mac agent is up), which is there for every item.
   const hasVerdict = Boolean(item.verdict) || item.reasons.length > 0
-  const showAside = hasVerdict || chatAgent !== null
+  // What Fable checked on public pages before its verdict on a requested
+  // change (queue-checked.ts). A rule has none.
+  const checked = item.type === 'Rule' ? [] : (item.checked ?? [])
+  const showAside = hasVerdict || checked.length > 0 || chatAgent !== null
   // Where Comb found the listing: the "Source:" line of its own Airtable
   // comment, read here as it is in Airtable (Bryce, 17 Sept 2026).
   const found =
@@ -7124,19 +7414,25 @@ function Detail({
             <span className={styles.when}>{ago(item.createdAt)}</span>
             <div className={styles.links}>
               {/* A form's own link is its record in Airtable; the email it
-                  arrived as sits beside it, and is what Q opens. */}
-              {item.emailLink && sourceHref(item) === item.emailLink && (
-                <a
-                  href={item.emailLink}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={styles.withIcon}
-                >
-                  <Icon src={linkIcon(item.emailLink)} size={12} />
-                  {linkLabel(item.emailLink)}
-                  <kbd>Q</kbd>
-                </a>
-              )}
+                  arrived as sits beside it, and is what Q opens. When the
+                  row's own link already IS that email (a correction the Mac
+                  turned into a new listing), the button below opens it, so
+                  this one is left out rather than shown twice (Bryce,
+                  18 Nov 2026: "There are two buttons here"). */}
+              {item.emailLink &&
+                item.emailLink !== item.sourceLink &&
+                sourceHref(item) === item.emailLink && (
+                  <a
+                    href={item.emailLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={styles.withIcon}
+                  >
+                    <Icon src={linkIcon(item.emailLink)} size={12} />
+                    {linkLabel(item.emailLink)}
+                    <kbd>Q</kbd>
+                  </a>
+                )}
               {item.sourceLink && (
                 <a
                   href={item.sourceLink}
@@ -7558,6 +7854,13 @@ function Detail({
             {fixNow?.error ?? d.error ?? item.error}
           </p>
         )}
+
+        <History
+          key={`history:${item.id}`}
+          item={item}
+          record={item.type === 'Rule' ? null : item.targetRecord}
+          onOpen={onOpenRow}
+        />
       </div>
 
       {showAside && (
@@ -7604,6 +7907,7 @@ function Detail({
                 ))}
               </ul>
             ))}
+          {checked.length > 0 && <Checked claims={checked} />}
           {flagCheck && (
             <FieldFlags
               check={flagCheck}
@@ -7701,7 +8005,10 @@ function Detail({
             {replyLabel(item) && (
               <span className={styles.note}>{replyLabel(item)}</span>
             )}
-            <span className={styles.note}>{ago(decidedAtOf(item))}</span>
+            <span className={styles.note}>
+              {ago(decidedAtOf(item))}
+              <DecidedBy item={item} lead=" · " />
+            </span>
             {item.reopening && <ReopeningTag reopening={item.reopening} />}
             {onReopen && takeBack(item) === 'reopen' ? (
               <button
@@ -7905,16 +8212,9 @@ function Detail({
               unfilled.length > 0 &&
               !d.busy &&
               blockedNote('fill', fillFirst(unfilled))}
-            {(editCount > 0 || leftCount > 0) && (
+            {leftCount > 0 && (
               <span className={styles.note}>
-                {[
-                  editCount > 0 &&
-                    `${editCount === 1 ? '1 edit goes' : `${editCount} edits go`} with it`,
-                  leftCount > 0 &&
-                    `${leftCount === 1 ? '1 field' : `${leftCount} fields`} left out`,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
+                {leftCount === 1 ? '1 field' : `${leftCount} fields`} left out
               </span>
             )}
           </div>
@@ -9385,10 +9685,6 @@ function RuleCard({
   )
   const from = item.ruleInstant
   const test = item.ruleTest
-  const needsYou =
-    test?.results.filter(
-      r => r.outcome === 'breaks' || r.outcome === 'unclear'
-    ) ?? []
   const others =
     test?.results.filter(
       r => r.outcome !== 'breaks' && r.outcome !== 'unclear'
@@ -9404,26 +9700,7 @@ function RuleCard({
       others.length > 0 ||
       Boolean(item.appliesTo) ||
       Boolean(item.ruleWording))
-  const wording = (
-    <>
-      {item.ruleWording && (
-        // The rule as it will read (9 Sept 2026: no diffs on the card;
-        // 5 Oct 2026: the words a click away).
-        <>
-          <h3 className={styles.h3}>Exact wording</h3>
-          <blockquote className={styles.quote}>{item.ruleWording}</blockquote>
-        </>
-      )}
-      {item.ruleWas && (
-        <>
-          <h3 className={styles.h3}>Replaces</h3>
-          <blockquote className={`${styles.quote} ${styles.from}`}>
-            {item.ruleWas}
-          </blockquote>
-        </>
-      )}
-    </>
-  )
+  const wording = <RuleWording item={item} />
   return (
     <section className={styles.block}>
       {from?.listing && (
@@ -9444,22 +9721,9 @@ function RuleCard({
           minutes.
         </p>
       ) : (
-        <p className={styles.ruleStat}>
-          <span>{ruleTestShort(test)}</span>
-          {RULE_OUTCOMES.filter(o => test.counts[o] > 0).map(o => (
-            <span key={o} className={styles.ruleTestOutcome} data-outcome={o}>
-              {OUTCOME_LABEL[o]} {test.counts[o]}
-            </span>
-          ))}
-        </p>
+        <RuleTestStat test={test} />
       )}
-      {needsYou.length > 0 && (
-        <ul className={styles.ruleTest}>
-          {needsYou.map(r => (
-            <RuleTestLine key={r.row} result={r} />
-          ))}
-        </ul>
-      )}
+      <RuleNeedsYou test={test} />
       {item.rulePublic && (
         // Outside the fold: Apply puts these words on the public page, so
         // they are always read first.
@@ -9496,11 +9760,67 @@ function RuleCard({
 
 const RULE_OUTCOMES = ['breaks', 'unclear', 'fixes', 'keeps'] as const
 
-/** A rule drafted minutes after one decision, as it pops up over the page:
- *  the listing it came from, the rule itself (its title), the first
- *  sentence of its summary, its test, any wording for the public listing
- *  policy (always in view, as Apply publishes it), and the decision.
- *  Anything more is a click away on the Rules tab. */
+/** The rule as it will read in the rulebook, and the words it replaces when
+ *  it rewrites one (9 Sept 2026: no diffs on the card). */
+function RuleWording({ item }: { item: QueueItem }) {
+  return (
+    <>
+      {item.ruleWording && (
+        <>
+          <h3 className={styles.h3}>Exact wording</h3>
+          <blockquote className={styles.quote}>{item.ruleWording}</blockquote>
+        </>
+      )}
+      {item.ruleWas && (
+        <>
+          <h3 className={styles.h3}>Replaces</h3>
+          <blockquote className={`${styles.quote} ${styles.from}`}>
+            {item.ruleWas}
+          </blockquote>
+        </>
+      )}
+    </>
+  )
+}
+
+/** One line on the test on his past decisions, its counts as labels. */
+function RuleTestStat({ test }: { test: RuleTest }) {
+  return (
+    <p className={styles.ruleStat}>
+      <span>{ruleTestShort(test)}</span>
+      {RULE_OUTCOMES.filter(o => test.counts[o] > 0).map(o => (
+        <span key={o} className={styles.ruleTestOutcome} data-outcome={o}>
+          {OUTCOME_LABEL[o]} {test.counts[o]}
+        </span>
+      ))}
+    </p>
+  )
+}
+
+/** The test results that need him, spelled out: where the rule goes
+ *  against one of his past decisions, or Fable can't tell. */
+function RuleNeedsYou({ test }: { test: RuleTest | null }) {
+  const needsYou =
+    test?.results.filter(
+      r => r.outcome === 'breaks' || r.outcome === 'unclear'
+    ) ?? []
+  if (needsYou.length === 0) return null
+  return (
+    <ul className={styles.ruleTest}>
+      {needsYou.map(r => (
+        <RuleTestLine key={r.row} result={r} />
+      ))}
+    </ul>
+  )
+}
+
+/** A rule drafted minutes after one decision, as it pops up centered over
+ *  the dimmed page: the listing it came from, the rule itself (its title),
+ *  the first sentence of its summary, its exact wording and any it
+ *  replaces, its test with the results that need him, any wording for the
+ *  public listing policy (always in view, as Apply publishes it), and the
+ *  decision. Enough to decide on the card (Bryce, 19 Nov 2026); the Rules
+ *  tab adds the background and the chat. */
 function RulePopUp({
   item,
   draft,
@@ -9531,7 +9851,6 @@ function RulePopUp({
     item.summary ?? 'No summary was written for this rule.'
   )
   const test = item.ruleTest
-  const against = test?.counts.breaks ?? 0
   return (
     <aside
       className={styles.rulePop}
@@ -9556,33 +9875,44 @@ function RulePopUp({
           the actual rule being proposed as well"). The summary's first
           sentence is often the story of his decision, which on its own
           never said what would change. */}
-      <p className={styles.rulePopLead}>{item.title}</p>
-      {item.summary && <p className={styles.rulePopWhy}>{lead}</p>}
-      <p className={styles.note}>
-        {test
-          ? against
-            ? `${ruleTestShort(test)}, against you on ${against}`
-            : ruleTestShort(test)
-          : 'Being tested on your past decisions…'}
-      </p>
-      {item.rulePublic && (
-        <PublicWording
-          wording={item.rulePublic}
-          internal={draft.keepInternal ?? item.rulePublicChoice === 'internal'}
-          onInternal={onInternal}
-          disabled={draft.busy}
-        />
-      )}
-      {draft.error && <p className={styles.error}>{draft.error}</p>}
+      {/* Only the middle scrolls, so a long wording never pushes the
+          buttons out of reach. */}
+      <div className={styles.rulePopBody}>
+        <p className={styles.rulePopLead}>{item.title}</p>
+        {item.summary && <p className={styles.rulePopWhy}>{lead}</p>}
+        {/* The words that go into the rulebook, on the card itself, so
+            Apply never needs V first (Bryce, 19 Nov 2026). */}
+        <RuleWording item={item} />
+        {/* A listing-policy row is only its wording: no test runs on it. */}
+        {!item.rulePublicPolicy &&
+          (test ? (
+            <RuleTestStat test={test} />
+          ) : (
+            <p className={styles.note}>Being tested on your past decisions…</p>
+          ))}
+        <RuleNeedsYou test={test} />
+        {item.rulePublic && (
+          <PublicWording
+            wording={item.rulePublic}
+            internal={
+              draft.keepInternal ?? item.rulePublicChoice === 'internal'
+            }
+            onInternal={onInternal}
+            disabled={draft.busy}
+          />
+        )}
+        {draft.error && <p className={styles.error}>{draft.error}</p>}
+      </div>
       {rejecting ? (
         <div className={styles.chips}>
-          {item.rejectChips.map(chip => (
+          {item.rejectChips.map((chip, i) => (
             <button
               key={chip}
               className={styles.chip}
               disabled={draft.busy}
               onClick={() => onReject(chip)}
             >
+              {i < 9 && <kbd>{i + 1}</kbd>}
               <span>{chip}</span>
             </button>
           ))}
@@ -9598,7 +9928,7 @@ function RulePopUp({
             onClick={onApply}
           >
             <Icon src={ICON.check} size={12} />
-            Apply <kbd>G</kbd>
+            Apply <kbd>A</kbd>
           </button>
           <button
             className={`${styles.button} ${styles.danger}`}
@@ -9606,7 +9936,7 @@ function RulePopUp({
             onClick={() => onRejecting(true)}
           >
             <Icon src={ICON.x} size={12} />
-            Reject
+            Reject <kbd>R</kbd>
           </button>
           <button className={styles.ghost} onClick={onOpen}>
             View <kbd>V</kbd>
@@ -9668,6 +9998,47 @@ function PublicWording({
  *  show by default"). The
  *  policy check's "Accept puts it on …" line is left out, as the card
  *  says so itself. */
+/** What Fable checked before its verdict on a requested change: a row per
+ *  claim – what the request said and how it fared, what the public pages
+ *  say, and where, each source a link named by its host. Words from the
+ *  web, so they are shown as plain text (queue-checked.ts). */
+function Checked({ claims }: { claims: CheckedClaim[] }) {
+  return (
+    <div className={styles.checked}>
+      <span className={styles.verdictKicker}>What Fable checked</span>
+      <ul className={styles.checkedList}>
+        {claims.map((c, i) => {
+          const fared = supportsWord(c.supports)
+          const label = [c.claim, fared].filter(Boolean).join(' · ')
+          const names = sourceLabels(c.sources)
+          return (
+            <li key={i}>
+              {label && <span className={styles.checkedClaim}>{label}</span>}
+              <span>{c.found}</span>
+              {c.sources.length > 0 && (
+                <span className={styles.checkedSources}>
+                  {c.sources.map((href, j) => (
+                    <a
+                      key={href}
+                      className={styles.checkedSource}
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={href}
+                    >
+                      {names[j]}
+                    </a>
+                  ))}
+                </span>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
 function RuleReasons({ reasons }: { reasons: string[] }) {
   const shown = reasons.filter(r => !/^Accept puts it on /i.test(r))
   if (shown.length === 0) return null
@@ -9850,6 +10221,7 @@ function DoneList({
                 {item.rejectReason && <span>{item.rejectReason}</span>}
                 {replyLabel(item) && <span>{replyLabel(item)}</span>}
                 <span>{ago(decidedAtOf(item))}</span>
+                <DecidedBy item={item} />
                 {item.reopening && <ReopeningTag reopening={item.reopening} />}
               </span>
             </span>

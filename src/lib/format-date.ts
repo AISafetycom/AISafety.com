@@ -1,19 +1,25 @@
+// Built once: making a formatter is slow, and a long list formats a date on
+// every card each time a filter changes (581 jobs on /jobs).
+const LONG_DATE = new Intl.DateTimeFormat('en-GB', {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+  timeZone: 'UTC',
+})
+
+const SHORT_MONTH = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  timeZone: 'UTC',
+})
+
 export function formatDate(date: Date): string {
-  return new Intl.DateTimeFormat('en-GB', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    timeZone: 'UTC',
-  }).format(date)
+  return LONG_DATE.format(date)
 }
 
 /** "31 Oct 2026": the short form card lines use, like /events and /training.
  *  en-US, not en-GB: en-GB abbreviates September as "Sept". */
 export function formatShortDate(date: Date): string {
-  const month = new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    timeZone: 'UTC',
-  }).format(date)
+  const month = SHORT_MONTH.format(date)
   return `${date.getUTCDate()} ${month} ${date.getUTCFullYear()}`
 }
 

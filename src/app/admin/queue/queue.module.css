@@ -794,6 +794,54 @@ button.earlierMore {
   color: var(--q-text);
 }
 
+/* What Fable checked before its verdict on a requested change (18 Nov
+   2026): under the reasons, a row per claim – what the request said and
+   how it fared, what the public pages say, then where, as links named by
+   their host. */
+.checked {
+  display: grid;
+  gap: 6px;
+}
+
+.checkedList {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--q-text);
+}
+
+.checkedList li {
+  display: grid;
+  gap: 2px;
+}
+
+.checkedClaim {
+  font-size: 12px;
+  color: var(--q-muted);
+}
+
+.checkedSources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  font-size: 12px;
+}
+
+/* The `a` outweighs `.queue a`'s teal. */
+a.checkedSource {
+  color: var(--q-muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+a.checkedSource:hover {
+  color: var(--q-text);
+}
+
 .detailTwoCol .actions {
   grid-column: 1 / -1;
 }
@@ -1984,6 +2032,62 @@ a.pageNav:hover {
   color: var(--q-muted);
 }
 
+/* A listing's history in the Queue (queue-history.ts): who decided or
+   edited what, newest first, under the folding heading the findings use.
+   Quiet, like the search's Earlier rows: what happened reads first, the
+   name and the day stay muted. */
+.history {
+  margin-top: 4px;
+}
+
+.historyList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.historyLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  width: 100%;
+  padding: 2px 0;
+  border: none;
+  background: none;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  color: var(--q-muted);
+}
+
+/* A line from another item of the same listing opens that item. */
+button.historyLine {
+  cursor: pointer;
+}
+
+button.historyLine:hover .historyWhat {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.historyWhat {
+  color: var(--q-text-2);
+}
+
+.historyAll {
+  padding: 4px 0 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--q-accent);
+  cursor: pointer;
+}
+
 /* A pressed while something is still missing: the note saying what goes
    red, holds, then fades back. A colour change only, so it stays on with
    reduced motion. */
@@ -2177,21 +2281,56 @@ select.input {
   resize: none;
 }
 
-.other {
-  width: auto;
-  min-width: 240px;
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 999px;
-}
-
 /* The reject panel's reason box, with the dictation mic inside it at the
-   right (16 Nov 2026); the mic is the chat's, sat in the pill. */
+   right (16 Nov 2026); the mic is the chat's, sat in the pill.
+
+   The box grows with its text (18 Nov 2026): wider first, up to the panel's
+   width, then onto more lines. `::after` is a hidden copy of the text in the
+   same grid cell as the textarea, so the copy sets the size and the textarea
+   fills it. The two must wrap alike, hence every text and box property here
+   is shared. One line is 32px high, a chip's height, and the corners are a
+   chip's too, so one line still reads as a pill. */
 .otherBox {
   position: relative;
-  display: inline-flex;
+  display: inline-grid;
+  min-width: 240px;
+  max-width: 100%;
 }
 
+.otherBox::after,
+.other {
+  grid-area: 1 / 1;
+  box-sizing: border-box;
+  min-width: 0;
+  margin: 0;
+  padding: 5px 12px;
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 16px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  letter-spacing: normal;
+  word-spacing: normal;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.otherBox::after {
+  content: attr(data-value) ' ';
+  visibility: hidden;
+  border-color: transparent;
+  pointer-events: none;
+}
+
+.other {
+  width: 100%;
+  height: auto;
+  overflow: hidden;
+  resize: none;
+}
+
+.otherBoxMic::after,
 .otherBoxMic .other {
   padding-right: 36px;
 }
@@ -2327,27 +2466,46 @@ select.input {
    the bottom-left corner: clear of the decision toast (centred) and of
    the chat (right). */
 .rulePop {
+  /* Centered over the dimmed page (Bryce, 19 Nov 2026: "it might as well
+     pop up centered and bigger"). Inset with auto margins centers it in the
+     room left above the decision toast: --pop-lift is the toast's height
+     while one shows (set by the page). */
   position: fixed;
-  left: 24px;
-  /* --pop-lift is the decision toast's height while one shows (set by the
-     page), so the card moves up out of its way */
-  bottom: calc(24px + var(--pop-lift, 0px));
+  inset: 24px 24px calc(24px + var(--pop-lift, 0px));
+  margin: auto;
+  height: fit-content;
   transition: bottom 0.2s ease;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  width: min(400px, calc(100vw - 48px));
+  gap: 14px;
+  width: min(560px, calc(100vw - 48px));
   max-height: calc(100vh - 48px - var(--pop-lift, 0px));
-  overflow-y: auto;
-  padding: 12px 14px 14px;
+  /* .rulePopBody scrolls instead, keeping the head and buttons in view */
+  overflow: hidden;
+  padding: 18px 22px 22px;
   background: var(--q-panel);
   color: var(--q-text);
   border: 1px solid var(--q-border-strong);
-  border-radius: 12px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
-  font-size: 13.5px;
-  z-index: 21;
+  border-radius: 14px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  font-size: 15px;
+  /* over its shade, which is over the admin header (z-index 50) */
+  z-index: 53;
   animation: rulePopIn 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* The page behind a rule card, header included, dimmed while it shows
+   (Bryce, 19 Nov 2026). The decision toast stays above it, so Undo is
+   still in reach. */
+.rulePopShade {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 52;
+}
+
+.toastOverShade {
+  z-index: 53;
 }
 
 .rulePop p,
@@ -2364,14 +2522,30 @@ select.input {
 
 .rulePopFrom {
   color: var(--q-text-2);
-  font-size: 12.5px;
+  font-size: 13.5px;
   overflow-wrap: anywhere;
 }
 
 .rulePopLead {
+  font-size: 18px;
   font-weight: 600;
-  line-height: 1.4;
+  line-height: 1.35;
   overflow-wrap: anywhere;
+}
+
+/* Everything between the head and the buttons: the part that scrolls when
+   the wording is long. */
+.rulePopBody {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Quotes stand out from the card, which shares their usual background. */
+.rulePop .quote {
+  background: var(--q-panel-2);
 }
 
 /* The summary's first sentence, under the rule: lighter, so the rule is
@@ -2383,11 +2557,11 @@ select.input {
 
 @keyframes rulePopIn {
   from {
-    transform: translateY(calc(100% + 24px));
+    transform: translateY(12px) scale(0.97);
     opacity: 0;
   }
   to {
-    transform: translateY(0);
+    transform: none;
     opacity: 1;
   }
 }
@@ -2655,8 +2829,72 @@ select.input {
   padding-left: 18px;
 }
 
+.chatFable ol {
+  margin: 0 0 8px;
+  padding-left: 22px;
+}
+
 .chatFable li {
   margin: 2px 0;
+}
+
+/* The rest of Fable's Markdown (18 Nov 2026): a list under a bullet, a
+   paragraph under one, a quote, a rule, a table – all in the panel's own
+   quiet lines. */
+.chatFable li > ul,
+.chatFable li > ol {
+  margin: 2px 0 0;
+}
+
+.chatFable li > p {
+  margin: 4px 0;
+}
+
+.chatFable blockquote {
+  margin: 0 0 8px;
+  padding: 2px 0 2px 10px;
+  border-left: 3px solid var(--q-border-strong);
+  color: var(--q-text-2);
+}
+
+.chatFable blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+.chatFable hr {
+  margin: 10px 0;
+  border: 0;
+  border-top: 1px solid var(--q-border-strong);
+}
+
+.chatTableWrap {
+  margin: 0 0 8px;
+  overflow-x: auto;
+}
+
+.chatTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.chatTable th,
+.chatTable td {
+  padding: 4px 10px 4px 0;
+  border-bottom: 1px solid var(--q-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.chatTable th {
+  font-weight: 600;
+  color: var(--q-text-2);
+  border-bottom-color: var(--q-border-strong);
+}
+
+.chatTable tr:last-child td {
+  border-bottom: 0;
 }
 
 .chatFable code {
@@ -3011,12 +3249,14 @@ select.input {
   display: none;
 }
 
-/* Stop, beside the paperclip while Fable answers. */
+/* Stop, beside the paperclip while Fable answers; with something typed
+   it is Send instead (18 Nov 2026), in the same place and the same teal. */
 .chatBoxAnswering .chatInput {
   padding-right: 68px;
 }
 
-.chatStop {
+.chatStop,
+.chatSend {
   position: absolute;
   right: 35px;
   bottom: 5px;
@@ -3042,6 +3282,10 @@ select.input {
   background: var(--q-accent-text);
 }
 
+.chatSend {
+  color: var(--q-accent-text);
+}
+
 /* Dictation (5 Nov 2026): the mic left of the paperclip, a red dot whose
    ring grows with his voice while it listens, a spinner while the Mac turns
    it into words, and the keys under the box. */
@@ -3057,7 +3301,8 @@ select.input {
   right: 66px;
 }
 
-.chatBoxMic .chatStop {
+.chatBoxMic .chatStop,
+.chatBoxMic .chatSend {
   right: 65px;
 }
 

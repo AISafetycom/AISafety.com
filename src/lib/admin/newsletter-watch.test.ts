@@ -1352,7 +1352,7 @@ describe('runWatch: ActiveCampaign unreachable', () => {
   })
 })
 
-/* ─── Health, 18 hours after ─────────────────────────────────────────── */
+/* ─── Health, 24 hours after (18 for a wave) ─────────────────────────── */
 
 describe('runWatch: health checks', () => {
   function sentWave(over: Partial<FakeCampaign> = {}) {
@@ -1645,16 +1645,22 @@ describe('runWatch: health checks', () => {
   it('looks to the next issue after a whole-list send', async () => {
     warmup.on = false
     const { store, sent, run } = setup()
+    const dayOld = {
+      segmentid: '0',
+      cdate: acDate(26 * HOUR),
+      sdate: acDate(26 * HOUR),
+      ldate: acDate(25 * HOUR),
+    }
     ac.campaigns = [
       sentWave({
         name: 'Training · Week 42, 2026',
-        segmentid: '0',
+        ...dayOld,
         verified_unique_opens: '200',
       }),
       sentWave({
         id: '261',
         name: 'Events · Week 42, 2026',
-        segmentid: '0',
+        ...dayOld,
       }),
     ]
     ac.lists = { '260': ['7'], '261': ['6'] }
@@ -1673,9 +1679,32 @@ describe('runWatch: health checks', () => {
       'Training · Week 42 needs a look before the next issue: verified opens 20% (amber under 25%).'
     )
     expect(sent[1].text).toContain(
-      'Events · Week 42 looks healthy 18 hours after it finished sending.\n'
+      'Events · Week 42 looks healthy 24 hours after it finished sending.\n'
     )
     expect(sent[1].text).not.toContain('next wave')
+  })
+
+  it('waits 24 hours for a whole-list send, 18 for a wave', async () => {
+    warmup.on = false
+    const { store, sent, run } = setup()
+    ac.campaigns = [
+      sentWave({ id: '260', name: 'Events · Week 42, 2026', segmentid: '0' }),
+      sentWave({ id: '261' }),
+    ]
+    ac.lists = { '260': ['6'], '261': ['7'] }
+    const whole = { wave: null, waves: null, segmentId: null }
+    await approve(store, '260', { listId: '6', ...whole, expected: 1000 })
+    await approve(store, '261', { listId: '7', expected: 1000 })
+    // 19 hours after both finished: only the wave is due.
+    await run()
+    expect(sent.map(m => m.subject)).toEqual([
+      'Newsletter: Training · Week 41 wave 1/4 health check: green',
+    ])
+    // 24 hours after: the whole-list send too.
+    await run(later(5 * HOUR))
+    expect(sent.map(m => m.subject).slice(1)).toEqual([
+      'Newsletter: Events · Week 42 health check: green',
+    ])
   })
 })
 

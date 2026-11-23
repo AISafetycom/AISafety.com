@@ -19,6 +19,7 @@ import {
   type LoadState,
 } from '@/lib/search'
 import styles from './SearchModal.module.css'
+import { withUtm } from '@/lib/utm'
 
 interface SearchModalProps {
   open: boolean
@@ -191,7 +192,7 @@ export default function SearchModal({
               link.click()
             }
           } else {
-            window.location.href = target.url
+            window.location.href = withUtm(target.url, 'Search')
           }
         }
       } else if (
@@ -376,7 +377,7 @@ export default function SearchModal({
                   <a
                     key={`${entry.type}-${entry.title}-${flatIndex}`}
                     data-result-index={flatIndex}
-                    href={entry.url}
+                    href={withUtm(entry.url, 'Search')}
                     target={isExternal ? '_blank' : undefined}
                     rel={isExternal ? 'noopener noreferrer' : undefined}
                     onClick={() => {

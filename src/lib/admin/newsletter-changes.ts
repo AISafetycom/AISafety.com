@@ -370,7 +370,9 @@ export async function fixListing(
   draftId: string,
   key: string,
   queueId: string | null,
-  messageId?: string
+  messageId?: string,
+  /** Who pressed Fix, for the Queue row's history (queue-history.ts). */
+  by: string | null = null
 ): Promise<FixResult> {
   if (!isRecordId(key)) throw new QueueError('Not a listing card.', 400)
   let groups = await draftCardGroups(draftId, messageId)
@@ -397,7 +399,9 @@ export async function fixListing(
       item,
       sanitiseEdits(withLeftOut(item.edits ?? {}, item.leftOut ?? [])),
       null,
-      keep
+      keep,
+      null,
+      by
     )
     applied = true
     if (keep.length)

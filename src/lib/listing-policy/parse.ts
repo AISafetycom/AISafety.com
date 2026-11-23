@@ -47,6 +47,46 @@ export function parsePolicy(md: string): PolicyBlock[] {
   return blocks
 }
 
+const MONTHS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+]
+
+/** Finds the policy's "Last updated: 17 November 2026" paragraph, so the page
+ *  can show the date under the heading like other pages do. Returns its
+ *  block index and the date as YYYY-MM-DD, or null when there is no such
+ *  line. Throws when the line is there but its date can't be read, so a
+ *  reworded line fails the build instead of quietly dropping the date. */
+export function findLastUpdated(
+  blocks: PolicyBlock[]
+): { index: number; iso: string } | null {
+  const index = blocks.findIndex(
+    b => b.kind === 'p' && b.text.startsWith('Last updated')
+  )
+  if (index === -1) return null
+  const text = (blocks[index] as { text: string }).text
+  const m = /^Last updated:?\s+(\d{1,2}) ([A-Z][a-z]+) (\d{4})\.?$/.exec(text)
+  const month = m ? MONTHS.indexOf(m[2]) + 1 : 0
+  const day = m ? Number(m[1]) : 0
+  if (!m || month === 0 || day < 1 || day > 31) {
+    throw new Error(
+      `Listing policy: can't read the date in "${text}". Expected "Last updated: 17 November 2026".`
+    )
+  }
+  const iso = `${m[3]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+  return { index, iso }
+}
+
 export type InlinePart =
   | { kind: 'text' | 'bold'; text: string }
   | { kind: 'link'; text: string; href: string }

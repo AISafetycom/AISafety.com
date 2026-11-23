@@ -1,8 +1,14 @@
 import Link from 'next/link'
 import { Fragment } from 'react'
+import RelativeDate from '@/components/RelativeDate'
 import { LISTING_POLICY_MD } from '@/lib/listing-policy/text'
-import { parseInline, parsePolicy } from '@/lib/listing-policy/parse'
+import {
+  findLastUpdated,
+  parseInline,
+  parsePolicy,
+} from '@/lib/listing-policy/parse'
 import styles from './page.module.css'
+import { withUtm } from '@/lib/utm'
 
 export const metadata = {
   title: 'Listing policy – AISafety.com',
@@ -35,7 +41,7 @@ const PAGE_PATHS = new Set([
 function linkPagePaths(text: string) {
   return text.split(/(?<![\w/])(\/[a-z-]+)(?![\w/-])/).map((piece, i) =>
     PAGE_PATHS.has(piece) ? (
-      <Link key={i} href={piece} className="color-teal-300">
+      <Link key={i} href={piece} className="link">
         {piece}
       </Link>
     ) : (
@@ -55,10 +61,10 @@ function Inline({ text }: { text: string }) {
           return (
             <a
               key={i}
-              href={part.href}
+              href={withUtm(part.href, 'Listing policy')}
               target="_blank"
               rel="noopener noreferrer"
-              className="color-teal-300"
+              className="link"
             >
               {part.text}
             </a>
@@ -66,7 +72,11 @@ function Inline({ text }: { text: string }) {
         }
         if (PAGE_PATHS.has(part.text)) {
           return (
-            <Link key={i} href={part.text} className={styles.pageLink}>
+            <Link
+              key={i}
+              href={part.text}
+              className="link paragraph-default-bold"
+            >
               {part.text}
             </Link>
           )
@@ -80,18 +90,32 @@ function Inline({ text }: { text: string }) {
 export default function ListingPolicyPage() {
   const blocks = parsePolicy(LISTING_POLICY_MD)
   const firstSection = blocks.findIndex(b => b.kind === 'h2')
+  // "Last updated" sits under the heading, as on the other pages, not at the
+  // end where the policy text has it.
+  const lastUpdated = findLastUpdated(blocks)
 
   return (
     <div className="container-narrow">
       <div className="flex justify-center">
         <div className={`width-9-col-narrow ${styles.policy}`}>
           {blocks.map((block, i) => {
+            if (i === lastUpdated?.index) return null
             switch (block.kind) {
               case 'h1':
                 return (
-                  <h1 key={i} className="padding-top-56px padding-bottom-40px">
-                    {block.text}
-                  </h1>
+                  <Fragment key={i}>
+                    <h1
+                      className={`padding-top-56px ${lastUpdated ? 'padding-bottom-8px' : 'padding-bottom-40px'}`}
+                    >
+                      {block.text}
+                    </h1>
+                    {lastUpdated && (
+                      <RelativeDate
+                        iso={lastUpdated.iso}
+                        className="paragraph-small color-teal-grey-300 margin-bottom-40px"
+                      />
+                    )}
+                  </Fragment>
                 )
               case 'h2':
                 return (
@@ -118,14 +142,8 @@ export default function ListingPolicyPage() {
               case 'p': {
                 // Before the first section: the intro line, then the note.
                 const isNote = i < firstSection && block.text.startsWith('**')
-                const isLastUpdated = block.text.startsWith('Last updated')
-                const className = isNote
-                  ? styles.note
-                  : isLastUpdated
-                    ? `paragraph-small ${styles.lastUpdated}`
-                    : styles.p
                 return (
-                  <p key={i} className={className}>
+                  <p key={i} className={isNote ? styles.note : styles.p}>
                     <Inline text={block.text} />
                   </p>
                 )
@@ -138,7 +156,7 @@ export default function ListingPolicyPage() {
               href={CONTACT_FORM}
               target="_blank"
               rel="noopener noreferrer"
-              className="color-teal-300"
+              className="link"
             >
               Send us an email
             </a>
@@ -147,7 +165,7 @@ export default function ListingPolicyPage() {
               href={CORRECTION_FORM}
               target="_blank"
               rel="noopener noreferrer"
-              className="color-teal-300"
+              className="link"
             >
               Suggest a correction
             </a>

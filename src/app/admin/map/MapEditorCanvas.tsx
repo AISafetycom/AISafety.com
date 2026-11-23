@@ -67,9 +67,9 @@ interface Props {
   controlsRef: React.MutableRefObject<CanvasControls>
   /** A view-only session: pins select on click but never drag or place. */
   readOnly: boolean
-  /** The Queue's map strip: only this record's pin can be dragged. Unset
-   *  on /admin/map, where every pin drags. */
-  onlyId?: string | null
+  /** The Queue's map strip: only these pins can be dragged. Unset on
+   *  /admin/map, where every pin drags. */
+  dragIds?: ReadonlySet<string> | null
   /** The Queue's map strip sits in a page that scrolls: there the wheel
    *  zooms only as a pinch or with Ctrl/Cmd held, so scrolling the page
    *  over the map still scrolls the page. Read once, when the map is built. */
@@ -206,7 +206,7 @@ export default function MapEditorCanvas({
   onDragStateChange,
   controlsRef,
   readOnly,
-  onlyId = null,
+  dragIds = null,
   quietWheel = false,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -520,11 +520,11 @@ export default function MapEditorCanvas({
       drawGlyph(d3.select<SVGGElement, EditorRecord>(this))
     })
     const all: PinSel = entered.merge(pins)
-    // Which pins drag: all of them, none in a view-only session, or the one
-    // the Queue's strip is placing. Set on every pass, since that one pin
-    // can change while the others stay.
+    // Which pins drag: all of them, none in a view-only session, or the
+    // ones the Queue's strip allows. Set on every pass, since that set can
+    // change while the pins stay.
     const drags = (d: EditorRecord) =>
-      !readOnly && (onlyId === null || d.id === onlyId)
+      !readOnly && (dragIds === null || dragIds.has(d.id))
     all.filter(d => drags(d)).call(drag)
     all.filter(d => !drags(d)).on('.drag', null)
     all.style('cursor', d => (drags(d) ? 'grab' : 'default'))
@@ -566,7 +566,7 @@ export default function MapEditorCanvas({
           )
           .attr('stroke-width', 3)
       })
-  }, [records, selectedId, placeModeId, previewPublic, readOnly, onlyId])
+  }, [records, selectedId, placeModeId, previewPublic, readOnly, dragIds])
 
   // Crosshair while placing.
   useEffect(() => {

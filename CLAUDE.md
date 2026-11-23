@@ -25,7 +25,7 @@ src/lib/admin/           admin-only helpers (auth, map editor, newsletter approv
 src/lib/site-pages.ts    title + description + icon for every public page
 src/proxy.ts             reports AI-assistant fetches to Matomo
 src/app/globals.css      the design system (see CSS below)
-scripts/                 build-time checks (icon sizes, preview keys)
+scripts/                 build-time checks (icon sizes, preview keys) and the style check
 docs/                    css-guidelines, api + changelog, architecture notes
 ```
 
@@ -56,7 +56,10 @@ Read `docs/css-guidelines.md` (Melissa's rules) before writing any styles. In sh
 - `globals.css` is the design system: variables for every color, pre-styled `h1`–`h3` and `p`, and utility classes for typography, spacing, layout and color. Buttons are the `<Button>` component (`src/components/Button.tsx`). Use them first. Never hardcode a hex value or add a new variable.
 - New classes only when utilities can't do it, in `ComponentName.module.css` or `page.module.css`. Rarely `globals.css`, and only for something truly reusable.
 - If a shared component looks wrong, fix its shared definition (for example `<Button>` in `src/components/Button.tsx`) so every instance is fixed at once. No one-off overrides.
+- **Use an existing component before building anything.** Look in `src/components/` first (`<Button>`, `<Icon>`, `<Tooltip>`, `ListingCard`, `FilterDropdown`, `PageHeader`, `StickyBar`, and the rest). If one nearly fits, add a prop to it instead of copying it or building a look-alike. Say in the PR description which components you reused. This is Melissa's ask: follow the design system and always use components when possible.
 - Diagnose before fixing. The right CSS fix is usually fewer lines, not more.
+- **An automatic check holds new code to these rules.** `npm run check:styles` fails when a change adds, on a user-facing page: a hard-coded color, a new variable, a `font-size` / `font-weight` / `font-family`, a hand-written `box-shadow`, a breakpoint other than 991px, hand-written spacing (`padding`, `margin`, `gap` in px) or flex (in `src/components/`, only spacing off the scale such as `45px`), a new class that only repeats `globals.css` classes, an inline `style` color, font, spacing or flex, or a hand-styled button. It runs by itself after Claude edits a `.css` or `.tsx` file (`.claude/settings.json`), on every commit, and in CI. Each message names the class or component to use instead: do that. Don't work around it, and don't add an exception without Melissa's ok (`docs/css-guidelines.md`, "The automatic check").
+- **The admin area is exempt.** These rules, and the check, cover what visitors see. `src/app/admin/` and `src/lib/admin/` are left alone.
 
 ## Errors: never silently fail
 
@@ -81,7 +84,7 @@ Read `docs/css-guidelines.md` (Melissa's rules) before writing any styles. In sh
 ## Admin area
 
 - People sign in with Google; each has one boolean per area (`src/lib/admin/access.ts`). A new admin page must start with `await requireAccess('<area>')` (`src/lib/admin/auth.ts`) even though its layout checks too: a client navigation renders the page without the layout. API routes check the specific capability themselves, never just `isAdmin()`.
-- `/admin/queue` is the owner's review inbox for proposed directory changes (docs/architecture.md, "Queue"). Bots write the rows on the owner's Mac; the site only decides them. Nothing there may ever auto-apply.
+- `/admin/queue` is the owner's review inbox for proposed directory changes (docs/architecture.md, "Queue"). Bots write the rows on the owner's Mac; the site only decides them. Nothing there may ever auto-apply. The one exception, at the owner's request (19 Nov 2026): Fable's field-check fixes, which the Mac writes straight onto an unpublished suggestion; publishing it is still his click.
 - Keep admin writes narrow and explicit. The map editor accepts only x, y and Scale and rejects any other key; follow that pattern.
 
 ## Public Data API
@@ -94,13 +97,14 @@ Read `docs/css-guidelines.md` (Melissa's rules) before writing any styles. In sh
 npm run type-check
 npm run lint
 npm test
+npm run check:styles
 ```
 
-- `npm run build` runs the vitest suite first, then builds. Husky runs lint-staged on every commit.
+- `npm run build` runs the vitest suite first, then builds. Husky runs lint-staged, the icon-size check and the style check on every commit.
 - Pure logic (ordering, formatting, parsing) goes in a dependency-free `src/lib` module with a vitest test next to it, following `training-order.ts` and `featured.ts`.
 - Browser smoke tests live in `e2e/` (Playwright): every public page renders without runtime errors and with its listings, and every Data API endpoint answers. Run them against a production build with `npm run build && npm run test:e2e`. They need no credentials.
 - Verify visual changes yourself in a real browser on localhost, at desktop and mobile widths. Compare against the design rules, not against the old Webflow site.
-- **CI** (`.github/workflows/ci.yml`) runs type-check, lint, unit tests, a production build and the smoke tests on every pull request and every push to `main`. A red check means the change is not ready; fix it rather than merging around it.
+- **CI** (`.github/workflows/ci.yml`) runs type-check, lint, unit tests, a production build and the smoke tests on every pull request and every push to `main`, plus the style check on every pull request. A red check means the change is not ready; fix it rather than merging around it.
 
 ## Git and pull requests
 

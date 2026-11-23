@@ -8,7 +8,11 @@ import {
   Recording,
   joinWords,
   micProblem,
+  carryOver,
+  finalWords,
+  onScreen,
   quietestCut,
+  settledWords,
   wavBytes,
 } from '@/lib/admin/queue-dictation'
 
@@ -25,6 +29,19 @@ import {
 // only the open piece is sent again, so each call stays quick. And as in
 // the Claude app, holding ⌘ after ⌘D is hold-to-talk: letting go puts the
 // words in.
+//
+// Since 19 Nov 2026 the screen shows only words that have stopped changing
+// (Bryce: "I don't like how it changes the whole time, because I think at
+// first that it got it wrong, but then it changes it to correct"): a word
+// goes up once two guesses in a row agree on it, and is never taken back.
+// The guesses and the final words are made exactly as before, from the
+// whole open piece, because "The quality of the transcription is
+// priority". When he stops, words on screen that the final words only
+// spell with other capitals or punctuation stay as they are; a word the
+// final words hear differently is replaced (`finalWords`), which should be
+// rare. (Cutting at every pause and showing each phrase once was tried that
+// day: nothing changed, but a pause mid-sentence gave worse words, so it
+// was dropped.)
 
 export type DictationState = 'off' | 'starting' | 'listening' | 'transcribing'
 
@@ -41,6 +58,12 @@ const LIVE_NEW_S = 0.3
  *  PIECE_MIN_S, so each call to the Mac stays under ~30 s of audio. */
 const PIECE_S = 20
 const PIECE_MIN_S = 10
+/** Below this share of the loudest moment of the piece = not speech. A
+ *  new guess waits until he has said at least NEW_SPEECH_S more: over a
+ *  pause it would only repeat the last one, and two guesses agreeing proves
+ *  nothing when they heard the same words. */
+const PAUSE_SHARE = 0.15
+const NEW_SPEECH_S = 0.25
 /** After a call that failed, wait this long before the next. */
 const BACKOFF_MS = 3000
 /** ⌘ still down this long after ⌘D started it = hold-to-talk. */
@@ -85,9 +108,16 @@ interface Live {
   peak: number
   /** Words of the pieces already cut, and where the open piece starts. */
   done: string[]
+  /** Those words as the screen shows them (in step with `done`, give or
+   *  take capitals, punctuation, and a word heard differently). */
+  screenDone: string
   from: number
-  /** The open piece's words as last heard. */
-  partial: string
+  /** The open piece's newest guess, and the words of it on screen (two
+   *  guesses in a row agreed on them). */
+  guess: string
+  shown: string
+  /** What the box shows now. */
+  screen: string
   /** The call to the Mac now going, if any. */
   asking: Promise<void> | null
   /** When the next call may go, and how far the last one heard. */
@@ -101,7 +131,9 @@ function wav(samples: Float32Array): Blob {
 }
 
 function show(l: Live, cb: Callbacks) {
-  if (!l.how) cb.onLive?.(joinWords([...l.done, l.partial]))
+  if (l.how) return
+  l.screen = onScreen([l.screenDone, l.shown])
+  cb.onLive?.(l.screen)
 }
 
 /** While he speaks: cut a long piece, or ask for the open piece's words.
@@ -139,9 +171,15 @@ function pump(l: Live, cbRef: { current: Callbacks }) {
         (rec.end - 0.4 * RATE) / FRAME
       ) * FRAME
     const close = (words: string) => {
+      const wasShown = joinWords([l.screenDone, l.shown])
       if (words.trim()) l.done.push(words.trim())
+      // Words on screen stay up, past the cut too; the next piece's
+      // guesses carry on from them.
+      const keep = carryOver(wasShown, joinWords(l.done))
+      l.screenDone = keep.done
+      l.shown = keep.rest
+      l.guess = ''
       l.from = cut
-      l.partial = ''
       rec.dropBefore(cut)
     }
     if (rec.loudest(from, cut) < SILENCE) {
@@ -161,14 +199,22 @@ function pump(l: Live, cbRef: { current: Callbacks }) {
     return
   }
   if (rec.end - l.heardTo < LIVE_NEW_S * RATE) return
-  if (rec.loudest(from) < SILENCE) return
+  const loudest = rec.loudest(from)
+  if (loudest < SILENCE) return
+  const said = rec.framesAtLeast(
+    Math.max(from, l.heardTo),
+    PAUSE_SHARE * loudest
+  )
+  if (said < (NEW_SPEECH_S * RATE) / FRAME) return
   l.heardTo = rec.end
   ask(
     wav(rec.slice(from)),
     words => {
       if (l.how || l.from !== from) return
-      l.partial = words.trim()
-      show(l, cbRef.current)
+      const was = l.shown
+      l.shown = settledWords(l.shown, l.guess, words.trim())
+      l.guess = words.trim()
+      if (l.shown !== was) show(l, cbRef.current)
     },
     'the words so far'
   )
@@ -188,8 +234,8 @@ export function useDictation({
   transcribe: Callbacks['transcribe']
   /** Gets the Mac's model ready as the mic starts. */
   warm?: () => void
-  /** The words so far, as he speaks; '' when they come out again (thrown
-   *  away, or nothing was heard). */
+  /** The words so far that have stopped changing, as he speaks; '' when
+   *  they come out again (thrown away, or nothing was heard). */
   onLive?: (words: string) => void
   /** The words, and whether Enter asked for the message to go too. */
   onWords: (words: string, send: boolean) => void
@@ -228,11 +274,13 @@ export function useDictation({
     setHolding(false)
   }, [])
 
-  /** The last piece to the Mac, then the words in. Try again runs it once
-   *  more with the same audio. */
-  const lastRef = useRef<(done: string[], rest: Float32Array) => void>(() => {})
+  /** The last piece to the Mac, then the words in (`screen` is what the
+   *  box showed). Try again runs it once more with the same audio. */
+  const lastRef = useRef<
+    (done: string[], rest: Float32Array, screen: string) => void
+  >(() => {})
   const last = useCallback(
-    async (done: string[], rest: Float32Array) => {
+    async (done: string[], rest: Float32Array, screen: string) => {
       set('transcribing')
       let words = ''
       // A rest with nothing said in it (a pause before Cmd+D) needs no call.
@@ -250,13 +298,14 @@ export function useDictation({
           cb.current.onLive?.('')
           cb.current.onProblem(
             `Couldn't turn that into text – ${e instanceof Error ? e.message : 'the Mac agent did not answer.'}`,
-            () => lastRef.current(done, rest)
+            // The box is back to how it was, so nothing is on screen.
+            () => lastRef.current(done, rest, '')
           )
           return
         }
       }
       set('off')
-      const all = joinWords([...done, words])
+      const all = finalWords(screen, joinWords([...done, words]))
       if (all) cb.current.onWords(all, sendAfter.current)
       else {
         cb.current.onLive?.('')
@@ -267,7 +316,7 @@ export function useDictation({
     [set]
   )
   useEffect(() => {
-    lastRef.current = (done, rest) => void last(done, rest)
+    lastRef.current = (done, rest, screen) => void last(done, rest, screen)
   }, [last])
 
   const release = useCallback(
@@ -305,7 +354,7 @@ export function useDictation({
       sendAfter.current = l.how === 'send'
       set('transcribing')
       if (l.asking) await l.asking
-      await last([...l.done], l.rec.slice(l.from))
+      await last([...l.done], l.rec.slice(l.from), l.screen)
     },
     [last, release, set]
   )
@@ -411,8 +460,11 @@ export function useDictation({
       rec: new Recording(),
       peak: 0,
       done: [],
+      screenDone: '',
       from: 0,
-      partial: '',
+      guess: '',
+      shown: '',
+      screen: '',
       asking: null,
       nextAsk: 0,
       heardTo: 0,

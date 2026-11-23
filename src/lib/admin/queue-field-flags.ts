@@ -7,11 +7,19 @@
 
   The Mac (~/Queue/fieldcheck.py) makes a second, separate look at every
   open addition whose verdict is Publish or Unsure (Unsure since 17 Nov
-  2026, Bryce: "Publish and Unsure") and keeps its answer on the row's
+  2026, Bryce: "Publish and Unsure"; a one-off pass the same day also
+  checked the Don't publish ones, so an item he publishes against the verdict
+  has its fields ready) and keeps its answer on the row's
   proposal as `field_flags` = {at, review, checked, flags: [{field, from,
   to, why}]}. The page lists the flags under the verdict, each with a Use
   button that puts the value into the page's edits – so, like any edit,
   nothing reaches the listing before Publish.
+
+  Since 19 Nov 2026 (Bryce: "Let's make Fable's field changes just go
+  through automatically. No need to tell me about them.") the Mac writes
+  each flag straight onto the unpublished record and moves it to the
+  block's `applied` list, which this file does not read. `flags` keeps only
+  one the record refused, so the page has nothing to show for the rest.
 
   `from` is the value the flag was judged against (the record with the
   page's edits over it). A flag whose field no longer reads that way has
@@ -30,9 +38,14 @@
 
 import { preparedNamed, type PreparedFile } from './queue-prepared'
 
-/** The verdicts whose additions get a field check, and so show its flags.
- *  Same list as CHECKED_VERDICTS in ~/Queue/fieldcheck.py. */
-export const FLAG_VERDICTS: ReadonlySet<string> = new Set(['Publish', 'Unsure'])
+/** The verdicts whose additions show the field check's flags. The Mac checks
+ *  Publish and Unsure as they come (CHECKED_VERDICTS in ~/Queue/fieldcheck.py);
+ *  a Don't publish item has flags only from a one-off pass (ALSO_VERDICTS). */
+export const FLAG_VERDICTS: ReadonlySet<string> = new Set([
+  'Publish',
+  'Unsure',
+  "Don't publish",
+])
 
 export type FlagValue = string | number | boolean | string[] | null
 

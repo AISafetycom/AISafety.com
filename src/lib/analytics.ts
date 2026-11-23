@@ -202,9 +202,9 @@ export function trackListingHover(
 
 /**
  * Track a visitor turning a filter value on (a sidebar checkbox or a dropdown
- * option) on a resource page. Deselections aren't recorded — the activation is
- * the expression of interest. `source` carries the filter group's title (e.g.
- * 'Type'), `label` the value picked (e.g. 'Fellowship').
+ * option) on a resource page. `source` carries the filter group's title (e.g.
+ * 'Type'), `label` the value picked (e.g. 'Fellowship'). Switching it off
+ * again is trackFilterRemove.
  */
 export function trackFilterApply(
   page: string,
@@ -216,6 +216,28 @@ export function trackFilterApply(
   window._paq?.push(['trackEvent', `Filters - ${page}`, group, value])
   sendTrackEvent({
     type: 'filter_apply',
+    page,
+    source: group,
+    label: value,
+  })
+}
+
+/**
+ * Track a visitor turning a filter value off again: unticking it, removing a
+ * city, or moving a range slider back to its full span. Same fields as
+ * trackFilterApply, so the two line up on the dashboard. Fire-and-forget like
+ * every tracking call.
+ */
+export function trackFilterRemove(
+  page: string,
+  group: string,
+  value: string
+): void {
+  if (typeof window === 'undefined') return
+  if (isTrackingOptedOut()) return
+  window._paq?.push(['trackEvent', `Filters removed - ${page}`, group, value])
+  sendTrackEvent({
+    type: 'filter_remove',
     page,
     source: group,
     label: value,
@@ -351,6 +373,29 @@ export function trackAirtableView(page: string, url: string): void {
  *  asset, opened the press email, or used one of the two entry buttons to
  *  jump down the page. */
 export type PressAction = 'copy' | 'download' | 'contact' | 'jump'
+
+export type SelectionMenuAction = 'open' | 'copy' | 'correction' | 'feedback'
+
+/**
+ * Track the menu that appears over selected text (SelectionMenu): it
+ * appearing ('open') and each of its buttons. `listing` is the card the text
+ * is on, when it is on one. The selected text itself is never recorded.
+ */
+export function trackSelectionMenu(
+  action: SelectionMenuAction,
+  listing?: { name: string; id?: string }
+): void {
+  if (typeof window === 'undefined') return
+  if (isTrackingOptedOut()) return
+  window._paq?.push(['trackEvent', 'Selection menu', action, listing?.name])
+  sendTrackEvent({
+    type: 'selection_menu',
+    page: trackedPath(window.location.pathname),
+    source: action,
+    label: listing?.name,
+    listingId: listing?.id,
+  })
+}
 
 /**
  * Track an action on the press and media page (/media). `label` names the

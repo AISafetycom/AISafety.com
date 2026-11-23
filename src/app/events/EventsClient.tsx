@@ -20,7 +20,7 @@ import ModeToggle from '@/components/ModeToggle'
 import StickyBar, { scrollToAnchor } from '@/components/StickyBar'
 import { EVENT_TYPES, eventTypeColor } from '@/lib/event-types'
 import { selectFeatured, withRandomStandIns } from '@/lib/featured'
-import { trackFilterApply } from '@/lib/analytics'
+import { trackFilterApply, trackFilterRemove } from '@/lib/analytics'
 import { foldForSearch } from '@/lib/search'
 import { gridListings, placementsById } from '@/lib/placements'
 import type { EventListing } from '@/lib/data/events'
@@ -589,10 +589,15 @@ export default function EventsClient({ events }: EventsClientProps) {
                   prev.includes(city) ? prev : [...prev, city]
                 )
               }}
-              onRemove={city =>
+              onRemove={city => {
+                trackFilterRemove('Events', 'City', city)
                 setSelectedCities(prev => prev.filter(c => c !== city))
-              }
-              onClear={() => setSelectedCities([])}
+              }}
+              onClear={() => {
+                for (const city of selectedCities)
+                  trackFilterRemove('Events', 'City', city)
+                setSelectedCities([])
+              }}
             />
           </div>
         )}

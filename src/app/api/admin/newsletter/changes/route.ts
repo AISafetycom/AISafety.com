@@ -24,6 +24,7 @@ import {
   canReviewQueue,
   canSendNewsletter,
   canViewNewsletter,
+  currentAdmin,
 } from '@/lib/admin/auth'
 import { isSameOriginRequest } from '@/lib/admin/origin'
 import {
@@ -111,7 +112,14 @@ export async function POST(req: NextRequest) {
   if (queue && !(await canReviewQueue()))
     return json({ error: 'Fixing a listing needs Queue access.' }, 401)
   try {
-    const result = await fixListing(campaign, key, queue, message)
+    const me = await currentAdmin()
+    const result = await fixListing(
+      campaign,
+      key,
+      queue,
+      message,
+      me?.name || me?.email || null
+    )
     console.info(
       `[newsletter] draft ${campaign} listing ${key}: ${
         result.applied ? `Broom item ${queue} applied, ` : ''

@@ -14,8 +14,15 @@ import { useDictation } from './useDictation'
 // again puts the words in the box, Enter puts them in and rejects, Esc
 // throws the recording away. The Mac turns the recording into words
 // (~/Queue/dictate.py), so nothing goes to another service. Since 17 Nov
-// 2026 the words show in the box as he speaks, and holding ⌘ after ⌘D is
-// hold-to-talk.
+// 2026 the words show in the box as he speaks (only words that have stopped
+// changing, since 19 Nov 2026), and holding ⌘ after ⌘D is hold-to-talk.
+//
+// The box grows with what is in it (Bryce, 18 Nov 2026: "the text field
+// should expand if the text is too long"): wider first, up to the panel's
+// width, then onto more lines. So it is a one-row textarea laid over a
+// hidden copy of its own text, which is what gives the box its size
+// (`.otherBox::after` in queue.module.css). A reason stays one paragraph:
+// Enter rejects, and a pasted line break becomes a space.
 
 export interface RejectReasonControl {
   /** Confirm reject: with the words first when it is listening. */
@@ -59,7 +66,7 @@ export default function RejectReason({
   onCancel: () => void
   control?: React.Ref<RejectReasonControl>
 }) {
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const micRef = useRef<HTMLButtonElement>(null)
   const valueRef = useRef(value)
   const agentRef = useRef(agent)
@@ -223,32 +230,40 @@ export default function RejectReason({
     return () => window.removeEventListener('keydown', onKey, true)
   }, [canDictate])
 
+  const placeholder =
+    dictation.state === 'transcribing'
+      ? 'Turning your words into text…'
+      : listening
+        ? 'Listening…'
+        : 'Other reason…'
+
   return (
     <>
       <span
         className={`${styles.otherBox}${canDictate ? ` ${styles.otherBoxMic}` : ''}`}
+        // The hidden copy that sizes the box.
+        data-value={value || placeholder}
       >
         {/* Focused as the panel opens, so a reason can be typed straight
             away (Bryce, 24 Sept 2026). While it is still empty the number
             keys keep picking a chip, and Esc cancels the reject as it does
             outside the box. */}
-        <input
+        <textarea
           ref={inputRef}
           autoFocus
+          rows={1}
           className={`${styles.input} ${styles.other}`}
-          placeholder={
-            dictation.state === 'transcribing'
-              ? 'Turning your words into text…'
-              : listening
-                ? 'Listening…'
-                : 'Other reason…'
-          }
+          placeholder={placeholder}
           value={value}
           // The words show here as he speaks; typing would land in the
           // middle of them.
           readOnly={dictation.state !== 'off'}
-          onChange={e => onChange(e.target.value)}
+          onChange={e =>
+            onChange(e.target.value.replace(/\s*[\r\n]+\s*/g, ' '))
+          }
           onKeyDown={e => {
+            // Enter never starts a new line here, whatever is held with it.
+            if (e.key === 'Enter') e.preventDefault()
             if (e.key === 'Enter' && dictation.state !== 'off') {
               e.preventDefault()
               reject()
