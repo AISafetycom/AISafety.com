@@ -29,6 +29,9 @@ export interface FeedbackRequest {
   anchor?: PageBox
   /** The selected text, from the selection menu. */
   quote?: string
+  /** Where that text is on the page: it stays marked while the form is
+   *  open, and the form's caret points at its first or last line. */
+  range?: Range
   /** The card's listing, when the text was on one. */
   listing?: { name: string; id?: string }
   /** The corrections table's Resource choice, when the page tells it. */

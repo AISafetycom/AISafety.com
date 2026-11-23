@@ -3,6 +3,7 @@
 import type { ReactNode, RefObject } from 'react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { placePopover, type Side } from '@/lib/popover-placement'
 import styles from './Popover.module.css'
 
 /** A box in page coordinates (scroll included). */
@@ -32,11 +33,16 @@ interface PopoverProps {
    *  outside (so it can toggle the popover itself), and focus goes back to it
    *  after Escape. */
   triggerRef: RefObject<HTMLElement | SVGElement | null>
-  /** Float over the page at this box, under it, or above it when there's no
-   *  room below, always on screen (e.g. selected text, a footer link). Leave
-   *  out to hang under the parent element in the page instead (e.g. a filter
-   *  pill); the parent needs position: relative. */
+  /** Float over the page by this box, with a caret pointing at it (e.g.
+   *  selected text, a footer link). It goes under it, or above, right or left
+   *  of it, whichever fits first, and never covers it (see
+   *  src/lib/popover-placement.ts). Leave out to hang under the parent
+   *  element in the page instead, without a caret (e.g. a filter pill); the
+   *  parent needs position: relative. */
   anchor?: PageBox
+  /** For selected text: its first and last lines, which the caret points
+   *  at. Without them it points at the anchor's middle. */
+  anchorLines?: { first: PageBox; last: PageBox }
   /** Names the popover for screen readers, which then announce it as a
    *  dialog. */
   label?: string
@@ -50,10 +56,14 @@ interface PopoverProps {
   children: ReactNode
 }
 
-// Space kept between the popover and the screen's edges, and between it and
-// what it hangs from.
+// Space kept between the popover and the screen's edges, and between a
+// floating popover and what it hangs from: room for its caret, whose tip
+// comes 8px out of the edge.
 const EDGE = 16
-const GAP = 8
+const CARET_GAP = 12
+// The caret keeps clear of the panel's rounded corners (16px) by this much,
+// measured to its middle.
+const CARET_INSET = 24
 // Space kept clear at the top of the screen for the nav bar (as on
 // SelectionMenu): a floating popover never opens above the anchor into it.
 const NAV_CLEARANCE = 96
@@ -67,20 +77,20 @@ export default function Popover({
   onClose,
   triggerRef,
   anchor,
+  anchorLines,
   label,
   className,
   escapeClearsText,
   children,
 }: PopoverProps) {
   const ref = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<{ left: number; top?: number }>({ left: 0 })
+  const [pos, setPos] = useState<{
+    left: number
+    top?: number
+    side?: Side
+    caret?: number
+  }>({ left: 0 })
   const floating = !!anchor
-  const {
-    left: aLeft,
-    right: aRight,
-    top: aTop,
-    bottom: aBottom,
-  } = anchor ?? { left: 0, right: 0, top: 0, bottom: 0 }
 
   // Placed before paint on opening, and again when the screen or the
   // popover's own size changes (a search narrowing a list, an error showing
@@ -91,10 +101,10 @@ export default function Popover({
     if (!open || !el) return
     // Which side of the anchor it opened on. It stays there while open, so
     // a form growing as it's typed in doesn't jump to the other side.
-    let side: 'below' | 'above' | undefined
+    let side: Side | undefined
     const place = () => {
       const width = el.offsetWidth
-      if (!floating) {
+      if (!anchor) {
         // Only a sideways nudge: it hangs under its parent.
         const r = el.parentElement?.getBoundingClientRect()
         if (!r) return
@@ -105,24 +115,29 @@ export default function Popover({
         setPos({ left: left - r.left })
         return
       }
-      const height = el.offsetHeight
-      const minLeft = window.scrollX + EDGE
-      const maxLeft =
-        window.scrollX + document.documentElement.clientWidth - width - EDGE
-      const centered = (aLeft + aRight) / 2 - width / 2
-      // Under the anchor; above it when there's no room under it; and when
-      // there's room on neither side, as low as it fits on screen, over the
-      // anchor (a tall form by text low on the screen).
-      const minTop = window.scrollY + NAV_CLEARANCE
-      const maxTop = window.scrollY + window.innerHeight - height - EDGE
-      const below = aBottom + GAP
-      const above = aTop - GAP - height
-      side ??= below <= maxTop || above < minTop ? 'below' : 'above'
-      const top = side === 'below' ? Math.min(below, maxTop) : above
-      setPos({
-        left: Math.max(minLeft, Math.min(centered, maxLeft)),
-        top: Math.max(minTop, top),
+      const placed = placePopover({
+        anchor,
+        first: anchorLines?.first ?? anchor,
+        last: anchorLines?.last ?? anchor,
+        width,
+        height: el.offsetHeight,
+        view: {
+          left: window.scrollX + EDGE,
+          right: window.scrollX + document.documentElement.clientWidth - EDGE,
+          top: window.scrollY + NAV_CLEARANCE,
+          bottom: window.scrollY + window.innerHeight - EDGE,
+        },
+        gap: CARET_GAP,
+        caretInset: CARET_INSET,
+        side,
       })
+      // Off the bottom of the screen when it opens (a tall form by text low
+      // on a phone): scroll it into view, once.
+      if (!side && placed.scroll > 0) {
+        window.scrollBy({ top: placed.scroll, behavior: 'smooth' })
+      }
+      side = placed.side
+      setPos(placed)
     }
     place()
     // Focus goes in only once the popover is in place, and without
@@ -138,7 +153,7 @@ export default function Popover({
       resize.disconnect()
       window.removeEventListener('resize', place)
     }
-  }, [open, floating, aLeft, aRight, aTop, aBottom])
+  }, [open, anchor, anchorLines])
 
   useEffect(() => {
     if (!open) return
@@ -186,6 +201,21 @@ export default function Popover({
       style={{ left: pos.left, top: pos.top }}
     >
       {children}
+      {floating && pos.side && (
+        // The caret, on the edge facing the anchor (the side the popover
+        // went to is the opposite one), its spot along that edge worked out
+        // in placePopover.
+        <span
+          aria-hidden="true"
+          data-side={pos.side}
+          className={`border-plus-fill ${styles.caret}`}
+          style={
+            pos.side === 'below' || pos.side === 'above'
+              ? { left: pos.caret }
+              : { top: pos.caret }
+          }
+        />
+      )}
     </div>
   )
 

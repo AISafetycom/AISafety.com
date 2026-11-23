@@ -263,14 +263,20 @@ export default function SelectionMenu() {
         onClick={e => {
           const kind = menu.listing ? 'correction' : 'feedback'
           trackSelectionMenu(kind, menu.listing)
-          // The form takes the menu's place, under the selected text.
+          // The form takes the menu's place by the selected text, which it
+          // keeps marked (the selection itself goes when the form's text
+          // box takes the focus).
           setOpen(false)
+          const selection = window.getSelection()
           openFeedbackForm({
             kind,
             entry: 'selection',
             trigger: e.currentTarget,
             anchor: menu.box,
             quote: menu.text,
+            range: selection?.rangeCount
+              ? selection.getRangeAt(0).cloneRange()
+              : undefined,
             listing: menu.listing,
             fallbackHref: menu.formHref,
           })

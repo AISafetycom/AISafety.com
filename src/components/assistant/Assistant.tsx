@@ -555,8 +555,9 @@ export default function Assistant() {
               iconPosition="only"
               onClick={handleClose}
               aria-label="Close chatbot"
-              // Below, it would run past the panel's right edge.
-              tooltipPosition="left"
+              // An X plainly means close, so no tooltip (Melissa, 23
+              // November 2026).
+              tooltip={false}
             />
           </div>
         </header>

@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import Button from '@/components/Button'
-import Popover, { pageBox } from '@/components/Popover'
+import Popover, { pageBox, type PageBox } from '@/components/Popover'
 import TextField from '@/components/TextField'
 import { trackFeedbackForm, trackedPath } from '@/lib/analytics'
 import { FEEDBACK_FORM_EVENT, type FeedbackRequest } from '@/lib/feedback-form'
+import { selectionLines } from '@/lib/popover-placement'
 import { quoteForForm, resourceForPath } from '@/lib/selection-feedback'
 import { RESOURCE_CHOICES } from '@/lib/site-feedback'
 import styles from './FeedbackPopover.module.css'
@@ -43,6 +44,8 @@ const VIEW_RE = /^[a-z-]{1,40}$/
 type Status = 'editing' | 'sending' | 'sent' | 'error' | 'limited'
 
 interface Opened extends FeedbackRequest {
+  /** The selected text's first and last lines, for the caret. */
+  lines?: { first: PageBox; last: PageBox }
   /** The page it was opened on, as analytics records it. */
   path: string
   view?: string
@@ -50,6 +53,22 @@ interface Opened extends FeedbackRequest {
   draft: Draft
   /** Counts openings, so each one starts a fresh form. */
   n: number
+}
+
+// The name the selected text is marked under while the form is open.
+const HIGHLIGHT = 'feedback-quote'
+
+/** A range's first and last lines, in page coordinates. */
+function linesOf(range: Range) {
+  const lines = selectionLines([...range.getClientRects()])
+  if (!lines) return undefined
+  const page = (b: PageBox): PageBox => ({
+    left: b.left + window.scrollX,
+    right: b.right + window.scrollX,
+    top: b.top + window.scrollY,
+    bottom: b.bottom + window.scrollY,
+  })
+  return { first: page(lines.first), last: page(lines.last) }
 }
 
 /** What was typed is kept for the same form on the same text, so closing it
@@ -84,6 +103,7 @@ export default function FeedbackPopover() {
       setOpened(prev => ({
         ...request,
         anchor: request.anchor ?? pageBox(request.trigger),
+        lines: request.range && linesOf(request.range),
         quote,
         resource:
           request.kind === 'correction'
@@ -106,6 +126,18 @@ export default function FeedbackPopover() {
     return () => window.removeEventListener(FEEDBACK_FORM_EVENT, onRequest)
   }, [])
 
+  // The selected text stays marked while the form is open, as if still
+  // selected (the ::highlight(feedback-quote) rule in globals.css). Browsers
+  // without the CSS Highlight API just don't mark it.
+  const range = open ? opened?.range : undefined
+  useEffect(() => {
+    if (!range || !('highlights' in CSS)) return
+    CSS.highlights.set(HIGHLIGHT, new Highlight(range))
+    return () => {
+      CSS.highlights.delete(HIGHLIGHT)
+    }
+  }, [range])
+
   const close = useCallback(() => setOpen(false), [])
   const saveDraft = useCallback((key: string, draft: Draft | null) => {
     if (draft) drafts.current.set(key, draft)
@@ -123,6 +155,7 @@ export default function FeedbackPopover() {
       onClose={close}
       triggerRef={triggerRef}
       anchor={opened.anchor}
+      anchorLines={opened.lines}
       label={correction ? 'Suggest a correction' : 'Give feedback'}
       className="padding-top-24px padding-bottom-24px padding-left-24px padding-right-24px"
     >
@@ -213,13 +246,15 @@ function FeedbackForm({
   const header = (
     <div className="flex items-center justify-between gap-16px">
       <p className="paragraph-small-bold">{title}</p>
+      {/* An X plainly means close, so no tooltip (Melissa, 23 November
+          2026). */}
       <Button
         variant="clear"
         size="xs"
         icon="/images/icons/x.svg"
         iconPosition="only"
         aria-label="Close"
-        tooltipPosition="left"
+        tooltip={false}
         onClick={onClose}
       />
     </div>
@@ -322,7 +357,7 @@ function FeedbackForm({
 
         <div className="flex flex-col gap-8px">
           <div>
-            <Button type="submit" size="small" loading={status === 'sending'}>
+            <Button type="submit" loading={status === 'sending'}>
               Send
             </Button>
           </div>

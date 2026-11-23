@@ -167,9 +167,10 @@ export default function DesignSystemPage() {
 
       <h2 className="padding-top-40px padding-bottom-12px">Popover</h2>
       <p className="paragraph-small color-teal-grey-300 padding-bottom-24px">
-        Holds anything: a filter&apos;s options, a form. It opens under what
-        opened it (above when there&apos;s no room) and closes on Escape or a
-        click outside.
+        Holds anything: a filter&apos;s options, a form. Opened by something on
+        the page, it points at it and goes under it, or above or beside it when
+        there&apos;s no room, never over it. It closes on Escape or a click
+        outside.
       </p>
       <PopoverDemo />
     </main>
