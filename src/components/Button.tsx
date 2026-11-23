@@ -40,16 +40,14 @@ type Look =
       tooltipPosition?: never
     }
   /** Just an icon, in a circle: small (40px, the default here) with a 24px
-      icon, or xs (32px) with a 16px icon. There is no
-      48px icon-only button. Needs an aria-label so screen readers can name
+      icon, or xs (32px) with a 16px icon (or 12px with iconSize). There is
+      no 48px icon-only button. Needs an aria-label so screen readers can name
       it, and shows that label as a <Tooltip> on hover and keyboard focus
       (not while disabled). */
-  | {
+  | ({
       children?: never
       icon: string
       iconPosition: 'only'
-      /** 12 swaps in the 12px icon (the x-small ×, say) at either size. */
-      iconSize?: 12
       'aria-label': string
       /** Tooltip text, if it should differ from the aria-label. false turns
           the tooltip off. */
@@ -57,8 +55,14 @@ type Look =
       /** Which side the tooltip appears on. Default 'below'. */
       tooltipPosition?: TooltipPosition
       variant?: Variant
-      size?: 'small' | 'xs'
-    }
+    } & (
+      | { size?: 'small'; iconSize?: never }
+      | {
+          size: 'xs'
+          /** 12 swaps in the 12px icon (the x-small × on a filter pill). */
+          iconSize?: 12
+        }
+    ))
 
 export type ButtonProps<C extends ElementType = 'button'> = Look & {
   /** The element or component to render. Default 'button'. */
@@ -121,7 +125,7 @@ export default function Button<C extends ElementType = 'button'>(
     .join(' ')
 
   // Icon-only buttons: a 24px icon at small (40px), 16px at xs (32px),
-  // unless iconSize asks for 12px. Buttons with a label always use 16px.
+  // unless an xs one's iconSize asks for 12px. Buttons with a label always use 16px.
   // The spinner keeps the base size, since its files come only at 16 and 24.
   const baseIconSize = iconOnly && size === 'small' ? 24 : 16
   const iconSize = iconSizeProp ?? baseIconSize

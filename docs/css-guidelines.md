@@ -170,7 +170,7 @@ Never style a button. Use the `<Button>` component (`src/components/Button.tsx`)
 - `variant`: `white` (the default), `teal`, `teal-alt`, `clear`, `clear-border`
 - `size`: `default` (48px) or `small` (40px) for buttons with a label
 - `icon` with `iconPosition`: `preceding`, `trailing` (the default) or `only`. Label buttons use a 16px icon.
-- Icon-only buttons come in `small` (40px, the default, with a 24px icon) or `xs` (32px, with a 16px icon), never 48px. `iconSize={12}` swaps in the 12px icon (the × on a filter pill). They need an `aria-label`, which also shows as a tooltip on hover and focus (not while disabled).
+- Icon-only buttons come in `small` (40px, the default, with a 24px icon) or `xs` (32px, with a 16px icon), never 48px. On an `xs` one, `iconSize={12}` swaps in the 12px icon (the × on a filter pill). They need an `aria-label`, which also shows as a tooltip on hover and focus (not while disabled).
 
 Hover, focus and disabled styles come for free. The text uses the global `.paragraph-small-bold` / `.paragraph-xs-bold` classes, so never set fonts on a button.
 
