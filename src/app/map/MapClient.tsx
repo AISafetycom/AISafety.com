@@ -288,7 +288,7 @@ export default function MapClient({
               <FilterDropdown
                 trackingPage="Map"
                 title="Status"
-                icon="/images/icons/activity.svg"
+                icon="/images/icons/check-in-circle.svg"
                 options={['Active', 'No longer active']}
                 selected={groups.status.selected}
                 counts={statusCounts}
