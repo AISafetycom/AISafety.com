@@ -152,8 +152,20 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         listingId: org.id,
       })
     }
+    // ESC on the map ends the ring too, but not an ESC that closes the chat
+    // or is typed in a field (the same skip as the map's own ESC handler).
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') clearChatRing()
+      if (e.key !== 'Escape') return
+      const target = e.target as HTMLElement | null
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable ||
+          target.closest('[role="dialog"]'))
+      )
+        return
+      clearChatRing()
     }
     window.addEventListener(MAP_FOCUS_EVENT, onFocus)
     window.addEventListener('keydown', onKey)
