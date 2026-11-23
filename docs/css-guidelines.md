@@ -55,6 +55,8 @@ Pick by job, not by look. If a job isn't listed here, ask Melissa before adding 
 
 Each color above also has a text class: `.color-` plus the variable's name, for example `--teal-grey-300` is `.color-teal-grey-300`. In markup, color text with the class.
 
+Teal links are the exception: give the `<a>` or `<Link>` the `.link` class instead of `.color-teal-300` (or put `.link-group` on a wrapper to cover every link inside it). `.link` is `--teal-300` and lightens to `--teal-200` on hover; `.color-teal-300` never changes on hover.
+
 Some older styles still use `--teal-grey-*` for backgrounds and borders. Those are being moved to the teal scale.
 
 ### 2. CSS Reset

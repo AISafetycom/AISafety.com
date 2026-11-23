@@ -45,6 +45,7 @@
   --teal-400: #6cbdbb;
   --teal-500: #4da9a7;
   --teal-600: #2d9292;
+  --teal-650: #227f7f; /* halfway between teal-600 and teal-700 */
   --teal-700: #176c6c;
   --teal-750: #0f5858;
   --teal-800: #094141;
@@ -893,6 +894,9 @@ label {
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+  /* Text a visitor selects and copies holds only what they can see, never
+     a screen-reader note like "(opens in new tab)". */
+  user-select: none;
 }
 
 /* Display */

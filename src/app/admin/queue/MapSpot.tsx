@@ -34,7 +34,7 @@ import {
 import MapEditorCanvas, {
   type CanvasControls,
 } from '@/app/admin/map/MapEditorCanvas'
-import { MAP_AREA_BY_CATEGORY } from '@/lib/data/map-areas'
+import { MAP_AREA_BY_CATEGORY, placingCategory } from '@/lib/data/map-areas'
 import type { EditorRecord } from '@/lib/admin/map-editor-core'
 import {
   AREA_LABELS,
@@ -249,9 +249,9 @@ const OTHERS_HINT = ' · other listings save as you drop them'
 /** How close the strip opens on the spot. */
 const OPEN_ZOOM = 3
 
-function areaOf(category: string): string | null {
-  const first = category.split(',')[0]?.trim() ?? ''
-  return (first && MAP_AREA_BY_CATEGORY[first]) || null
+function areaOf(category: string, status: string | null): string | null {
+  const placing = placingCategory(category, status)
+  return (placing && MAP_AREA_BY_CATEGORY[placing]) || null
 }
 
 export default function MapSpot({
@@ -260,6 +260,7 @@ export default function MapSpot({
   label,
   description,
   category,
+  status,
   scale,
   logo,
   spot,
@@ -279,6 +280,8 @@ export default function MapSpot({
   description: string | null
   /** Its categories, comma-joined: the first decides the area. */
   category: string
+  /** Its Status: one that isn't Active puts it in the Gone Graveyard. */
+  status: string | null
   scale: string | null
   /** Its "Logo (for map)", when the page holds a link to it. */
   logo: string | null
@@ -334,7 +337,7 @@ export default function MapSpot({
     }
   }, [attempt])
 
-  const area = areaOf(category)
+  const area = areaOf(category, status)
 
   // Every other listing, each where it is: on the record, published from
   // this page a moment ago, or held in another open addition's edits.

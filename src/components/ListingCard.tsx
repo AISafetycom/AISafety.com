@@ -51,6 +51,9 @@ export interface ListingCardProps {
   /** Click source recorded with the event — the active view's slug on pages
    *  with a view toggle (e.g. 'online' / 'in-person' on Events). */
   trackingSource?: string
+  /** The listing's map area, recorded with the click so the dashboard can
+   *  group Map-page activity by it (/map only). */
+  trackingArea?: string
 }
 
 /** What a resource page's card.ts builds from one listing: the card's
@@ -58,7 +61,7 @@ export interface ListingCardProps {
  *  renders. The admin Queue's site preview renders the same content. */
 export type CardProps = Omit<
   ListingCardProps,
-  'trackingPage' | 'listingId' | 'placement' | 'trackingSource'
+  'trackingPage' | 'listingId' | 'placement' | 'trackingSource' | 'trackingArea'
 >
 
 function MetaRows({ rows }: { rows: ListingCardMeta[] }) {
@@ -98,6 +101,7 @@ export default function ListingCard({
   listingId,
   placement,
   trackingSource,
+  trackingArea,
 }: ListingCardProps) {
   // The logo loads lazily below; fetch it in the background once the page has
   // settled, so it's ready before a fast scroll reaches it.
@@ -108,7 +112,10 @@ export default function ListingCard({
   return (
     <li
       id={listingId}
-      className={`card ${href ? '' : 'card-static'} ${styles.card}`}
+      className={`card ${href ? 'cursor-pointer' : 'card-static'} ${styles.card}`}
+      // A click anywhere on the card opens the title link (CardClicks). The
+      // pointer also lets iPhones send that click from a tap on plain text.
+      data-card={href ? '' : undefined}
     >
       <div
         className={`flex gap-16px padding-bottom-24px ${
@@ -148,7 +155,8 @@ export default function ListingCard({
                     href,
                     listingId,
                     placement,
-                    trackingSource
+                    trackingSource,
+                    trackingArea
                   )
                 }
               >

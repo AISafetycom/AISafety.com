@@ -12,15 +12,24 @@ import {
 import FilterBar from '@/components/FilterBar'
 import FilterDropdown from '@/components/FilterDropdown'
 import ListingCard from '@/components/ListingCard'
+import ContributeButtons from '@/components/ContributeButtons'
 import { Job } from '@/lib/data/jobs'
 import { withUtm } from '@/lib/utm'
+import { formatDate } from '@/lib/format-date'
 import { placementsById } from '@/lib/placements'
 import { setPageContext } from '@/lib/assistant/page-context'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
+import styles from './page.module.css'
 
 interface JobsClientProps {
   jobs: Job[]
 }
+
+// Public read-only view of the jobs on this page ("AISafety.com/jobs" in the
+// Jobs table's "Publicly shared" section). Its filter copies the site's view,
+// "Jobs AI Safety Only": when that filter changes, change this one too.
+const AIRTABLE_VIEW_URL =
+  'https://airtable.com/appF8XfZUGXtfi40E/shroBLhvX7XmuZRlO/tblyLelYCQjP6w3nV?viewControls=on'
 
 // The labels the published jobs carry. When the 80k data adds or renames
 // one, update this list and the chatbot's two copies (skillSet in
@@ -188,6 +197,9 @@ export default function JobsClient({ jobs }: JobsClientProps) {
   const [selectedCountries, setSelectedCountries] = useState<string[]>([])
   const [selectedDegrees, setSelectedDegrees] = useState<string[]>([])
   const savedScrollY = useRef<number | null>(null)
+  // Off-screen cards stop being redrawn from the first filter change on
+  // (page.module.css), which makes every change after it ~2–3x faster.
+  const [skipOffscreen, setSkipOffscreen] = useState(false)
 
   // Each job's slot in the full page order, stamped onto a click so the
   // dashboard can tie clicks to page position even after later reordering.
@@ -341,6 +353,7 @@ export default function JobsClient({ jobs }: JobsClientProps) {
     setter: Dispatch<SetStateAction<string[]>>
   ) => {
     savedScrollY.current = window.scrollY
+    setSkipOffscreen(true)
     setter(current =>
       current.includes(value)
         ? current.filter(v => v !== value)
@@ -443,14 +456,13 @@ export default function JobsClient({ jobs }: JobsClientProps) {
       <div className="flex gap-56px">
         <ul
           role="list"
-          className="collection-list padding-bottom-40px width-9-col"
+          className={`collection-list padding-bottom-40px width-9-col ${styles.cards} ${
+            skipOffscreen ? styles.skipOffscreen : ''
+          }`}
         >
           {filteredJobs.map(job => {
             const posted = job.datePublished
-              ? new Date(job.datePublished + 'T00:00:00').toLocaleDateString(
-                  'en-GB',
-                  { day: 'numeric', month: 'long', year: 'numeric' }
-                )
+              ? formatDate(new Date(`${job.datePublished}T00:00:00Z`))
               : null
             const tokens = roleTokens(job)
             const roleTypeValue = tokens
@@ -563,15 +575,23 @@ export default function JobsClient({ jobs }: JobsClientProps) {
         </ul>
 
         <div className="hide-mobile width-3-col">
-          <p className="paragraph-small padding-bottom-4px">Source:</p>
-          <a
-            href={withUtm('https://jobs.80000hours.org/', 'Jobs')}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="color-teal-300"
-          >
-            80,000 Hours Job Board
-          </a>
+          <div className="flex flex-col gap-16px">
+            <div>
+              <p className="paragraph-small padding-bottom-4px">Source:</p>
+              <a
+                href={withUtm('https://jobs.80000hours.org/', 'Jobs')}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="link paragraph-small"
+              >
+                80,000 Hours Job Board
+              </a>
+            </div>
+            <ContributeButtons
+              airtableUrl={AIRTABLE_VIEW_URL}
+              trackingPage="Jobs"
+            />
+          </div>
         </div>
       </div>
     </>
