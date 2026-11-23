@@ -111,43 +111,11 @@ export default function ContributeButtons({
         </div>
       </div>
 
-      {/* View data in Airtable card */}
-      <a
-        href={airtableUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={() => {
-          if (trackingPage) trackAirtableView(trackingPage, airtableUrl)
-        }}
-        className={`border-only border-hover color-teal-grey-300 hover-white ${styles.airtableCard}`}
-      >
-        <Image
-          src="/images/airtable-vector.svg"
-          alt=""
-          width={220}
-          height={86}
-          unoptimized
-          className={styles.airtableImg}
-        />
-        <span className={`bg-teal-800 ${styles.badge} ${styles.airtableArrow}`}>
-          <Icon
-            src="/images/icons/arrow-up-right-figma.svg"
-            size={16}
-            className="color-white"
-          />
-        </span>
-        <div className={styles.airtableTextWrap}>
-          <p className="paragraph-xs padding-left-16px padding-bottom-12px">
-            View data in Airtable
-            {airtableNote && (
-              <>
-                <br />
-                {airtableNote}
-              </>
-            )}
-          </p>
-        </div>
-      </a>
+      <AirtableViewCard
+        url={airtableUrl}
+        note={airtableNote}
+        trackingPage={trackingPage}
+      />
     </div>
   )
 
@@ -155,5 +123,58 @@ export default function ContributeButtons({
 
   return (
     <div className={`hide-mobile width-3-col ${styles.sidebar}`}>{cards}</div>
+  )
+}
+
+/** The "View data in Airtable" card on its own, for a page that has a public
+ *  Airtable view but no contribute forms (Jobs, synced from 80,000 Hours). */
+export function AirtableViewCard({
+  url,
+  note,
+  trackingPage,
+}: {
+  url: string
+  /** Extra line under "View data in Airtable", e.g. "(includes past events)". */
+  note?: string
+  /** Analytics page name; a click records an airtable_view event under it. */
+  trackingPage?: string
+}) {
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={() => {
+        if (trackingPage) trackAirtableView(trackingPage, url)
+      }}
+      className={`border-only border-hover color-teal-grey-300 hover-white ${styles.airtableCard}`}
+    >
+      <Image
+        src="/images/airtable-vector.svg"
+        alt=""
+        width={220}
+        height={86}
+        unoptimized
+        className={styles.airtableImg}
+      />
+      <span className={`bg-teal-800 ${styles.badge} ${styles.airtableArrow}`}>
+        <Icon
+          src="/images/icons/arrow-up-right-figma.svg"
+          size={16}
+          className="color-white"
+        />
+      </span>
+      <div className={styles.airtableTextWrap}>
+        <p className="paragraph-xs padding-left-16px padding-bottom-12px">
+          View data in Airtable
+          {note && (
+            <>
+              <br />
+              {note}
+            </>
+          )}
+        </p>
+      </div>
+    </a>
   )
 }
