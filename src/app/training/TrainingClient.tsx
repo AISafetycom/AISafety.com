@@ -290,9 +290,11 @@ export default function TrainingClient({
 
   // Upcoming programs are one deadline-ordered list; each card carries its
   // own "Apply by" line, so no month headings. Programs that can't be applied
-  // to sit at the bottom, and once the Applications filter shows more than
-  // one set the blocks get labels so the switch is obvious. Recurring
-  // programs have no dates and stay one flat A–Z grid.
+  // to sit at the bottom, and when more than one set shows, the later blocks
+  // get labels so the switch is obvious. Open programs are what visitors
+  // expect first, so their block has no label: right under the filter count
+  // it read as stray text (Melissa, 22 Nov 2026). Recurring programs have no
+  // dates and stay one flat A–Z grid.
   const sections = useMemo(() => {
     if (mode !== 'upcoming') return []
     const groups: { key: Section; programs: TrainingProgram[] }[] = []
@@ -480,11 +482,12 @@ export default function TrainingClient({
                 key={section.key}
                 className={i === 0 ? undefined : 'padding-top-32px'}
               >
-                {sections.length > 1 && (
-                  <p className="paragraph-small color-teal-grey-300 padding-bottom-24px">
-                    {SECTION_LABELS[section.key]}
-                  </p>
-                )}
+                {sections.length > 1 &&
+                  !(i === 0 && section.key === 'open') && (
+                    <p className="paragraph-small color-teal-grey-300 padding-bottom-24px">
+                      {SECTION_LABELS[section.key]}
+                    </p>
+                  )}
                 <ul role="list" className="collection-list">
                   {section.programs.map(program => renderCard(program))}
                 </ul>
