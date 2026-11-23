@@ -232,6 +232,16 @@ describe('rowToEditorRecord', () => {
     expect(r.status).toBe('Active')
     expect(r.description).toBeNull()
   })
+  it('puts a shut-down org in the Graveyard whatever its categories', () => {
+    const r = rowToEditorRecord(
+      row({
+        [FIELD.categoryText]: 'Funding, Resource',
+        [FIELD.status]: 'Inactive',
+      })
+    )
+    expect(r.category).toBe('Funding, Resource')
+    expect(r.area).toBe('Gone Graveyard')
+  })
   it('flags furniture rows and unknown areas', () => {
     const r = rowToEditorRecord(
       row({

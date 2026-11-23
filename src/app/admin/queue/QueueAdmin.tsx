@@ -117,6 +117,7 @@ import {
   type HistoryRow,
 } from '@/lib/admin/queue-history'
 import { STATUS_ICONS as FUNDER_STATUS_ICONS } from '@/app/funding/card'
+import { STATUS_ICONS as MAP_STATUS_ICONS } from '@/app/map/card'
 import { APPLICATIONS_ICONS as ADVISOR_APPLICATIONS_ICONS } from '@/app/advisors/card'
 import { trainingTypeColor } from '@/lib/training-types'
 import { eventTypeColor } from '@/lib/event-types'
@@ -1200,6 +1201,7 @@ function pinOf(
     label: text('Short name') || title,
     description: text('Description') || null,
     category: text('Category'),
+    status: text('Status') || null,
     scale: text('Scale') || null,
     logo:
       typeof first === 'string'
@@ -8301,6 +8303,7 @@ const PAGE_ICONS: Record<string, Record<string, string>> = {
   },
   '/advisors': { "who it's for": 'team', 'focus areas': 'target' },
   '/founders': { type: 'tag' },
+  '/map': { category: 'tag' },
   '/media-channels': { type: 'computer' },
   '/self-study': { type: 'type', 'course type': 'type' },
 }
@@ -8342,6 +8345,11 @@ function fieldIcon(
   }
   if (page === '/funding' && key === 'application status') {
     return FUNDER_STATUS_ICONS[value] ?? null
+  }
+  if (page === '/map' && key === 'status') {
+    return value === 'Active'
+      ? MAP_STATUS_ICONS.active
+      : MAP_STATUS_ICONS.inactive
   }
   if (page === '/advisors' && key === 'applications') {
     return ADVISOR_APPLICATIONS_ICONS[value] ?? null
