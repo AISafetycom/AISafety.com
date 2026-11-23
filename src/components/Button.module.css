@@ -60,7 +60,7 @@
   border-color: var(--teal-800);
 }
 .teal:hover {
-  border-color: var(--teal-750);
+  border-color: var(--teal-700);
 }
 .teal:disabled {
   background-color: var(--teal-grey-800);
@@ -73,7 +73,7 @@
   border-color: var(--teal-750);
 }
 .tealAlt:hover {
-  border-color: var(--teal-700);
+  border-color: var(--teal-650);
 }
 .tealAlt:disabled {
   background-color: var(--teal-grey-750);

@@ -81,38 +81,17 @@
   transform: translateY(-5px) rotate(-45deg);
 }
 
-.nav-item {
-  display: flex;
-  justify-content: flex-start;
-  align-items: center;
-  gap: 8px;
-  height: 40px;
-  padding-left: 4px;
-  padding-right: 16px;
-  border: 1px solid color-mix(in srgb, var(--teal-300) 30%, transparent);
-  border-radius: 20px;
+/* The +N overflow menu: this wrapper holds the +N <Pill> and its dropdown
+   panel, and owns the hover/click handlers in the JSX. */
+.nav-more {
+  position: relative;
   flex: none;
-  max-width: 100%;
-  /* Resets for <button> use — iOS Safari otherwise paints button text
-     in its system blue. */
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  transition: all var(--hover-transition);
 }
 
-.nav-item-last {
-  display: flex;
-  justify-content: flex-start;
-  align-items: center;
-  gap: 8px;
-  height: 40px;
-  padding: 0 16px;
-  border: 1px solid color-mix(in srgb, var(--teal-300) 30%, transparent);
-  border-radius: 20px;
-  transition: all var(--hover-transition);
-  position: relative;
-  cursor: pointer;
+/* Ring-only hint on the +N pill when the current page's link is hidden
+   inside the overflow dropdown. */
+.nav-more-pill[data-active-inside] {
+  border-color: var(--teal-300);
 }
 
 /* Surface (fill + border) from the global .border-plus-fill class, matching
@@ -120,7 +99,7 @@
 /* Invisible strip over the 8px gap between the +N pill and its panel, so
    the pointer can travel down into the panel without leaving the pill's
    hover area. Only while open. */
-.nav-item-last[data-open]::after {
+.nav-more[data-open]::after {
   content: '';
   position: absolute;
   top: 100%;
@@ -178,77 +157,9 @@
   }
 }
 
-.nav-dropdown-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 40px;
-  padding-left: 4px;
-  padding-right: 16px;
-  border: 1px solid color-mix(in srgb, var(--teal-300) 30%, transparent);
-  border-radius: 20px;
-  width: 100%;
-  max-width: 100%;
-  /* Reset for <button> use of this class. */
-  background: transparent;
-  cursor: pointer;
-  transition: all var(--hover-transition);
-}
-
-.nav-dropdown-item:hover {
-  background-color: var(--teal-grey-850);
-  box-shadow: var(--shadow-dark);
-}
-
-.nav-item:hover,
-.nav-item-last:hover {
-  background-color: var(--teal-grey-850);
-  box-shadow: var(--shadow-dark);
-  cursor: pointer;
-}
-
-/* Current page ("you are here") — the resting 30%-alpha teal border lit up
-   to full strength, plus the hover fill made persistent. Same border width,
-   so no layout shift; the existing transition animates the ring on route
-   change. aria-current is set in the JSX, one link at a time. */
-.nav-item[aria-current='page'],
-.nav-dropdown-item[aria-current='page'] {
-  border-color: var(--teal-300);
-  background-color: var(--teal-grey-850);
-}
-
-/* The active pill is already filled, so hover lifts it with the site's
-   card-hover color-mix instead. Also keeps hover visible on the active
-   dropdown item, whose fill blends into the teal-850 dropdown panel. */
-.nav-item[aria-current='page']:hover,
-.nav-dropdown-item[aria-current='page']:hover {
-  background-color: color-mix(
-    in srgb,
-    var(--teal-grey-850) 60%,
-    var(--teal-grey-800)
-  );
-}
-
-/* Ring-only hint on the +N pill when the current page's link is hidden
-   inside the overflow dropdown. */
-.nav-item-last[data-active-inside] {
-  border-color: var(--teal-300);
-}
-
 /* The search <Button> keeps its size when the nav row gets tight. */
 .nav-search-button {
   flex: none;
-}
-
-.nav-item-icon {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  width: 32px;
-  height: 32px;
-  background-color: var(--white);
-  border-radius: 16px;
-  box-shadow: var(--shadow-dark);
 }
 
 .nav-fixed {
@@ -307,7 +218,7 @@
   .mobile-menu-items {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 12px;
     padding: 16px 6.4vw;
     overflow-y: auto;
     transform: translateY(-20px);
@@ -327,12 +238,5 @@
     justify-content: space-between;
     align-items: center;
     padding: 24px 6.4vw;
-  }
-
-  .mobile-menu .nav-item {
-    width: 100%;
-    height: 40px;
-    padding-left: 4px;
-    border-radius: 20px;
   }
 }
