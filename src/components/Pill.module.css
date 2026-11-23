@@ -54,7 +54,6 @@
 
 .count {
   flex: none;
-  font-variant-numeric: tabular-nums;
 }
 
 /* Current page ("you are here"): the resting border at full strength, with
@@ -94,7 +93,7 @@
 @media (hover: hover) {
   .tealAlt:hover:not(:disabled) {
     background-color: var(--teal-800);
-    border-color: var(--teal-700);
+    border-color: var(--teal-650);
     box-shadow: var(--shadow);
   }
 }
