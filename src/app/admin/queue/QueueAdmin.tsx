@@ -1585,6 +1585,8 @@ function decidedOf(item: QueueItem): Decided | null {
       item.status === 'Applied' || item.status === 'Accepted'
         ? item.replyDraft
         : null,
+    decline:
+      item.status === 'Rejected' ? (item.rejectReply?.text ?? null) : null,
   }
 }
 
@@ -6945,11 +6947,13 @@ function Detail({
     item.rejectDrafts,
     d.mode === 'reject' ? d.focusChip : null
   )
+  // The box exists for an open item with someone to reply to who doesn't
+  // already have a decline; it shows once there is a decline to put in it
+  // (one written for a reason, an edit, or Fable's from the chat).
+  const hasDeclineBox =
+    isOpen(item) && Boolean(item.replyTo) && !item.declinedBefore
   const showDecline =
-    isOpen(item) &&
-    Boolean(item.replyTo) &&
-    !item.declinedBefore &&
-    (declineChip !== null || d.decline !== null)
+    hasDeclineBox && (declineChip !== null || d.decline !== null)
   const declineFromReason =
     d.mode === 'reject' && d.other.trim() !== '' && d.decline === null
   const declineText =
@@ -7957,6 +7961,9 @@ function Detail({
               agent={chatAgent}
               edits={d.edits}
               reply={d.reply ?? item.replyDraft}
+              decline={
+                hasDeclineBox ? { text: declineText, edited: d.decline } : null
+              }
               // Whether a field can be edited at all, open or not: a
               // decided item's cards stay, read-only (`decided`).
               canEditField={k =>
@@ -7969,6 +7976,9 @@ function Detail({
               }}
               onSetReply={text => {
                 if (isOpen(item)) setD({ reply: text })
+              }}
+              onSetDecline={text => {
+                if (isOpen(item)) setD({ decline: text, editingDecline: false })
               }}
               onWrote={onWrote}
               onFlag={onFlag}
