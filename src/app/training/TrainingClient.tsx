@@ -426,7 +426,7 @@ export default function TrainingClient({
         <FilterDropdown
           trackingPage="Training"
           title="Type"
-          icon="/images/icons/tag.svg"
+          icon="/images/icons/layers.svg"
           options={[...TRAINING_TYPES]}
           selected={selectedTypes}
           counts={typeCounts}
