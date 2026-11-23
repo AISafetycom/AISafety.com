@@ -8,6 +8,7 @@ import {
   parsePolicy,
 } from '@/lib/listing-policy/parse'
 import styles from './page.module.css'
+import { withUtm } from '@/lib/utm'
 
 export const metadata = {
   title: 'Listing policy – AISafety.com',
@@ -60,7 +61,7 @@ function Inline({ text }: { text: string }) {
           return (
             <a
               key={i}
-              href={part.href}
+              href={withUtm(part.href, 'Listing policy')}
               target="_blank"
               rel="noopener noreferrer"
               className="link"

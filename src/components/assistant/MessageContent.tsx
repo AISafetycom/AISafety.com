@@ -8,6 +8,7 @@ import CitationCard from './CitationCard'
 import { cardTypePage } from './cardFallback'
 import Icon from '@/components/Icon'
 import styles from './Assistant.module.css'
+import { withUtm } from '@/lib/utm'
 
 const SUGGEST_TYPE_SET = new Set<string>(SUGGEST_TYPES)
 
@@ -163,7 +164,7 @@ function renderInline(
         parts.push(
           <a
             key={`c-${key++}`}
-            href={cit.url}
+            href={withUtm(cit.url, 'Chatbot')}
             target={isExt ? '_blank' : undefined}
             rel={isExt ? 'noopener noreferrer' : undefined}
             className={styles.inlineCitation}
@@ -185,7 +186,7 @@ function renderInline(
         parts.push(
           <a
             key={`c-${key++}`}
-            href={cit.url}
+            href={withUtm(cit.url, 'Chatbot')}
             target={isExt ? '_blank' : undefined}
             rel={isExt ? 'noopener noreferrer' : undefined}
             className={styles.inlineCitation}
@@ -225,7 +226,7 @@ function renderInline(
         parts.push(
           <a
             key={`l-${key++}`}
-            href={href}
+            href={withUtm(href, 'Chatbot')}
             target={isExternal ? '_blank' : undefined}
             rel={isExternal ? 'noopener noreferrer' : undefined}
             onClick={() => onLinkClick?.(href, label)}
@@ -268,7 +269,7 @@ function renderInline(
       parts.push(
         <a
           key={`u-${key++}`}
-          href={href}
+          href={withUtm(href, 'Chatbot')}
           target="_blank"
           rel="noopener noreferrer"
           onClick={() => onLinkClick?.(href, token)}

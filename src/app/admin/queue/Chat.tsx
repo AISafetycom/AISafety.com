@@ -765,26 +765,31 @@ export default function Chat({
   // Reply button appears by them; it quotes them into the next message,
   // the way the Claude desktop app does (Bryce, 14 Sept 2026). The panel
   // is found from the box to type in, which is always on the page.
+  /** The words selected in the panel right now, if any. */
+  const selectedInPanel = () => {
+    const box = inputRef.current?.closest<HTMLElement>('[data-chat-scroll]')
+    const sel = window.getSelection()
+    // As Markdown, so a quoted link keeps its address (quoteOf).
+    const picked = sel ? quoteOf(sel) : ''
+    if (
+      !box ||
+      !sel ||
+      sel.isCollapsed ||
+      !picked ||
+      !sel.anchorNode ||
+      !box.contains(sel.anchorNode) ||
+      document.activeElement === inputRef.current
+    ) {
+      return null
+    }
+    return { text: picked, rect: sel.getRangeAt(0).getBoundingClientRect() }
+  }
+  const selectedRef = useRef(selectedInPanel)
+  selectedRef.current = selectedInPanel
   useEffect(() => {
     const read = () => {
-      const box = inputRef.current?.closest<HTMLElement>('[data-chat-scroll]')
-      const sel = window.getSelection()
-      // As Markdown, so a quoted link keeps its address (quoteOf).
-      const picked = sel ? quoteOf(sel) : ''
-      if (
-        !box ||
-        !sel ||
-        sel.isCollapsed ||
-        !picked ||
-        !sel.anchorNode ||
-        !box.contains(sel.anchorNode) ||
-        document.activeElement === inputRef.current
-      ) {
-        setPick(null)
-        return
-      }
-      const rect = sel.getRangeAt(0).getBoundingClientRect()
-      setPick({ text: picked, x: rect.left, y: rect.bottom })
+      const got = selectedRef.current()
+      setPick(got && { text: got.text, x: got.rect.left, y: got.rect.bottom })
     }
     const onUp = () => setTimeout(read, 0)
     const onChange = () => {
@@ -1250,10 +1255,19 @@ export default function Chat({
   })
   const listening =
     dictation.state === 'listening' || dictation.state === 'starting'
-  /** The mic (`key` false) or ⌘D (`key` true, which can be held to talk). */
+  /** The mic (`key` false) or ⌘D (`key` true, which can be held to talk).
+   *  Words selected in the panel when it starts become the quote, as if
+   *  Reply had been pressed first (Bryce, 22 Nov 2026: select text, ⌘D
+   *  "should start dictating as a reply, just like Claude Code does"). */
   const toggleDictation = (key = false) => {
     setHeard(null)
     if (dictation.state === 'off') {
+      const picked = selectedInPanel()
+      if (picked) {
+        setQuote(picked.text)
+        setPick(null)
+        window.getSelection()?.removeAllRanges()
+      }
       inputRef.current?.focus()
       markStart()
     }
