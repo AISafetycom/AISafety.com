@@ -255,31 +255,61 @@ export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
         clusterRadius: 40,
       })
 
-      // Colors come from the design system: the bubble is --teal-400, where
-      // the pin's teal starts, in a white ring like the pin's frame, with a
-      // dark count.
+      // A bubble is drawn like the pin: the pin's teal gradient (--teal-400
+      // fading to --teal-500, the design system's alt gradient surface) in a
+      // white ring like the pin's white frame. Rasterized per size at the
+      // screen's pixel density, as the pins are, so it stays sharp.
       const cssVar = (name: string) =>
         getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+      const bubbleRadii: Record<string, number> = { sm: 14, md: 18, lg: 22 }
+      const RING = 2
+      for (const [size, radius] of Object.entries(bubbleRadii)) {
+        if (map.hasImage(`bubble-${size}`)) continue
+        const side = Math.round((radius + RING) * 2 * dpr)
+        const canvas = document.createElement('canvas')
+        canvas.width = side
+        canvas.height = side
+        const ctx = canvas.getContext('2d')!
+        const c = side / 2
+        ctx.beginPath()
+        ctx.arc(c, c, c, 0, Math.PI * 2)
+        ctx.fillStyle = cssVar('--white')
+        ctx.fill()
+        // Same light-to-dark direction as pin.svg's radial gradient.
+        const gradient = ctx.createRadialGradient(
+          side * 0.39,
+          side * 0.22,
+          0,
+          side * 0.39,
+          side * 0.22,
+          side
+        )
+        gradient.addColorStop(0, cssVar('--teal-400'))
+        gradient.addColorStop(1, cssVar('--teal-500'))
+        ctx.beginPath()
+        ctx.arc(c, c, c - RING * dpr, 0, Math.PI * 2)
+        ctx.fillStyle = gradient
+        ctx.fill()
+        map.addImage(`bubble-${size}`, ctx.getImageData(0, 0, side, side), {
+          pixelRatio: dpr,
+        })
+      }
       map.addLayer({
         id: 'community-clusters',
-        type: 'circle',
-        source: 'communities',
-        filter: ['has', 'point_count'],
-        paint: {
-          'circle-color': cssVar('--teal-400'),
-          'circle-stroke-color': cssVar('--white'),
-          'circle-stroke-width': 2,
-          // Full brightness: the basemap's dusk lighting would darken it.
-          'circle-emissive-strength': 1,
-          'circle-radius': ['step', ['get', 'point_count'], 14, 10, 18, 50, 22],
-        },
-      })
-      map.addLayer({
-        id: 'community-cluster-counts',
         type: 'symbol',
         source: 'communities',
         filter: ['has', 'point_count'],
         layout: {
+          'icon-image': [
+            'step',
+            ['get', 'point_count'],
+            'bubble-sm',
+            10,
+            'bubble-md',
+            50,
+            'bubble-lg',
+          ],
+          'icon-allow-overlap': true,
           'text-field': ['get', 'point_count_abbreviated'],
           // Inter, the site's font, from Mapbox's font server.
           'text-font': ['Inter Bold'],
@@ -289,6 +319,8 @@ export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
         },
         paint: {
           'text-color': cssVar('--teal-900'),
+          // Full brightness: the basemap's dusk lighting would darken them.
+          'icon-emissive-strength': 1,
           'text-emissive-strength': 1,
         },
       })
