@@ -27,10 +27,13 @@ export interface FeedbackRequest {
   /** What the form hangs from: the selected text, or the trigger's own box
    *  when left out. */
   anchor?: PageBox
+  /** The selected text's first and last lines, which the form's caret
+   *  points at. */
+  anchorLines?: { first: PageBox; last: PageBox }
   /** The selected text, from the selection menu. */
   quote?: string
   /** Where that text is on the page: it stays marked while the form is
-   *  open, and the form's caret points at its first or last line. */
+   *  open. */
   range?: Range
   /** The card's listing, when the text was on one. */
   listing?: { name: string; id?: string }

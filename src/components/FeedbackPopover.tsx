@@ -3,11 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import Button from '@/components/Button'
-import Popover, { pageBox, type PageBox } from '@/components/Popover'
+import Popover, { pageBox } from '@/components/Popover'
 import TextField from '@/components/TextField'
 import { trackFeedbackForm, trackedPath } from '@/lib/analytics'
 import { FEEDBACK_FORM_EVENT, type FeedbackRequest } from '@/lib/feedback-form'
-import { selectionLines } from '@/lib/popover-placement'
 import { quoteForForm, resourceForPath } from '@/lib/selection-feedback'
 import { RESOURCE_CHOICES } from '@/lib/site-feedback'
 import styles from './FeedbackPopover.module.css'
@@ -44,8 +43,6 @@ const VIEW_RE = /^[a-z-]{1,40}$/
 type Status = 'editing' | 'sending' | 'sent' | 'error' | 'limited'
 
 interface Opened extends FeedbackRequest {
-  /** The selected text's first and last lines, for the caret. */
-  lines?: { first: PageBox; last: PageBox }
   /** The page it was opened on, as analytics records it. */
   path: string
   view?: string
@@ -57,19 +54,6 @@ interface Opened extends FeedbackRequest {
 
 // The name the selected text is marked under while the form is open.
 const HIGHLIGHT = 'feedback-quote'
-
-/** A range's first and last lines, in page coordinates. */
-function linesOf(range: Range) {
-  const lines = selectionLines([...range.getClientRects()])
-  if (!lines) return undefined
-  const page = (b: PageBox): PageBox => ({
-    left: b.left + window.scrollX,
-    right: b.right + window.scrollX,
-    top: b.top + window.scrollY,
-    bottom: b.bottom + window.scrollY,
-  })
-  return { first: page(lines.first), last: page(lines.last) }
-}
 
 /** What was typed is kept for the same form on the same text, so closing it
  *  by accident (a click on the page) loses nothing. */
@@ -103,7 +87,6 @@ export default function FeedbackPopover() {
       setOpened(prev => ({
         ...request,
         anchor: request.anchor ?? pageBox(request.trigger),
-        lines: request.range && linesOf(request.range),
         quote,
         resource:
           request.kind === 'correction'
@@ -155,7 +138,7 @@ export default function FeedbackPopover() {
       onClose={close}
       triggerRef={triggerRef}
       anchor={opened.anchor}
-      anchorLines={opened.lines}
+      anchorLines={opened.anchorLines}
       label={correction ? 'Suggest a correction' : 'Give feedback'}
       className="padding-top-24px padding-bottom-24px padding-left-24px padding-right-24px"
     >

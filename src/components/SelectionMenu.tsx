@@ -7,6 +7,7 @@ import Button from '@/components/Button'
 import Icon from '@/components/Icon'
 import { trackSelectionMenu, trackedPath } from '@/lib/analytics'
 import { openFeedbackForm } from '@/lib/feedback-form'
+import { selectionLines, unionBox, type Box } from '@/lib/popover-placement'
 import { selectionFormLink } from '@/lib/selection-feedback'
 import styles from './SelectionMenu.module.css'
 
@@ -40,12 +41,50 @@ const ICONS = {
 interface Menu {
   text: string
   /** The selection's box, in page coordinates. */
-  box: { left: number; right: number; top: number; bottom: number }
+  box: Box
+  /** Its first and last lines, in page coordinates: the form's caret
+   *  points at one of them. */
+  lines?: { first: Box; last: Box }
   /** The Airtable form with the text filled in: offered by the site's form
    *  if sending fails. */
   formHref: string
   /** The listing whose card the text is on, when it is on one. */
   listing?: { name: string; id?: string }
+}
+
+/** The boxes of the selected text people can see, one per line of each
+ *  text node, in screen coordinates. Text in a visually hidden label (a
+ *  card's "(opens in new tab)") is left out: it is clipped to 1px, but its
+ *  box runs on past the card, which put the form far to its right. */
+function visibleTextRects(range: Range): DOMRect[] {
+  const root = range.commonAncestorContainer
+  const nodes: Text[] = []
+  if (root instanceof Text) nodes.push(root)
+  else {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+    while (walker.nextNode()) nodes.push(walker.currentNode as Text)
+  }
+  const rects: DOMRect[] = []
+  for (const node of nodes) {
+    if (!node.data.trim() || !range.intersectsNode(node)) continue
+    if (node.parentElement?.closest('.visually-hidden')) continue
+    const part = document.createRange()
+    part.selectNodeContents(node)
+    if (node === range.startContainer) part.setStart(node, range.startOffset)
+    if (node === range.endContainer) part.setEnd(node, range.endOffset)
+    rects.push(...part.getClientRects())
+  }
+  return rects
+}
+
+/** A box in screen coordinates, moved to page coordinates. */
+function onPage(b: Box): Box {
+  return {
+    left: b.left + window.scrollX,
+    right: b.right + window.scrollX,
+    top: b.top + window.scrollY,
+    bottom: b.bottom + window.scrollY,
+  }
 }
 
 function readSelection(pathname: string): Menu | null {
@@ -59,8 +98,10 @@ function readSelection(pathname: string): Menu | null {
   const el = node instanceof Element ? node : node.parentElement
   // A page's content and the footer; never the nav.
   if (!el?.closest('main, footer')) return null
-  const rect = range.getBoundingClientRect()
-  if (rect.width === 0 && rect.height === 0) return null
+  const rects = visibleTextRects(range)
+  const rect = unionBox(rects)
+  const lines = selectionLines(rects)
+  if (!rect || !lines) return null
 
   // A card's name is its title link's own text (the link also holds a
   // hidden "(opens in new tab)"); its id, where it has one, is the listing's
@@ -79,12 +120,8 @@ function readSelection(pathname: string): Menu | null {
 
   return {
     text,
-    box: {
-      left: rect.left + window.scrollX,
-      right: rect.right + window.scrollX,
-      top: rect.top + window.scrollY,
-      bottom: rect.bottom + window.scrollY,
-    },
+    box: onPage(rect),
+    lines: { first: onPage(lines.first), last: onPage(lines.last) },
     formHref: selectionFormLink({
       text,
       path,
@@ -273,6 +310,7 @@ export default function SelectionMenu() {
             entry: 'selection',
             trigger: e.currentTarget,
             anchor: menu.box,
+            anchorLines: menu.lines,
             quote: menu.text,
             range: selection?.rangeCount
               ? selection.getRangeAt(0).cloneRange()

@@ -108,30 +108,37 @@ export function placePopover(p: PlaceInput): Placement {
   return { side, left, top, caret, scroll: 0 }
 }
 
-/** A selection's first and last lines, from its range's boxes (in screen
- *  coordinates, as getClientRects gives them). Boxes taller than a line
- *  (a whole paragraph the selection covers) are left out. */
+/** A selection's first and last lines, from the boxes of its text, one per
+ *  line of each text node (in screen coordinates, as getClientRects gives
+ *  them). A line is the boxes level with its top or bottom box: a link or a
+ *  bigger word on it joins it. */
 export function selectionLines(
   rects: readonly Box[]
 ): { first: Box; last: Box } | undefined {
   const boxes = rects.filter(r => r.right > r.left && r.bottom > r.top)
   if (boxes.length === 0) return undefined
-  const lineHeight = Math.min(...boxes.map(r => r.bottom - r.top))
-  const lines = boxes.filter(r => r.bottom - r.top < lineHeight * 1.5)
-  const top = Math.min(...lines.map(r => r.top))
-  const bottom = Math.max(...lines.map(r => r.bottom))
-  // The boxes on a line: those whose middle is within half a line of it.
-  const row = (onLine: (r: Box) => boolean): Box => {
-    const on = lines.filter(onLine)
-    return {
-      left: Math.min(...on.map(r => r.left)),
-      right: Math.max(...on.map(r => r.right)),
-      top: Math.min(...on.map(r => r.top)),
-      bottom: Math.max(...on.map(r => r.bottom)),
-    }
-  }
+  const topBox = boxes.reduce((a, b) => (b.top < a.top ? b : a))
+  const bottomBox = boxes.reduce((a, b) => (b.bottom > a.bottom ? b : a))
+  const row = (on: Box[]): Box => ({
+    left: Math.min(...on.map(r => r.left)),
+    right: Math.max(...on.map(r => r.right)),
+    top: Math.min(...on.map(r => r.top)),
+    bottom: Math.max(...on.map(r => r.bottom)),
+  })
   return {
-    first: row(r => centerY(r) < top + lineHeight),
-    last: row(r => centerY(r) > bottom - lineHeight),
+    first: row(boxes.filter(r => centerY(r) < topBox.bottom)),
+    last: row(boxes.filter(r => centerY(r) > bottomBox.top)),
+  }
+}
+
+/** The box around them all. */
+export function unionBox(rects: readonly Box[]): Box | undefined {
+  const boxes = rects.filter(r => r.right > r.left && r.bottom > r.top)
+  if (boxes.length === 0) return undefined
+  return {
+    left: Math.min(...boxes.map(r => r.left)),
+    right: Math.max(...boxes.map(r => r.right)),
+    top: Math.min(...boxes.map(r => r.top)),
+    bottom: Math.max(...boxes.map(r => r.bottom)),
   }
 }

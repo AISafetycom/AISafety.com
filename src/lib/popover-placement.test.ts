@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   placePopover,
   selectionLines,
+  unionBox,
   type Box,
   type PlaceInput,
 } from './popover-placement'
@@ -137,19 +138,31 @@ describe('selectionLines', () => {
     })
   })
 
-  it('joins the boxes on one line and leaves out a whole paragraph', () => {
+  it('joins the boxes on one line, whatever their size', () => {
     const lines = selectionLines([
-      box(100, 100, 400, 160), // the <p> itself
-      box(100, 100, 200, 120),
-      box(200, 101, 300, 119), // a link on the same line
-      box(100, 140, 150, 160),
+      box(100, 100, 300, 140), // a big title line
+      box(100, 150, 200, 170),
+      box(200, 151, 300, 169), // a link on the same line
+      box(100, 180, 150, 200),
       box(0, 0, 0, 0),
     ])
-    expect(lines?.first).toEqual(box(100, 100, 300, 120))
-    expect(lines?.last).toEqual(box(100, 140, 150, 160))
+    expect(lines?.first).toEqual(box(100, 100, 300, 140))
+    expect(lines?.last).toEqual(box(100, 180, 150, 200))
   })
 
   it('has nothing for an empty selection', () => {
     expect(selectionLines([])).toBeUndefined()
+  })
+})
+
+describe('unionBox', () => {
+  it('spans every box, leaving out empty ones', () => {
+    expect(
+      unionBox([
+        box(100, 100, 300, 120),
+        box(80, 130, 200, 150),
+        box(0, 0, 0, 0),
+      ])
+    ).toEqual(box(80, 100, 300, 150))
   })
 })
