@@ -135,6 +135,19 @@ export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
     })
 
     Promise.all([pinImagePromise, styleLoadPromise]).then(([pinImage]) => {
+      // Country borders come from the Mapbox Standard basemap the style
+      // imports, which draws them in its default pink. Give them the site's
+      // default border color instead, read from the design system so no
+      // color is written here. Needs Mapbox GL 3.11 or later: older builds
+      // get a Standard basemap without this setting (see communities-map.ts).
+      map.setConfigProperty(
+        'basemap',
+        'colorAdminBoundaries',
+        getComputedStyle(document.documentElement)
+          .getPropertyValue('--teal-800')
+          .trim()
+      )
+
       // Mapbox rasterizes an added image once and then scales that bitmap on
       // the GPU, which is what made the pins blurry — one 128px raster was
       // being resized for every pin size and screen density. Instead,
