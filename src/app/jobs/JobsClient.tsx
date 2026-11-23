@@ -1,6 +1,14 @@
 'use client'
 
-import { useState, useMemo, useRef, useLayoutEffect, useEffect } from 'react'
+import {
+  useState,
+  useMemo,
+  useRef,
+  useLayoutEffect,
+  useEffect,
+  type Dispatch,
+  type SetStateAction,
+} from 'react'
 import FilterBar from '@/components/FilterBar'
 import FilterDropdown from '@/components/FilterDropdown'
 import ListingCard from '@/components/ListingCard'
@@ -342,16 +350,15 @@ export default function JobsClient({ jobs }: JobsClientProps) {
 
   const toggleFilter = (
     value: string,
-    current: string[],
-    setter: (v: string[]) => void
+    setter: Dispatch<SetStateAction<string[]>>
   ) => {
     savedScrollY.current = window.scrollY
     setSkipOffscreen(true)
-    if (current.includes(value)) {
-      setter(current.filter(v => v !== value))
-    } else {
-      setter([...current, value])
-    }
+    setter(current =>
+      current.includes(value)
+        ? current.filter(v => v !== value)
+        : [...current, value]
+    )
   }
 
   useLayoutEffect(() => {
@@ -397,7 +404,7 @@ export default function JobsClient({ jobs }: JobsClientProps) {
           options={skillSetOptions}
           selected={selectedSkills}
           counts={skillCounts}
-          onToggle={v => toggleFilter(v, selectedSkills, setSelectedSkills)}
+          onToggle={v => toggleFilter(v, setSelectedSkills)}
         />
         <FilterDropdown
           trackingPage="Jobs"
@@ -406,9 +413,7 @@ export default function JobsClient({ jobs }: JobsClientProps) {
           options={experienceOptions}
           selected={selectedExperience}
           counts={experienceCounts}
-          onToggle={v =>
-            toggleFilter(v, selectedExperience, setSelectedExperience)
-          }
+          onToggle={v => toggleFilter(v, setSelectedExperience)}
         />
         <FilterDropdown
           trackingPage="Jobs"
@@ -417,7 +422,7 @@ export default function JobsClient({ jobs }: JobsClientProps) {
           options={roleTypeOptions}
           selected={selectedRoles}
           counts={roleCounts}
-          onToggle={v => toggleFilter(v, selectedRoles, setSelectedRoles)}
+          onToggle={v => toggleFilter(v, setSelectedRoles)}
         />
         <FilterDropdown
           trackingPage="Jobs"
@@ -426,9 +431,7 @@ export default function JobsClient({ jobs }: JobsClientProps) {
           options={workLocationOptions}
           selected={selectedWorkLocation}
           counts={workLocationCounts}
-          onToggle={v =>
-            toggleFilter(v, selectedWorkLocation, setSelectedWorkLocation)
-          }
+          onToggle={v => toggleFilter(v, setSelectedWorkLocation)}
         />
         <FilterDropdown
           trackingPage="Jobs"
@@ -437,9 +440,7 @@ export default function JobsClient({ jobs }: JobsClientProps) {
           options={countryOptions}
           selected={selectedCountries}
           counts={countryCounts}
-          onToggle={v =>
-            toggleFilter(v, selectedCountries, setSelectedCountries)
-          }
+          onToggle={v => toggleFilter(v, setSelectedCountries)}
         />
         <FilterDropdown
           trackingPage="Jobs"
@@ -448,7 +449,7 @@ export default function JobsClient({ jobs }: JobsClientProps) {
           options={degreeOptions}
           selected={selectedDegrees}
           counts={degreeCounts}
-          onToggle={v => toggleFilter(v, selectedDegrees, setSelectedDegrees)}
+          onToggle={v => toggleFilter(v, setSelectedDegrees)}
         />
       </FilterBar>
 
