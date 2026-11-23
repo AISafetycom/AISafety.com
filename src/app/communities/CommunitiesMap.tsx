@@ -255,8 +255,9 @@ export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
         clusterRadius: 40,
       })
 
-      // Colors come from the design system: the bubble is the pin's teal
-      // (--teal-400) inside the pin's white frame, with a dark count.
+      // Colors come from the design system: the bubble is --teal-400, where
+      // the pin's teal starts, in a white ring like the pin's frame, with a
+      // dark count.
       const cssVar = (name: string) =>
         getComputedStyle(document.documentElement).getPropertyValue(name).trim()
       map.addLayer({
@@ -282,7 +283,8 @@ export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
           'text-field': ['get', 'point_count_abbreviated'],
           // Inter, the site's font, from Mapbox's font server.
           'text-font': ['Inter Bold'],
-          'text-size': 12,
+          // 13px, the size of .paragraph-xs-bold, the site's smallest text.
+          'text-size': 13,
           'text-allow-overlap': true,
         },
         paint: {
