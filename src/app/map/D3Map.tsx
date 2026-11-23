@@ -7,7 +7,12 @@ import * as d3 from 'd3'
 import MapControls from '@/components/MapControls'
 import MapSearch, { NO_MAP_SEARCH_CONTROL } from './MapSearch'
 import type { MapSearchControl } from './MapSearch'
-import { trackListingClick, trackListingHover } from '@/lib/analytics'
+import {
+  trackEvent,
+  trackListingClick,
+  trackListingHover,
+} from '@/lib/analytics'
+import { MAP_FOCUS_EVENT, type MapFocusDetail } from '@/lib/assistant/map-focus'
 import { withUtm } from '@/lib/utm'
 import { positionTooltip } from '@/lib/mapTooltip'
 import { MAP_BACKGROUND_URL } from '@/lib/map-images'
@@ -120,6 +125,25 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
   // and tab focus. Keeping the last zoom transform here lets the rebuild
   // restore the viewport instead of jumping back to the zoomed-out default.
   const savedTransformRef = useRef<d3.ZoomTransform | null>(null)
+
+  // The chatbot names an organization that's on the map → fly to it and
+  // ring it, exactly as a pick in the map's search does.
+  useEffect(() => {
+    const onFocus = (e: Event) => {
+      const { id } = (e as CustomEvent<MapFocusDetail>).detail
+      const org = searchOrgs.find(o => o.id === id)
+      if (!org) return
+      searchRef.current.flyTo(org)
+      trackEvent('map_chat_focus', {
+        page: 'Map',
+        label: org.title,
+        url: org.link,
+        listingId: org.id,
+      })
+    }
+    window.addEventListener(MAP_FOCUS_EVENT, onFocus)
+    return () => window.removeEventListener(MAP_FOCUS_EVENT, onFocus)
+  }, [searchOrgs])
 
   useEffect(() => {
     if (!containerRef.current || orgs.length === 0) return

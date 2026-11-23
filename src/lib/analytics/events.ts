@@ -205,6 +205,9 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   'map_search_open',
   'map_search_query',
   'map_search_pick',
+  // The Field map moving to an organization because a chatbot reply showed
+  // its card: `label` its title, `url` its link, `listingId` its record id.
+  'map_chat_focus',
   // The global nav's +N pill (the pages that don't fit the bar) opening its
   // menu. `source` is how: 'hover' (mouse/trackpad) or 'tap' (touch screens);
   // `page` the path it happened on. One per closed→open transition.
