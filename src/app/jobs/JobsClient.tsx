@@ -4,7 +4,7 @@ import { useState, useMemo, useRef, useLayoutEffect, useEffect } from 'react'
 import FilterBar from '@/components/FilterBar'
 import FilterDropdown from '@/components/FilterDropdown'
 import ListingCard from '@/components/ListingCard'
-import { AirtableViewCard } from '@/components/ContributeButtons'
+import ContributeButtons from '@/components/ContributeButtons'
 import { Job } from '@/lib/data/jobs'
 import { withUtm } from '@/lib/utm'
 import { formatDate } from '@/lib/format-date'
@@ -581,12 +581,15 @@ export default function JobsClient({ jobs }: JobsClientProps) {
                 href={withUtm('https://jobs.80000hours.org/', 'Jobs')}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="color-teal-300"
+                className="link paragraph-small"
               >
                 80,000 Hours Job Board
               </a>
             </div>
-            <AirtableViewCard url={AIRTABLE_VIEW_URL} trackingPage="Jobs" />
+            <ContributeButtons
+              airtableUrl={AIRTABLE_VIEW_URL}
+              trackingPage="Jobs"
+            />
           </div>
         </div>
       </div>
