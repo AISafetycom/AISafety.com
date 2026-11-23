@@ -13,7 +13,12 @@
   gap: 4px;
   border-radius: 100px;
   color: var(--teal-grey-300);
-  transition: all var(--hover-transition);
+  /* Colors only: the padding a pill gains when it turns on changes at once,
+     so the × never slides over the label. */
+  transition:
+    background-color var(--hover-transition),
+    border-color var(--hover-transition),
+    color var(--hover-transition);
 }
 
 .pill:hover {
@@ -21,13 +26,28 @@
   cursor: pointer;
 }
 
+/* An active pill has no chevron; its right padding leaves room for the ×
+   (4px gap, the 32px button, 4px to the edge). */
 .pill.pillActive {
   background: var(--teal-800);
   color: var(--white);
+  padding-right: 40px;
+}
+
+/* The × button, as tall as the pill and 4px in from its edge; the span's
+   items-center class centers the × on it, so its round hover fill sits
+   inside the pill's round end. No transform here: one would give the slot
+   its own layer, and the pills after it would cover the tooltip. */
+.clearSlot {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 4px;
 }
 
 /* The leading Icon and the chevron both use currentColor, so they follow the
-   pill's text color to white automatically when active — no recolor needed. */
+   pill's text color to white automatically when active — no recolor needed.
+   The × is white from <Button>'s own color. */
 .chevron {
   transition: transform var(--hover-transition);
 }
