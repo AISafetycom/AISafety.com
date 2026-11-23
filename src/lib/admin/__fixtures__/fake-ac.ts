@@ -172,7 +172,9 @@ export function buildEmail(
       fields: [
         ['title', '', 'The Big Tent'],
         ['m0', 'pin', 'San Francisco, USA'],
-        ['m1', 'calendar', '20–21 November'],
+        // A year far ahead: without one the date takes the nearest year, so it
+        // "passes" on the day and the date check blocks every send in the tests.
+        ['m1', 'calendar', '20–21 November 2099'],
         ['desc', '', 'AI safety convention for the whole community.'],
       ],
     },

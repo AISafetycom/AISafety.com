@@ -259,7 +259,7 @@ export default async function MediaPage() {
           <dd>
             Grants from the{' '}
             <a
-              href="https://survivalandflourishing.fund/"
+              href={withUtm('https://survivalandflourishing.fund/', 'Media')}
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -284,7 +284,7 @@ export default async function MediaPage() {
           <dt>Sister site</dt>
           <dd>
             <a
-              href="https://aisafety.info"
+              href={withUtm('https://aisafety.info', 'Media')}
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -717,7 +717,11 @@ function NewsList({ items }: { items: typeof NEWS }) {
         <li key={item.url} className={styles.newsItem}>
           <span className={styles.newsDate}>{formatDate(item.date)}</span>
           <span className={styles.newsTitle}>
-            <a href={item.url} target="_blank" rel="noopener noreferrer">
+            <a
+              href={withUtm(item.url, 'Media')}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
               {item.title}
             </a>
             <span className={styles.newsOutlet}> · {item.outlet}</span>

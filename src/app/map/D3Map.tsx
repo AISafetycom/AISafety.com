@@ -13,6 +13,7 @@ import { CORRECTIONS_FORM } from '@/lib/selection-feedback'
 import { withUtm } from '@/lib/utm'
 import { positionTooltip } from '@/lib/mapTooltip'
 import { MAP_BACKGROUND_URL } from '@/lib/map-images'
+import { placingCategory } from '@/lib/data/map-areas'
 import styles from './page.module.css'
 
 interface MapOrg {
@@ -22,6 +23,7 @@ interface MapOrg {
   shortName: string | null
   description: string
   category: string
+  status: string
   link: string
   mapLogo: string | null
   x: number | null
@@ -337,9 +339,10 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
       // on the map but not be clickable
       const hasLink = org.link && org.link !== '#'
       // First category only — orgs can carry several ("Funding, Resource"),
-      // but the dashboard groups map hovers/clicks by a single area. May be
+      // but the dashboard groups map hovers/clicks by a single area ("No
+      // longer active" for a shut-down org, whatever its categories). May be
       // '' for uncategorized items, which analytics receives as undefined.
-      const firstCategory = org.category.split(',')[0].trim()
+      const firstCategory = placingCategory(org.category, org.status) ?? ''
       const linkEl = itemGroup
         .append(hasLink ? 'a' : 'g')
         .attr('class', 'mapItem')

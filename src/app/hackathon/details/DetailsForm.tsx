@@ -5,6 +5,7 @@ import base from '../page.module.css'
 import { FIELDS, OTHER_MAX, SECTIONS, maxLen, type Field } from './questions'
 import Button from '@/components/Button'
 import TextField from '@/components/TextField'
+import { withUtm } from '@/lib/utm'
 
 /** Answers by field key. Checkbox groups hold the ticked options; their
  *  free-text "Other" box is stored under `${key}Other`. */
@@ -26,7 +27,7 @@ function Text({ children }: { children: string }) {
         return m ? (
           <a
             key={i}
-            href={m[2]}
+            href={withUtm(m[2], 'Hackathon')}
             target="_blank"
             rel="noopener noreferrer"
             className="color-teal-300"

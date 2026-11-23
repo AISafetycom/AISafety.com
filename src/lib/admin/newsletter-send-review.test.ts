@@ -128,7 +128,7 @@ describe('the email the checks passed is the email that goes', () => {
           fields: [
             ['title', '', 'The Big Tent'],
             ['m0', 'pin', 'San Francisco, USA'],
-            ['m1', 'calendar', '20–21 November'],
+            ['m1', 'calendar', '20–21 November 2099'],
             ['desc', '', 'TEST TEST'],
           ],
         },

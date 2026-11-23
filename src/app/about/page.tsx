@@ -4,6 +4,7 @@ import Button from '@/components/Button'
 import FeedbackFormLink from '@/components/FeedbackFormLink'
 import Icon from '@/components/Icon'
 import styles from './page.module.css'
+import { withUtm } from '@/lib/utm'
 
 export const metadata = {
   title: 'About – AISafety.com',
@@ -201,7 +202,7 @@ export default function AboutPage() {
               since 2015, building infrastructure like the original versions of
               the AISafety.com resources and{' '}
               <a
-                href="https://aisafety.info"
+                href={withUtm('https://aisafety.info', 'About')}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="color-teal-300"
