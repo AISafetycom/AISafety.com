@@ -588,7 +588,6 @@ export default function JobsClient({ jobs }: JobsClientProps) {
             </div>
             <ContributeButtons
               airtableUrl={AIRTABLE_VIEW_URL}
-              airtableNote="(from 80,000 Hours)"
               trackingPage="Jobs"
             />
           </div>
