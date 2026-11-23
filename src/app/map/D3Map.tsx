@@ -127,13 +127,24 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
   const savedTransformRef = useRef<d3.ZoomTransform | null>(null)
 
   // The chatbot names an organization that's on the map → fly to it and
-  // ring it, exactly as a pick in the map's search does.
+  // ring it, exactly as a pick in the map's search does. A search pick's ring
+  // ends when the search closes; this one ends the next time the visitor
+  // touches, scrolls, zooms or resets the map, so after closing the chat on
+  // a phone they still see which pin it was.
+  const chatRingRef = useRef(false)
+  const clearChatRing = () => {
+    if (!chatRingRef.current) return
+    chatRingRef.current = false
+    searchRef.current.clearHighlight()
+  }
   useEffect(() => {
+    const container = containerRef.current
     const onFocus = (e: Event) => {
       const { id } = (e as CustomEvent<MapFocusDetail>).detail
       const org = searchOrgs.find(o => o.id === id)
       if (!org) return
       searchRef.current.flyTo(org)
+      chatRingRef.current = true
       trackEvent('map_chat_focus', {
         page: 'Map',
         label: org.title,
@@ -141,8 +152,19 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         listingId: org.id,
       })
     }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') clearChatRing()
+    }
     window.addEventListener(MAP_FOCUS_EVENT, onFocus)
-    return () => window.removeEventListener(MAP_FOCUS_EVENT, onFocus)
+    window.addEventListener('keydown', onKey)
+    container?.addEventListener('pointerdown', clearChatRing)
+    container?.addEventListener('wheel', clearChatRing, { passive: true })
+    return () => {
+      window.removeEventListener(MAP_FOCUS_EVENT, onFocus)
+      window.removeEventListener('keydown', onKey)
+      container?.removeEventListener('pointerdown', clearChatRing)
+      container?.removeEventListener('wheel', clearChatRing)
+    }
   }, [searchOrgs])
 
   useEffect(() => {
@@ -744,9 +766,18 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
 
       <MapControls
         className={styles['map-controls']}
-        onZoomIn={() => controlsRef.current.zoomIn()}
-        onZoomOut={() => controlsRef.current.zoomOut()}
-        onReset={() => controlsRef.current.reset()}
+        onZoomIn={() => {
+          clearChatRing()
+          controlsRef.current.zoomIn()
+        }}
+        onZoomOut={() => {
+          clearChatRing()
+          controlsRef.current.zoomOut()
+        }}
+        onReset={() => {
+          clearChatRing()
+          controlsRef.current.reset()
+        }}
       />
 
       <MapSearch
@@ -754,7 +785,11 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         orgs={searchOrgs}
         suggestEntryUrl={suggestEntryUrl}
         controlRef={searchControlRef}
-        onPick={org => searchRef.current.flyTo(org)}
+        onPick={org => {
+          // The search's own ring replaces the chat's.
+          chatRingRef.current = false
+          searchRef.current.flyTo(org)
+        }}
         onClear={() => searchRef.current.clearHighlight()}
       />
 
