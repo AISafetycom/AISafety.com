@@ -11,6 +11,7 @@ import {
   trackListingClick,
   trackListingHover,
   trackCardsButtonClick,
+  trackEvent,
 } from '@/lib/analytics'
 import { withUtm } from '@/lib/utm'
 import { MAPBOX_GL_CSS_URL, MAPBOX_GL_JS_URL } from '@/lib/communities-map'
@@ -244,12 +245,57 @@ export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
         })),
       }
 
-      map.addSource('communities', { type: 'geojson', data: geojsonData })
+      // Pins close together merge into one numbered bubble that splits up
+      // as the visitor zooms in (Melissa's feature matrix, 22 Nov 2026):
+      // Europe and North America were a heap of overlapping pins.
+      map.addSource('communities', {
+        type: 'geojson',
+        data: geojsonData,
+        cluster: true,
+        clusterRadius: 40,
+      })
+
+      // Colors come from the design system: the bubble is the pin's teal
+      // (--teal-400) inside the pin's white frame, with a dark count.
+      const cssVar = (name: string) =>
+        getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+      map.addLayer({
+        id: 'community-clusters',
+        type: 'circle',
+        source: 'communities',
+        filter: ['has', 'point_count'],
+        paint: {
+          'circle-color': cssVar('--teal-400'),
+          'circle-stroke-color': cssVar('--white'),
+          'circle-stroke-width': 2,
+          // Full brightness: the basemap's dusk lighting would darken it.
+          'circle-emissive-strength': 1,
+          'circle-radius': ['step', ['get', 'point_count'], 14, 10, 18, 50, 22],
+        },
+      })
+      map.addLayer({
+        id: 'community-cluster-counts',
+        type: 'symbol',
+        source: 'communities',
+        filter: ['has', 'point_count'],
+        layout: {
+          'text-field': ['get', 'point_count_abbreviated'],
+          // Inter, the site's font, from Mapbox's font server.
+          'text-font': ['Inter Bold'],
+          'text-size': 12,
+          'text-allow-overlap': true,
+        },
+        paint: {
+          'text-color': cssVar('--teal-900'),
+          'text-emissive-strength': 1,
+        },
+      })
 
       map.addLayer({
         id: 'community-pins',
         type: 'symbol',
         source: 'communities',
+        filter: ['!', ['has', 'point_count']],
         layout: {
           'icon-image': [
             'concat',
@@ -465,6 +511,36 @@ export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
           )
         }
         updateTooltipPosition(e, tooltip, mapContainer)
+      })
+
+      // A bubble zooms in to where its pins split apart, on desktop and
+      // mobile alike.
+      map.on('click', 'community-clusters', (e: any) => {
+        const feature = e.features?.[0]
+        if (!feature) return
+        const count = feature.properties?.point_count
+        map
+          .getSource('communities')
+          .getClusterExpansionZoom(
+            feature.properties?.cluster_id,
+            (err: unknown, zoom: number) => {
+              if (err) {
+                console.warn('Community cluster zoom failed', err)
+                return
+              }
+              map.easeTo({ center: feature.geometry.coordinates, zoom })
+            }
+          )
+        trackEvent('map_cluster_click', {
+          page: 'Communities',
+          label: String(count ?? ''),
+        })
+      })
+      map.on('mouseenter', 'community-clusters', () => {
+        map.getCanvas().style.cursor = 'pointer'
+      })
+      map.on('mouseleave', 'community-clusters', () => {
+        map.getCanvas().style.cursor = ''
       })
 
       // Tooltip tap → open listing. Registered unconditionally so it
