@@ -69,6 +69,17 @@ describe('takenOutOf', () => {
     ).toBe('started')
   })
 
+  it('reads one taken out on its last day', () => {
+    const t = takenOutOf(
+      row({
+        error:
+          'Passed: it ends today, 23 November 2026, too late to publish. Taken out by the daily check',
+      })
+    )
+    expect(t?.how).toBe('ended')
+    expect(t?.day).toBe('23 November 2026')
+  })
+
   it('leaves every other row out', () => {
     expect(takenOutOf(row({ status: 'Pending' }))).toBeNull()
     expect(takenOutOf(row({ error: 'Deleted outside the queue' }))).toBeNull()
