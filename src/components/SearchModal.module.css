@@ -67,7 +67,6 @@
 .filter-chip {
   flex: none;
   background-color: var(--teal-300);
-  color: var(--teal-grey-900);
   border: none;
   border-radius: 999px;
   cursor: pointer;

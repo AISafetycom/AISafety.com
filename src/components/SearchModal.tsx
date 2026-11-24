@@ -253,7 +253,7 @@ export default function SearchModal({
           {activeType && (
             <button
               type="button"
-              className={`${styles['filter-chip']} paragraph-xs-bold inline-flex items-center gap-8px padding-top-4px padding-bottom-4px padding-left-12px padding-right-8px`}
+              className={`${styles['filter-chip']} paragraph-xs-bold color-teal-900 inline-flex items-center gap-8px padding-top-4px padding-bottom-4px padding-left-12px padding-right-8px`}
               onClick={() => setActiveType(null)}
               aria-label={`Remove ${TYPE_LABEL[activeType]} filter`}
             >
