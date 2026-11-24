@@ -352,53 +352,13 @@ describe('TSX rules', () => {
     expect(rulesIn(found)).toEqual(['raw-button'])
   })
 
-  it('an icon button with its tooltip switched off', () => {
+  it('an icon button may switch its tooltip off', () => {
     const found = tsx(
-      `import Button from '@/components/Button'\nexport default function A() {\n  return (\n    <>\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={false} />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip="" />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={''} />\n    </>\n  )\n}`
+      `import Button from '@/components/Button'\nexport default function A() {\n  return (\n    <>\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={false} />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip="" />\n    </>\n  )\n}`
     )
-    expect(rulesIn(found)).toEqual([
-      'tooltip-off',
-      'tooltip-off',
-      'tooltip-off',
-    ])
-    expect(found[0].line).toBe(5)
-    expect(found[0].what).toBe('<Button tooltip={false}>')
-    expect(found[0].hint).toContain('aria-label shows by itself')
-  })
-
-  it('a tooltip switched off in brackets or with `as const` counts too', () => {
-    const found = tsx(
-      `import Button from '@/components/Button'\nexport default function A() {\n  return (\n    <>\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={(false)} />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={false as const} />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={('' as const)} />\n    </>\n  )\n}`
-    )
-    expect(rulesIn(found)).toEqual([
-      'tooltip-off',
-      'tooltip-off',
-      'tooltip-off',
-    ])
-  })
-
-  it('a tooltip that comes from a variable is left to the reviewer', () => {
-    const found = tsx(
-      `import Button from '@/components/Button'\nconst OFF = false\nexport default function A({ on }: { on: boolean }) {\n  let label = ''\n  if (on) label = 'Copy link'\n  return (\n    <>\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Copy" tooltip={label} />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={OFF} />\n    </>\n  )\n}`
-    )
-    // It may be set while the page runs, so the script can't tell.
+    // Melissa, 23 November 2026: an icon-only button doesn't have to have a
+    // tooltip, though in most cases it's a good idea.
     expect(found).toEqual([])
-  })
-
-  it('an icon button that keeps its tooltip, or words it differently, is fine', () => {
-    const found = tsx(
-      `import Button from '@/components/Button'\nexport default function A({ open }: { open: boolean }) {\n  return (\n    <>\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip="Close the menu" />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={open ? false : undefined} />\n      <Popover tooltip={false} />\n    </>\n  )\n}`
-    )
-    // The conditional one is the design reviewer's to judge
-    // (docs/design-review-checklist.md), not the script's.
-    expect(found).toEqual([])
-  })
-
-  it('a switched-off tooltip can be allowed with a reason', () => {
-    const found = tsx(
-      `import Button from '@/components/Button'\nexport default function A() {\n  return (\n    <Button\n      icon="/images/icons/x.svg"\n      iconPosition="only"\n      aria-label="Close"\n      // style-check: allow tooltip-off (label is printed beside it, agreed with Melissa)\n      tooltip={false}\n    />\n  )\n}`
-    )
-    expect(rulesIn(found)).toEqual(['exception'])
   })
 
   it('one module class on two kinds of element is a note', () => {

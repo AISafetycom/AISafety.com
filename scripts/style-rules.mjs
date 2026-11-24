@@ -58,13 +58,6 @@ export const RULES = {
   // themselves; flex from flex, flex-col, items-*, justify-* and so on.
   spacing: { level: 'error', title: 'Hand-written spacing' },
   flex: { level: 'error', title: 'Hand-written flex' },
-  // "Icon-only buttons … need an aria-label, which also shows as a tooltip"
-  // (docs/css-guidelines.md, Buttons). A correction pop-up switched one off
-  // on 22 Nov 2026 and every check passed, so now this one catches it.
-  'tooltip-off': {
-    level: 'error',
-    title: 'Icon button with its tooltip switched off',
-  },
   // Other single lines a utility class covers (a color, a cursor) are notes:
   // a class that genuinely needs its own CSS often has one in it. A class made
   // of nothing else is a `duplicate-class` error instead.
@@ -1020,26 +1013,6 @@ export function checkTsx(text, ds, ts, file = '') {
     return out
   }
 
-  /** tooltip={false} or tooltip="" written out, also in brackets or with
-      `as const`. A value that comes from a variable, a prop or a condition
-      is the design reviewer's to judge: it may be set while the page runs. */
-  const switchedOff = attr => {
-    const init = attr.initializer
-    if (!init) return false
-    if (ts.isStringLiteral(init)) return init.text.trim() === ''
-    let value = ts.isJsxExpression(init) ? init.expression : null
-    while (
-      value &&
-      (ts.isParenthesizedExpression(value) ||
-        ts.isAsExpression(value) ||
-        ts.isSatisfiesExpression(value))
-    )
-      value = value.expression
-    if (!value) return false
-    if (value.kind === ts.SyntaxKind.FalseKeyword) return true
-    return ts.isStringLiteralLike(value) && value.text.trim() === ''
-  }
-
   const tagsOfClass = new Map() // "styles.row" → Map(tag → first element)
 
   walk(sf, node => {
@@ -1050,19 +1023,6 @@ export function checkTsx(text, ds, ts, file = '') {
     const attr = name => attrs.find(a => a.name.getText(sf) === name)
 
     if (attr('style') && !drawsImage) checkStyle(attr('style'))
-
-    if (
-      tag === 'Button' &&
-      !BUTTON_FILES.includes(file) &&
-      attr('tooltip') &&
-      switchedOff(attr('tooltip'))
-    )
-      add(
-        'tooltip-off',
-        attr('tooltip'),
-        `<Button ${attr('tooltip').getText(sf)}>`,
-        'Every icon-only button shows its label as a tooltip on hover and keyboard focus (docs/css-guidelines.md, "Buttons"). Delete this prop and the aria-label shows by itself; for different words, pass tooltip="…". If this button truly must not show one, that is a design decision for Melissa.'
-      )
 
     // Which HTML tags each module class is put on. <Link> renders an <a>, so
     // it counts as one; other components are left out, since what they
