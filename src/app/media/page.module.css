@@ -78,14 +78,6 @@
   gap: 10px;
 }
 
-.inlineLink {
-  color: var(--teal-300);
-}
-
-.inlineLink:hover {
-  opacity: 0.8;
-}
-
 /* Boilerplate: one block per length, each with a copy button. */
 .copyBlocks {
   display: flex;
@@ -109,10 +101,6 @@
 .copyHead span {
   color: var(--teal-grey-300);
   font-weight: 300;
-}
-
-.copyText {
-  margin: 0;
 }
 
 .copyBtn {
