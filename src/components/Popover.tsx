@@ -51,7 +51,8 @@ interface PopoverProps {
   /** In a text box with text in it, the first Escape belongs to the box (a
    *  search box clears), not the popover. */
   // (To focus a field as the popover opens, give it data-autofocus rather
-  // than autoFocus: it is focused once the popover is in place.)
+  // than autoFocus: it is focused once the popover is in place, and only
+  // with a mouse.)
   escapeClearsText?: boolean
   children: ReactNode
 }
@@ -142,10 +143,14 @@ export default function Popover({
     place()
     // Focus goes in only once the popover is in place, and without
     // scrolling: a field focused where the popover first renders would
-    // scroll the page there.
-    el.querySelector<HTMLElement>('[data-autofocus]')?.focus({
-      preventScroll: true,
-    })
+    // scroll the page there. Not on a touch screen, where focusing a box
+    // brings up the keyboard, and a dropdown its list of choices, before
+    // the visitor has even seen the form: there they tap the field first.
+    if (window.matchMedia('(hover: hover)').matches) {
+      el.querySelector<HTMLElement>('[data-autofocus]')?.focus({
+        preventScroll: true,
+      })
+    }
     const resize = new ResizeObserver(place)
     resize.observe(el)
     window.addEventListener('resize', place)
