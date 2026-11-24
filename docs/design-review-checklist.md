@@ -2,7 +2,7 @@
 
 Melissa's rules are in [`css-guidelines.md`](css-guidelines.md). `npm run check:styles` holds new code to the ones a script can judge. This list is the rest: the judgment rules a script can't check, written as short checks that can be made from the code. It comes before Melissa's own look at the page, not instead of it.
 
-The list is hers to own. Each check comes from her guide, from the notes in `CLAUDE.md` and `docs/claude.md`, from her comments in the shared components, or from something a review caught. She can change or remove any line.
+The list is hers to own. Each check comes from her guide, from the notes in `CLAUDE.md` and `docs/claude.md`, from her comments in the shared components, or from a correction she asked to keep. She can change or remove any line.
 
 Every change to what visitors see, or to one of Melissa's own files (F3), gets an independent design review against this list before it is pushed (see [How a review runs](#how-a-review-runs)). A line is added only when Melissa asks for it (see [Adding to this list](#adding-to-this-list)).
 
@@ -31,7 +31,7 @@ The reviewer changes no code. After the report, the author fixes each finding, a
 
 - **A1.** Before any new piece of UI, look in `src/components/` for one that already does the job (`Button`, `Icon`, `Tooltip`, `ListingCard`, `FeaturedCard`, `FilterBar`, `FilterDropdown`, `FilterPopover`, `PageHeader`, `StickyBar`, `SearchBar`, `SelectionMenu`, `NewsletterSignup`, `ModeToggle`, and the rest). New markup that does the job of an existing component is a finding.
 - **A2.** A component that nearly fits gets a new prop. A copy of it, or a look-alike built beside it, is a finding.
-- **A3.** No one-off overrides. New CSS that restyles a shared component from outside (a module class passed as its `className`, or a wrapper selector that reaches into it) is a finding. If the component looks wrong, its own file is fixed, so every use is fixed at once. A utility class that places a component is fine (a margin or a width class), and so is a `.color-*` class on `<Icon>`, which is how an icon gets its color. A utility class that changes a shared component's own look (a color, padding, or paragraph class on `<Button>`) is a judgment call: list it.
+- **A3.** No one-off overrides. New CSS that restyles a shared component from outside (a module class passed as its `className`, or a wrapper selector that reaches into it) is a finding. If the component looks wrong, its own file is fixed, so every use is fixed at once. A utility class that places a component is fine (a margin or a width class), and so is a `.color-*` class on `<Icon>`, which is how an icon gets its color. A utility class that changes `<Button>`'s own look (a color, padding, or paragraph class) is a finding (the guide, section 9: never style a button). On another shared component it is a judgment call: list it.
 - **A4.** A brand-new component or `.module.css` file is a judgment call: list it, with why no existing component fits. A new shared component also gets a section on the `/design-system` page (`src/app/design-system/page.tsx`); without one it is a finding.
 - **A6.** A button's `variant` and `size` come from the set in the guide, and icon-only buttons are `small` or `xs`. Nothing else is dressed up as a button: no `<div>`, `<span>`, or link given a button's border, fill, and padding. A chip, a tab, or a row that `<Button>` doesn't cover is fine.
 - **A7.** Icons go through `<Icon>`, at 12, 16, 24, or 32px, from `/images/icons/`. An inline `<svg>` or an `<img>` used as an icon is a finding.
@@ -59,7 +59,7 @@ The reviewer changes no code. After the report, the author fixes each finding, a
 ### D. Colors by job
 
 - **D1.** Every color in an added or changed line is the one the guide's "Which color for what" table gives for that job, in CSS and in `className` alike. Picked by job, not by look.
-- **D2.** Old colors get the same treatment as new ones. There is no "new code only" rule: a color anywhere in a changed file that isn't the one the table gives for its job moves to the right one in the same change, and is listed (F1). A border or background still on `--teal-grey-*` moves to the teal step the table names.
+- **D2.** Old colors get the same treatment as new ones. There is no "new code only" rule: a color anywhere in a changed file that isn't the one the table gives for its job moves to the right one in the same change, and is listed (F1). In `globals.css` and shared components, which reach every page, that covers the class or component the change touches; any other wrong color there is listed for its own clean-up pull request. A border or background still on `--teal-grey-*` moves to the teal step the table names.
 - **D3.** Error text is `--red-300`. Orange, pink, blue, purple, yellow, and green are for tags. Old code that shows errors in another color is corrected too (D2).
 - **D4.** Text color in markup comes from a `.color-*` class on the element, not from a `color:` line in a new class, unless the color belongs to a state such as `:hover`. If the class it needs doesn't exist, that is a judgment call: list it.
 - **D5.** Borders and dividers are `--teal-800`, or the table's alt mix. A highlight line is `--teal-300`. A plain divider is the `.divider` class.
