@@ -95,8 +95,6 @@
 
 .copyBlock {
   padding: 20px 24px;
-  background-color: var(--teal-grey-850);
-  border: 1px solid var(--teal-grey-700);
   border-radius: 16px;
 }
 
@@ -170,7 +168,7 @@
 .facts dd a {
   color: var(--teal-grey-300);
   text-decoration: underline;
-  text-decoration-color: var(--teal-grey-600);
+  text-decoration-color: color-mix(in srgb, var(--teal-300) 30%, transparent);
   text-underline-offset: 3px;
 }
 
@@ -237,9 +235,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--teal-grey-700);
   border-radius: 16px;
-  background-color: var(--teal-grey-850);
 }
 
 .assetPreview {
@@ -256,7 +252,7 @@
 }
 
 .onDark {
-  background-color: var(--teal-grey-900);
+  background-color: var(--teal-900);
 }
 
 .onLight {
@@ -315,12 +311,12 @@
   display: block;
   width: 100%;
   height: auto;
-  border: 1px solid var(--teal-grey-700);
+  border: 1px solid var(--teal-800);
   border-radius: 12px;
 }
 
 .shot a:hover img {
-  border-color: var(--teal-grey-500);
+  border-color: var(--teal-300);
 }
 
 .kitRow {
@@ -349,11 +345,11 @@
   grid-template-columns: 150px 1fr;
   gap: 16px;
   padding: 14px 0;
-  border-top: 1px solid var(--teal-grey-700);
+  border-top: 1px solid var(--teal-800);
 }
 
 .newsItem:last-child {
-  border-bottom: 1px solid var(--teal-grey-700);
+  border-bottom: 1px solid var(--teal-800);
 }
 
 .newsDate {

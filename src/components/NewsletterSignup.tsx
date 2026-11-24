@@ -139,7 +139,7 @@ function ActiveCampaignSignup({
     state === 'done'
       ? 'paragraph-small color-teal-300'
       : error
-        ? 'paragraph-xs color-orange-300 padding-top-8px'
+        ? 'paragraph-xs color-red-300 padding-top-8px'
         : ''
   return (
     <form

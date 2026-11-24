@@ -652,7 +652,10 @@ export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
       />
       <div ref={mapContainerRef} className={styles.mapContainer}>
         {!pinsLoaded && (
-          <div className={styles.mapLoading} aria-live="polite">
+          <div
+            className={`${styles.mapLoading} border-plus-fill`}
+            aria-live="polite"
+          >
             <div className={styles.mapSpinner} aria-hidden="true" />
             <p className="paragraph-small">Loading map…</p>
           </div>

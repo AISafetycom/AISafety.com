@@ -224,7 +224,7 @@ export default function AboutPage() {
 
         <div className="flex flex-col gap-56px width-4-col-narrow">
           <div>
-            <div className={styles.iconCircle}>
+            <div className={`${styles.iconCircle} bg-teal-800`}>
               <Icon
                 src="/images/icons/people.svg"
                 size={16}
@@ -248,7 +248,7 @@ export default function AboutPage() {
           </div>
 
           <div>
-            <div className={styles.iconCircle}>
+            <div className={`${styles.iconCircle} bg-teal-800`}>
               <Icon
                 src="/images/icons/speech-bubble.svg"
                 size={16}
@@ -273,7 +273,7 @@ export default function AboutPage() {
         </div>
 
         <div className="width-4-col-narrow">
-          <div className={styles.iconCircle}>
+          <div className={`${styles.iconCircle} bg-teal-800`}>
             <Icon
               src="/images/icons/add-doc.svg"
               size={16}

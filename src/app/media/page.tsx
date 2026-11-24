@@ -210,7 +210,10 @@ export default async function MediaPage() {
         </p>
         <div className={styles.copyBlocks}>
           {BOILERPLATE.map(block => (
-            <div key={block.id} className={styles.copyBlock}>
+            <div
+              key={block.id}
+              className={`${styles.copyBlock} border-plus-fill`}
+            >
               <div className={`${styles.copyHead} paragraph-small-bold`}>
                 <div>
                   {block.label} <span>· {wordCount(block.text)} words</span>
@@ -489,7 +492,10 @@ export default async function MediaPage() {
 
         <div className={styles.assetGrid}>
           {LOGOS.map(logo => (
-            <div key={logo.id} className={styles.assetCard}>
+            <div
+              key={logo.id}
+              className={`${styles.assetCard} border-plus-fill`}
+            >
               <div
                 className={`${styles.assetPreview} ${
                   logo.on === 'dark'

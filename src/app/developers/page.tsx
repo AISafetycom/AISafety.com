@@ -98,7 +98,7 @@ export default function DevelopersPage() {
       </div>
       <p className={styles.baseUrl}>
         <span>Base URL</span>
-        <code className={styles.inline}>
+        <code className={`${styles.inline} border-plus-fill`}>
           https://aisafety.com{API_BASE_PATH}
         </code>
       </p>
@@ -109,7 +109,7 @@ export default function DevelopersPage() {
           Every endpoint is a plain GET that returns JSON. No auth; CORS is open
           to any origin.
         </p>
-        <pre className={styles.code}>
+        <pre className={`${styles.code} border-plus-fill`}>
           <code>{QUICK_START}</code>
         </pre>
       </section>
@@ -151,12 +151,14 @@ export default function DevelopersPage() {
         <h2>Response shape</h2>
         <p className={`paragraph-small ${styles.sectionLead}`}>
           Every endpoint returns the same wrapped envelope: a{' '}
-          <code className={styles.inline}>data</code> array and a{' '}
-          <code className={styles.inline}>meta</code> object with the record
-          count, license, and attribution. IDs are stable Airtable record IDs,
-          image fields are absolute URLs, and dates are ISO-8601.
+          <code className={`${styles.inline} border-plus-fill`}>data</code>{' '}
+          array and a{' '}
+          <code className={`${styles.inline} border-plus-fill`}>meta</code>{' '}
+          object with the record count, license, and attribution. IDs are stable
+          Airtable record IDs, image fields are absolute URLs, and dates are
+          ISO-8601.
         </p>
-        <pre className={styles.code}>
+        <pre className={`${styles.code} border-plus-fill`}>
           <code>{ENVELOPE}</code>
         </pre>
       </section>
@@ -165,21 +167,27 @@ export default function DevelopersPage() {
         <h2>Filtering &amp; search</h2>
         <ul className={styles.filterList}>
           <li className={styles.filterRow}>
-            <code className={styles.inline}>?type=Conference</code>
+            <code className={`${styles.inline} border-plus-fill`}>
+              ?type=Conference
+            </code>
             <span>Filter by any listed field. Case-insensitive substring.</span>
           </li>
           <li className={styles.filterRow}>
-            <code className={styles.inline}>?location=Europe,UK</code>
+            <code className={`${styles.inline} border-plus-fill`}>
+              ?location=Europe,UK
+            </code>
             <span>Comma-separate values for OR.</span>
           </li>
           <li className={styles.filterRow}>
-            <code className={styles.inline}>
+            <code className={`${styles.inline} border-plus-fill`}>
               ?location=Europe&amp;type=Conference
             </code>
             <span>Combine different fields for AND.</span>
           </li>
           <li className={styles.filterRow}>
-            <code className={styles.inline}>?q=alignment</code>
+            <code className={`${styles.inline} border-plus-fill`}>
+              ?q=alignment
+            </code>
             <span>Free-text search across all fields.</span>
           </li>
         </ul>

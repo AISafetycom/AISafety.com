@@ -161,7 +161,7 @@ a {
    =============================== */
 
 body {
-  background-color: var(--teal-grey-900);
+  background-color: var(--teal-900);
   background-image: url('/images/bg.svg');
   background-position: top center;
   background-repeat: no-repeat;
@@ -359,6 +359,11 @@ label {
 }
 .color-green-300 {
   color: var(--green-300);
+}
+
+/* Error text (css-guidelines: "Which color for what") */
+.color-red-300 {
+  color: var(--red-300);
 }
 
 /* Accent background colors */
@@ -1089,8 +1094,7 @@ select.text-field {
 
 .shadow-text {
   /* Shared shadow treatment for text on light-ish backgrounds */
-  text-shadow: 0 0 12px
-    color-mix(in srgb, var(--teal-grey-900) 80%, transparent);
+  text-shadow: 0 0 12px color-mix(in srgb, var(--teal-900) 80%, transparent);
 }
 
 /* Surfaces */
