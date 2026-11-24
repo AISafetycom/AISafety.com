@@ -367,6 +367,22 @@ describe('recordClick', () => {
     expect(h?.get('__total')).toBe(2)
     expect(h?.get(JSON.stringify({ t: 'Lens', u: link.u }))).toBe(2)
   })
+
+  it('tallies an A/B test’s halves apart, the usual counts staying whole', async () => {
+    const link = { u: 'https://lensacademy.org/', k: 'rec1', t: 'Lens' }
+    const field = JSON.stringify({ t: 'Lens', u: link.u })
+    await m.recordClick('Events · Week 48, 2026', link, 'subject')
+    await m.recordClick('Events · Week 48, 2026', link, 'subject')
+    await m.recordClick('Events · Week 48, 2026', link, 'preview')
+    const h = hashes.get('aisafety:newsletter:clicks:Events · Week 48, 2026')
+    expect(h?.get('__total')).toBe(3)
+    const ab = hashes.get(
+      'aisafety:newsletter:ab-clicks:Events · Week 48, 2026'
+    )
+    expect(ab?.get('subject')).toBe(2)
+    expect(ab?.get('preview')).toBe(1)
+    expect(ab?.get(`subject ${field}`)).toBe(2)
+  })
 })
 
 describe('test copies', () => {
