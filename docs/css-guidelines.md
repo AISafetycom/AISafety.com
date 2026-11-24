@@ -311,13 +311,13 @@ Spacing and flex fail everywhere on pages, mobile overrides and `:hover` include
 
 Shared components (`src/components/`) set their own spacing and flex, since they are the design system's own pieces. In there, flex and spacing on the scale (`gap: 8px`, `padding: 0 16px`) are fine, and only spacing off the scale (`45px`, `1.5em`) fails, in CSS and in an inline `style` alike. A deliberate odd value takes an exception (below). `Button`'s `padding: 0 17px` is one: with its 1px border it makes the 18px side padding in Figma. Melissa, 21 November 2026.
 
-**It adds a note, without failing,** for another hand-written line that has an exact utility class (a color or a cursor), for a class that rebuilds a bigger global class such as `.divider`, for a new raw `<button>`, and for a new variable in `globals.css`. These are notes because a class that really needs its own CSS often has one of these lines in it. A class made of nothing else fails, as above.
+**It adds a note, without failing,** for another hand-written line that has an exact utility class (a color or a cursor), for a class that rebuilds a bigger global class such as `.divider`, for a new raw `<button>`, and for a new variable in `globals.css`. These are notes because a class that really needs its own CSS often has one of these lines in it. A class made of nothing else fails, as above. One more note, `class-on-two-tags`, is for a module class put on two kinds of HTML tag in the same file: a note because a row that is a link in one case and plain text in another is sometimes right.
 
-**It does not judge** sizes (`width`, `height`), whether a new class was needed at all, hover and other states, or anything visual. Those still need a person.
+**It does not judge** sizes (`width`, `height`), whether a new class was needed at all, hover and other states, or anything visual. Those still need a person to look at the page. Before that, a second Claude that didn't write the change checks it against [`design-review-checklist.md`](design-review-checklist.md), the list of rules a script can't judge.
 
-### Only new code, and no list to maintain
+### Only what a change adds, and no list to maintain
 
-Existing code is left alone. Each changed file is compared with the same file on `main`, rule by rule, and the check fails only when the file has more of something than it has there. So:
+The check fails only on what a change adds, so old code never blocks a pull request. That doesn't make old code an exception to the rules: it gets cleaned up too (see the clean-up list below). Each changed file is compared with the same file on `main`, rule by rule, and the check fails only when the file has more of something than it has there. So:
 
 - Code that already breaks a rule passes until someone adds to it. Rewording or moving it within its file is fine.
 - When a file is cleaned up, its new, lower count becomes the limit as soon as that change is merged. There is nothing to update by hand.

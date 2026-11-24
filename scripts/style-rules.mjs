@@ -66,6 +66,16 @@ export const RULES = {
     title: 'A utility class already does this',
   },
   'raw-button': { level: 'warn', title: 'New <button> element' },
+  // docs/claude.md ("HTML Consistency") asks for the same tag wherever a
+  // shared class goes, because browsers style <a>, <button>, <div> and <p>
+  // differently. This applies the same idea to a file's own module classes,
+  // where a script can see it (a review found one on 22 Nov 2026). A note,
+  // because a row that is a link in one case and plain in another is
+  // sometimes right.
+  'class-on-two-tags': {
+    level: 'warn',
+    title: 'One class on two kinds of element',
+  },
   'design-system-variable': {
     level: 'warn',
     title: 'New variable in globals.css',
@@ -984,6 +994,27 @@ export function checkTsx(text, ds, ts, file = '') {
     return out.filter(Boolean)
   }
 
+  /** The classes in a className that come from this file's CSS module
+      (styles.row, styles['row']), as "styles.row". */
+  const moduleClasses = attr => {
+    const out = []
+    if (!attr.initializer) return out
+    walk(attr.initializer, n => {
+      const fromModule =
+        (ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n)) &&
+        ts.isIdentifier(n.expression) &&
+        cssModules.has(n.expression.text)
+      if (!fromModule) return
+      if (ts.isPropertyAccessExpression(n))
+        out.push(`${n.expression.text}.${n.name.text}`)
+      else if (ts.isStringLiteralLike(n.argumentExpression))
+        out.push(`${n.expression.text}.${n.argumentExpression.text}`)
+    })
+    return out
+  }
+
+  const tagsOfClass = new Map() // "styles.row" → Map(tag → first element)
+
   walk(sf, node => {
     if (!ts.isJsxOpeningElement(node) && !ts.isJsxSelfClosingElement(node))
       return
@@ -992,6 +1023,28 @@ export function checkTsx(text, ds, ts, file = '') {
     const attr = name => attrs.find(a => a.name.getText(sf) === name)
 
     if (attr('style') && !drawsImage) checkStyle(attr('style'))
+
+    // Which HTML tags each module class is put on. <Link> renders an <a>, so
+    // it counts as one; other components are left out, since what they
+    // render is their own business.
+    // <input>, <select> and <textarea> are one kind here: a form field's
+    // class belongs on all three, as .text-field is.
+    const htmlTag =
+      tag === 'Link'
+        ? 'a'
+        : ['select', 'textarea'].includes(tag)
+          ? 'input'
+          : tag
+    if (attr('className') && /^[a-z]/.test(htmlTag))
+      for (const cls of new Set(moduleClasses(attr('className')))) {
+        const tags = tagsOfClass.get(cls) ?? new Map()
+        const seen = tags.get(htmlTag)
+        tags.set(htmlTag, {
+          node: seen?.node ?? node,
+          uses: (seen?.uses ?? 0) + 1,
+        })
+        tagsOfClass.set(cls, tags)
+      }
 
     if (BUTTON_FILES.includes(file) || tag === 'Button') return
     const classAttr = attr('className')
@@ -1013,6 +1066,27 @@ export function checkTsx(text, ds, ts, file = '') {
         `<button> ${classNames(classAttr).join(' ')}`
       )
   })
+
+  // One note for each further tag a class is put on, so a class already on
+  // two tags gets a new note when a change puts it on a third. The tag a
+  // class is on most often counts as its own (the first one, in a tie), so
+  // the note lands on the odd one out rather than on whichever comes later.
+  for (const [cls, tags] of tagsOfClass) {
+    if (tags.size < 2) continue
+    const [home] = [...tags].reduce((best, entry) =>
+      entry[1].uses > best[1].uses ? entry : best
+    )
+    for (const [tag, { node }] of tags) {
+      if (tag === home) continue
+      add(
+        'class-on-two-tags',
+        node,
+        `${cls} is on <${tag}> (line ${lineOf(node)}) as well as <${home}> (line ${lineOf(tags.get(home).node)})`,
+        `Keep the element that fits the job: a heading stays a heading, a list item a list item. Browsers give <${home}> and <${tag}> different built-in styles, so a class that carries a look (a color, a border, type) can look different on each: give the odd element its own class. A class that only places things (a grid span) is fine on both, and so is a row that is a link in one case and plain text in another. If the class carries a look, list it for design review in the pull request (checklist C4). A class that only places things needs no mention.`,
+        `${cls} <${tag}>`
+      )
+    }
+  }
 
   return applyAllows(findings, tsxAllows(text))
 }
