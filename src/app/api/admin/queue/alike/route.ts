@@ -8,6 +8,7 @@
     → { like: [id, …] }  up to three of `among`, most alike first (none
       when nothing there is really alike)
     → 400 for a body it can't read, 502 when Claude can't be asked
+      (with a fixed reason; the error itself goes to the server log)
 
   Claude does the judging (map-alike-claude.ts). The strip sends the
   listings it has already read, so this makes no Airtable read of its own.
@@ -39,8 +40,12 @@ export async function POST(req: Request) {
   try {
     return json({ like: await askAlike(listing, among, area) })
   } catch (e) {
-    const error = e instanceof Error ? e.message : String(e)
-    console.error('[queue/alike]', error)
+    // The full error goes to the server log only: the page gets a fixed
+    // reason, never the error's own text (CodeQL, information exposure).
+    console.error('[queue/alike]', e)
+    const error = process.env.ANTHROPIC_API_KEY
+      ? 'see the server log'
+      : 'no ANTHROPIC_API_KEY on the server'
     return json({ error }, 502)
   }
 }
