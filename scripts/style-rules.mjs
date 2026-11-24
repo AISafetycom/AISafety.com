@@ -1082,7 +1082,7 @@ export function checkTsx(text, ds, ts, file = '') {
         'class-on-two-tags',
         node,
         `${cls} is on <${tag}> (line ${lineOf(node)}) as well as <${home}> (line ${lineOf(tags.get(home).node)})`,
-        `Keep the element that fits the job: a heading stays a heading, a list item a list item. Browsers give <${home}> and <${tag}> different built-in styles, so a class that carries a look (a color, a border, type) can look different on each: give the odd element its own class. A class that only places things (a grid span) is fine on both, and so is a row that is a link in one case and plain text in another. Either way, say so in the pull request.`,
+        `Keep the element that fits the job: a heading stays a heading, a list item a list item. Browsers give <${home}> and <${tag}> different built-in styles, so a class that carries a look (a color, a border, type) can look different on each: give the odd element its own class. A class that only places things (a grid span) is fine on both, and so is a row that is a link in one case and plain text in another. If the class carries a look, list it for design review in the pull request (checklist C4). A class that only places things needs no mention.`,
         `${cls} <${tag}>`
       )
     }
