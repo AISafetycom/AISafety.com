@@ -72,7 +72,15 @@ export interface LinkList {
   /** The ActiveCampaign campaign name ("Training · Week 39, 2026"). */
   c: string
   links: NewsletterLink[]
+  /** Which half of a subject line A/B test the list's email went to
+   *  (admin/newsletter-ab.ts): its clicks are also tallied per half. */
+  ab?: AbHalfName
 }
+
+/** The halves of the subject line A/B test (24 Nov 2026): the highlights
+ *  in the subject, or in the preview line. */
+export const AB_HALVES = ['subject', 'preview'] as const
+export type AbHalfName = (typeof AB_HALVES)[number]
 
 /** Pure: one entry of a list. Anything that isn't a plain http(s) link goes
  *  to the homepage — nothing else is ever redirected to. */
@@ -98,7 +106,12 @@ function parseLink(raw: unknown): NewsletterLink {
  *  one of ours; a bad entry keeps its place (so link <n> is still link <n>)
  *  and goes to the homepage, and the rest of the email's links still work. */
 export function parseLinkList(data: unknown): LinkList | null {
-  const d = data as { v?: unknown; c?: unknown; links?: unknown } | null
+  const d = data as {
+    v?: unknown
+    c?: unknown
+    links?: unknown
+    ab?: unknown
+  } | null
   if (
     !d ||
     typeof d !== 'object' ||
@@ -107,7 +120,10 @@ export function parseLinkList(data: unknown): LinkList | null {
     !Array.isArray(d.links)
   )
     return null
-  return { c: d.c.slice(0, 200), links: d.links.map(parseLink) }
+  const list: LinkList = { c: d.c.slice(0, 200), links: d.links.map(parseLink) }
+  if ((AB_HALVES as readonly unknown[]).includes(d.ab))
+    list.ab = d.ab as AbHalfName
+  return list
 }
 
 /** Pure: whether a list's raw bytes are the ones its name was made from
@@ -461,6 +477,10 @@ export async function isTestCopyClick(
  *  JSON) holding the click count, plus the campaign total. */
 const KEY_PREFIX = 'aisafety:newsletter:clicks:'
 const TOTAL_FIELD = '__total'
+/** The A/B test's tally, one hash per campaign beside the usual one: a
+ *  field per half (its clicks) and per half and link ("<half> <link field>"),
+ *  so the usual counts stay the issue's whole. */
+const AB_KEY_PREFIX = 'aisafety:newsletter:ab-clicks:'
 
 const DEV_FILE = path.join(
   process.cwd(),
@@ -482,7 +502,8 @@ async function readDevCounts(): Promise<
  *  (via after()), and a failed count must not matter to them. */
 export async function recordClick(
   campaign: string,
-  link: NewsletterLink
+  link: NewsletterLink,
+  ab?: AbHalfName
 ): Promise<void> {
   const field = JSON.stringify({ t: link.t, u: link.u })
   try {
@@ -490,6 +511,10 @@ export async function recordClick(
       const p = store.pipeline()
       p.hincrby(KEY_PREFIX + campaign, field, 1)
       p.hincrby(KEY_PREFIX + campaign, TOTAL_FIELD, 1)
+      if (ab) {
+        p.hincrby(AB_KEY_PREFIX + campaign, ab, 1)
+        p.hincrby(AB_KEY_PREFIX + campaign, `${ab} ${field}`, 1)
+      }
       await p.exec()
       return
     }
@@ -497,6 +522,11 @@ export async function recordClick(
     const c = (all[campaign] ??= {})
     c[field] = (c[field] ?? 0) + 1
     c[TOTAL_FIELD] = (c[TOTAL_FIELD] ?? 0) + 1
+    if (ab) {
+      const h = (all[AB_KEY_PREFIX + campaign] ??= {})
+      h[ab] = (h[ab] ?? 0) + 1
+      h[`${ab} ${field}`] = (h[`${ab} ${field}`] ?? 0) + 1
+    }
     await fs.mkdir(path.dirname(DEV_FILE), { recursive: true })
     await fs.writeFile(DEV_FILE, JSON.stringify(all))
   } catch (err) {
