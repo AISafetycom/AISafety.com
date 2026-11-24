@@ -12,8 +12,9 @@ import { selectionFormLink } from '@/lib/selection-feedback'
 import styles from './SelectionMenu.module.css'
 
 // The small menu that appears by text a visitor selects in a page's main
-// content, the footer or the chatbot's messages: Copy, and a button that
-// opens the site's correction or feedback
+// content, the footer or the chatbot's messages: Copy (left out on a phone,
+// which shows its own), and a button that opens the site's correction or
+// feedback
 // form (FeedbackPopover) right there, with the selected text in it. Text on a
 // listing's card leads to "Suggest a correction"; text anywhere else to
 // "Give feedback".
@@ -51,6 +52,9 @@ interface Menu {
   formHref: string
   /** The listing whose card the text is on, when it is on one. */
   listing?: { name: string; id?: string }
+  /** Selected by touch: the phone shows its own Copy, so the menu leaves
+   *  its own out. */
+  touch?: boolean
 }
 
 /** The boxes of the selected text people can see, one per line of each
@@ -97,9 +101,16 @@ function readSelection(pathname: string): Menu | null {
   const range = selection.getRangeAt(0)
   const node = range.commonAncestorContainer
   const el = node instanceof Element ? node : node.parentElement
-  // A page's content, the footer and the chatbot's messages (marked
-  // data-selection-menu); never the nav or a text box.
-  if (!el?.closest('main, footer, [data-selection-menu]')) return null
+  // Both ends in a page's content, the footer or the chatbot's messages
+  // (marked data-selection-menu), never the nav or a text box. Both ends,
+  // not their common parent: a selection running from the page into the
+  // footer has the whole page as its parent.
+  const inScope = (n: Node) =>
+    !!(n instanceof Element ? n : n.parentElement)?.closest(
+      'main, footer, [data-selection-menu]'
+    )
+  if (!inScope(range.startContainer) || !inScope(range.endContainer))
+    return null
   const rects = visibleTextRects(range)
   const rect = unionBox(rects)
   const lines = selectionLines(rects)
@@ -108,7 +119,7 @@ function readSelection(pathname: string): Menu | null {
   // A card's name is its title link's own text (the link also holds a
   // hidden "(opens in new tab)"); its id, where it has one, is the listing's
   // record id, which a link to the page scrolls to.
-  const card = el.closest<HTMLElement>('[data-card]')
+  const card = el?.closest<HTMLElement>('[data-card]')
   const name = card?.querySelector('h3 a')?.firstChild?.textContent?.trim()
   const listing = card && name ? { name, id: card.id || undefined } : undefined
 
@@ -158,7 +169,7 @@ export default function SelectionMenu() {
     function update() {
       const next = readSelection(pathname)
       if (next) {
-        setMenu(next)
+        setMenu({ ...next, touch: touchRef.current })
         setCopied(false)
       }
       setOpen(!!next)
@@ -235,7 +246,7 @@ export default function SelectionMenu() {
   useLayoutEffect(() => {
     const el = menuRef.current
     if (!menu || !open || !el) return
-    const touch = touchRef.current
+    const touch = menu.touch
     const gap = touch ? 24 : 8
     const { offsetWidth: width, offsetHeight: height } = el
     const pageLeft = window.scrollX + 8
@@ -298,15 +309,18 @@ export default function SelectionMenu() {
       // Pressing the menu must not clear the selection it is about.
       onMouseDown={e => e.preventDefault()}
     >
-      <Button
-        variant="clear"
-        size="small"
-        icon={copied ? ICONS.copied : ICONS.copy}
-        iconPosition="preceding"
-        onClick={() => copy(menu.text, menu.listing)}
-      >
-        {copied ? 'Copied' : 'Copy'}
-      </Button>
+      {/* A phone puts its own Copy by text selected by touch. */}
+      {!menu.touch && (
+        <Button
+          variant="clear"
+          size="small"
+          icon={copied ? ICONS.copied : ICONS.copy}
+          iconPosition="preceding"
+          onClick={() => copy(menu.text, menu.listing)}
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </Button>
+      )}
       <Button
         variant="clear"
         size="small"

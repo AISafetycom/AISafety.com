@@ -1201,6 +1201,12 @@ select.text-field {
     line-height: 165%;
   }
 
+  /* iPhones zoom the page in on a focused box whose text is under 16px, so
+     typed text stays at 16px here while body text drops to 15px. */
+  .text-field {
+    font-size: 16px;
+  }
+
   h1 {
     letter-spacing: -3.36px;
     font-size: 56px;

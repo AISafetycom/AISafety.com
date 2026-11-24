@@ -37,14 +37,6 @@
     max-height: none;
     overflow: visible;
   }
-
-  /* iOS Safari auto-zooms focused fields with text under 16px; the site's
-     .text-field is 15px, so bump the form's fields on mobile. */
-  .fields input,
-  .fields textarea,
-  .fields select {
-    font-size: 16px;
-  }
 }
 
 /* Signup form layout — everything else on the page uses global utilities. */
