@@ -198,7 +198,7 @@ export default function DevelopersPage() {
         <p className={`paragraph-small ${styles.license}`}>
           Data is licensed{' '}
           <a
-            className="color-teal-400 underline"
+            className="link underline"
             href={DATA_LICENSE_URL}
             target="_blank"
             rel="noopener noreferrer"
@@ -207,7 +207,7 @@ export default function DevelopersPage() {
           </a>
           . Use it for any purpose, including commercially, as long as you
           credit AISafety.com with a link back to{' '}
-          <a className="color-teal-400 underline" href="https://aisafety.com">
+          <a className="link underline" href="https://aisafety.com">
             aisafety.com
           </a>
           . Organization logos remain the property of their respective owners.

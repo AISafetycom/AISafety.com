@@ -113,7 +113,6 @@
 
 .copyText {
   margin: 0;
-  color: var(--teal-grey-100);
 }
 
 .copyBtn {
@@ -166,14 +165,9 @@
 }
 
 .facts dd a {
-  color: var(--teal-grey-300);
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, var(--teal-300) 30%, transparent);
   text-underline-offset: 3px;
-}
-
-.facts dd a:hover {
-  color: var(--white);
 }
 
 .factsNote {
@@ -251,10 +245,6 @@
   height: auto;
 }
 
-.onDark {
-  background-color: var(--teal-900);
-}
-
 .onLight {
   background-color: var(--white);
 }
@@ -287,12 +277,7 @@
 }
 
 .assetLinks a {
-  color: var(--teal-300);
   font-weight: 500;
-}
-
-.assetLinks a:hover {
-  opacity: 0.8;
 }
 
 .shotGrid {
@@ -385,14 +370,9 @@
 
 .email {
   display: inline-block;
-  color: var(--teal-300);
   font-size: 22px;
   letter-spacing: -0.5px;
   padding: 8px 0 16px;
-}
-
-.email:hover {
-  opacity: 0.8;
 }
 
 .contactList {

@@ -75,7 +75,7 @@ export default function AboutPage() {
           </div>
           <p className="color-teal-grey-300 padding-top-24px paragraph-small">
             Journalist? Boilerplate, logos and a press contact are on the{' '}
-            <Link href="/media" className="color-teal-300">
+            <Link href="/media" className="link">
               press and media page
             </Link>
             .
@@ -204,7 +204,7 @@ export default function AboutPage() {
                 href={withUtm('https://aisafety.info', 'About')}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="color-teal-300"
+                className="link"
               >
                 AISafety.info
               </a>{' '}

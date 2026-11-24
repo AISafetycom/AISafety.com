@@ -246,6 +246,7 @@ export default async function MediaPage() {
           <dd>
             Nonprofit project fiscally sponsored by{' '}
             <a
+              className="hover-white"
               href={withUtm('https://www.ashgro.org/', 'Media')}
               target="_blank"
               rel="noopener noreferrer"
@@ -261,6 +262,7 @@ export default async function MediaPage() {
           <dd>
             Grants from the{' '}
             <a
+              className="hover-white"
               href={withUtm('https://survivalandflourishing.fund/', 'Media')}
               target="_blank"
               rel="noopener noreferrer"
@@ -279,13 +281,16 @@ export default async function MediaPage() {
             if (typeof count !== 'number') return null
             return (
               <FactRow key={path} label={label}>
-                <Link href={path}>{count.toLocaleString('en-US')}</Link>
+                <Link href={path} className="hover-white">
+                  {count.toLocaleString('en-US')}
+                </Link>
               </FactRow>
             )
           })}
           <dt>Sister site</dt>
           <dd>
             <a
+              className="hover-white"
               href={withUtm('https://aisafety.info', 'Media')}
               target="_blank"
               rel="noopener noreferrer"
@@ -499,7 +504,7 @@ export default async function MediaPage() {
               <div
                 className={`${styles.assetPreview} ${
                   logo.on === 'dark'
-                    ? styles.onDark
+                    ? 'bg-teal-900'
                     : logo.on === 'light'
                       ? styles.onLight
                       : styles.onTile
@@ -528,7 +533,7 @@ export default async function MediaPage() {
                 <span className={`paragraph-xs ${styles.assetNote}`}>
                   {logo.note}
                 </span>
-                <div className={`paragraph-xs ${styles.assetLinks}`}>
+                <div className={`paragraph-xs link-group ${styles.assetLinks}`}>
                   {'svg' in logo && (
                     <PressLink
                       href={logo.svg}
@@ -633,7 +638,7 @@ export default async function MediaPage() {
               action="contact"
               label="Emailed the press inbox"
               newTab
-              className={styles.email}
+              className={`link ${styles.email}`}
             >
               {PRESS_EMAIL}
             </PressLink>

@@ -181,10 +181,12 @@ export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
             0,
             Math.PI * 2
           )
-          ctx.fillStyle = '#14b8a6'
+          // The palette's colors, read from globals.css, not hard-coded.
+          const palette = getComputedStyle(document.documentElement)
+          ctx.fillStyle = palette.getPropertyValue('--teal-400').trim()
           ctx.fill()
           ctx.lineWidth = dpr
-          ctx.strokeStyle = '#ffffff'
+          ctx.strokeStyle = palette.getPropertyValue('--white').trim()
           ctx.stroke()
         }
         return ctx.getImageData(0, 0, canvas.width, canvas.height)
