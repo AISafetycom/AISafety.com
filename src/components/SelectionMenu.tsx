@@ -12,7 +12,8 @@ import { selectionFormLink } from '@/lib/selection-feedback'
 import styles from './SelectionMenu.module.css'
 
 // The small menu that appears by text a visitor selects in a page's main
-// content or the footer: Copy, and a button that opens the site's correction or feedback
+// content, the footer or the chatbot's messages: Copy, and a button that
+// opens the site's correction or feedback
 // form (FeedbackPopover) right there, with the selected text in it. Text on a
 // listing's card leads to "Suggest a correction"; text anywhere else to
 // "Give feedback".
@@ -96,8 +97,9 @@ function readSelection(pathname: string): Menu | null {
   const range = selection.getRangeAt(0)
   const node = range.commonAncestorContainer
   const el = node instanceof Element ? node : node.parentElement
-  // A page's content and the footer; never the nav.
-  if (!el?.closest('main, footer')) return null
+  // A page's content, the footer and the chatbot's messages (marked
+  // data-selection-menu); never the nav or a text box.
+  if (!el?.closest('main, footer, [data-selection-menu]')) return null
   const rects = visibleTextRects(range)
   const rect = unionBox(rects)
   const lines = selectionLines(rects)
@@ -197,11 +199,24 @@ export default function SelectionMenu() {
       if (e.key === 'Escape') setOpen(false)
     }
 
+    // The menu sits in the page, so it moves with the page's own scrolling.
+    // Anything else scrolling (the chatbot's messages, or the page under the
+    // chatbot, which stays put) would leave it behind: it goes instead, and
+    // comes back with the next selection.
+    function onScroll(e: Event) {
+      const page = e.target === document
+      const selection = window.getSelection()
+      const node = selection?.rangeCount ? selection.anchorNode : null
+      const el = node instanceof Element ? node : node?.parentElement
+      if (!page || el?.closest('[data-selection-menu]')) setOpen(false)
+    }
+
     document.addEventListener('pointerdown', onPointerDown, true)
     document.addEventListener('pointerup', onPointerEnd, true)
     document.addEventListener('pointercancel', onPointerEnd, true)
     document.addEventListener('selectionchange', onSelectionChange)
     document.addEventListener('keydown', onKeyDown)
+    document.addEventListener('scroll', onScroll, true)
     window.addEventListener('resize', onSelectionChange)
     return () => {
       window.clearTimeout(timer)
@@ -210,6 +225,7 @@ export default function SelectionMenu() {
       document.removeEventListener('pointercancel', onPointerEnd, true)
       document.removeEventListener('selectionchange', onSelectionChange)
       document.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', onSelectionChange)
     }
   }, [pathname, off])

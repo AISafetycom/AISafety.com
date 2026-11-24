@@ -1001,7 +1001,9 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
 
   return (
     <>
-      <div className={styles.body} ref={bodyRef}>
+      {/* data-selection-menu: selecting text in the messages brings up the
+          site's selection menu (Copy, Give feedback), as on a page. */}
+      <div className={styles.body} ref={bodyRef} data-selection-menu>
         {messages.length === 0 ? (
           <>
             {greeting && (

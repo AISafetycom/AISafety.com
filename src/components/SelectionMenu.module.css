@@ -4,7 +4,9 @@
    top) is set in SelectionMenu.tsx. */
 .menu {
   position: absolute;
-  z-index: 30; /* above the sticky filter bar (20), under the nav */
+  /* Above the sticky filter bar (20) and the chatbot (96 to 100), whose
+     messages it also serves, as the correction form is; under the nav. */
+  z-index: 101;
   display: none;
   padding: 3px; /* style-check: allow spacing (3px + the 1px border = 4px around the buttons) */
   border-radius: 24px;
