@@ -11,10 +11,9 @@ import { selectionLines, unionBox, type Box } from '@/lib/popover-placement'
 import { selectionFormLink } from '@/lib/selection-feedback'
 import styles from './SelectionMenu.module.css'
 
-// The small menu that appears by text a visitor selects in a page's main
-// content, the footer or the chatbot's messages: Copy (left out on a phone,
-// which shows its own), and a button that opens the site's correction or
-// feedback
+// The small menu that appears by text a visitor selects with a mouse or
+// keyboard in a page's main content, the footer or the chatbot's messages:
+// Copy, and a button that opens the site's correction or feedback
 // form (FeedbackPopover) right there, with the selected text in it. Text on a
 // listing's card leads to "Suggest a correction"; text anywhere else to
 // "Give feedback".
@@ -52,9 +51,6 @@ interface Menu {
   formHref: string
   /** The listing whose card the text is on, when it is on one. */
   listing?: { name: string; id?: string }
-  /** Selected by touch: the phone shows its own Copy, so the menu leaves
-   *  its own out. */
-  touch?: boolean
 }
 
 /** The boxes of the selected text people can see, one per line of each
@@ -153,8 +149,9 @@ export default function SelectionMenu() {
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  // Whether the selection was made by touch: a phone shows its own menu
-  // above the selection, so this one goes underneath.
+  // Whether the selection was made by touch. A phone shows its own menu
+  // (Copy, Look up) by the selection, so this one stays away rather than
+  // sit on top of it (Bryce, 24 November 2026).
   const touchRef = useRef(false)
   const off = OFF_PATHS.some(
     p => pathname === p || pathname.startsWith(`${p}/`)
@@ -167,9 +164,9 @@ export default function SelectionMenu() {
     let shownFor = ''
 
     function update() {
-      const next = readSelection(pathname)
+      const next = touchRef.current ? null : readSelection(pathname)
       if (next) {
-        setMenu({ ...next, touch: touchRef.current })
+        setMenu(next)
         setCopied(false)
       }
       setOpen(!!next)
@@ -242,12 +239,11 @@ export default function SelectionMenu() {
   }, [pathname, off])
 
   // Centered over the selection and kept on screen. Above it, unless that
-  // would put it under the nav bar or the selection was made by touch.
+  // would put it under the nav bar.
   useLayoutEffect(() => {
     const el = menuRef.current
     if (!menu || !open || !el) return
-    const touch = menu.touch
-    const gap = touch ? 24 : 8
+    const gap = 8
     const { offsetWidth: width, offsetHeight: height } = el
     const pageLeft = window.scrollX + 8
     const pageRight =
@@ -255,7 +251,7 @@ export default function SelectionMenu() {
     const centered = (menu.box.left + menu.box.right) / 2 - width / 2
     const left = Math.max(pageLeft, Math.min(centered, pageRight))
     const topAbove = menu.box.top - height - gap
-    const above = !touch && topAbove - window.scrollY > NAV_CLEARANCE
+    const above = topAbove - window.scrollY > NAV_CLEARANCE
     el.style.left = `${left}px`
     el.style.top = `${above ? topAbove : menu.box.bottom + gap}px`
   }, [menu, open, copied])
@@ -309,18 +305,15 @@ export default function SelectionMenu() {
       // Pressing the menu must not clear the selection it is about.
       onMouseDown={e => e.preventDefault()}
     >
-      {/* A phone puts its own Copy by text selected by touch. */}
-      {!menu.touch && (
-        <Button
-          variant="clear"
-          size="small"
-          icon={copied ? ICONS.copied : ICONS.copy}
-          iconPosition="preceding"
-          onClick={() => copy(menu.text, menu.listing)}
-        >
-          {copied ? 'Copied' : 'Copy'}
-        </Button>
-      )}
+      <Button
+        variant="clear"
+        size="small"
+        icon={copied ? ICONS.copied : ICONS.copy}
+        iconPosition="preceding"
+        onClick={() => copy(menu.text, menu.listing)}
+      >
+        {copied ? 'Copied' : 'Copy'}
+      </Button>
       <Button
         variant="clear"
         size="small"

@@ -37,16 +37,24 @@
 }
 
 /* Only the title is a link, so a screen reader announces a short name. This
-   box stretches it over the card (.card is position: relative) but lets the
-   pointer through, so the card's text can be selected; CardClicks opens the
-   link from a click anywhere on the card. While Cmd or Ctrl is held, and for
-   a right-click, the box catches the pointer so the browser finds a real
-   link over the whole card. */
+   box stretches it over the card (.card is position: relative). On a touch
+   screen it catches the finger, so the whole card is the link: a tap opens
+   it and a long-press shows the link's menu (Open in New Tab) rather than
+   selecting the card's text. With a mouse it lets the pointer through, so
+   the card's text can be selected, and CardClicks opens the link from a
+   click anywhere on the card. While Cmd or Ctrl is held, and for a
+   right-click, the box catches the pointer so the browser finds a real link
+   over the whole card. */
 .titleLink::after {
   content: '';
   position: absolute;
   inset: 0;
-  pointer-events: none;
+}
+
+@media (hover: hover) {
+  .titleLink::after {
+    pointer-events: none;
+  }
 }
 
 :global(html[data-card-links]) .titleLink::after {

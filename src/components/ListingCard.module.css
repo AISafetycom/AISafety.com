@@ -25,16 +25,24 @@
   order: -1;
 }
 
-/* Only the title is a link, so a screen reader announces a short name and the
-   rest of the card's text can be selected; CardClicks opens the link from a
-   click anywhere else on the card. This box over the card (.card is
-   position: relative) lets clicks through to the text beneath. */
+/* Only the title is a link, so a screen reader announces a short name. This
+   box stretches it over the card (.card is position: relative). On a touch
+   screen it catches the finger, so the whole card is the link: a tap opens
+   it and a long-press shows the link's menu (Open in New Tab) rather than
+   selecting the card's text. With a mouse it lets the pointer through to the
+   text beneath, so the card's words can be selected, and CardClicks opens
+   the link from a click anywhere else on the card. */
 .titleLink::after {
   content: '';
   position: absolute;
   inset: 0;
   border-radius: 16px;
-  pointer-events: none;
+}
+
+@media (hover: hover) {
+  .titleLink::after {
+    pointer-events: none;
+  }
 }
 
 /* While Cmd or Ctrl is held, and for a right-click, the box catches the
