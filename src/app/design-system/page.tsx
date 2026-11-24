@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import Button from '@/components/Button'
+import FeedbackFormLink from '@/components/FeedbackFormLink'
 import TextField from '@/components/TextField'
+import { CORRECTIONS_FORM, FEEDBACK_FORM } from '@/lib/selection-feedback'
 import PopoverDemo from './PopoverDemo'
 
 /* The design system, in public: every shared component in every variant,
@@ -191,6 +193,29 @@ export default function DesignSystemPage() {
         outside.
       </p>
       <PopoverDemo />
+
+      <h2 className="padding-top-40px padding-bottom-12px">
+        Correction and feedback form
+      </h2>
+      <p className="paragraph-small color-teal-grey-300 padding-bottom-24px">
+        The site&apos;s own form, in a popover by what opened it. Links that
+        open it are FeedbackFormLinks: a plain click opens the form, a Cmd-click
+        the Airtable form. Selecting text on a page opens it too.
+      </p>
+      <div className="flex items-center gap-16px">
+        <Button
+          as={FeedbackFormLink}
+          kind="correction"
+          href={CORRECTIONS_FORM}
+          variant="clear-border"
+          size="small"
+        >
+          Suggest a correction
+        </Button>
+        <FeedbackFormLink kind="feedback" href={FEEDBACK_FORM} className="link">
+          Give feedback
+        </FeedbackFormLink>
+      </div>
     </main>
   )
 }

@@ -151,7 +151,7 @@ export default function FeaturedCard({
         className={`${styles.pill} ${accentClass ? styles.pillAccent : ''} paragraph-xs-bold ${accentClass ?? 'color-teal-grey-300'} inline-flex items-center gap-8px padding-left-8px padding-right-8px`}
       >
         <span
-          className={`${styles.dot} ${accentClass ? styles.dotAccent : ''}`}
+          className={`${styles.dot} ${accentClass ? styles.dotAccent : 'bg-teal-300'}`}
         />
         {tagline}
       </span>

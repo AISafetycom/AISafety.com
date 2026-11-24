@@ -270,7 +270,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
       .attr('font-weight', 400)
       .attr('font-size', 72)
       .style('letter-spacing', '-2.16px')
-      .attr('fill', '#fff')
+      .attr('fill', 'var(--white)')
       .text('Map of AI Existential Safety')
 
     // Add area labels
@@ -301,7 +301,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         .attr('font-weight', 600)
         .attr('font-size', finalFontSize)
         .style('letter-spacing', '-0.01em')
-        .attr('fill', '#fff')
+        .attr('fill', 'var(--white)')
         .text(label)
 
       const bbox = textEl.node()?.getBBox()
@@ -314,7 +314,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
           .attr('height', bbox.height + finalPadY * 2)
           .attr('rx', (bbox.height + finalPadY * 2) / 2)
           .attr('ry', (bbox.height + finalPadY * 2) / 2)
-          .attr('fill', 'rgba(27, 43, 62, 0.6)')
+          .attr('fill', 'color-mix(in srgb, var(--teal-900) 60%, transparent)')
       }
     })
 
@@ -448,7 +448,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         .attr('r', iconSize / 2)
         .attr('cx', 0)
         .attr('cy', 0)
-        .attr('fill', '#fff')
+        .attr('fill', 'var(--white)')
 
       // Logo image — single SVG <image> clipped to a circle. The browser
       // fetches/decodes the logo exactly once; preserveAspectRatio handles
@@ -472,7 +472,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
             .attr('r', contentSize / 2)
             .attr('cx', 0)
             .attr('cy', 0)
-            .attr('fill', '#f70')
+            .attr('fill', 'var(--orange-300)')
         })
       } else {
         linkEl
@@ -480,7 +480,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
           .attr('r', contentSize / 2)
           .attr('cx', 0)
           .attr('cy', 0)
-          .attr('fill', 'red')
+          .attr('fill', 'var(--orange-300)')
       }
 
       // Add label below logo
@@ -500,7 +500,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         .attr('font-weight', 600)
         .attr('font-size', fontSize)
         .style('letter-spacing', '-0.02em')
-        .attr('fill', '#000')
+        .attr('fill', 'var(--teal-900)')
         .text(labelName)
 
       // Get text bounding box and add background pill
@@ -519,7 +519,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
           .attr('height', rectH)
           .attr('rx', rectH / 2)
           .attr('ry', rectH / 2)
-          .attr('fill', '#fff')
+          .attr('fill', 'var(--white)')
 
         textEl.attr('y', bbox.height * 0.35)
 
