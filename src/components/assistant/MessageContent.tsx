@@ -316,7 +316,11 @@ export function SuggestInline({
     <span className={styles.suggest}>
       <a href="#" className={styles.suggestButton} onClick={handleClick}>
         {label}
-        <Icon src="/images/icons/arrow-up-right.svg" size={16} />
+        {/* The arrow says it opens elsewhere: a correction or feedback opens
+            the site's own form right here instead. */}
+        {type !== 'correction' && type !== 'feedback' && (
+          <Icon src="/images/icons/arrow-up-right.svg" size={16} />
+        )}
         {badge}
       </a>
     </span>

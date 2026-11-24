@@ -472,7 +472,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
             .attr('r', contentSize / 2)
             .attr('cx', 0)
             .attr('cy', 0)
-            .attr('fill', 'var(--orange-300)')
+            .attr('fill', 'var(--teal-800)')
         })
       } else {
         linkEl
@@ -480,7 +480,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
           .attr('r', contentSize / 2)
           .attr('cx', 0)
           .attr('cy', 0)
-          .attr('fill', 'var(--orange-300)')
+          .attr('fill', 'var(--teal-800)')
       }
 
       // Add label below logo
