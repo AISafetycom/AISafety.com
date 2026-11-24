@@ -172,7 +172,7 @@
 }
 
 .nav-blur {
-  background-color: color-mix(in srgb, var(--teal-grey-900) 40%, transparent);
+  background-color: color-mix(in srgb, var(--teal-900) 40%, transparent);
   backdrop-filter: blur(16px);
 }
 

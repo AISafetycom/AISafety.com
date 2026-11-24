@@ -30,7 +30,7 @@ function Text({ children }: { children: string }) {
             href={withUtm(m[2], 'Hackathon')}
             target="_blank"
             rel="noopener noreferrer"
-            className="color-teal-300"
+            className="link"
           >
             {m[1]}
           </a>

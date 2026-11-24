@@ -385,7 +385,7 @@ export default function MapSearch({
                 href={suggestEntryUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={styles['map-search-suggest']}
+                className="link"
                 // Keep the input's blur from closing the list before the
                 // click lands (same trick as the result rows).
                 onMouseDown={event => event.preventDefault()}

@@ -144,7 +144,10 @@ export default function ListingPolicyPage() {
                 // Before the first section: the intro line, then the note.
                 const isNote = i < firstSection && block.text.startsWith('**')
                 return (
-                  <p key={i} className={isNote ? styles.note : styles.p}>
+                  <p
+                    key={i}
+                    className={isNote ? `${styles.note} bg-teal-850` : styles.p}
+                  >
                     <Inline text={block.text} />
                   </p>
                 )

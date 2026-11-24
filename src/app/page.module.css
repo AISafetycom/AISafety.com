@@ -41,7 +41,7 @@
   width: 436px;
   margin: -40px -40px 16px 0;
   padding: 40px;
-  background-color: color-mix(in srgb, var(--teal-grey-900) 50%, transparent);
+  background-color: color-mix(in srgb, var(--teal-900) 50%, transparent);
   backdrop-filter: blur(16px);
   border-radius: 8px;
   isolation: isolate;
@@ -93,7 +93,7 @@
   min-width: 460px;
   height: 100%;
   padding: 56px;
-  background-color: color-mix(in srgb, var(--teal-grey-900) 60%, transparent);
+  background-color: color-mix(in srgb, var(--teal-900) 60%, transparent);
   backdrop-filter: blur(16px);
   border-radius: 16px 0 0 16px;
 }
@@ -121,7 +121,7 @@
   max-width: 436px;
   margin: -40px -40px 16px 0;
   padding: 40px;
-  background-color: color-mix(in srgb, var(--teal-grey-900) 20%, transparent);
+  background-color: color-mix(in srgb, var(--teal-900) 20%, transparent);
   backdrop-filter: blur(16px);
   border-radius: 8px;
   isolation: isolate;
@@ -196,7 +196,7 @@
   left: 16px;
   right: 16px;
   padding: 40px;
-  background-color: color-mix(in srgb, var(--teal-grey-900) 40%, transparent);
+  background-color: color-mix(in srgb, var(--teal-900) 40%, transparent);
   border-radius: 8px;
   backdrop-filter: blur(16px);
   isolation: isolate;
@@ -208,7 +208,7 @@
   left: 16px;
   right: 16px;
   padding: 40px;
-  background-color: color-mix(in srgb, var(--teal-grey-900) 20%, transparent);
+  background-color: color-mix(in srgb, var(--teal-900) 20%, transparent);
   border-radius: 8px;
   isolation: isolate;
 }
@@ -264,7 +264,7 @@
   left: 16px;
   right: 16px;
   padding: 32px 32px 34px;
-  background-color: color-mix(in srgb, var(--teal-grey-900) 20%, transparent);
+  background-color: color-mix(in srgb, var(--teal-900) 20%, transparent);
   border-radius: 8px;
   isolation: isolate;
 }
@@ -312,7 +312,7 @@
   align-items: center;
   position: relative;
   padding: 56px;
-  border: 1px solid var(--teal-400);
+  border: 1px solid var(--teal-300);
   border-radius: 16px;
   justify-content: space-between;
 }
