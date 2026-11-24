@@ -79,6 +79,8 @@ export default function FilterRange({
     <FilterPopover
       label={active ? `${title}: ${summary}` : title}
       active={active}
+      // Back to the full span; the effect above records the removal.
+      onClear={() => onChange([0, labels.length - 1])}
       icon={icon}
     >
       <div className={styles.panel}>

@@ -1,4 +1,5 @@
 import DetailsForm from './DetailsForm'
+import { withUtm } from '@/lib/utm'
 
 // Unlisted: sent by email to accepted applicants only. Deliberately absent
 // from the sitemap, search index, footer, llms.txt, and the assistant's page
@@ -27,7 +28,7 @@ export default function HackathonDetailsPage() {
           <p className="color-teal-grey-300 padding-bottom-16px">
             Congratulations on your place at the hackathon at{' '}
             <a
-              href="https://www.ceealar.org"
+              href={withUtm('https://www.ceealar.org', 'Hackathon')}
               target="_blank"
               rel="noopener noreferrer"
               className="color-teal-300"

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import type { CitationRef, ListingType } from '@/lib/assistant/types'
 import Icon from '@/components/Icon'
 import styles from './Assistant.module.css'
+import { withUtm } from '@/lib/utm'
 
 interface Props {
   citation: CitationRef
@@ -73,7 +74,9 @@ export default function CitationCard({ citation, note, onClick }: Props) {
   //   - "#" — a listing with no link of its own (e.g. a community with no
   //     website or join link).
   // The assistant is also prompted to point to the resource page in these cases.
-  const href = isExternal ? citation.url : citation.pageUrl || citation.url
+  const href = isExternal
+    ? withUtm(citation.url, 'Chatbot')
+    : citation.pageUrl || citation.url
   const summary = metaSummary(citation)
   const [imgFailed, setImgFailed] = useState(false)
   const showLogo = citation.logo && !imgFailed

@@ -1,7 +1,8 @@
 /*
-  Where a new listing could sit on the Field map: a free spot nestled among
-  the listings of its own area, for the Queue's map strip (the suggestion a
-  /map addition opens with, before anyone drags it).
+  Where a new listing could sit on the Field map: a free spot among the
+  listings of its own area, beside the ones it is most like when those are
+  known (else nestled among them), for the Queue's map strip (the
+  suggestion a /map addition opens with, before anyone drags it).
 
   It reads nothing but the pins already placed, so every listing placed by
   hand teaches the next suggestion: how far apart an area's pins sit and
@@ -40,6 +41,9 @@ export interface SpotAsk {
   scale: string | null
   label: string
   area: string | null
+  /** Ids of the listings it is most like, most alike first (Claude's
+   *  pick, map-alike.ts). Those outside its area are passed over. */
+  like?: string[]
 }
 
 export interface Spot {
@@ -167,6 +171,15 @@ const CLUMP = 2.5
 /** An area needs this many pins before the ground under them says where
  *  its pins belong. */
 const HOME_MIN = 6
+/** How many of the listings it is most like it looks to sit beside. */
+const LIKE_MOST = 3
+/** How much further from the most alike listing a spot may be and still
+ *  win over one beside the next most alike, in grid units (about half the
+ *  usual spacing): it sits beside the most alike one that has room. */
+const LIKE_STEP = 0.5
+/** A little pull towards all of them, so among spots beside one it takes
+ *  the one facing the others. */
+const LIKE_ALL = 0.1
 
 function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b)
@@ -240,12 +253,13 @@ function outsideBy(hull: Point[], x: number, y: number): number {
  *  It looks inside the outline of the area's pins first (of each group of
  *  them, when some sit apart), since past the outermost ones the land
  *  usually ends, and with `ground` only on the kind of ground those pins
- *  sit on. There it takes the spot nestled
- *  closest among them (the smallest average distance to its three nearest)
- *  that keeps about the area's usual spacing and covers no pin, name or
- *  map lettering. A full area gets the roomiest spot left inside it, where
- *  only name pills may touch; one with no room at all, the nearest spot
- *  outside. Every spot has the area's own pins as its nearest neighbours,
+ *  sit on. There it takes the spot beside the most alike of the listings
+ *  it is most like (`ask.like`) that has room or, without those, the one
+ *  nestled closest among them (the smallest average distance to its three
+ *  nearest), that keeps about the area's usual spacing and covers no pin,
+ *  name or map lettering. A full area gets the roomiest spot left inside
+ *  it, where only name pills may touch; one with no room at all, the
+ *  nearest spot outside. Every spot has the area's own pins as its nearest neighbours,
  *  so none drifts over a border into the area next door. An area with
  *  nothing in it yet gets a spot just under its name. */
 export function suggestSpot(
@@ -295,6 +309,12 @@ export function suggestSpot(
   const isOwn = placed.map(p => p.area === ask.area)
   const k = Math.min(NEIGHBOURS, own.length)
   const home = ground ? homeGround(own, ground) : null
+  // The listings it is most like, among its own area's: the spot sits
+  // beside one of them, the most alike that has room.
+  const like = (ask.like ?? [])
+    .map(id => own.find(p => p.id === id))
+    .filter((p): p is SpotPin => Boolean(p))
+    .slice(0, LIKE_MOST)
 
   /** The best spot within `reach` of the outline (of the pins themselves
    *  when they make no outline). */
@@ -387,10 +407,22 @@ export function suggestSpot(
           // The most room: as far as it can get from its nearest pin.
           score = -d1
         } else {
-          // How nestled it is: the average distance to its area's nearest
-          // pins. A spot closer than the area's usual spacing is cramped:
-          // it has to be that much more nestled to win.
-          score = (o1 + (k > 1 ? o2 : 0) + (k > 2 ? o3 : 0)) / k
+          // How close it sits to the listings it is most like or, without
+          // those, how nestled it is: the average distance to its area's
+          // nearest pins. A spot closer than the area's usual spacing is
+          // cramped: it has to be that much closer to win.
+          if (like.length) {
+            let beside = Infinity
+            let all = 0
+            like.forEach((p, i) => {
+              const d = Math.hypot(p.x - x, p.y - y)
+              beside = Math.min(beside, d + LIKE_STEP * i)
+              all += d
+            })
+            score = beside + (LIKE_ALL * all) / like.length
+          } else {
+            score = (o1 + (k > 1 ? o2 : 0) + (k > 2 ? o3 : 0)) / k
+          }
           score += 1.5 * Math.max(0, spacing - d1)
         }
         if (score >= bestScore) continue

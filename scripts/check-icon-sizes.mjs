@@ -59,7 +59,8 @@ for (const file of walk(SRC_DIR)) {
 
 // <Button icon="…"> draws its icon at 24px when it is icon-only at the small
 // size (the icon-only default), and 16px otherwise (src/components/Button.tsx),
-// so the same rule applies to the file it gets.
+// unless an icon-only button passes iconSize={12}, so the same rule applies to
+// the file it gets.
 // Props may hold arrow functions, so read each opening tag up to the first
 // `>` outside braces.
 for (const file of walk(SRC_DIR)) {
@@ -90,7 +91,13 @@ for (const file of walk(SRC_DIR)) {
     const iconOnly = /\biconPosition="only"/.test(props)
     const sizeProp =
       props.match(/\bsize="(\w+)"/)?.[1] ?? (iconOnly ? 'small' : 'default')
-    const size = iconOnly && sizeProp === 'small' ? 24 : 16
+    const iconSizeProp = props.match(/\biconSize=\{(\d+)\}/)?.[1]
+    const size =
+      iconOnly && iconSizeProp
+        ? Number(iconSizeProp)
+        : iconOnly && sizeProp === 'small'
+          ? 24
+          : 16
     if (size !== nat) {
       mismatches.push(
         `${file}:${line}  ${path} is ${nat}px but this <Button> shows it at ${size}px`

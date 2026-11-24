@@ -35,15 +35,16 @@ type Look =
       icon?: string
       /** Where the icon sits. Default 'trailing'. */
       iconPosition?: 'preceding' | 'trailing'
+      iconSize?: never
       tooltip?: never
       tooltipPosition?: never
     }
   /** Just an icon, in a circle: small (40px, the default here) with a 24px
-      icon, or xs (32px) with a 16px icon. There is no
-      48px icon-only button. Needs an aria-label so screen readers can name
+      icon, or xs (32px) with a 16px icon (or 12px with iconSize). There is
+      no 48px icon-only button. Needs an aria-label so screen readers can name
       it, and shows that label as a <Tooltip> on hover and keyboard focus
       (not while disabled). */
-  | {
+  | ({
       children?: never
       icon: string
       iconPosition: 'only'
@@ -54,15 +55,21 @@ type Look =
       /** Which side the tooltip appears on. Default 'below'. */
       tooltipPosition?: TooltipPosition
       variant?: Variant
-      size?: 'small' | 'xs'
-    }
+    } & (
+      | { size?: 'small'; iconSize?: never }
+      | {
+          size: 'xs'
+          /** 12 swaps in the 12px icon (the x-small × on a filter pill). */
+          iconSize?: 12
+        }
+    ))
 
 export type ButtonProps<C extends ElementType = 'button'> = Look & {
   /** The element or component to render. Default 'button'. */
   as?: C
-  /** Spins the repeat icon (at the button's icon size) in place of the
-      icon while something is on its way (a form sending, say). The button
-      keeps its normal colors. */
+  /** Spins the repeat icon (at the button's base icon size, never at
+      iconSize's 12px) in place of the icon while something is on its way (a
+      form sending, say). The button keeps its normal colors. */
   loading?: boolean
   className?: string
 } & Omit<
@@ -88,6 +95,7 @@ export default function Button<C extends ElementType = 'button'>(
     size: sizeProp,
     icon,
     iconPosition = 'trailing',
+    iconSize: iconSizeProp,
     className = '',
     loading = false,
     tooltip,
@@ -116,17 +124,19 @@ export default function Button<C extends ElementType = 'button'>(
     .filter(Boolean)
     .join(' ')
 
-  // Icon-only buttons: a 24px icon at small (40px), 16px at xs (32px).
-  // Buttons with a label always use 16px.
-  const iconSize = iconOnly && size === 'small' ? 24 : 16
+  // Icon-only buttons: a 24px icon at small (40px), 16px at xs (32px),
+  // unless an xs one's iconSize asks for 12px. Buttons with a label always use 16px.
+  // The spinner keeps the base size, since its files come only at 16 and 24.
+  const baseIconSize = iconOnly && size === 'small' ? 24 : 16
+  const iconSize = iconSizeProp ?? baseIconSize
   const iconEl = loading ? (
     <Icon
       src={
-        iconSize === 24
+        baseIconSize === 24
           ? '/images/icons/repeat-large.svg'
           : '/images/icons/repeat.svg'
       }
-      size={iconSize}
+      size={baseIconSize}
       className={styles.spinner}
     />
   ) : icon ? (

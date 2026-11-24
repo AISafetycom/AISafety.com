@@ -12,7 +12,7 @@
   No next/d3/DOM imports — importable from tests, server and client code.
 */
 
-import { MAP_AREA_BY_CATEGORY } from '@/lib/data/map-areas'
+import { MAP_AREA_BY_CATEGORY, placingCategory } from '@/lib/data/map-areas'
 import { GRID_DECIMALS, inGridBounds, roundGrid } from './map-geometry'
 
 export const MAP_TABLE_ID = 'tblvzbGL9q9dOO9Nc'
@@ -130,7 +130,8 @@ export function rowToEditorRecord(row: AirtableRowLike): EditorRecord {
   const shortName = str(f[FIELD.shortName])
   const category =
     str(f[FIELD.categoryText]) || strArray(f[FIELD.category]).join(', ')
-  const firstCategory = category.split(',')[0]?.trim() || ''
+  const status = str(f[FIELD.status]) || 'Active'
+  const placing = placingCategory(category, status)
   return {
     id: row.id,
     title,
@@ -139,8 +140,8 @@ export function rowToEditorRecord(row: AirtableRowLike): EditorRecord {
     labelName: shortName || title,
     description: str(f[FIELD.description]),
     category,
-    area: (firstCategory && MAP_AREA_BY_CATEGORY[firstCategory]) || null,
-    status: str(f[FIELD.status]) || 'Active',
+    area: (placing && MAP_AREA_BY_CATEGORY[placing]) || null,
+    status,
     scale: str(f[FIELD.scale]),
     mapLogo: attachmentUrl(f[FIELD.logoForMap]),
     x: num(f[FIELD.x]),
