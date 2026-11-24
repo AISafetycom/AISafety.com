@@ -338,6 +338,12 @@ export interface Camp {
   unsubscribes: string
   uniqueopens: string
   verified_unique_opens: string
+  /** 'split' for a subject line A/B test, with its split settings and
+   *  every message (msg is the first). */
+  type?: string
+  split_type?: string
+  split_content?: string
+  msgs?: string[]
 }
 
 export interface Msg {
@@ -395,6 +401,11 @@ export interface AcOptions {
   /** Reading back a campaign the approval just created answers with this
    *  HTTP status (the read back fails). */
   readbackStatus?: number
+  /** How AC stores a new campaign's type and split settings, whatever was
+   *  asked (an A/B test that comes back wrong). */
+  createdSplit?: { type?: string; split_type?: string; split_content?: string }
+  /** v1 message_add refuses. */
+  messageAddFails?: boolean
 }
 
 export function camp(p: Partial<Camp> & { id: string; name: string }): Camp {
@@ -470,6 +481,9 @@ export function makeAC(opts: AcOptions = {}) {
   const segmentRows = new Map<string, string>()
   let nextId = 201
   let nextRow = 9
+  let nextMsgId = 501
+  /** Messages made with v1 message_add (an A/B test's halves). */
+  const addedMsgs: string[] = []
   const creates: string[] = []
   const calls: Call[] = []
   /** What the admin mail script was asked to send. */
@@ -513,7 +527,10 @@ export function makeAC(opts: AcOptions = {}) {
         const list = [...form.keys()]
           .find(k => k.startsWith('p['))!
           .slice(2, -1)
-        const msg = [...form.keys()].find(k => k.startsWith('m['))!.slice(2, -1)
+        const allMsgs = [...form.keys()]
+          .filter(k => k.startsWith('m['))
+          .map(k => k.slice(2, -1))
+        const msg = allMsgs[0]
         let segmentid = '0'
         const asked = form.get('segmentid')
         if (asked && (opts.createdSegment ?? 'row') !== '0') {
@@ -538,12 +555,47 @@ export function makeAC(opts: AcOptions = {}) {
             tracklinks: opts.createdTracking ?? form.get('tracklinks')!,
             tracklinksanalytics: String(form.get('tracklinksanalytics')),
             segmentid,
+            type: opts.createdSplit?.type ?? form.get('type') ?? 'single',
+            ...(form.get('split_type') != null || opts.createdSplit
+              ? {
+                  split_type:
+                    opts.createdSplit?.split_type ??
+                    form.get('split_type') ??
+                    'even',
+                  split_content:
+                    opts.createdSplit?.split_content ??
+                    form.get('split_content') ??
+                    '0',
+                }
+              : {}),
+            msgs: allMsgs,
           })
         )
         creates.push(id)
         if (errSeq.shift())
           return new Response('<html>502 Bad Gateway</html>', { status: 502 })
         return j({ result_code: 1, id })
+      }
+      if (action === 'message_add') {
+        if (opts.messageAddFails)
+          return j({ result_code: 0, result_message: 'temporary failure' })
+        const id = String(nextMsgId++)
+        msgs.set(id, {
+          id,
+          subject: form.get('subject') ?? '',
+          fromemail: form.get('fromemail') ?? '',
+          fromname: form.get('fromname') ?? '',
+          reply2: form.get('reply2') ?? '',
+          // AC decodes &amp; one level when it stores HTML.
+          html: (form.get('html') ?? '').replace(/&amp;/g, '&'),
+          text: form.get('text') ?? '',
+        })
+        addedMsgs.push(id)
+        return j({ result_code: 1, id })
+      }
+      if (action === 'message_delete') {
+        const had = msgs.delete(form.get('id') ?? '')
+        return j({ result_code: had ? 1 : 0 })
       }
       if (action === 'campaign_delete') {
         if (opts.deleteFails)
@@ -642,7 +694,11 @@ export function makeAC(opts: AcOptions = {}) {
     if (m) {
       const c = camps.find(x => x.id === m![1])
       return c
-        ? j({ campaignMessages: [{ messageid: c.msg }] })
+        ? j({
+            campaignMessages: (c.msgs ?? [c.msg]).map(id => ({
+              messageid: id,
+            })),
+          })
         : j({ message: 'nf' }, 404)
     }
     m = /^messages\/(\d+)$/.exec(p)
@@ -735,7 +791,16 @@ export function makeAC(opts: AcOptions = {}) {
     }
     return j({ message: 'unhandled ' + p }, 500)
   }
-  return { fetchMock, creates, camps, calls, msgs, mails, segmentRows }
+  return {
+    fetchMock,
+    creates,
+    camps,
+    calls,
+    msgs,
+    addedMsgs,
+    mails,
+    segmentRows,
+  }
 }
 
 /* ─── The module under test, fresh each time ───────────────────────────── */

@@ -145,6 +145,12 @@ interface Draft {
   editLock: string | null
   /** The inbox preview line (hidden preheader), as Gmail shows it. */
   preview: string | null
+  /** A subject line A/B test: what each half of the list sees in the inbox
+   *  (half A the highlights as the subject, half B as the preview line). */
+  abTest: {
+    a: { subject: string; preview: string }
+    b: { subject: string; preview: string }
+  } | null
   /** The last issue sent on its list ("Week 45, 2026") when the email's
    *  design has changed since: a Send test is worth it. */
   designChangedSince: string | null
@@ -1391,17 +1397,40 @@ export default function NewsletterAdmin({
                 </span>
               </div>
               <p className={styles.draftMeta}>
-                <span>
-                  Subject{' '}
-                  <span className={styles.draftMetaValue}>{draft.subject}</span>
-                </span>
-                {draft.preview && (
-                  <span>
-                    Preview{' '}
-                    <span className={styles.draftMetaValue}>
-                      {draft.preview}
+                {draft.abTest ? (
+                  <>
+                    <span>
+                      A/B test, half A{' '}
+                      <span className={styles.draftMetaValue}>
+                        {draft.abTest.a.subject}
+                      </span>
+                      {draft.abTest.a.preview && ` · ${draft.abTest.a.preview}`}
                     </span>
-                  </span>
+                    <span>
+                      Half B{' '}
+                      <span className={styles.draftMetaValue}>
+                        {draft.abTest.b.subject}
+                      </span>
+                      {draft.abTest.b.preview && ` · ${draft.abTest.b.preview}`}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span>
+                      Subject{' '}
+                      <span className={styles.draftMetaValue}>
+                        {draft.subject}
+                      </span>
+                    </span>
+                    {draft.preview && (
+                      <span>
+                        Preview{' '}
+                        <span className={styles.draftMetaValue}>
+                          {draft.preview}
+                        </span>
+                      </span>
+                    )}
+                  </>
                 )}
                 <span>
                   To{' '}
@@ -2896,12 +2925,32 @@ function ConfirmSend({
           <dd>
             {draft.fromName} &lt;{draft.fromEmail}&gt;
           </dd>
-          <dt>Subject</dt>
-          <dd>{draft.subject}</dd>
-          {draft.preview && (
+          {draft.abTest ? (
+            // A subject line A/B test: each half of the list, at random.
+            (['a', 'b'] as const).map(h => (
+              <Fragment key={h}>
+                <dt>Half {h.toUpperCase()}</dt>
+                <dd>
+                  {draft.abTest![h].subject}
+                  {draft.abTest![h].preview && (
+                    <span className={styles.muted}>
+                      {' '}
+                      · {draft.abTest![h].preview}
+                    </span>
+                  )}
+                </dd>
+              </Fragment>
+            ))
+          ) : (
             <>
-              <dt>Preview</dt>
-              <dd className={styles.muted}>{draft.preview}</dd>
+              <dt>Subject</dt>
+              <dd>{draft.subject}</dd>
+              {draft.preview && (
+                <>
+                  <dt>Preview</dt>
+                  <dd className={styles.muted}>{draft.preview}</dd>
+                </>
+              )}
             </>
           )}
           <dt>To</dt>
