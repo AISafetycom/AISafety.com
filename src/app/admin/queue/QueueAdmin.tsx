@@ -687,6 +687,10 @@ function takeBack(item: QueueItem): 'undo' | 'reopen' | null {
 }
 
 function decidedSince(item: QueueItem, since: number): boolean {
+  // A row the Mac closed (taken out by the daily check) was never decided:
+  // it has no Decided at, which read as today, so it sat in Done today as
+  // "Published" (Bryce, 24 Nov 2026). It has its own line at the top.
+  if (item.status === 'Closed') return false
   const at = decidedAtOf(item)
   const t = at ? Date.parse(at) : NaN
   return !Number.isFinite(t) || t >= since
@@ -2850,7 +2854,12 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
       const held = new Set((items ?? []).map(i => i.id))
       const older: QueueItem[] = []
       for (const item of items ?? []) {
-        if (isOpen(item) || decidedSince(item, dayStart)) continue
+        if (
+          isOpen(item) ||
+          item.status === 'Closed' ||
+          decidedSince(item, dayStart)
+        )
+          continue
         if (hits.has(item.id)) older.push(item)
       }
       for (const item of earlier ?? []) {

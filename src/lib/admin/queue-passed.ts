@@ -48,9 +48,11 @@ export function passedBlock(p: Passed): string {
   return `It ${p.how} on ${passedDay(p.on)}, so it can't go on the site. Reject it to draft their reply.`
 }
 
-/** The daily check closes a row with this Error. */
+/** The daily check closes a row with this Error: "it ended on <day>." once
+ *  the day has gone by, or, for an addition taken out on its last day
+ *  (since 19 Nov 2026), "it ends today, <day>, too late to publish." */
 const TAKEN_OUT_RE =
-  /^Passed: it (ended|started) on (\d{1,2} [A-Z][a-z]+ \d{4})\. Taken out by the daily check/
+  /^Passed: it (?:(ended|started) on|(ends|starts) today,) (\d{1,2} [A-Z][a-z]+ \d{4})[.,] .*?Taken out by the daily check/
 
 export interface TakenOut {
   id: string
@@ -81,8 +83,9 @@ export function takenOutOf(item: {
     id: item.id,
     title: item.title,
     page: item.page,
-    how: m[1] as 'ended' | 'started',
-    day: m[2],
+    // Read days later, "ends today" has ended: the line says it that way.
+    how: (m[1] ?? (m[2] === 'ends' ? 'ended' : 'started')) as TakenOut['how'],
+    day: m[3],
     link:
       item.sourceLink && /^https:\/\//.test(item.sourceLink)
         ? item.sourceLink
