@@ -46,8 +46,6 @@ interface PopoverProps {
   /** Names the popover for screen readers, which then announce it as a
    *  dialog. */
   label?: string
-  /** Extra classes on the panel, e.g. the padding its content wants. */
-  className?: string
   /** In a text box with text in it, the first Escape belongs to the box (a
    *  search box clears), not the popover. */
   // (To focus a field as the popover opens, give it data-autofocus rather
@@ -80,7 +78,6 @@ export default function Popover({
   anchor,
   anchorLines,
   label,
-  className,
   escapeClearsText,
   children,
 }: PopoverProps) {
@@ -202,7 +199,7 @@ export default function Popover({
       ref={ref}
       role={label ? 'dialog' : undefined}
       aria-label={label}
-      className={`${styles.popover} ${floating ? styles.floating : styles.inline} border-plus-fill drop-shadow-extra-dark${className ? ` ${className}` : ''}`}
+      className={`${styles.popover} ${floating ? styles.floating : styles.inline} border-plus-fill drop-shadow-extra-dark`}
       style={{ left: pos.left, top: pos.top }}
     >
       {children}

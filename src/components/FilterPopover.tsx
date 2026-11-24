@@ -38,7 +38,7 @@ export default function FilterPopover({
   const close = useCallback(() => setOpen(false), [])
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div className={styles.wrapper}>
       <button
         ref={buttonRef}
         type="button"
@@ -90,10 +90,9 @@ export default function FilterPopover({
         open={open}
         onClose={close}
         triggerRef={buttonRef}
-        className={styles.panel}
         escapeClearsText
       >
-        {children}
+        <div className={styles.panel}>{children}</div>
       </Popover>
     </div>
   )

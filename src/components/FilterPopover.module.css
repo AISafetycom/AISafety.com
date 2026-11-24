@@ -56,7 +56,13 @@
   transform: rotate(180deg);
 }
 
-/* The <Popover>'s padding around the filter's options. */
+/* Holds the pill and its <Popover>, which hangs under it and the × slot
+   placed over it. */
+.wrapper {
+  position: relative;
+}
+
+/* The padding around the filter's options, inside the <Popover>. */
 .panel {
   padding: 20px;
 }

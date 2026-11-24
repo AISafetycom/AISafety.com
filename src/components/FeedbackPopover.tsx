@@ -140,18 +140,19 @@ export default function FeedbackPopover() {
       anchor={opened.anchor}
       anchorLines={opened.anchorLines}
       label={correction ? 'Suggest a correction' : 'Give feedback'}
-      className="padding-top-24px padding-bottom-24px padding-left-24px padding-right-24px"
     >
-      <FeedbackForm
-        key={opened.n}
-        opened={opened}
-        onDraft={draft => saveDraft(key, draft)}
-        onSent={() => saveDraft(key, null)}
-        onClose={() => {
-          close()
-          triggerRef.current?.focus()
-        }}
-      />
+      <div className="padding-top-24px padding-bottom-24px padding-left-24px padding-right-24px">
+        <FeedbackForm
+          key={opened.n}
+          opened={opened}
+          onDraft={draft => saveDraft(key, draft)}
+          onSent={() => saveDraft(key, null)}
+          onClose={() => {
+            close()
+            triggerRef.current?.focus()
+          }}
+        />
+      </div>
     </Popover>
   )
 }
@@ -228,7 +229,7 @@ function FeedbackForm({
 
   const header = (
     <div className="flex items-center justify-between gap-16px">
-      <p className="paragraph-small-bold">{title}</p>
+      <h2 className="paragraph-small-bold">{title}</h2>
       {/* An X plainly means close, so no tooltip (Melissa, 23 November
           2026). */}
       <Button
@@ -272,14 +273,18 @@ function FeedbackForm({
         {header}
 
         {opened.quote && (
-          <div className={`padding-left-12px ${styles.quote}`}>
-            <p className="paragraph-xs color-teal-grey-300">
-              &ldquo;{opened.quote}&rdquo;
-            </p>
+          <figure className={`padding-left-12px ${styles.quote}`}>
+            <blockquote>
+              <p className="paragraph-xs color-teal-grey-300">
+                &ldquo;{opened.quote}&rdquo;
+              </p>
+            </blockquote>
             {opened.listing && (
-              <p className="paragraph-xs">{opened.listing.name}</p>
+              <figcaption className="paragraph-xs">
+                {opened.listing.name}
+              </figcaption>
             )}
-          </div>
+          </figure>
         )}
 
         {askResource && (

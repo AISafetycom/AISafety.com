@@ -1,7 +1,8 @@
 /* <Popover> — the site's popover panel. Fill and border come from the global
    .border-plus-fill class, the shadow from .drop-shadow-extra-dark. Where it
    sits (left, and top when floating) is set in Popover.tsx. The padding
-   belongs to what it holds, so each use sets its own. */
+   belongs to what it holds: each use wraps its content in its own padded
+   element. */
 .popover {
   position: absolute;
   width: max-content;

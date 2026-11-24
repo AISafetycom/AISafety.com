@@ -33,9 +33,9 @@ export default function PopoverDemo() {
         label="Example popover"
       >
         <div className="padding-top-24px padding-bottom-24px padding-left-24px padding-right-24px">
-          <p className="paragraph-small-bold padding-bottom-8px">
+          <h2 className="paragraph-small-bold padding-bottom-8px">
             Popover title
-          </p>
+          </h2>
           <p className="paragraph-small color-teal-grey-300">
             Any content. Escape or a click outside closes it.
           </p>

@@ -128,9 +128,7 @@ export default function TextField(props: TextFieldProps) {
   }
 
   return (
-    <div
-      className={`flex flex-col gap-8px ${styles.field}${className ? ` ${className}` : ''}`}
-    >
+    <div className={`flex flex-col gap-8px${className ? ` ${className}` : ''}`}>
       <label className="paragraph-small color-teal-grey-300" htmlFor={id}>
         {label}
         {optional && (

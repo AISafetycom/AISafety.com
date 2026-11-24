@@ -42,7 +42,6 @@ function Text({ children }: { children: string }) {
   )
 }
 
-/** Textareas grow with their content instead of scrolling internally. */
 export default function DetailsForm() {
   const [values, setValues] = useState(EMPTY)
   const [busy, setBusy] = useState(false)

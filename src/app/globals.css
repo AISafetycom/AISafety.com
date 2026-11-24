@@ -175,11 +175,10 @@ body {
 }
 
 /* Text a visitor selected for the correction or feedback form stays marked
-   while the form is open (FeedbackPopover), in the browser's own selection
-   color at the strength Chrome paints a selection with, so it looks as it
-   did while selected. */
+   while the form is open (FeedbackPopover), in the highlight teal at the
+   strength of the alt border, so the white text on it stays easy to read. */
 ::highlight(feedback-quote) {
-  background-color: color-mix(in srgb, Highlight 60%, transparent);
+  background-color: color-mix(in srgb, var(--teal-300) 30%, transparent);
 }
 
 /* Sub-pages (every route except the landing page) shift the top background up
@@ -1017,8 +1016,8 @@ label {
      by side line up. */
   height: 48px;
   padding: 0 16px;
-  background-color: var(--teal-grey-900);
-  border: 1px solid var(--teal-grey-600);
+  background-color: var(--teal-900);
+  border: 1px solid var(--teal-800);
   border-radius: 16px;
   color: var(--white);
   /* Type inherits the default body text style. The reset's `font: inherit`
@@ -1027,8 +1026,16 @@ label {
 }
 
 .text-field:focus {
-  border-color: var(--teal-grey-400);
+  border-color: var(--teal-300);
   outline: none;
+}
+
+/* A box with an error (aria-invalid, as <TextField> and the /newsletter
+   email box set it): a red border, from the Figma text input set. The
+   message under it is .color-red-300. After :focus, so it stays red while
+   the box is being fixed. */
+.text-field[aria-invalid='true'] {
+  border-color: var(--red-300);
 }
 
 /* Native <select> arrows sit flush against the edge and ignore padding, so
