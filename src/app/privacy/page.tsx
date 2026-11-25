@@ -46,14 +46,15 @@ export default function PrivacyPage() {
           <p className="color-teal-grey-300 padding-bottom-40px">
             This site doesn&apos;t set cookies for visitors. The only cookie we
             use anywhere is the one our own team gets when signing in to the
-            site&apos;s admin area. The site does keep two small things in your
-            browser&apos;s own storage: your chatbot conversation, so it
-            isn&apos;t lost as you move between pages (it&apos;s cleared when
-            you close the tab), and the anonymous analytics ID described below,
-            which you can switch off. Nothing in your browser is used for
-            advertising or to track you across other sites – the things cookie
-            banners exist to ask consent for – which is why there&apos;s no
-            banner.
+            site&apos;s admin area. The site does keep three small things in
+            your browser&apos;s own storage: your chatbot conversation, so it
+            isn&apos;t lost as you move between pages; a note of whether your
+            visit is one of the recorded sample described below (both are
+            cleared when you close the tab); and the anonymous analytics ID
+            described below, which you can switch off. Nothing in your browser
+            is used for advertising or to track you across other sites – the
+            things cookie banners exist to ask consent for – which is why
+            there&apos;s no banner.
           </p>
 
           <h3 className="padding-bottom-16px">Analytics</h3>
