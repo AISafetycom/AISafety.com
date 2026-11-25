@@ -21,9 +21,90 @@ interface RecEvent {
 
 /** The parts of rrweb-player this page uses. */
 interface PlayerLike {
+  /** Leaves it playing or paused as it was, unless `play` says. */
   goto: (timeOffset: number, play?: boolean) => void
+  toggle: () => void
+  setSpeed: (speed: number) => void
+  toggleFullscreen: () => void
+  getMetaData: () => { totalTime: number }
+  getReplayer: () => {
+    getCurrentTime: () => number
+    config: { speed: number }
+    service: { state: { value: string } }
+  }
   addEventListener: (event: string, handler: (p: unknown) => unknown) => void
   $destroy: () => void
+}
+
+// The player's speed buttons; < and > step through them.
+const SPEEDS = [0.5, 1, 2, 4, 8]
+// One frame at 30 a second, for , and . while paused (as on YouTube).
+const FRAME_MS = 1000 / 30
+
+/** YouTube's keyboard shortcuts, on the replay. Returns whether the key was
+ *  one of them. */
+function handleKey(p: PlayerLike, key: string): boolean {
+  const replayer = p.getReplayer()
+  const now = replayer.getCurrentTime()
+  const total = p.getMetaData().totalTime
+  const seek = (ms: number) => p.goto(Math.max(0, Math.min(total, ms)))
+  const paused = replayer.service.state.value !== 'playing'
+  switch (key) {
+    case ' ':
+    case 'k':
+    case 'K':
+      p.toggle()
+      return true
+    case 'j':
+    case 'J':
+      seek(now - 10_000)
+      return true
+    case 'l':
+    case 'L':
+      seek(now + 10_000)
+      return true
+    case 'ArrowLeft':
+      seek(now - 5_000)
+      return true
+    case 'ArrowRight':
+      seek(now + 5_000)
+      return true
+    case 'Home':
+      seek(0)
+      return true
+    case 'End':
+      seek(total)
+      return true
+    case ',':
+    case '.':
+      if (paused) seek(now + (key === '.' ? FRAME_MS : -FRAME_MS))
+      return true
+    case '<':
+    case '>': {
+      const i = SPEEDS.indexOf(replayer.config.speed)
+      const next =
+        SPEEDS[
+          Math.max(
+            0,
+            Math.min(
+              SPEEDS.length - 1,
+              (i < 0 ? 1 : i) + (key === '>' ? 1 : -1)
+            )
+          )
+        ]
+      p.setSpeed(next)
+      return true
+    }
+    case 'f':
+    case 'F':
+      p.toggleFullscreen()
+      return true
+  }
+  if (/^[0-9]$/.test(key)) {
+    seek((total * Number(key)) / 10)
+    return true
+  }
+  return false
 }
 
 // rrweb's FullSnapshot event: a replay can't begin without one.
@@ -101,11 +182,15 @@ export default function ReplayPlayer({
           width,
           height: Math.round(width * 0.6),
           autoPlay: startAt == null,
+          speedOption: SPEEDS,
           skipInactive: true,
           showController: true,
         },
       }) as unknown as PlayerLike
       player.current = made
+      // The controls start on the first speed option (0.5x) whatever the
+      // replay's own speed; the player doesn't pass its `speed` on.
+      made.setSpeed(1)
       const t0 = events[0].timestamp
       made.addEventListener('ui-update-current-time', p =>
         setNow((p as { payload: number }).payload)
@@ -124,6 +209,30 @@ export default function ReplayPlayer({
       player.current = null
     }
   }, [id, chunkCount, offset, startAt])
+
+  // Keyboard shortcuts, anywhere on the page but a text box.
+  useEffect(() => {
+    if (status !== 'ready') return
+    const onKey = (e: KeyboardEvent) => {
+      const p = player.current
+      // The player's own timeline already moved for this key.
+      if (!p || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return
+      const t = e.target as HTMLElement | null
+      if (
+        t?.isContentEditable ||
+        /^(INPUT|TEXTAREA|SELECT)$/.test(t?.tagName ?? '')
+      )
+        return
+      if (!handleKey(p, e.key)) return
+      e.preventDefault()
+      // A focused button (play, a speed, a line in the list) would also
+      // take the Space press.
+      if (document.activeElement instanceof HTMLButtonElement)
+        document.activeElement.blur()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [status])
 
   const at = (m: Moment) =>
     first == null ? 0 : Math.max(0, m.at - offset - first)
@@ -146,6 +255,14 @@ export default function ReplayPlayer({
           </div>
         )}
         <div ref={box} className={styles.replayFrame} />
+        {status === 'ready' && (
+          <p className={styles.caption}>
+            Keys, as on YouTube: Space or K play and pause, J and L go 10
+            seconds back or forward, ← and → 5 seconds, 0 to 9 jump through the
+            visit, Home and End go to the start and end, &lt; and &gt; change
+            the speed, , and . step one frame while paused, F is full screen.
+          </p>
+        )}
         {missing > 0 && status === 'ready' && (
           <p className={styles.caption}>
             {missing} of {chunkCount} parts couldn&apos;t be loaded, so the
