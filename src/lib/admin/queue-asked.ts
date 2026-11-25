@@ -17,13 +17,31 @@
     addition again with it.
   - No answer after WAIT_DAYS: back in its place, marked "No answer since",
     even if the Mac is off (the page works the date out itself).
+
+  Fable's review with their answer goes at the foot of the chat, and the
+  review the item showed before it stays at the head of the side panel
+  (Bryce, 25 Nov 2026, on Fangcun AI: "Fable's new review after they
+  replied should come at the bottom of the chat. It shouldn't go to the
+  top. The original review should be at the top"). The review overwrites
+  the row's verdict and reasons, so the Mac keeps both on the answer as
+  `review: {before, after}`, each {verdict, reasons, chips?}.
 */
+
+import type { Verdict } from './queue'
 
 /** How long an item waits for an answer before it comes back anyway. The
  *  Mac's waiting.py has the same number. */
 export const WAIT_DAYS = 14
 
 const DAY_MS = 24 * 60 * 60 * 1000
+
+/** A verdict and its reasons as the item showed them at one point. */
+export interface ShownReview {
+  verdict: Verdict
+  reasons: string[]
+  /** The reject buttons with it; null when not kept. */
+  chips: string[] | null
+}
 
 export interface Answer {
   at: string | null
@@ -34,6 +52,11 @@ export interface Answer {
   link: string | null
   /** Fable has reviewed the listing again with this answer. */
   reviewed: boolean
+  /** When it did (null before then, or when the time was not kept). */
+  reviewedAt: string | null
+  /** The review the item showed before that one, and that one itself;
+   *  null when the Mac did not keep them. */
+  review: { before: ShownReview; after: ShownReview } | null
 }
 
 export interface Asked {
@@ -72,6 +95,32 @@ function gmailLink(v: unknown): string | null {
   return s && s.startsWith('https://mail.google.com/') ? s : null
 }
 
+const VERDICTS: readonly Verdict[] = ['Publish', "Don't publish", 'Unsure']
+
+function textList(v: unknown): string[] | null {
+  if (!Array.isArray(v)) return null
+  const out = v.map(text)
+  return out.every((s): s is string => s !== null) ? out : null
+}
+
+/** One side of `review`, or null when malformed. */
+function shownReviewOf(v: unknown): ShownReview | null {
+  if (!isRecord(v)) return null
+  const verdict = VERDICTS.find(x => x === v.verdict)
+  const reasons = textList(v.reasons)
+  if (!verdict || !reasons?.length) return null
+  return { verdict, reasons, chips: textList(v.chips) }
+}
+
+function reviewPairOf(
+  v: unknown
+): { before: ShownReview; after: ShownReview } | null {
+  if (!isRecord(v)) return null
+  const before = shownReviewOf(v.before)
+  const after = shownReviewOf(v.after)
+  return before && after ? { before, after } : null
+}
+
 /** Pure: the reply block's `asked`, or null when absent or malformed. */
 export function askedOf(v: unknown): Asked | null {
   if (!isRecord(v)) return null
@@ -92,6 +141,8 @@ export function askedOf(v: unknown): Asked | null {
           text: text(a.text) ?? '',
           link: gmailLink(a.link),
           reviewed: Boolean(text(a.reviewed)),
+          reviewedAt: instant(a.reviewed),
+          review: reviewPairOf(a.review),
         }
       : null,
   }
@@ -142,6 +193,30 @@ export function reviewStage(
   if (answer.reviewed) return 'done'
   const at = answer.at ? Date.parse(answer.at) : NaN
   return Number.isFinite(at) && now - at < REVIEWING_MS ? 'running' : null
+}
+
+/** Fable's review with their answer, and the one the item showed before. */
+export interface AnsweredReview {
+  /** When Fable reviewed it again (null when the time was not kept). */
+  at: string | null
+  /** Who answered. */
+  who: string | null
+  before: ShownReview
+  after: ShownReview
+}
+
+/** Pure: the review with their answer, which goes at the foot of the chat,
+ *  and the one before it, which stays at the head of the side panel; null
+ *  until Fable has reviewed the addition again and the Mac kept both. It
+ *  stays once the item is decided or he has replied, so the panel keeps
+ *  its order. */
+export function answeredReview(item: {
+  type: string
+  asked: Asked | null
+}): AnsweredReview | null {
+  const a = item.asked?.answer
+  if (!a?.reviewed || !a.review || item.type !== 'Add') return null
+  return { at: a.reviewedAt, who: a.who, ...a.review }
 }
 
 /** Pure: "16 Nov" for a row tag, in the viewer's own time zone. */
