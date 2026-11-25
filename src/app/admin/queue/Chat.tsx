@@ -1,6 +1,13 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import {
   fableChangesOf,
   wentOut,
@@ -13,6 +20,7 @@ import {
   verdictWords,
   type FlagUpdate,
 } from '@/lib/admin/queue-flag'
+import { answeredReview, type ShownReview } from '@/lib/admin/queue-asked'
 import Icon from '@/components/Icon'
 import type { AgentInfo, QueueItem } from '@/lib/admin/queue'
 import { reviewNewerThanChat } from '@/lib/admin/queue-reopen'
@@ -1428,7 +1436,24 @@ export default function Chat({
   }, [])
 
   const thread = messages ?? []
-  const hasThread = thread.length > 0 || live !== null
+  // Fable's review with their answer, after the messages that came before
+  // it (at the end when its time was not kept).
+  const answered = answeredReview(item)
+  const answeredAt = Date.parse(answered?.at ?? '')
+  const firstAfter = Number.isFinite(answeredAt)
+    ? thread.findIndex(m => Date.parse(m.at) > answeredAt)
+    : -1
+  const cut = firstAfter < 0 ? thread.length : firstAfter
+  const answeredCard = answered && (
+    <AnsweredReviewCard
+      key="answered"
+      review={answered.after}
+      item={item}
+      decided={decided}
+      onFlag={onFlag}
+    />
+  )
+  const hasThread = thread.length > 0 || live !== null || answered !== null
   // Something in the box to send: while Fable answers, the round button is
   // then Send rather than Stop.
   const hasDraft = text.trim() !== '' || quote !== null || files.length > 0
@@ -1452,46 +1477,50 @@ export default function Chat({
     >
       {hasThread && (
         <div className={styles.chatThread}>
-          {thread.map((m, i) =>
-            m.role === 'you' ? (
-              <div key={i} className={styles.chatMsg}>
-                <span className={styles.chatWho}>You</span>
-                <YouText
-                  text={m.text ?? ''}
-                  attachments={m.attachments}
-                  fetchFile={fetchFile}
-                />
-              </div>
-            ) : m.role === 'error' ? (
-              <p key={i} className={styles.chatError}>
-                {m.text}
-              </p>
-            ) : (
-              <div key={i} className={styles.chatMsg}>
-                <span className={styles.chatWho}>Fable</span>
-                {m.note && <p className={styles.chatTool}>{m.note}</p>}
-                <Parts
-                  parts={m.parts ?? []}
-                  edits={edits}
-                  reply={reply}
-                  decline={decline}
-                  canEditField={canEditField}
-                  decided={decided}
-                  acts={actsFor(m)}
-                  cap={cap}
-                />
-                {m.flag !== undefined && (
-                  <FlagCard
-                    raw={m.flag}
-                    item={item}
-                    decided={decided}
-                    onFlag={onFlag}
-                    auto={autoFlag?.at === m.at ? autoFlag : null}
+          {thread.map((m, i) => (
+            <Fragment key={i}>
+              {i === cut && answeredCard}
+              {m.role === 'you' ? (
+                <div key={i} className={styles.chatMsg}>
+                  <span className={styles.chatWho}>You</span>
+                  <YouText
+                    text={m.text ?? ''}
+                    attachments={m.attachments}
+                    fetchFile={fetchFile}
                   />
-                )}
-              </div>
-            )
-          )}
+                </div>
+              ) : m.role === 'error' ? (
+                <p key={i} className={styles.chatError}>
+                  {m.text}
+                </p>
+              ) : (
+                <div key={i} className={styles.chatMsg}>
+                  <span className={styles.chatWho}>Fable</span>
+                  {m.note && <p className={styles.chatTool}>{m.note}</p>}
+                  <Parts
+                    parts={m.parts ?? []}
+                    edits={edits}
+                    reply={reply}
+                    decline={decline}
+                    canEditField={canEditField}
+                    decided={decided}
+                    acts={actsFor(m)}
+                    cap={cap}
+                  />
+                  {m.flag !== undefined && (
+                    <FlagCard
+                      raw={m.flag}
+                      item={item}
+                      decided={decided}
+                      onFlag={onFlag}
+                      auto={autoFlag?.at === m.at ? autoFlag : null}
+                    />
+                  )}
+                </div>
+              )}
+            </Fragment>
+          ))}
+          {cut === thread.length && answeredCard}
           {live !== null && (
             <div className={styles.chatMsg}>
               <span className={styles.chatWho}>Fable</span>
@@ -2409,6 +2438,79 @@ function FlagCard({
         />
       )}
       {error && <p className={styles.chatError}>{error}</p>}
+    </div>
+  )
+}
+
+/** Fable's review with their answer to his question (queue-asked.ts
+ *  answeredReview), in the chat where it happened, after the messages that
+ *  came before it; the review the item showed before stays at the panel's
+ *  head (Bryce, 25 Nov 2026, Fangcun AI: "Fable's new review after they
+ *  replied should come at the bottom of the chat"). Laid out like a
+ *  verdict the chat sets; when something later replaced it, Update verdict
+ *  puts it back on. */
+export function AnsweredReviewCard({
+  review,
+  item,
+  decided,
+  onFlag,
+}: {
+  review: ShownReview
+  item: QueueItem
+  decided: Decided | null
+  onFlag: (body: { flag: FlagUpdate }) => Promise<string | null>
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const flag: FlagUpdate = {
+    verdict: review.verdict,
+    reasons: review.reasons,
+    chips: review.chips,
+    title: null,
+    changes: null,
+  }
+  const shown = flagShown(item, flag)
+  const apply = async () => {
+    setBusy(true)
+    setError(null)
+    const failed = await onFlag({ flag })
+    setBusy(false)
+    if (failed) setError(failed)
+  }
+  return (
+    <div className={styles.chatMsg}>
+      <span className={styles.chatWho}>Fable</span>
+      <div className={styles.chatEdits}>
+        <span className={styles.chatWho}>Reviewed again with their answer</span>
+        <div className={styles.chatEditRow}>
+          <span className={styles.label}>Verdict</span>
+          <span>{verdictWords(review.verdict)}</span>
+        </div>
+        <div className={styles.chatEditRow}>
+          <span className={styles.label}>Reasons</span>
+          <ul className={styles.reasons}>
+            {review.reasons.map((r, i) => (
+              <li key={i}>{r}</li>
+            ))}
+          </ul>
+        </div>
+        {decided ? (
+          <DecidedFoot
+            done={shown}
+            text={shown ? 'Decided on this verdict' : 'Not used'}
+          />
+        ) : (
+          <CardFoot
+            applied={shown}
+            appliedText="The item shows this verdict"
+            offText="Not the verdict on the item"
+            waitText="Updating the verdict…"
+            applyText="Update verdict"
+            onApply={busy ? undefined : () => void apply()}
+          />
+        )}
+        {error && <p className={styles.chatError}>{error}</p>}
+      </div>
     </div>
   )
 }
