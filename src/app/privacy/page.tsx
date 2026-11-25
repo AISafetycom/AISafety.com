@@ -69,9 +69,14 @@ export default function PrivacyPage() {
             other sites.
           </p>
           <p className="color-teal-grey-300 padding-bottom-24px">
+            On a few pages, we also record a sample of visits – how the page
+            changes as you scroll, move the mouse, and click – to see where the
+            site is confusing. Anything you type is hidden in these recordings.
+          </p>
+          <p className="color-teal-grey-300 padding-bottom-24px">
             If you&apos;d rather not be counted, you can switch analytics off
-            for this browser. This also stops your chatbot conversations from
-            being saved.
+            for this browser. This also stops your visits from being recorded
+            and your chatbot conversations from being saved.
           </p>
           <AnalyticsOptOut />
 
@@ -146,7 +151,7 @@ export default function PrivacyPage() {
           </p>
 
           <p className="paragraph-small color-teal-grey-300 padding-bottom-80px">
-            Last updated: 17 November 2026
+            Last updated: 25 November 2026
           </p>
         </div>
       </div>

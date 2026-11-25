@@ -345,7 +345,11 @@ export default function SearchModal({
             <div
               className={`${styles.empty} padding-top-32px padding-bottom-32px padding-left-24px padding-right-24px`}
             >
-              <p className="paragraph-small color-teal-grey-300">
+              {/* data-rr-mask: hidden in session recordings. */}
+              <p
+                className="paragraph-small color-teal-grey-300"
+                data-rr-mask=""
+              >
                 {activeType
                   ? `No ${TYPE_LABEL[activeType].toLowerCase()} match “${query}”.`
                   : `No results for “${query}”.`}
