@@ -45,12 +45,12 @@ These are real problems, they're just not what this site covers:
 - AI welfare, digital minds, AI consciousness, AI and animals.
 - "Better futures" work, meaning how well the future goes if humanity survives, even when some sessions cover x-risk. S-risk and gradual disempowerment still count.
 - General AI policy, AI diplomacy, and great-power competition or export controls framed as geopolitics.
-- The economics of AI, and benchmarks, leaderboards, or evaluations that only measure or push what AI can do. More of these makes AI more capable, whoever runs them.
+- The economics of AI, and benchmarks, leaderboards, or evaluations that only measure or push what AI can do.
 - Enterprise AI security, AI for cybersecurity, adversarial ML without a safety motivation, and general tech, startup, or venture activity.
 - Biosecurity where the interventions are more bio than AI.
 - Anything that isn't particularly useful for a reader to be aware of.
 
-Advancing capabilities counts against a listing. The map shows the major AI companies under their own capabilities category so readers can see the whole field, but capabilities work doesn't earn a new listing: an organization that trains and ships frontier-style models is usually not a fit, even with a safety angle, and building, operating, or supplying compute is capabilities work.
+Advancing capabilities counts against a listing. The map shows the major AI companies under their own capabilities category so readers can see the whole field, but capabilities work doesn't earn a new listing: an organization that trains and ships frontier-style models is usually not a fit, even with a safety angle, and building, operating, or supplying compute is capabilities work. So are benchmarks that only measure what AI can do: the more of them there are, the faster capabilities research moves.
 
 ## What's the bar for the page I submitted to?
 
