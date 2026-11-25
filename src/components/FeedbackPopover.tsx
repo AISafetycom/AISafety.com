@@ -386,8 +386,8 @@ function FeedbackForm({
             noSuggestions={
               index
                 ? resource
-                  ? `No listing on ${resource} has that name.`
-                  : 'No listing on the site has that name.'
+                  ? `No listing on ${resource} matches.`
+                  : 'No listing on the site matches.'
                 : undefined
             }
             value={draft.listingName}

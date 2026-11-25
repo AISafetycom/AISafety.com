@@ -61,6 +61,18 @@ describe('pickableListings', () => {
       ['recTrain0000000001']
     )
   })
+  it('knows a recurring program in an older copy of the index by its details', () => {
+    const old = [
+      entry({
+        type: 'training',
+        title: 'AISB',
+        id: 'recTrain0000000003',
+        category: 'Recurring · Bootcamp · London',
+      }),
+    ]
+    expect(pickableListings(old, 'Recurring training programs')).toHaveLength(1)
+    expect(pickableListings(old, 'Training programs')).toHaveLength(0)
+  })
 })
 
 describe('findListing', () => {

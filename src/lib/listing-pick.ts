@@ -28,9 +28,13 @@ const RESOURCE_FOR_TYPE: Partial<Record<SearchType, string>> = {
 }
 
 /** The Resource choice a listing falls under: a training program from the
- *  recurring list has a choice of its own. */
+ *  recurring list has a choice of its own. A browser can hold a copy of the
+ *  index from before entries were marked recurring (it keeps one for an
+ *  hour), so a recurring program is also known by its details, which start
+ *  with "Recurring" (getTrainingEntries in search-index.ts). */
 function resourceOf(e: SearchEntry): string | undefined {
-  if (e.type === 'training' && e.recurring) return 'Recurring training programs'
+  const recurring = e.recurring ?? e.category.startsWith('Recurring')
+  if (e.type === 'training' && recurring) return 'Recurring training programs'
   return RESOURCE_FOR_TYPE[e.type]
 }
 
