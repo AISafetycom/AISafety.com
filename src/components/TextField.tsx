@@ -54,7 +54,8 @@ function grow(el: HTMLTextAreaElement) {
   el.style.height = `${el.scrollHeight + 2}px`
 }
 
-// The field's own props; everything else goes on the box.
+// The field's own props; everything else goes on the box. A dropdown's
+// placeholder is its first, empty choice; a text box's is the box's own.
 const OWN_PROPS = [
   'as',
   'label',
@@ -62,12 +63,12 @@ const OWN_PROPS = [
   'error',
   'className',
   'options',
-  'placeholder',
 ] as const
 
 function boxAttributes(props: TextFieldProps): Record<string, unknown> {
   const rest: Record<string, unknown> = { ...props }
   for (const key of OWN_PROPS) delete rest[key]
+  if (props.as === 'select') delete rest.placeholder
   return rest
 }
 
@@ -122,7 +123,7 @@ export default function TextField(props: TextFieldProps) {
       <input
         type="text"
         {...(attributes as InputHTMLAttributes<HTMLInputElement>)}
-        className="text-field"
+        className={`text-field ${styles.input}`}
       />
     )
   }

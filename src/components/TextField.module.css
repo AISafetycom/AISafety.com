@@ -11,3 +11,11 @@
   resize: vertical;
   overflow-y: hidden;
 }
+
+/* A text box with suggestions (a list attribute): Chrome draws its own arrow
+   at the right, unlike anything else on the site. The suggestions still show
+   as the visitor types. Chrome's own style for the arrow wins without
+   !important. */
+.input::-webkit-calendar-picker-indicator {
+  display: none !important;
+}

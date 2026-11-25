@@ -30,6 +30,9 @@ export type SearchType =
 
 export interface SearchEntry {
   type: SearchType
+  /** The listing's Airtable record id, which the corrections form sends
+   *  with a listing picked by name. Pages and jobs have none. */
+  id?: string
   title: string
   subtitle: string
   description: string
@@ -256,6 +259,7 @@ async function getEventEntries(): Promise<SearchEntry[]> {
           : e.mode
     return {
       type: 'event' as const,
+      id: e.id,
       title: e.name,
       subtitle: e.host,
       description: e.description,
@@ -304,6 +308,7 @@ async function getTrainingEntries(): Promise<SearchEntry[]> {
         : ''
     entries.push({
       type: 'training',
+      id: p.id,
       title: p.name,
       // Host isn't shown on /training and isn't maintained, so don't
       // display or match on it.
@@ -327,6 +332,7 @@ async function getTrainingEntries(): Promise<SearchEntry[]> {
     const url = realUrl(p.url)
     entries.push({
       type: 'training',
+      id: p.id,
       title: p.name,
       subtitle: '',
       description: p.description,
@@ -346,6 +352,7 @@ async function getAdvisorEntries(): Promise<SearchEntry[]> {
   const advisors = await getAdvisors()
   return advisors.map(a => ({
     type: 'advisor' as const,
+    id: a.id,
     title: a.name,
     subtitle: '',
     description: a.description,
@@ -364,6 +371,7 @@ async function getCommunityEntries(): Promise<SearchEntry[]> {
   const communities = await getCommunities()
   return communities.map(c => ({
     type: 'community' as const,
+    id: c.id,
     title: c.name,
     subtitle: '',
     description: c.description,
@@ -380,6 +388,7 @@ async function getCourseEntries(): Promise<SearchEntry[]> {
   const courses = await getCourses()
   return courses.map(c => ({
     type: 'course' as const,
+    id: c.id,
     title: c.name,
     // The card's "By <organizer>" line.
     subtitle: addedName(c.organizer, c.name),
@@ -394,6 +403,7 @@ async function getFounderEntries(): Promise<SearchEntry[]> {
   const founders = await getFounderResources()
   return founders.map(f => ({
     type: 'founder' as const,
+    id: f.id,
     title: f.name,
     subtitle: '',
     description: f.description,
@@ -407,6 +417,7 @@ async function getFunderEntries(): Promise<SearchEntry[]> {
   const funders = await getFunders()
   return funders.map(f => ({
     type: 'funder' as const,
+    id: f.id,
     title: f.name,
     subtitle: '',
     description: f.description,
@@ -470,6 +481,7 @@ async function getMapEntries(): Promise<SearchEntry[]> {
     if (/^https?:\/\/(www\.)?aisafety\.com/i.test(o.link)) continue
     entries.push({
       type: 'map',
+      id: o.id,
       title: o.title,
       // The short name on the map pin.
       subtitle: addedName(o.shortName, o.title),
@@ -486,6 +498,7 @@ async function getMediaEntries(): Promise<SearchEntry[]> {
   const media = await getMediaChannels()
   return media.map(m => ({
     type: 'media' as const,
+    id: m.id,
     title: m.name,
     subtitle: '',
     description: m.description,

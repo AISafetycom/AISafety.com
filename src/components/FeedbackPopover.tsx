@@ -1,12 +1,14 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import Button from '@/components/Button'
 import Popover, { pageBox } from '@/components/Popover'
 import TextField from '@/components/TextField'
 import { trackFeedbackForm, trackedPath } from '@/lib/analytics'
+import type { SearchEntry } from '@/lib/data/search-index'
 import { FEEDBACK_FORM_EVENT, type FeedbackRequest } from '@/lib/feedback-form'
+import { findListing, pickableListings } from '@/lib/listing-pick'
 import { quoteForForm, resourceForPath } from '@/lib/selection-feedback'
 import { RESOURCE_CHOICES } from '@/lib/site-feedback'
 import styles from './FeedbackPopover.module.css'
@@ -50,6 +52,31 @@ interface Opened extends FeedbackRequest {
   draft: Draft
   /** Counts openings, so each one starts a fresh form. */
   n: number
+}
+
+// The listings "Which listing?" offers: the site search's index, loaded once
+// the first time the box is shown and kept for the page's life. null when it
+// couldn't load: then any typed name goes, as before.
+let listingIndex: Promise<SearchEntry[] | null> | null = null
+function loadListingIndex(): Promise<SearchEntry[] | null> {
+  listingIndex ??= fetch('/api/search-index', { credentials: 'omit' })
+    .then(res => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      return res.json() as Promise<unknown>
+    })
+    .then(body => {
+      if (!Array.isArray(body)) throw new Error('not an array')
+      return body as SearchEntry[]
+    })
+    .catch(err => {
+      console.warn(
+        'Corrections form: the listings to pick from did not load',
+        err
+      )
+      listingIndex = null
+      return null
+    })
+  return listingIndex
 }
 
 // The name the selected text is marked under while the form is open.
@@ -177,6 +204,24 @@ function FeedbackForm({
   // resource page.
   const askListing = correction && !opened.listing
   const askResource = askListing && !opened.resource
+  // "Which listing?" offers the site's listings as the name is typed (the
+  // browser's own suggestion list, as the page dropdown is its own), on the
+  // page chosen when there is one, and Send takes only one of them.
+  const listId = useId()
+  const [index, setIndex] = useState<SearchEntry[] | null>(null)
+  const [listingError, setListingError] = useState('')
+  useEffect(() => {
+    if (!askListing) return
+    let live = true
+    void loadListingIndex().then(loaded => {
+      if (live) setIndex(loaded)
+    })
+    return () => {
+      live = false
+    }
+  }, [askListing])
+  const resource = opened.resource ?? (draft.resource || undefined)
+  const listings = index ? pickableListings(index, resource) : []
 
   function set(field: keyof Draft) {
     return (
@@ -190,9 +235,31 @@ function FeedbackForm({
     }
   }
 
+  function setListingName(e: React.ChangeEvent<HTMLInputElement>) {
+    const name = e.target.value
+    const next = { ...draft, listingName: name }
+    // A listing picked before its page: the page follows from it.
+    const match = askResource && !draft.resource && findListing(listings, name)
+    if (match && match !== 'ambiguous') next.resource = match.resource
+    setDraft(next)
+    onDraft(next)
+    setListingError('')
+  }
+
   async function send(e: React.FormEvent) {
     e.preventDefault()
     if (status === 'sending') return
+    const picked =
+      askListing && index ? findListing(listings, draft.listingName) : undefined
+    if (askListing && index && (!picked || picked === 'ambiguous')) {
+      setListingError(
+        picked === 'ambiguous'
+          ? 'Listings on more than one page have this name. Choose the page above.'
+          : 'Choose a listing from the list that shows as you type its name.'
+      )
+      return
+    }
+    const listing = picked && picked !== 'ambiguous' ? picked : undefined
     setStatus('sending')
     const track = (stage: 'sent' | 'error') =>
       trackFeedbackForm(stage, opened.kind, opened.entry, opened.listing?.id)
@@ -207,9 +274,10 @@ function FeedbackForm({
           quote: opened.quote,
           path: opened.path,
           view: opened.view,
-          listingName: opened.listing?.name ?? draft.listingName,
-          listingId: opened.listing?.id,
-          resource: opened.resource ?? draft.resource,
+          listingName:
+            opened.listing?.name ?? listing?.title ?? draft.listingName,
+          listingId: opened.listing?.id ?? listing?.id,
+          resource: opened.resource ?? (draft.resource || listing?.resource),
           website: draft.website,
         }),
       })
@@ -301,14 +369,28 @@ function FeedbackForm({
         )}
 
         {askListing && (
-          <TextField
-            label="Which listing?"
-            value={draft.listingName}
-            onChange={set('listingName')}
-            maxLength={200}
-            required
-            data-autofocus={!askResource || undefined}
-          />
+          <>
+            <TextField
+              label="Which listing?"
+              placeholder="Start typing its name"
+              list={listId}
+              autoComplete="off"
+              value={draft.listingName}
+              onChange={setListingName}
+              error={listingError || undefined}
+              maxLength={200}
+              required
+              data-autofocus={!askResource || undefined}
+            />
+            <datalist id={listId}>
+              {listings.map(l => (
+                // Without a page chosen, each says which page it's on.
+                <option key={l.id} value={l.title}>
+                  {resource ? undefined : l.resource}
+                </option>
+              ))}
+            </datalist>
+          </>
         )}
 
         <TextField
