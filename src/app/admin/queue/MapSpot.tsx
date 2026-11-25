@@ -4,8 +4,9 @@
   The map strip on a /map addition: a small copy of the map editor under the
   listing, showing where the new pin would go.
 
-  It opens on a suggested spot among the listings of the same category
-  (src/lib/admin/map-spot.ts). The pin drags; a listing with no spot is
+  It opens on a suggested spot among the listings of the same category,
+  beside the ones Claude finds it most like (src/lib/admin/map-spot.ts,
+  map-alike.ts, /api/admin/queue/alike). The pin drags; a listing with no spot is
   placed with a click. The new listing's place is never written from here:
   a suggested spot goes out with Publish, and a dragged one becomes two
   edits (x and y) on the card like any other, written when Publish is
@@ -34,7 +35,7 @@ import {
 import MapEditorCanvas, {
   type CanvasControls,
 } from '@/app/admin/map/MapEditorCanvas'
-import { MAP_AREA_BY_CATEGORY } from '@/lib/data/map-areas'
+import { MAP_AREA_BY_CATEGORY, placingCategory } from '@/lib/data/map-areas'
 import type { EditorRecord } from '@/lib/admin/map-editor-core'
 import {
   AREA_LABELS,
@@ -50,6 +51,7 @@ import {
   type SpotPin,
 } from '@/lib/admin/map-spot'
 import { tidySpot } from '@/lib/admin/queue-spot'
+import { listed } from '@/lib/admin/queue-fable'
 import styles from './queue.module.css'
 import own from './MapSpot.module.css'
 
@@ -241,6 +243,61 @@ function readGround(): Promise<Ground | null> {
   }))
 }
 
+// ─── The listings it is most like ──────────────────────────────────────────
+
+const ALIKE_API = '/api/admin/queue/alike'
+/** How long a suggestion waits for Claude before going without it. */
+const ALIKE_WAIT_MS = 20 * 1000
+
+/** Claude's answer: the ids of the listings it is most like (none when
+ *  nothing is), or why there is no answer. */
+type Alike = { ids: string[] } | { error: string }
+
+/** Answers had on this page, by the question, so stepping back to an item
+ *  asks again only when its text or its area's listings have changed. A
+ *  failed answer is not kept. */
+const alikeAnswers = new Map<string, Promise<Alike>>()
+
+function askAlike(key: string, body: unknown): Promise<Alike> {
+  const kept = alikeAnswers.get(key)
+  if (kept) return kept
+  const answer = (async (): Promise<Alike> => {
+    try {
+      const res = await fetch(ALIKE_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(ALIKE_WAIT_MS),
+      })
+      const data = (await res.json().catch(() => ({}))) as {
+        like?: string[]
+        error?: string
+      }
+      if (res.ok && Array.isArray(data.like)) return { ids: data.like }
+      return { error: data.error ?? `HTTP ${res.status}` }
+    } catch (e) {
+      return {
+        error:
+          e instanceof Error && e.name === 'TimeoutError'
+            ? 'no answer in time'
+            : e instanceof Error
+              ? e.message
+              : String(e),
+      }
+    }
+  })()
+  alikeAnswers.set(key, answer)
+  void answer.then(a => {
+    if ('error' in a) {
+      alikeAnswers.delete(key)
+      console.warn(
+        `[queue] Could not ask which listings this one is most like (${a.error}); the spot is suggested without them.`
+      )
+    }
+  })
+  return answer
+}
+
 // ─── The strip ─────────────────────────────────────────────────────────────
 
 /** Added to the hint when the other listings drag too. */
@@ -249,9 +306,9 @@ const OTHERS_HINT = ' · other listings save as you drop them'
 /** How close the strip opens on the spot. */
 const OPEN_ZOOM = 3
 
-function areaOf(category: string): string | null {
-  const first = category.split(',')[0]?.trim() ?? ''
-  return (first && MAP_AREA_BY_CATEGORY[first]) || null
+function areaOf(category: string, status: string | null): string | null {
+  const placing = placingCategory(category, status)
+  return (placing && MAP_AREA_BY_CATEGORY[placing]) || null
 }
 
 export default function MapSpot({
@@ -260,6 +317,7 @@ export default function MapSpot({
   label,
   description,
   category,
+  status,
   scale,
   logo,
   spot,
@@ -279,6 +337,8 @@ export default function MapSpot({
   description: string | null
   /** Its categories, comma-joined: the first decides the area. */
   category: string
+  /** Its Status: one that isn't Active puts it in the Gone Graveyard. */
+  status: string | null
   scale: string | null
   /** Its "Logo (for map)", when the page holds a link to it. */
   logo: string | null
@@ -334,7 +394,10 @@ export default function MapSpot({
     }
   }, [attempt])
 
-  const area = areaOf(category)
+  const area = areaOf(category, status)
+  const [alike, setAlike] = useState<{ key: string; answer: Alike } | null>(
+    null
+  )
 
   // Every other listing, each where it is: on the record, published from
   // this page a moment ago, or held in another open addition's edits.
@@ -349,11 +412,53 @@ export default function MapSpot({
       .filter(r => r.x !== null && r.y !== null)
   }, [map, record, claimed])
 
+  // The question for Claude: which of its area's listings this one is
+  // most like. Asked only while the listing has no place of its own, and
+  // not at all when its area is empty (then there is no one to sit by).
+  const alikeAsk = useMemo(() => {
+    if (spot || !others || !area) return null
+    const among = others
+      .filter(r => r.area === area)
+      .map(r => ({
+        id: r.id,
+        name: r.tooltipTitle || r.title,
+        description: r.description,
+        category: r.category,
+      }))
+    if (!among.length) return null
+    const listing = { name: title, description, category }
+    const key = JSON.stringify([area, listing, among.map(a => a.id).sort()])
+    return { key, body: { area, listing, among } }
+  }, [spot, others, area, title, description, category])
+
+  useEffect(() => {
+    if (!alikeAsk) return
+    let alive = true
+    void askAlike(alikeAsk.key, alikeAsk.body).then(answer => {
+      if (alive) setAlike({ key: alikeAsk.key, answer })
+    })
+    return () => {
+      alive = false
+    }
+  }, [alikeAsk])
+
+  /** Claude's answer to the question asked now: undefined while it is on
+   *  its way, null when there was no question. */
+  const alikeNow = !alikeAsk
+    ? null
+    : alike?.key === alikeAsk.key
+      ? alike.answer
+      : undefined
+  const likeIds = alikeNow && 'ids' in alikeNow ? alikeNow.ids : undefined
+
   // The suggestion, worked out only while the listing has no place of its
-  // own, and only once the picture has been read (or has failed to), so
-  // the pin does not jump when it arrives.
+  // own, and only once the picture has been read (or has failed to) and
+  // Claude has named the listings it is most like (or could not), so the
+  // pin does not jump when they arrive.
   const suggested = useMemo(() => {
-    if (spot || !others || ground === undefined) return null
+    if (spot || !others || ground === undefined || alikeNow === undefined) {
+      return null
+    }
     const pins: SpotPin[] = others.map(r => ({
       id: r.id,
       x: r.x as number,
@@ -362,8 +467,21 @@ export default function MapSpot({
       label: r.labelName,
       area: r.area,
     }))
-    return suggestSpot(pins, { scale, label, area }, ground ?? undefined)
-  }, [spot, others, ground, scale, label, area])
+    return suggestSpot(
+      pins,
+      { scale, label, area, like: likeIds },
+      ground ?? undefined
+    )
+  }, [spot, others, ground, alikeNow, likeIds, scale, label, area])
+
+  /** What the hint names as the listings it sits beside. */
+  const likeNames = useMemo(() => {
+    if (!likeIds || !others) return []
+    return likeIds.flatMap(id => {
+      const r = others.find(o => o.id === id)
+      return r ? [r.labelName || r.title] : []
+    })
+  }, [likeIds, others])
 
   const onSuggestRef = useRef(onSuggest)
   useEffect(() => {
@@ -375,7 +493,8 @@ export default function MapSpot({
   // Leaving the item takes its suggestion with it.
   useEffect(() => () => onSuggestRef.current(null), [])
 
-  const ready = Boolean(others) && ground !== undefined
+  const ready =
+    Boolean(others) && ground !== undefined && alikeNow !== undefined
   const at = spot ?? suggested
 
   // The new listing as a pin, drawn from the card as it reads now, so an
@@ -541,7 +660,11 @@ export default function MapSpot({
       </button>
     </span>
   ) : !ready ? (
-    <span className={own.muted}>Reading the map…</span>
+    <span className={own.muted}>
+      {others && ground !== undefined
+        ? 'Finding the listings it is most like…'
+        : 'Reading the map…'}
+    </span>
   ) : spot ? (
     <span className={own.muted}>
       {edited ? 'Your spot' : 'The spot on the record'}
@@ -551,6 +674,15 @@ export default function MapSpot({
   ) : suggested ? (
     <span className={own.muted}>
       Suggested spot{area ? ` in ${area}` : ''}
+      {likeNames.length > 0 &&
+        `, near ${listed(likeNames)}, the listing${likeNames.length > 1 ? 's' : ''} most like it`}
+      {alikeNow && 'error' in alikeNow && (
+        <span className={own.error}>
+          {' '}
+          (placed without looking for similar listings, as Claude could not be
+          asked, {alikeNow.error.replace(/\.$/, '')})
+        </span>
+      )}
       {canEdit && ' · drag the pin to move it'}
       {moveOthers && OTHERS_HINT}
     </span>

@@ -1,6 +1,13 @@
 'use client'
 
-import { useState, useMemo, useRef, useLayoutEffect } from 'react'
+import {
+  useState,
+  useMemo,
+  useRef,
+  useLayoutEffect,
+  type Dispatch,
+  type SetStateAction,
+} from 'react'
 import FilterBar from '@/components/FilterBar'
 import FilterDropdown from '@/components/FilterDropdown'
 import ListingCard from '@/components/ListingCard'
@@ -70,11 +77,10 @@ export default function MediaChannelsClient({
 
   const toggleFilter = (
     value: string,
-    current: string[],
-    setter: (v: string[]) => void
+    setter: Dispatch<SetStateAction<string[]>>
   ) => {
     savedScrollY.current = window.scrollY
-    setter(
+    setter(current =>
       current.includes(value)
         ? current.filter(v => v !== value)
         : [...current, value]
@@ -106,7 +112,7 @@ export default function MediaChannelsClient({
           options={typeOptions}
           selected={typeFilters}
           counts={filterCounts.type}
-          onToggle={v => toggleFilter(v, typeFilters, setTypeFilters)}
+          onToggle={v => toggleFilter(v, setTypeFilters)}
         />
       </FilterBar>
 

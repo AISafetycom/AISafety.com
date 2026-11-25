@@ -1,6 +1,13 @@
 'use client'
 
-import { useState, useMemo, useRef, useLayoutEffect } from 'react'
+import {
+  useState,
+  useMemo,
+  useRef,
+  useLayoutEffect,
+  type Dispatch,
+  type SetStateAction,
+} from 'react'
 import FilterBar from '@/components/FilterBar'
 import FilterDropdown from '@/components/FilterDropdown'
 import ListingCard from '@/components/ListingCard'
@@ -134,11 +141,10 @@ export default function CommunitiesClient({
 
   const toggleFilter = (
     value: string,
-    current: string[],
-    setter: (v: string[]) => void
+    setter: Dispatch<SetStateAction<string[]>>
   ) => {
     savedScrollY.current = window.scrollY
-    setter(
+    setter(current =>
       current.includes(value)
         ? current.filter(v => v !== value)
         : [...current, value]
@@ -181,7 +187,7 @@ export default function CommunitiesClient({
           options={countryOptions}
           selected={countryFilters}
           counts={filterCounts.country}
-          onToggle={v => toggleFilter(v, countryFilters, setCountryFilters)}
+          onToggle={v => toggleFilter(v, setCountryFilters)}
           searchable
           // 386 + the search box and padding keeps the whole popover
           // about 500px tall, the height agreed for this list.
@@ -194,7 +200,7 @@ export default function CommunitiesClient({
           options={platformOptions}
           selected={platformFilters}
           counts={filterCounts.platform}
-          onToggle={v => toggleFilter(v, platformFilters, setPlatformFilters)}
+          onToggle={v => toggleFilter(v, setPlatformFilters)}
         />
         <FilterDropdown
           trackingPage="Communities"
@@ -203,7 +209,7 @@ export default function CommunitiesClient({
           options={activityOptions}
           selected={activityFilters}
           counts={filterCounts.activity}
-          onToggle={v => toggleFilter(v, activityFilters, setActivityFilters)}
+          onToggle={v => toggleFilter(v, setActivityFilters)}
         />
         <FilterDropdown
           trackingPage="Communities"
@@ -212,7 +218,7 @@ export default function CommunitiesClient({
           options={focusOptions}
           selected={focusFilters}
           counts={filterCounts.focus}
-          onToggle={v => toggleFilter(v, focusFilters, setFocusFilters)}
+          onToggle={v => toggleFilter(v, setFocusFilters)}
         />
       </FilterBar>
 

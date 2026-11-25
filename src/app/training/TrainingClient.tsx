@@ -7,6 +7,8 @@ import {
   useRef,
   useState,
   useLayoutEffect,
+  type Dispatch,
+  type SetStateAction,
 } from 'react'
 import { useSearchParams } from 'next/navigation'
 import ListingCard from '@/components/ListingCard'
@@ -311,11 +313,10 @@ export default function TrainingClient({
   const savedScrollY = useRef<number | null>(null)
   const toggleFilter = (
     value: string,
-    current: string[],
-    setter: (v: string[]) => void
+    setter: Dispatch<SetStateAction<string[]>>
   ) => {
     savedScrollY.current = window.scrollY
-    setter(
+    setter(current =>
       current.includes(value)
         ? current.filter(v => v !== value)
         : [...current, value]
@@ -420,7 +421,7 @@ export default function TrainingClient({
             options={applicationOptions}
             selected={selectedStatus}
             counts={statusCounts}
-            onToggle={v => toggleFilter(v, selectedStatus, setSelectedStatus)}
+            onToggle={v => toggleFilter(v, setSelectedStatus)}
           />
         )}
         <FilterDropdown
@@ -430,7 +431,7 @@ export default function TrainingClient({
           options={[...TRAINING_TYPES]}
           selected={selectedTypes}
           counts={typeCounts}
-          onToggle={v => toggleFilter(v, selectedTypes, setSelectedTypes)}
+          onToggle={v => toggleFilter(v, setSelectedTypes)}
         />
         <FilterDropdown
           trackingPage="Training"
@@ -439,7 +440,7 @@ export default function TrainingClient({
           options={focusOptions}
           selected={selectedFocus}
           counts={focusCounts}
-          onToggle={v => toggleFilter(v, selectedFocus, setSelectedFocus)}
+          onToggle={v => toggleFilter(v, setSelectedFocus)}
         />
         <FilterDropdown
           trackingPage="Training"
@@ -448,7 +449,7 @@ export default function TrainingClient({
           options={[...ENTRY_BARS]}
           selected={selectedEntryBar}
           counts={entryBarCounts}
-          onToggle={v => toggleFilter(v, selectedEntryBar, setSelectedEntryBar)}
+          onToggle={v => toggleFilter(v, setSelectedEntryBar)}
         />
         <FilterDropdown
           trackingPage="Training"
@@ -457,7 +458,7 @@ export default function TrainingClient({
           options={[...STIPEND_OPTIONS]}
           selected={selectedStipend}
           counts={stipendCounts}
-          onToggle={v => toggleFilter(v, selectedStipend, setSelectedStipend)}
+          onToggle={v => toggleFilter(v, setSelectedStipend)}
         />
         <FilterDropdown
           trackingPage="Training"
@@ -466,7 +467,7 @@ export default function TrainingClient({
           options={[...LENGTH_BUCKETS]}
           selected={selectedLength}
           counts={lengthCounts}
-          onToggle={v => toggleFilter(v, selectedLength, setSelectedLength)}
+          onToggle={v => toggleFilter(v, setSelectedLength)}
         />
         <FilterDropdown
           trackingPage="Training"
@@ -475,7 +476,7 @@ export default function TrainingClient({
           options={locationOptions}
           selected={selectedLocation}
           counts={locationCounts}
-          onToggle={v => toggleFilter(v, selectedLocation, setSelectedLocation)}
+          onToggle={v => toggleFilter(v, setSelectedLocation)}
         />
       </FilterBar>
 

@@ -4,7 +4,7 @@ import { MAP_AREA_BY_CATEGORY } from '@/lib/data/map-areas'
 
 /** Stamp on every conversation log row. Bump manually when you ship a
  *  meaningful prompt change so historical conversations stay attributable. */
-export const PROMPT_VERSION = '2026-11-21-01'
+export const PROMPT_VERSION = '2026-11-25-02'
 
 /** "Category → **Area**" lines for the Field map section, generated from the
  *  same table the catalog uses to compute each org's \`mapArea\`, so the prompt
@@ -434,7 +434,8 @@ Each resource page below has a public, read-only Airtable view of its full data 
 - [Media channels data in Airtable](https://airtable.com/appF8XfZUGXtfi40E/shrK0YGL591cGcAE1)
 - [Advisors data in Airtable](https://airtable.com/appF8XfZUGXtfi40E/shr3u6yIAwM9Hi2fL)
 - [Founder toolkit data in Airtable](https://airtable.com/appF8XfZUGXtfi40E/shr63cQohkMqyzOZv)
-[Jobs](/jobs) and the [Donation guide](/donation-guide) have no Airtable view (the job board is sourced from 80,000 Hours), so for those two say plainly that there's no download. Copy these links exactly – never build or guess an Airtable link.
+- [Jobs data in Airtable](https://airtable.com/appF8XfZUGXtfi40E/shroBLhvX7XmuZRlO/tblyLelYCQjP6w3nV?viewControls=on) – the jobs on [Jobs](/jobs), copied daily from the 80,000 Hours job board; current openings only, no past jobs
+The [Donation guide](/donation-guide) has no Airtable view, so for it say plainly that there's no download. Copy these links exactly – never build or guess an Airtable link.
 For a developer who wants the data programmatically – an API, JSON, a feed, something to build on – point to the site's free, read-only [Data API](/developers) instead (no key needed).
 
 # Notes about specific listings

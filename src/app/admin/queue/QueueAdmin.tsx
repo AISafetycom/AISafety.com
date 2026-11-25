@@ -20,11 +20,13 @@ import type {
   ProposedChange,
   QueueItem,
   RejectReply,
+  Verdict,
 } from '@/lib/admin/queue'
 import { fillFirst, neededLeft } from '@/lib/admin/queue-needed'
 import { replyWho } from '@/lib/admin/queue-also'
 import { backSince, laterSince, laterUntil } from '@/lib/admin/queue-later'
 import {
+  answeredReview,
   askedDay,
   askedState,
   reviewStage,
@@ -117,6 +119,7 @@ import {
   type HistoryRow,
 } from '@/lib/admin/queue-history'
 import { STATUS_ICONS as FUNDER_STATUS_ICONS } from '@/app/funding/card'
+import { STATUS_ICONS as MAP_STATUS_ICONS } from '@/app/map/card'
 import { APPLICATIONS_ICONS as ADVISOR_APPLICATIONS_ICONS } from '@/app/advisors/card'
 import { trainingTypeColor } from '@/lib/training-types'
 import { eventTypeColor } from '@/lib/event-types'
@@ -125,7 +128,12 @@ import SitePreview, {
   prefetchPreview,
   seedPreviews,
 } from './SitePreview'
-import Chat, { CharCount, descriptionCap, type Decided } from './Chat'
+import Chat, {
+  AnsweredReviewCard,
+  CharCount,
+  descriptionCap,
+  type Decided,
+} from './Chat'
 import RejectReason, { type RejectReasonControl } from './RejectReason'
 import FieldPicker from './FieldPicker'
 import FieldFlags, { type PictureHeld } from './FieldFlags'
@@ -455,7 +463,7 @@ function sourceIcon(item: QueueItem): string {
   }
 }
 
-function verdictIcon(item: QueueItem): string {
+function verdictIcon(item: { verdict: Verdict | null }): string {
   if (item.verdict === 'Publish' || item.verdict === 'Fix') return ICON.check
   if (item.verdict === 'Unsure') return ICON.question
   return ICON.x
@@ -686,6 +694,10 @@ function takeBack(item: QueueItem): 'undo' | 'reopen' | null {
 }
 
 function decidedSince(item: QueueItem, since: number): boolean {
+  // A row the Mac closed (taken out by the daily check) was never decided:
+  // it has no Decided at, which read as today, so it sat in Done today as
+  // "Published" (Bryce, 24 Nov 2026). It has its own line at the top.
+  if (item.status === 'Closed') return false
   const at = decidedAtOf(item)
   const t = at ? Date.parse(at) : NaN
   return !Number.isFinite(t) || t >= since
@@ -1200,6 +1212,7 @@ function pinOf(
     label: text('Short name') || title,
     description: text('Description') || null,
     category: text('Category'),
+    status: text('Status') || null,
     scale: text('Scale') || null,
     logo:
       typeof first === 'string'
@@ -1445,7 +1458,7 @@ function acceptLabel(
   return 'Apply rule'
 }
 
-function verdictWord(item: QueueItem): string {
+function verdictWord(item: { verdict: Verdict | null }): string {
   return verdictWords(item.verdict)
 }
 
@@ -1583,6 +1596,8 @@ function decidedOf(item: QueueItem): Decided | null {
       item.status === 'Applied' || item.status === 'Accepted'
         ? item.replyDraft
         : null,
+    decline:
+      item.status === 'Rejected' ? (item.rejectReply?.text ?? null) : null,
   }
 }
 
@@ -2846,7 +2861,12 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
       const held = new Set((items ?? []).map(i => i.id))
       const older: QueueItem[] = []
       for (const item of items ?? []) {
-        if (isOpen(item) || decidedSince(item, dayStart)) continue
+        if (
+          isOpen(item) ||
+          item.status === 'Closed' ||
+          decidedSince(item, dayStart)
+        )
+          continue
         if (hits.has(item.id)) older.push(item)
       }
       for (const item of earlier ?? []) {
@@ -6406,7 +6426,7 @@ function Marked({
   return <>{out}</>
 }
 
-function verdictClass(item: QueueItem): string {
+function verdictClass(item: { verdict: Verdict | null }): string {
   if (item.verdict === 'Publish' || item.verdict === 'Fix') return styles.yes
   if (item.verdict === 'Unsure') return styles.maybe
   return styles.no
@@ -6943,11 +6963,13 @@ function Detail({
     item.rejectDrafts,
     d.mode === 'reject' ? d.focusChip : null
   )
+  // The box exists for an open item with someone to reply to who doesn't
+  // already have a decline; it shows once there is a decline to put in it
+  // (one written for a reason, an edit, or Fable's from the chat).
+  const hasDeclineBox =
+    isOpen(item) && Boolean(item.replyTo) && !item.declinedBefore
   const showDecline =
-    isOpen(item) &&
-    Boolean(item.replyTo) &&
-    !item.declinedBefore &&
-    (declineChip !== null || d.decline !== null)
+    hasDeclineBox && (declineChip !== null || d.decline !== null)
   const declineFromReason =
     d.mode === 'reject' && d.other.trim() !== '' && d.decline === null
   const declineText =
@@ -7183,6 +7205,15 @@ function Detail({
   const question = isOpen(item) ? askedNow(item) : null
   const asked = item.asked
   const reviewed = question === 'answered' ? reviewNow(item) : null
+  // Fable's review with their answer goes at the foot of the chat, in the
+  // order things happened, and the review the item showed before it stays
+  // at the panel's head (Bryce, 25 Nov 2026, on Fangcun AI: "The original
+  // review should be at the top"). Null for a review the Mac kept no
+  // pair for: that one is still the panel's head, as before.
+  const answered = answeredReview(item)
+  const answeredWhere = chatAgent
+    ? 'at the bottom of the chat'
+    : 'under the first one'
   const askedBlock =
     !question || !asked ? null : question === 'answered' && asked.answer ? (
       <section className={`${styles.block} ${styles.pushback}`}>
@@ -7219,7 +7250,9 @@ function Detail({
               Fable
             </span>{' '}
             {reviewed === 'done'
-              ? 'reviewed it again with their answer, so the verdict here is the new one'
+              ? answered
+                ? `reviewed it again with their answer · the new review is ${answeredWhere}`
+                : 'reviewed it again with their answer, so the verdict here is the new one'
               : 'is reviewing it again with their answer…'}
           </p>
         )}
@@ -7876,23 +7909,54 @@ function Detail({
               <span>{foundText}</span>
             </div>
           )}
-          {item.verdict && (
-            <div className={styles.verdictHead}>
-              <span className={styles.verdictKicker}>
-                {item.flagUndo ? 'Fable now says' : 'Fable says'}
-              </span>
-              <span className={`${styles.verdictBig} ${styles.withIcon}`}>
-                <Icon src={verdictIcon(item)} size={16} />
-                {verdictWord(item)}
-              </span>
-              {flagRevisedNote(item) && (
-                <span className={styles.verdictRevised}>
-                  {flagRevisedNote(item)}
+          {answered ? (
+            // The review before their answer, in its own color when the one
+            // with their answer (the panel's color) differs from it.
+            <>
+              <div
+                className={`${styles.verdictHead} ${
+                  answered.before.verdict !== item.verdict
+                    ? verdictClass(answered.before)
+                    : ''
+                }`}
+              >
+                <span className={styles.verdictKicker}>Fable says</span>
+                <span className={`${styles.verdictBig} ${styles.withIcon}`}>
+                  <Icon src={verdictIcon(answered.before)} size={16} />
+                  {verdictWord(answered.before)}
                 </span>
-              )}
-            </div>
+                <span className={styles.verdictRevised}>
+                  {answered.after.verdict === answered.before.verdict
+                    ? `Reviewed again with their answer, ${answeredWhere}`
+                    : `Changed to “${verdictWord(answered.after)}” with their answer, ${answeredWhere}`}
+                </span>
+              </div>
+              <ul className={styles.reasons}>
+                {answered.before.reasons.map((r, i) => (
+                  <li key={i}>{r}</li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            item.verdict && (
+              <div className={styles.verdictHead}>
+                <span className={styles.verdictKicker}>
+                  {item.flagUndo ? 'Fable now says' : 'Fable says'}
+                </span>
+                <span className={`${styles.verdictBig} ${styles.withIcon}`}>
+                  <Icon src={verdictIcon(item)} size={16} />
+                  {verdictWord(item)}
+                </span>
+                {flagRevisedNote(item) && (
+                  <span className={styles.verdictRevised}>
+                    {flagRevisedNote(item)}
+                  </span>
+                )}
+              </div>
+            )
           )}
-          {item.reasons.length > 0 &&
+          {!answered &&
+            item.reasons.length > 0 &&
             (item.type === 'Rule' ? (
               // A rule's bullets are the decisions it was learned from,
               // under a heading that folds them away. Its key must differ
@@ -7948,6 +8012,16 @@ function Detail({
               }}
             />
           )}
+          {/* With the Mac off there is no chat: the review with their
+              answer goes under the first one instead. */}
+          {answered && !chatAgent && (
+            <AnsweredReviewCard
+              review={answered.after}
+              item={item}
+              decided={decidedOf(item)}
+              onFlag={onFlag}
+            />
+          )}
           {chatAgent && (
             <Chat
               key={item.id}
@@ -7955,6 +8029,9 @@ function Detail({
               agent={chatAgent}
               edits={d.edits}
               reply={d.reply ?? item.replyDraft}
+              decline={
+                hasDeclineBox ? { text: declineText, edited: d.decline } : null
+              }
               // Whether a field can be edited at all, open or not: a
               // decided item's cards stay, read-only (`decided`).
               canEditField={k =>
@@ -7967,6 +8044,9 @@ function Detail({
               }}
               onSetReply={text => {
                 if (isOpen(item)) setD({ reply: text })
+              }}
+              onSetDecline={text => {
+                if (isOpen(item)) setD({ decline: text, editingDecline: false })
               }}
               onWrote={onWrote}
               onFlag={onFlag}
@@ -8301,6 +8381,7 @@ const PAGE_ICONS: Record<string, Record<string, string>> = {
   },
   '/advisors': { "who it's for": 'team', 'focus areas': 'target' },
   '/founders': { type: 'tag' },
+  '/map': { category: 'tag' },
   '/media-channels': { type: 'computer' },
   '/self-study': { type: 'type', 'course type': 'type' },
 }
@@ -8342,6 +8423,11 @@ function fieldIcon(
   }
   if (page === '/funding' && key === 'application status') {
     return FUNDER_STATUS_ICONS[value] ?? null
+  }
+  if (page === '/map' && key === 'status') {
+    return value === 'Active'
+      ? MAP_STATUS_ICONS.active
+      : MAP_STATUS_ICONS.inactive
   }
   if (page === '/advisors' && key === 'applications') {
     return ADVISOR_APPLICATIONS_ICONS[value] ?? null

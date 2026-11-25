@@ -29,7 +29,7 @@ function Text({ children }: { children: string }) {
             href={withUtm(m[2], 'Hackathon')}
             target="_blank"
             rel="noopener noreferrer"
-            className="color-teal-300"
+            className="link"
           >
             {m[1]}
           </a>
@@ -348,7 +348,7 @@ export default function DetailsForm() {
           {busy ? 'Submitting…' : 'Submit'}
         </Button>
         {error && (
-          <p className="paragraph-small color-orange-300 margin-top-16px">
+          <p className="paragraph-small color-red-300 margin-top-16px">
             {error}
           </p>
         )}
