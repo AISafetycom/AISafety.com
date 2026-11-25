@@ -23,7 +23,12 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { gzip } from 'node:zlib'
 import { writesSharedStore } from '@/lib/analytics/events'
-import { MAX_CHUNKS, summarizeChunk, type ChunkSummary } from './shared'
+import {
+  MAX_CHUNKS,
+  isRecordingId,
+  summarizeChunk,
+  type ChunkSummary,
+} from './shared'
 
 const gzipAsync = promisify(gzip)
 
@@ -166,10 +171,10 @@ export async function saveChunk({
   }
 
   // Local dev: files.
-  const dir = path.join(DEV_DIR, id)
+  const dir = devPath(id)
   await fs.mkdir(dir, { recursive: true })
   const file = `${seq}-${now}.json.gz`
-  await fs.writeFile(path.join(dir, file), body)
+  await fs.writeFile(devPath(id, file), body)
   const record: ChunkRecord = {
     seq,
     ...summary,
@@ -188,7 +193,7 @@ export async function saveChunk({
     )
   }
   await fs.appendFile(
-    path.join(dir, 'chunks.ndjson'),
+    devPath(id, 'chunks.ndjson'),
     JSON.stringify(record) + '\n',
     'utf8'
   )
@@ -197,8 +202,20 @@ export async function saveChunk({
 
 // ─── Local-file backend (dev only) ───────────────────────────────────────────
 
-const DEV_DIR = path.join(process.cwd(), '.analytics-dev', 'recordings')
+const DEV_DIR = path.resolve(process.cwd(), '.analytics-dev', 'recordings')
 const DEV_INDEX = path.join(DEV_DIR, 'index.ndjson')
+
+/** A recording's dev folder, or a file in it. The id comes from the
+ *  browser: the routes check it's a UUID, and it's checked again here,
+ *  where it becomes part of a path on disk, as is where the path lands. */
+function devPath(id: string, file?: string): string {
+  if (!isRecordingId(id)) throw new Error(`recordings: bad id: ${id}`)
+  const dir = path.resolve(DEV_DIR, id)
+  const full = file ? path.resolve(dir, file) : dir
+  if (!full.startsWith(dir + path.sep) && full !== dir)
+    throw new Error(`recordings: path outside its folder: ${id}/${file}`)
+  return full
+}
 
 async function readLines<T>(file: string): Promise<T[]> {
   let raw: string
@@ -327,7 +344,7 @@ export async function listRecordings(
 }
 
 async function readDevChunks(id: string): Promise<ChunkRecord[]> {
-  return readLines<ChunkRecord>(path.join(DEV_DIR, id, 'chunks.ndjson'))
+  return readLines<ChunkRecord>(devPath(id, 'chunks.ndjson'))
 }
 
 /** One recording's summary and its chunks in order, or null. */
@@ -370,5 +387,5 @@ export async function readChunkBytes(chunk: ChunkRecord, id: string) {
   }
   if (!/^[\w.-]+$/.test(chunk.url))
     throw new Error(`bad dev chunk file name: ${chunk.url}`)
-  return new Uint8Array(await fs.readFile(path.join(DEV_DIR, id, chunk.url)))
+  return new Uint8Array(await fs.readFile(devPath(id, chunk.url)))
 }
