@@ -26,7 +26,7 @@ export default function PrivacyPage() {
           <p className="color-teal-grey-300 padding-bottom-40px">
             AISafety.com is run by a small nonprofit team – you can meet us on
             the{' '}
-            <Link href="/about" className="color-teal-300">
+            <Link href="/about" className="link">
               about page
             </Link>
             . Bryce Robertson, the site&apos;s project manager, is responsible
@@ -35,7 +35,7 @@ export default function PrivacyPage() {
               href="https://airtable.com/appF8XfZUGXtfi40E/pagUmmzVb8OnVvTZS/form"
               target="_blank"
               rel="noopener noreferrer"
-              className="color-teal-300"
+              className="link"
             >
               send us a message
             </a>
@@ -69,9 +69,10 @@ export default function PrivacyPage() {
             other sites.
           </p>
           <p className="color-teal-grey-300 padding-bottom-24px">
-            On a few pages, we also record a sample of visits – how the page
-            changes as you scroll, move the mouse, and click – to see where the
-            site is confusing. Anything you type is hidden in these recordings.
+            We also record a sample of visits that reach a few of the main pages
+            – how the site changes as you scroll, move the mouse, and click – to
+            see where it&apos;s confusing. Anything you type is hidden in these
+            recordings.
           </p>
           <p className="color-teal-grey-300 padding-bottom-24px">
             If you&apos;d rather not be counted, you can switch analytics off
@@ -111,7 +112,7 @@ export default function PrivacyPage() {
             anonymously – it isn&apos;t tied to you or your email address. Every
             email has an unsubscribe link at the bottom, and a Manage
             subscriptions link that opens your newsletters on{' '}
-            <Link href="/newsletter" className="color-teal-300">
+            <Link href="/newsletter" className="link">
               aisafety.com/newsletter
             </Link>{' '}
             so you can change which ones you get; the private code in that link
@@ -139,7 +140,7 @@ export default function PrivacyPage() {
               href="https://airtable.com/appF8XfZUGXtfi40E/pagUmmzVb8OnVvTZS/form"
               target="_blank"
               rel="noopener noreferrer"
-              className="color-teal-300"
+              className="link"
             >
               sending us a message
             </a>
