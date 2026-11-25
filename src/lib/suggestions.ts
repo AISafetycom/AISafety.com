@@ -6,6 +6,9 @@ export interface Suggestion {
   value: string
   /** A second, quieter line under it, e.g. the page a listing is on. */
   detail?: string
+  /** A listing's logo before it (<ListingLogo>): its image, or null for
+   *  its initials. Left out, the row has none. */
+  logo?: string | null
 }
 
 /** The suggestions that contain what's typed, ignoring case: those that

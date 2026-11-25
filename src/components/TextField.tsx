@@ -7,6 +7,7 @@ import type {
   TextareaHTMLAttributes,
 } from 'react'
 import { useId, useLayoutEffect, useRef, useState } from 'react'
+import ListingLogo from '@/components/ListingLogo'
 import { matchSuggestions, type Suggestion } from '@/lib/suggestions'
 import styles from './TextField.module.css'
 
@@ -260,7 +261,7 @@ function SuggestingInput({
               id={`${listId}-${i}`}
               role="option"
               aria-selected={i === active}
-              className={`flex flex-col cursor-pointer ${styles.suggestion}${
+              className={`flex items-center gap-12px cursor-pointer ${styles.suggestion}${
                 i === active ? ` ${styles.suggestionActive}` : ''
               }`}
               // Keeps the focus in the box, so it doesn't close the list
@@ -270,12 +271,17 @@ function SuggestingInput({
               onMouseEnter={() => setActive(i)}
               onClick={() => pick(s)}
             >
-              <span className="paragraph-small">{s.value}</span>
-              {s.detail && (
-                <span className="paragraph-xs color-teal-grey-300">
-                  {s.detail}
-                </span>
+              {s.logo !== undefined && (
+                <ListingLogo title={s.value} logo={s.logo} />
               )}
+              <span className="flex flex-col">
+                <span className="paragraph-small">{s.value}</span>
+                {s.detail && (
+                  <span className="paragraph-xs color-teal-grey-300">
+                    {s.detail}
+                  </span>
+                )}
+              </span>
             </div>
           ))}
         </div>

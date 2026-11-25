@@ -229,6 +229,7 @@ function FeedbackForm({
       listings.map(l => ({
         value: l.title,
         detail: resource ? undefined : l.resource,
+        logo: l.logo,
       })),
     [listings, resource]
   )

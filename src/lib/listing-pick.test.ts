@@ -83,6 +83,7 @@ describe('findListing', () => {
       id: 'recEvent0000000001',
       title: 'AI Safety Camp',
       resource: 'Events',
+      logo: null,
     })
   })
 
@@ -99,6 +100,7 @@ describe('findListing', () => {
       id: 'recMap000000000001',
       title: 'Open Philanthropy',
       resource: 'Field map',
+      logo: null,
     })
   })
 })

@@ -11,6 +11,8 @@ export interface PickableListing {
   title: string
   /** The corrections table's Resource choice for its page. */
   resource: string
+  /** Its logo, as the site search shows it. */
+  logo: string | null
 }
 
 // The corrections table's Resource choice for each kind of listing in the
@@ -53,7 +55,7 @@ export function pickableListings(
     const key = `${r}\n${e.title.toLowerCase()}`
     if (seen.has(key)) continue
     seen.add(key)
-    out.push({ id: e.id, title: e.title, resource: r })
+    out.push({ id: e.id, title: e.title, resource: r, logo: e.logo })
   }
   return out
 }
