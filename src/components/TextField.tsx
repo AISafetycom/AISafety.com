@@ -290,9 +290,7 @@ function SuggestingInput({
         <div
           className={`border-plus-fill drop-shadow-dark ${styles.suggestions}`}
         >
-          <p
-            className={`paragraph-small color-teal-grey-300 ${styles.noSuggestions}`}
-          >
+          <p className="paragraph-small color-teal-grey-300 padding-top-12px padding-bottom-12px padding-left-16px padding-right-16px">
             {noSuggestions}
           </p>
         </div>

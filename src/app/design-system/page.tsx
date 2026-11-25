@@ -3,7 +3,9 @@ import Button from '@/components/Button'
 import FeedbackFormLink from '@/components/FeedbackFormLink'
 import TextField from '@/components/TextField'
 import { CORRECTIONS_FORM, FEEDBACK_FORM } from '@/lib/selection-feedback'
+import ListingLogo from '@/components/ListingLogo'
 import PopoverDemo from './PopoverDemo'
+import SuggestionsDemo from './SuggestionsDemo'
 
 /* The design system, in public: every shared component in every variant,
    matching the Figma components. Add a section here for each new shared
@@ -183,6 +185,22 @@ export default function DesignSystemPage() {
           label="Dropdown"
           options={['First choice', 'Second choice']}
         />
+        <SuggestionsDemo />
+      </div>
+
+      <h2 className="padding-top-40px padding-bottom-12px">Listing logo</h2>
+      <p className="paragraph-small color-teal-grey-300 padding-bottom-24px">
+        Starts a row in the site search&apos;s results and a text box&apos;s
+        suggestions: the logo, the name&apos;s initials when there&apos;s none,
+        or a page&apos;s icon.
+      </p>
+      <div className="flex items-center gap-16px">
+        <ListingLogo
+          title="AI Safety Quest"
+          logo="/images/ai-safety-quest.png"
+        />
+        <ListingLogo title="Alignment Forum" logo={null} />
+        <ListingLogo title="Events" logo="/images/icons/calendar.svg" page />
       </div>
 
       <h2 className="padding-top-40px padding-bottom-12px">Popover</h2>
