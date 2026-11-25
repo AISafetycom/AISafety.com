@@ -470,9 +470,15 @@
   color: var(--white);
 }
 
-.lineupList summary {
-  cursor: pointer;
+/* Each listing opens its card on the live page in a new tab. */
+.lineupList a {
   color: var(--teal-300);
+  text-decoration: none;
+}
+
+.lineupList a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .lineupGroup {
