@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import Button from '@/components/Button'
 import Popover, { pageBox } from '@/components/Popover'
@@ -204,10 +204,8 @@ function FeedbackForm({
   // resource page.
   const askListing = correction && !opened.listing
   const askResource = askListing && !opened.resource
-  // "Which listing?" offers the site's listings as the name is typed (the
-  // browser's own suggestion list, as the page dropdown is its own), on the
-  // page chosen when there is one, and Send takes only one of them.
-  const listId = useId()
+  // "Which listing?" suggests the site's listings as the name is typed, on
+  // the page chosen when there is one, and Send takes only one of them.
   const [index, setIndex] = useState<SearchEntry[] | null>(null)
   const [listingError, setListingError] = useState('')
   useEffect(() => {
@@ -221,7 +219,19 @@ function FeedbackForm({
     }
   }, [askListing])
   const resource = opened.resource ?? (draft.resource || undefined)
-  const listings = index ? pickableListings(index, resource) : []
+  const listings = useMemo(
+    () => (index ? pickableListings(index, resource) : []),
+    [index, resource]
+  )
+  // Without a page chosen, each suggestion says which page it's on.
+  const suggestions = useMemo(
+    () =>
+      listings.map(l => ({
+        value: l.title,
+        detail: resource ? undefined : l.resource,
+      })),
+    [listings, resource]
+  )
 
   function set(field: keyof Draft) {
     return (
@@ -235,8 +245,7 @@ function FeedbackForm({
     }
   }
 
-  function setListingName(e: React.ChangeEvent<HTMLInputElement>) {
-    const name = e.target.value
+  function setListingName(name: string) {
     const next = { ...draft, listingName: name }
     // A listing picked before its page: the page follows from it.
     const match = askResource && !draft.resource && findListing(listings, name)
@@ -369,28 +378,25 @@ function FeedbackForm({
         )}
 
         {askListing && (
-          <>
-            <TextField
-              label="Which listing?"
-              placeholder="Start typing its name"
-              list={listId}
-              autoComplete="off"
-              value={draft.listingName}
-              onChange={setListingName}
-              error={listingError || undefined}
-              maxLength={200}
-              required
-              data-autofocus={!askResource || undefined}
-            />
-            <datalist id={listId}>
-              {listings.map(l => (
-                // Without a page chosen, each says which page it's on.
-                <option key={l.id} value={l.title}>
-                  {resource ? undefined : l.resource}
-                </option>
-              ))}
-            </datalist>
-          </>
+          <TextField
+            label="Which listing?"
+            placeholder="Start typing its name"
+            suggestions={suggestions}
+            onSuggestion={setListingName}
+            noSuggestions={
+              index
+                ? resource
+                  ? `No listing on ${resource} has that name.`
+                  : 'No listing on the site has that name.'
+                : undefined
+            }
+            value={draft.listingName}
+            onChange={e => setListingName(e.target.value)}
+            error={listingError || undefined}
+            maxLength={200}
+            required
+            data-autofocus={!askResource || undefined}
+          />
         )}
 
         <TextField

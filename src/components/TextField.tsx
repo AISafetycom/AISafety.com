@@ -6,7 +6,8 @@ import type {
   SelectHTMLAttributes,
   TextareaHTMLAttributes,
 } from 'react'
-import { useId, useLayoutEffect, useRef } from 'react'
+import { useId, useLayoutEffect, useRef, useState } from 'react'
+import { matchSuggestions, type Suggestion } from '@/lib/suggestions'
 import styles from './TextField.module.css'
 
 /* A form field: its label, the box, and an error message under it. Built
@@ -17,8 +18,13 @@ import styles from './TextField.module.css'
      <TextField label="Email" type="email" required />
      <TextField as="textarea" label="What's wrong?" />
      <TextField as="select" label="Which page?" options={['Events', …]} />
+     <TextField label="Which listing?" suggestions={[{ value: 'ARENA' }, …]}
+       onSuggestion={pick} />
 
-   A text area grows with what's typed instead of scrolling. */
+   A text area grows with what's typed instead of scrolling. A text box with
+   suggestions lists the ones that match what's typed under it, as the
+   /events "Find events near you" box does; the arrow keys and Enter or a
+   click pick one. */
 
 interface Common {
   /** Shown above the box, and read out for it. */
@@ -33,6 +39,12 @@ interface Common {
 
 type InputField = Common & {
   as?: 'input'
+  /** Shown under the box as it's typed in, the ones that match. */
+  suggestions?: readonly Suggestion[]
+  /** Called with a suggestion's value when one is picked. */
+  onSuggestion?: (value: string) => void
+  /** Shown in the list when something is typed and nothing matches. */
+  noSuggestions?: string
 } & Omit<InputHTMLAttributes<HTMLInputElement>, 'className'>
 
 type TextAreaField = Common & {
@@ -63,6 +75,9 @@ const OWN_PROPS = [
   'error',
   'className',
   'options',
+  'suggestions',
+  'onSuggestion',
+  'noSuggestions',
 ] as const
 
 function boxAttributes(props: TextFieldProps): Record<string, unknown> {
@@ -118,12 +133,21 @@ export default function TextField(props: TextFieldProps) {
         ))}
       </select>
     )
+  } else if (props.suggestions) {
+    box = (
+      <SuggestingInput
+        attributes={attributes as InputHTMLAttributes<HTMLInputElement>}
+        suggestions={props.suggestions}
+        onSuggestion={props.onSuggestion}
+        noSuggestions={props.noSuggestions}
+      />
+    )
   } else {
     box = (
       <input
         type="text"
         {...(attributes as InputHTMLAttributes<HTMLInputElement>)}
-        className={`text-field ${styles.input}`}
+        className="text-field"
       />
     )
   }
@@ -144,6 +168,128 @@ export default function TextField(props: TextFieldProps) {
         <p id={errorId} className="paragraph-xs color-red-300">
           {error}
         </p>
+      )}
+    </div>
+  )
+}
+
+/** A text box with its suggestions in a list under it (a combobox). The
+ *  list shows while the box has focus and some suggestions match; the arrow
+ *  keys move through it, and Enter or a click picks one. */
+function SuggestingInput({
+  attributes,
+  suggestions,
+  onSuggestion,
+  noSuggestions,
+}: {
+  attributes: InputHTMLAttributes<HTMLInputElement>
+  suggestions: readonly Suggestion[]
+  onSuggestion?: (value: string) => void
+  noSuggestions?: string
+}) {
+  const listId = useId()
+  const [open, setOpen] = useState(false)
+  const [active, setActive] = useState(-1)
+  const typed = String(attributes.value ?? '')
+  const matches = open ? matchSuggestions(suggestions, typed) : []
+  // Once the box holds exactly the one suggestion left, the list has
+  // nothing more to offer.
+  const shown =
+    matches.length === 1 &&
+    matches[0].value.toLowerCase() === typed.trim().toLowerCase()
+      ? []
+      : matches
+  const none = open && !!noSuggestions && !!typed.trim() && matches.length === 0
+
+  function pick(s: Suggestion) {
+    onSuggestion?.(s.value)
+    setOpen(false)
+    setActive(-1)
+  }
+
+  return (
+    <div className={styles.combo}>
+      <input
+        type="text"
+        {...attributes}
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={shown.length > 0}
+        aria-controls={listId}
+        aria-activedescendant={
+          shown[active] ? `${listId}-${active}` : undefined
+        }
+        autoComplete="off"
+        className="text-field"
+        onChange={e => {
+          attributes.onChange?.(e)
+          setOpen(true)
+          setActive(-1)
+        }}
+        onFocus={e => {
+          attributes.onFocus?.(e)
+          setOpen(true)
+        }}
+        onBlur={e => {
+          attributes.onBlur?.(e)
+          setOpen(false)
+        }}
+        onKeyDown={e => {
+          attributes.onKeyDown?.(e)
+          if (shown.length === 0) return
+          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault()
+            const step = e.key === 'ArrowDown' ? 1 : -1
+            setActive(a => (a + step + shown.length) % shown.length)
+          } else if (e.key === 'Enter' && shown[active]) {
+            // Picks the suggestion instead of sending the form.
+            e.preventDefault()
+            pick(shown[active])
+          }
+        }}
+      />
+      {shown.length > 0 && (
+        <div
+          id={listId}
+          role="listbox"
+          className={`border-plus-fill drop-shadow-dark ${styles.suggestions}`}
+        >
+          {shown.map((s, i) => (
+            <div
+              key={`${s.value}\n${s.detail ?? ''}`}
+              id={`${listId}-${i}`}
+              role="option"
+              aria-selected={i === active}
+              className={`flex flex-col cursor-pointer ${styles.suggestion}${
+                i === active ? ` ${styles.suggestionActive}` : ''
+              }`}
+              // Keeps the focus in the box, so it doesn't close the list
+              // before the click lands.
+              onPointerDown={e => e.preventDefault()}
+              onMouseDown={e => e.preventDefault()}
+              onMouseEnter={() => setActive(i)}
+              onClick={() => pick(s)}
+            >
+              <span className="paragraph-small">{s.value}</span>
+              {s.detail && (
+                <span className="paragraph-xs color-teal-grey-300">
+                  {s.detail}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {none && (
+        <div
+          className={`border-plus-fill drop-shadow-dark ${styles.suggestions}`}
+        >
+          <p
+            className={`paragraph-small color-teal-grey-300 ${styles.noSuggestions}`}
+          >
+            {noSuggestions}
+          </p>
+        </div>
       )}
     </div>
   )
