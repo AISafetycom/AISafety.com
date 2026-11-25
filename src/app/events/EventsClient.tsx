@@ -562,7 +562,7 @@ export default function EventsClient({ events }: EventsClientProps) {
           <FilterDropdown
             trackingPage="Events"
             title="Type"
-            icon="/images/icons/layers.svg"
+            icon="/images/icons/tag.svg"
             options={[...EVENT_TYPES]}
             selected={selectedTypes}
             counts={typeCounts}
@@ -571,7 +571,7 @@ export default function EventsClient({ events }: EventsClientProps) {
           <FilterDropdown
             trackingPage="Events"
             title="Cost"
-            icon="/images/icons/tag.svg"
+            icon="/images/icons/money.svg"
             options={costOptions}
             selected={selectedCost}
             counts={costCounts}

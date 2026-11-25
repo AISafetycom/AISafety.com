@@ -100,7 +100,11 @@ export function bottomMetaFor(event: EventListing) {
     })
   if (event.cost.length > 0)
     rows.push({
-      icon: '/images/icons/tag.svg',
+      // Money, as for stipends on /training (crossed out when it's free);
+      // the tag means the event's type on this page.
+      icon: event.cost.every(c => c.startsWith('Free'))
+        ? '/images/icons/money-off.svg'
+        : '/images/icons/money.svg',
       label: 'Cost',
       value: event.cost.join(', '),
     })
