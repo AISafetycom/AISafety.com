@@ -27,12 +27,11 @@ const RESOURCE_FOR_TYPE: Partial<Record<SearchType, string>> = {
   founder: 'Founder toolkit',
 }
 
-/** The Resource choice a listing of this kind falls under. Both training
- *  choices (upcoming and recurring) list every training program. */
-function sameResource(a: string, b: string): boolean {
-  const training = (r: string) =>
-    r.startsWith('Training') || r.startsWith('Recurring training')
-  return a === b || (training(a) && training(b))
+/** The Resource choice a listing falls under: a training program from the
+ *  recurring list has a choice of its own. */
+function resourceOf(e: SearchEntry): string | undefined {
+  if (e.type === 'training' && e.recurring) return 'Recurring training programs'
+  return RESOURCE_FOR_TYPE[e.type]
 }
 
 /** The listings the form offers, on one page's choice or on all of them,
@@ -44,9 +43,9 @@ export function pickableListings(
   const seen = new Set<string>()
   const out: PickableListing[] = []
   for (const e of index) {
-    const r = RESOURCE_FOR_TYPE[e.type]
+    const r = resourceOf(e)
     if (!r || !e.id) continue
-    if (resource && !sameResource(r, resource)) continue
+    if (resource && r !== resource) continue
     const key = `${r}\n${e.title.toLowerCase()}`
     if (seen.has(key)) continue
     seen.add(key)

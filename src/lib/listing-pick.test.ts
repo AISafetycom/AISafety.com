@@ -18,7 +18,12 @@ function entry(over: Partial<SearchEntry>): SearchEntry {
 const index: SearchEntry[] = [
   entry({ type: 'event', title: 'AI Safety Camp', id: 'recEvent0000000001' }),
   entry({ type: 'training', title: 'ARENA', id: 'recTrain0000000001' }),
-  entry({ type: 'training', title: 'ARENA', id: 'recTrain0000000002' }),
+  entry({
+    type: 'training',
+    title: 'ARENA',
+    id: 'recTrain0000000002',
+    recurring: true,
+  }),
   entry({
     type: 'funder',
     title: 'Open Philanthropy',
@@ -36,6 +41,7 @@ describe('pickableListings', () => {
     ).toEqual([
       'Events: AI Safety Camp',
       'Training programs: ARENA',
+      'Recurring training programs: ARENA',
       'Funding: Open Philanthropy',
       'Field map: Open Philanthropy',
     ])
@@ -47,10 +53,13 @@ describe('pickableListings', () => {
     ])
   })
 
-  it('lists training programs under both training choices', () => {
+  it('keeps recurring programs and upcoming cohorts apart', () => {
     expect(
-      pickableListings(index, 'Recurring training programs').map(l => l.title)
-    ).toEqual(['ARENA'])
+      pickableListings(index, 'Recurring training programs').map(l => l.id)
+    ).toEqual(['recTrain0000000002'])
+    expect(pickableListings(index, 'Training programs').map(l => l.id)).toEqual(
+      ['recTrain0000000001']
+    )
   })
 })
 

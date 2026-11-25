@@ -44,6 +44,10 @@ export interface SearchEntry {
   keywords?: string
   /** Shown only for a search for its name (see search() in lib/search). */
   nameOnly?: boolean
+  /** A training program from the recurring list (/training?view=recurring)
+   *  rather than an upcoming cohort, which the corrections form tells
+   *  apart. */
+  recurring?: boolean
 }
 
 function page(
@@ -333,6 +337,7 @@ async function getTrainingEntries(): Promise<SearchEntry[]> {
     entries.push({
       type: 'training',
       id: p.id,
+      recurring: true,
       title: p.name,
       subtitle: '',
       description: p.description,
