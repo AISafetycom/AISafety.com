@@ -20,11 +20,13 @@ import type {
   ProposedChange,
   QueueItem,
   RejectReply,
+  Verdict,
 } from '@/lib/admin/queue'
 import { fillFirst, neededLeft } from '@/lib/admin/queue-needed'
 import { replyWho } from '@/lib/admin/queue-also'
 import { backSince, laterSince, laterUntil } from '@/lib/admin/queue-later'
 import {
+  answeredReview,
   askedDay,
   askedState,
   reviewStage,
@@ -126,7 +128,12 @@ import SitePreview, {
   prefetchPreview,
   seedPreviews,
 } from './SitePreview'
-import Chat, { CharCount, descriptionCap, type Decided } from './Chat'
+import Chat, {
+  AnsweredReviewCard,
+  CharCount,
+  descriptionCap,
+  type Decided,
+} from './Chat'
 import RejectReason, { type RejectReasonControl } from './RejectReason'
 import FieldPicker from './FieldPicker'
 import FieldFlags, { type PictureHeld } from './FieldFlags'
@@ -456,7 +463,7 @@ function sourceIcon(item: QueueItem): string {
   }
 }
 
-function verdictIcon(item: QueueItem): string {
+function verdictIcon(item: { verdict: Verdict | null }): string {
   if (item.verdict === 'Publish' || item.verdict === 'Fix') return ICON.check
   if (item.verdict === 'Unsure') return ICON.question
   return ICON.x
@@ -1451,7 +1458,7 @@ function acceptLabel(
   return 'Apply rule'
 }
 
-function verdictWord(item: QueueItem): string {
+function verdictWord(item: { verdict: Verdict | null }): string {
   return verdictWords(item.verdict)
 }
 
@@ -6419,7 +6426,7 @@ function Marked({
   return <>{out}</>
 }
 
-function verdictClass(item: QueueItem): string {
+function verdictClass(item: { verdict: Verdict | null }): string {
   if (item.verdict === 'Publish' || item.verdict === 'Fix') return styles.yes
   if (item.verdict === 'Unsure') return styles.maybe
   return styles.no
@@ -7198,6 +7205,15 @@ function Detail({
   const question = isOpen(item) ? askedNow(item) : null
   const asked = item.asked
   const reviewed = question === 'answered' ? reviewNow(item) : null
+  // Fable's review with their answer goes at the foot of the chat, in the
+  // order things happened, and the review the item showed before it stays
+  // at the panel's head (Bryce, 25 Nov 2026, on Fangcun AI: "The original
+  // review should be at the top"). Null for a review the Mac kept no
+  // pair for: that one is still the panel's head, as before.
+  const answered = answeredReview(item)
+  const answeredWhere = chatAgent
+    ? 'at the bottom of the chat'
+    : 'under the first one'
   const askedBlock =
     !question || !asked ? null : question === 'answered' && asked.answer ? (
       <section className={`${styles.block} ${styles.pushback}`}>
@@ -7234,7 +7250,9 @@ function Detail({
               Fable
             </span>{' '}
             {reviewed === 'done'
-              ? 'reviewed it again with their answer, so the verdict here is the new one'
+              ? answered
+                ? `reviewed it again with their answer · the new review is ${answeredWhere}`
+                : 'reviewed it again with their answer, so the verdict here is the new one'
               : 'is reviewing it again with their answer…'}
           </p>
         )}
@@ -7891,23 +7909,54 @@ function Detail({
               <span>{foundText}</span>
             </div>
           )}
-          {item.verdict && (
-            <div className={styles.verdictHead}>
-              <span className={styles.verdictKicker}>
-                {item.flagUndo ? 'Fable now says' : 'Fable says'}
-              </span>
-              <span className={`${styles.verdictBig} ${styles.withIcon}`}>
-                <Icon src={verdictIcon(item)} size={16} />
-                {verdictWord(item)}
-              </span>
-              {flagRevisedNote(item) && (
-                <span className={styles.verdictRevised}>
-                  {flagRevisedNote(item)}
+          {answered ? (
+            // The review before their answer, in its own color when the one
+            // with their answer (the panel's color) differs from it.
+            <>
+              <div
+                className={`${styles.verdictHead} ${
+                  answered.before.verdict !== item.verdict
+                    ? verdictClass(answered.before)
+                    : ''
+                }`}
+              >
+                <span className={styles.verdictKicker}>Fable says</span>
+                <span className={`${styles.verdictBig} ${styles.withIcon}`}>
+                  <Icon src={verdictIcon(answered.before)} size={16} />
+                  {verdictWord(answered.before)}
                 </span>
-              )}
-            </div>
+                <span className={styles.verdictRevised}>
+                  {answered.after.verdict === answered.before.verdict
+                    ? `Reviewed again with their answer, ${answeredWhere}`
+                    : `Changed to “${verdictWord(answered.after)}” with their answer, ${answeredWhere}`}
+                </span>
+              </div>
+              <ul className={styles.reasons}>
+                {answered.before.reasons.map((r, i) => (
+                  <li key={i}>{r}</li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            item.verdict && (
+              <div className={styles.verdictHead}>
+                <span className={styles.verdictKicker}>
+                  {item.flagUndo ? 'Fable now says' : 'Fable says'}
+                </span>
+                <span className={`${styles.verdictBig} ${styles.withIcon}`}>
+                  <Icon src={verdictIcon(item)} size={16} />
+                  {verdictWord(item)}
+                </span>
+                {flagRevisedNote(item) && (
+                  <span className={styles.verdictRevised}>
+                    {flagRevisedNote(item)}
+                  </span>
+                )}
+              </div>
+            )
           )}
-          {item.reasons.length > 0 &&
+          {!answered &&
+            item.reasons.length > 0 &&
             (item.type === 'Rule' ? (
               // A rule's bullets are the decisions it was learned from,
               // under a heading that folds them away. Its key must differ
@@ -7961,6 +8010,16 @@ function Detail({
                 const st = imageStash.get(`${item.id}/${field}`)
                 return Boolean(st && !st.redo)
               }}
+            />
+          )}
+          {/* With the Mac off there is no chat: the review with their
+              answer goes under the first one instead. */}
+          {answered && !chatAgent && (
+            <AnsweredReviewCard
+              review={answered.after}
+              item={item}
+              decided={decidedOf(item)}
+              onFlag={onFlag}
             />
           )}
           {chatAgent && (
