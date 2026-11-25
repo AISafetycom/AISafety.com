@@ -1044,7 +1044,10 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
                   aria-label="Edit message"
                   tooltipPosition="above"
                 />
-                <div className={styles.userMessage}>{m.content}</div>
+                {/* data-rr-mask: hidden in session recordings. */}
+                <div className={styles.userMessage} data-rr-mask="">
+                  {m.content}
+                </div>
               </div>
             ) : (
               <div key={m.id} className={styles.message}>

@@ -75,14 +75,21 @@ export function setTrackingOptOut(optOut: boolean): void {
   } catch {
     // Storage unavailable (private mode); nothing to persist.
   }
+  // A session recording under way in this tab stops at once (the 'storage'
+  // event only reaches other tabs). src/lib/recordings/recorder.ts listens.
+  if (optOut && typeof window !== 'undefined')
+    window.dispatchEvent(new Event(TRACKING_OFF_EVENT))
 }
+
+/** Fired on window when this tab switches analytics off. */
+export const TRACKING_OFF_EVENT = 'aisafety:tracking-off'
 
 /** A stable, anonymous per-browser id (random UUID in localStorage) so the
  *  dashboard can count UNIQUE users — e.g. not double-counting one person who
  *  opens the chatbot ten times. No PII; first-party only. Returns undefined if
  *  storage is unavailable (private mode), in which case the event is still
  *  recorded, just not deduped. */
-function getVisitorId(): string | undefined {
+export function getVisitorId(): string | undefined {
   try {
     if (typeof localStorage === 'undefined') return undefined
     let id = localStorage.getItem(VID_KEY)
