@@ -30,6 +30,7 @@ We lean toward work relevant to superintelligence, since we consider this to be 
 - Technical and theoretical alignment research, S-risk from AI, and gradual disempowerment worked on as a safety problem.
 - Governance aimed at catastrophic or frontier AI risk, held to the same content test as technical work: red lines, compute governance, frontier oversight, loss of control, concentration of power, international agreements, model-weight security.
 - Security of frontier AI itself: protecting model weights, hardware security, and verification for compute that others run. Enterprise and product security don't count.
+- Evaluations aimed at safety, including tests for dangerous capabilities, and trackers that show how fast frontier AI is advancing.
 - Major rationalist programs and content.
 - Cause-general effective altruism orgs, events, and programs that address AI x-risk among their causes.
 - Substantive single-author resources on superintelligence alignment. "Personal project" only counts against hobby-scale work.
@@ -44,7 +45,7 @@ These are real problems, they're just not what this site covers:
 - AI welfare, digital minds, AI consciousness, AI and animals.
 - "Better futures" work, meaning how well the future goes if humanity survives, even when some sessions cover x-risk. S-risk and gradual disempowerment still count.
 - General AI policy, AI diplomacy, and great-power competition or export controls framed as geopolitics.
-- Tracking AI capabilities or the economics of AI without any safety work.
+- The economics of AI, and benchmarks, leaderboards, or evaluations that only measure or push what AI can do. More of these makes AI more capable, whoever runs them.
 - Enterprise AI security, AI for cybersecurity, adversarial ML without a safety motivation, and general tech, startup, or venture activity.
 - Biosecurity where the interventions are more bio than AI.
 - Anything that isn't particularly useful for a reader to be aware of.
@@ -150,5 +151,5 @@ An existing listing isn't a guarantee, and we review and remove listings often.
 - **Tell us if we misread you.** If we missed x-risk work on your site or picked the wrong page, show us where. Reply to our email or use the "Send us an email" button.
 - **Suggest a correction.** If you think another listing shouldn't be there, use "Suggest correction" on that page and say why.
 
-Last updated: 17 November 2026
+Last updated: 25 November 2026
 `
