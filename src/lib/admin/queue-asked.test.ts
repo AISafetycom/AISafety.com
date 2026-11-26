@@ -4,6 +4,8 @@ import {
   answeredReview,
   askedOf,
   askedState,
+  elsewhereOf,
+  latestAsked,
   reviewStage,
   waitEnds,
   type Asked,
@@ -21,6 +23,7 @@ function asked(over: Partial<Asked> = {}): Asked {
     sentAt: null,
     sentLink: null,
     answer: null,
+    elsewhere: false,
     ...over,
   }
 }
@@ -305,5 +308,126 @@ describe('answeredReview', () => {
     ).toBeNull()
     expect(answeredReview({ type: 'Change', asked: answered({}) })).toBeNull()
     expect(answeredReview({ type: 'Add', asked: null })).toBeNull()
+  })
+})
+
+// Asked outside email (Bryce, 26 Nov 2026, Common Ground: AI Safety,
+// translated: he messaged the host on Luma, and the item stayed in the list).
+const LUMA = '2026-11-26T09:30:00Z'
+
+describe('elsewhereOf', () => {
+  it('reads a question asked outside email as sent, with no Gmail link', () => {
+    expect(
+      elsewhereOf({ at: LUMA, text: ' Whether it covers x-risk ', by: 'Bryce' })
+    ).toEqual({
+      at: LUMA,
+      text: 'Whether it covers x-risk',
+      to: null,
+      sentAt: LUMA,
+      sentLink: null,
+      answer: null,
+      elsewhere: true,
+    })
+  })
+
+  it('reads the answer he pasted into the chat', () => {
+    const got = elsewhereOf({
+      at: LUMA,
+      text: '',
+      answer: { at: '2026-11-28T08:00:00Z', text: 'Yes, loss of control.' },
+    })
+    expect(got?.answer).toEqual({
+      at: '2026-11-28T08:00:00Z',
+      who: null,
+      text: 'Yes, loss of control.',
+      link: null,
+      reviewed: false,
+      reviewedAt: null,
+      review: null,
+    })
+  })
+
+  it('is null without a readable time', () => {
+    expect(elsewhereOf({ text: 'x' })).toBeNull()
+    expect(elsewhereOf('x')).toBeNull()
+    expect(elsewhereOf(null)).toBeNull()
+  })
+})
+
+describe('latestAsked', () => {
+  const emailed = asked({ sentAt: SENT })
+  const outside = elsewhereOf({ at: LUMA, text: 'x' }) as Asked
+
+  it('takes whichever question is later', () => {
+    expect(latestAsked(emailed, outside)).toBe(outside)
+    const older = elsewhereOf({ at: '2026-11-01T00:00:00Z' }) as Asked
+    expect(latestAsked(emailed, older)).toBe(emailed)
+  })
+
+  it('takes the one there is', () => {
+    expect(latestAsked(null, outside)).toBe(outside)
+    expect(latestAsked(emailed, null)).toBe(emailed)
+    expect(latestAsked(null, null)).toBeNull()
+  })
+})
+
+describe('the wait for an addition with a date', () => {
+  const outside = elsewhereOf({ at: LUMA, text: 'x' }) as Asked
+  const now = Date.parse(LUMA)
+
+  it('comes back once its date would make it urgent', () => {
+    // The event and its deadline are on 8 Dec: back on 4 Dec, not 10 Dec.
+    const dates = { start: '2026-12-08', closes: '2026-12-08' }
+    expect(waitEnds(outside, dates)).toBe('2026-12-04T00:00:00.000Z')
+    const it = { ...item(outside), dates }
+    expect(askedState(it, Date.parse('2026-12-03T23:00:00Z'))).toBe('waiting')
+    expect(askedState(it, Date.parse('2026-12-04T00:00:00Z'))).toBe('silent')
+  })
+
+  it('takes the sooner of the start date and the deadline', () => {
+    expect(
+      waitEnds(outside, { start: '2026-12-20', closes: '2026-12-05' })
+    ).toBe('2026-12-01T00:00:00.000Z')
+  })
+
+  it('still waits two weeks when the date is further off', () => {
+    expect(waitEnds(outside, { start: '2027-02-01' })).toBe(
+      new Date(now + WAIT_DAYS * DAY).toISOString()
+    )
+  })
+
+  it('waits at least a day when the date is very near', () => {
+    expect(waitEnds(outside, { start: '2026-11-28' })).toBe(
+      new Date(now + DAY).toISOString()
+    )
+  })
+
+  it('ignores a date already gone or unreadable', () => {
+    const twoWeeks = new Date(now + WAIT_DAYS * DAY).toISOString()
+    expect(waitEnds(outside, { start: '2026-11-20' })).toBe(twoWeeks)
+    expect(waitEnds(outside, { start: 'soon', closes: null })).toBe(twoWeeks)
+    expect(waitEnds(outside, {})).toBe(twoWeeks)
+  })
+
+  it('brings an emailed question back early too', () => {
+    const emailed = asked({ sentAt: LUMA })
+    expect(waitEnds(emailed, { start: '2026-12-08' })).toBe(
+      '2026-12-04T00:00:00.000Z'
+    )
+  })
+})
+
+describe('an answer pasted into the chat', () => {
+  it('is answered, with no second review announced', () => {
+    const a = elsewhereOf({
+      at: LUMA,
+      answer: { at: '2026-11-28T08:00:00Z', text: 'Yes' },
+    })
+    expect(askedState(item(a), Date.parse('2026-11-28T09:00:00Z'))).toBe(
+      'answered'
+    )
+    expect(
+      reviewStage({ type: 'Add', asked: a }, Date.parse('2026-11-28T08:10:00Z'))
+    ).toBeNull()
   })
 })

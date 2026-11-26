@@ -135,6 +135,19 @@ function wrongInfo(changes: UrgentInput['changes']): string | null {
   return null
 }
 
+/** An addition's own Start date and Deadline (YYYY-MM-DD each, or null),
+ *  read the way the urgency reads them. A change carries none of its own. */
+export function addedDates(item: {
+  type: string
+  fields: Record<string, unknown> | null
+}): ListingDates {
+  if (item.type !== 'Add' || !item.fields) return {}
+  return {
+    start: isoDay(field(item.fields, 'Start date')),
+    closes: isoDay(field(item.fields, 'Deadline')),
+  }
+}
+
 /** Why `item` can't wait, or null. `listing` is the published record's own
  *  dates (Changes only); `today` is the viewer's YYYY-MM-DD. */
 export function urgencyOf(

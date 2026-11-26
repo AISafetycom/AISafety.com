@@ -51,6 +51,7 @@ import {
   saveEdits,
   undoItem,
   unflagItem,
+  waitItem,
   type QueueItem,
 } from './queue'
 import { LEFT_OUT_KEY } from './queue-left-out'
@@ -1281,6 +1282,141 @@ describe('noReplyOf', () => {
 
 // "Update flag" from the chat (queue-flag.ts): against a stand-in Queue row
 // that reads and patches like Airtable.
+describe('waitItem', () => {
+  // Bryce, 26 Nov 2026, on Common Ground: AI Safety, translated: he had
+  // messaged the host on Luma and the item stayed in the list.
+  const ID = rid('ground')
+  const FLD = {
+    title: 'fldeRsOE3DM3R2vbX',
+    type: 'fldBc9YIDhjmu58f3',
+    source: 'flddKkVy62MAZ8M0J',
+    status: 'fldTXGYOoXcUApaI2',
+    proposal: 'fldgl9Ny2jnu8T0Da',
+    history: 'fldjRsqYJAwR6CXpA',
+  }
+  const proposal = {
+    kind: 'add',
+    table: EVENTS,
+    record: rid('event'),
+    page: '/events',
+    fields: { Name: 'Common Ground', 'Start date': '2026-12-08' },
+  }
+  let row: Record<string, unknown>
+
+  beforeEach(() => {
+    row = {
+      [FLD.title]: 'Common Ground: AI Safety, translated',
+      [FLD.type]: 'Add',
+      [FLD.source]: 'Comb',
+      [FLD.status]: 'Pending',
+      [FLD.proposal]: JSON.stringify(proposal),
+    }
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(
+      async (path: string, init?: RequestInit) => {
+        if (!path.startsWith(`${QUEUE}/${ID}`)) {
+          return new Response('not here', { status: 404 })
+        }
+        if (init?.method === 'PATCH') {
+          const body = JSON.parse(String(init.body)) as {
+            fields: Record<string, unknown>
+          }
+          for (const [k, v] of Object.entries(body.fields)) {
+            if (v === null) delete row[k]
+            else row[k] = v
+          }
+        }
+        return new Response(
+          JSON.stringify({
+            id: ID,
+            createdTime: '2026-11-25T00:00:00.000Z',
+            fields: row,
+          }),
+          { status: 200 }
+        )
+      }
+    )
+  })
+
+  const current = async () => {
+    const i = await getQueueItem(ID)
+    if (!i) throw new Error('row gone')
+    return i
+  }
+  const held = () =>
+    JSON.parse(String(row[FLD.proposal])) as Record<string, unknown>
+  const history = () =>
+    (
+      JSON.parse(String(row[FLD.history] ?? '[]')) as {
+        did: string
+        by: string
+      }[]
+    ).map(e => `${e.did} ${e.by}`)
+
+  it('puts it in Waiting on them, then takes it out, each on the history', async () => {
+    await waitItem(await current(), true, 'Bryce')
+    const waiting = await current()
+    expect(waiting.asked).toMatchObject({
+      elsewhere: true,
+      text: '',
+      sentLink: null,
+      answer: null,
+    })
+    expect(waiting.asked?.sentAt).toBe(waiting.asked?.at)
+    expect(held().waiting_on).toMatchObject({ text: '', by: 'Bryce' })
+    expect(held().reply).toBeUndefined()
+
+    await waitItem(waiting, false, 'Bryce')
+    expect((await current()).asked).toBeNull()
+    expect(held()).toEqual(proposal)
+    expect(history()).toEqual(['wait Bryce', 'unwait Bryce'])
+  })
+
+  it('keeps what the chat said he asked', async () => {
+    row[FLD.proposal] = JSON.stringify({
+      ...proposal,
+      waiting_on: { at: '2026-11-01T00:00:00Z', text: 'Is it about x-risk?' },
+    })
+    // That wait ran out long ago: G starts a new one with the same words.
+    await waitItem(await current(), true, 'Bryce')
+    const w = held().waiting_on as Record<string, unknown>
+    expect(w.text).toBe('Is it about x-risk?')
+    expect(w.at).not.toBe('2026-11-01T00:00:00Z')
+  })
+
+  it('refuses a second wait, a stop with nothing waiting, and a decided item', async () => {
+    await waitItem(await current(), true, 'Bryce')
+    await expect(waitItem(await current(), true, 'Bryce')).rejects.toThrow(
+      /waiting on them already/
+    )
+    row[FLD.proposal] = JSON.stringify(proposal)
+    await expect(waitItem(await current(), false, 'Bryce')).rejects.toThrow(
+      /not waiting/
+    )
+    row[FLD.status] = 'Applied'
+    await expect(waitItem(await current(), true, 'Bryce')).rejects.toThrow(
+      /already applied/
+    )
+  })
+
+  it('reads the later of an emailed question and one asked elsewhere', async () => {
+    row[FLD.proposal] = JSON.stringify({
+      ...proposal,
+      reply: {
+        to: 'host@example.org',
+        thread: '1a2b3c4d5e6f',
+        asked: {
+          at: '2026-11-20T00:00:00Z',
+          text: 'By email?',
+          to: 'host@example.org',
+        },
+      },
+      waiting_on: { at: '2026-11-26T09:30:00Z', text: 'On Luma?' },
+    })
+    expect((await current()).asked?.text).toBe('On Luma?')
+  })
+})
+
 describe('flagItem / unflagItem', () => {
   const ID = rid('bruin')
   const FLD = {

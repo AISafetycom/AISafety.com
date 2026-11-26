@@ -53,6 +53,7 @@ const NEEDS: Record<string, { view: 'detail' | 'row'; noEditor: boolean }> = {
   Enter: { view: 'detail', noEditor: true },
   x: { view: 'detail', noEditor: true },
   w: { view: 'detail', noEditor: true },
+  g: { view: 'detail', noEditor: true },
   r: { view: 'detail', noEditor: true },
   c: { view: 'detail', noEditor: true },
   '1': { view: 'detail', noEditor: true },

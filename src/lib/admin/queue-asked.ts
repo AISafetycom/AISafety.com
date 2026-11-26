@@ -25,9 +25,26 @@
   top. The original review should be at the top"). The review overwrites
   the row's verdict and reasons, so the Mac keeps both on the answer as
   `review: {before, after}`, each {verdict, reasons, chips?}.
+
+  A question asked anywhere but email (Bryce, 26 Nov 2026, on Common
+  Ground: AI Safety, translated, after messaging the host on Luma: "We need
+  a button to mark as waiting on them maybe? Or Fable Review should do it
+  automatically") sits on the proposal as `waiting_on`: {at, text, by?,
+  answer?: {at, text}}. The chat's ```waiting block writes it when he says
+  he has asked them, the "Waiting on them" button (G) writes it too, and his
+  paste of their answer into the chat adds `answer` (~/Queue waiting.py).
+  It reads as a question already sent, with no Gmail link; nothing but him
+  brings their answer, and Fable reads it in the chat, so no second review
+  is announced.
+
+  An addition with a start date or deadline comes back before that date,
+  not only after WAIT_DAYS: once it would be urgent (ADD_URGENT_DAYS ahead,
+  queue-urgent.ts), so an answer that never comes still leaves time to
+  decide. Never sooner than a day after asking.
 */
 
 import type { Verdict } from './queue'
+import { ADD_URGENT_DAYS, type ListingDates } from './queue-urgent'
 
 /** How long an item waits for an answer before it comes back anyway. The
  *  Mac's waiting.py has the same number. */
@@ -70,6 +87,9 @@ export interface Asked {
   /** The sent question in Gmail. */
   sentLink: string | null
   answer: Answer | null
+  /** Asked outside email (`waiting_on`): no Gmail thread to follow, so
+   *  their answer comes only when he pastes it into the chat. */
+  elsewhere: boolean
 }
 
 /** Where a question stands: still a `draft`, `waiting` on them, `answered`,
@@ -145,13 +165,85 @@ export function askedOf(v: unknown): Asked | null {
           review: reviewPairOf(a.review),
         }
       : null,
+    elsewhere: false,
   }
 }
 
-/** Pure: when a sent question's wait runs out, as an ISO instant. */
-export function waitEnds(asked: Asked): string | null {
+/** The proposal key for a question asked outside email (~/Queue
+ *  waiting.py ELSEWHERE_KEY). */
+export const ELSEWHERE_KEY = 'waiting_on'
+
+/** Pure: the proposal's `waiting_on` as a question already sent, or null
+ *  when absent or malformed. */
+export function elsewhereOf(v: unknown): Asked | null {
+  if (!isRecord(v)) return null
+  const at = instant(v.at)
+  if (!at) return null
+  const a = isRecord(v.answer) ? v.answer : null
+  const answerAt = a ? instant(a.at) : null
+  return {
+    at,
+    text: text(v.text) ?? '',
+    to: null,
+    sentAt: at,
+    sentLink: null,
+    answer:
+      a && answerAt
+        ? {
+            at: answerAt,
+            who: null,
+            text: text(a.text) ?? '',
+            link: null,
+            reviewed: false,
+            reviewedAt: null,
+            review: null,
+          }
+        : null,
+    elsewhere: true,
+  }
+}
+
+/** Pure: the question that counts when a row holds both an emailed one and
+ *  one asked elsewhere: the later of the two. */
+export function latestAsked(
+  emailed: Asked | null,
+  elsewhere: Asked | null
+): Asked | null {
+  if (!emailed || !elsewhere) return emailed ?? elsewhere
+  return Date.parse(elsewhere.at) >= Date.parse(emailed.at)
+    ? elsewhere
+    : emailed
+}
+
+/** A YYYY-MM-DD day as the epoch ms of its start (UTC), or NaN. */
+function dayMs(iso: string | null | undefined): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso ?? '')
+  return m ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : NaN
+}
+
+/** Pure: when a sent question's wait runs out, in ms: WAIT_DAYS after it
+ *  went, or sooner for an addition whose start date or deadline (`dates`)
+ *  would make it urgent before then, but never within a day of asking.
+ *  Null while it is unsent. */
+function waitEndMs(asked: Asked, dates?: ListingDates): number | null {
   if (!asked.sentAt) return null
-  return new Date(Date.parse(asked.sentAt) + WAIT_DAYS * DAY_MS).toISOString()
+  const sent = Date.parse(asked.sentAt)
+  let ends = sent + WAIT_DAYS * DAY_MS
+  for (const d of [dates?.start, dates?.closes]) {
+    const day = dayMs(d)
+    if (!Number.isFinite(day) || day <= sent) continue
+    ends = Math.min(
+      ends,
+      Math.max(sent + DAY_MS, day - ADD_URGENT_DAYS * DAY_MS)
+    )
+  }
+  return ends
+}
+
+/** Pure: when a sent question's wait runs out, as an ISO instant. */
+export function waitEnds(asked: Asked, dates?: ListingDates): string | null {
+  const ends = waitEndMs(asked, dates)
+  return ends === null ? null : new Date(ends).toISOString()
 }
 
 /** The parts of a Queue item the state reads. */
@@ -162,6 +254,8 @@ export interface AskedInput {
   passed: unknown
   /** He has replied to them since their answer: the question is settled. */
   alreadyReplied: unknown
+  /** An addition's own dates, which bring it back sooner (waitEnds). */
+  dates?: ListingDates
 }
 
 /** Pure: where an open item's question stands at `now`, or null when it has
@@ -173,7 +267,7 @@ export function askedState(item: AskedInput, now: number): AskedState | null {
   if (asked.answer) return item.alreadyReplied ? null : 'answered'
   if (!asked.sentAt) return 'draft'
   if (item.passed) return 'silent'
-  const ends = Date.parse(asked.sentAt) + WAIT_DAYS * DAY_MS
+  const ends = waitEndMs(asked, item.dates) as number
   return now < ends ? 'waiting' : 'silent'
 }
 
@@ -189,7 +283,8 @@ export function reviewStage(
   now: number
 ): 'done' | 'running' | null {
   const answer = item.asked?.answer
-  if (!answer || item.type !== 'Add') return null
+  // An answer pasted into the chat is read there: no second review.
+  if (!answer || item.type !== 'Add' || item.asked?.elsewhere) return null
   if (answer.reviewed) return 'done'
   const at = answer.at ? Date.parse(answer.at) : NaN
   return Number.isFinite(at) && now - at < REVIEWING_MS ? 'running' : null

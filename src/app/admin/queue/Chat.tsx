@@ -210,6 +210,10 @@ interface Msg {
    *  queue-flag.ts). Written onto the row when the reply lands, and shown
    *  as a card with Undo. */
   flag?: unknown
+  /** The reply's ```waiting or ```answer block moved the item into
+   *  Waiting on them ("waiting") or brought their answer ("answered"),
+   *  written on the Mac (queue-asked.ts): the page reads the row again. */
+  waiting?: string
 }
 
 /** A flag write that a landed reply started by itself. */
@@ -387,6 +391,7 @@ export default function Chat({
   onSetReply,
   onSetDecline,
   onWrote,
+  onRowChanged,
   onFlag,
   onFableChanges,
   focusTick,
@@ -415,6 +420,9 @@ export default function Chat({
   onSetDecline: (text: string | null) => void
   /** A reply that changed Airtable has landed: re-read the live record. */
   onWrote?: () => void
+  /** A reply moved the item into or out of Waiting on them on the Mac:
+   *  read the row again. */
+  onRowChanged?: () => void
   /** Write a flag update onto the row, or undo it; resolves to an error
    *  to show, or null. */
   onFlag: (
@@ -599,6 +607,7 @@ export default function Chat({
     (msg: Msg, withFlag = true) => {
       if (msg.role !== 'fable' || !mountedRef.current) return
       if (msg.wrote) onWrote?.()
+      if (msg.waiting) onRowChanged?.()
       // A decided item keeps what went with its decision: a reply that
       // lands after it changes nothing on the page.
       if (decided) return
@@ -617,7 +626,16 @@ export default function Chat({
       if (no) putDecline(msg.at, no)
       if (withFlag && msg.flag !== undefined) putFlag(msg)
     },
-    [canEditField, decided, onWrote, putDecline, putEdits, putFlag, putReply]
+    [
+      canEditField,
+      decided,
+      onWrote,
+      onRowChanged,
+      putDecline,
+      putEdits,
+      putFlag,
+      putReply,
+    ]
   )
   // Read through a ref by loadHistory, so that it changes only with the
   // item. The page hands down new callbacks on every render, and each
