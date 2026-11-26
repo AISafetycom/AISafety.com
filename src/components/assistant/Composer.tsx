@@ -114,27 +114,20 @@ const Composer = forwardRef<HTMLTextAreaElement, Props>(function Composer(
 
   return (
     <div className={styles.composer}>
-      {(attachments.length > 0 || readingFile || truncated) && (
+      {attachments.length > 0 && (
         <div className="flex flex-col gap-4px padding-bottom-8px">
-          {attachments.length > 0 && (
-            <ul role="list" className="flex flex-wrap gap-4px">
-              {attachments.map((a, i) => (
-                <AttachmentChip
-                  key={`${a.name}-${i}`}
-                  name={a.name}
-                  onRemove={() => onRemoveAttachment?.(i)}
-                />
-              ))}
-            </ul>
-          )}
+          <ul role="list" className="flex flex-wrap gap-4px">
+            {attachments.map((a, i) => (
+              <AttachmentChip
+                key={`${a.name}-${i}`}
+                name={a.name}
+                onRemove={() => onRemoveAttachment?.(i)}
+              />
+            ))}
+          </ul>
           {truncated && (
             <p className="paragraph-xs color-teal-grey-300">
               That document is long, so only its first part will be read.
-            </p>
-          )}
-          {readingFile && (
-            <p className="paragraph-xs color-teal-grey-300" role="status">
-              Reading the document
             </p>
           )}
         </div>
@@ -178,8 +171,12 @@ const Composer = forwardRef<HTMLTextAreaElement, Props>(function Composer(
                   size="xs"
                   icon="/images/icons/paperclip.svg"
                   iconPosition="only"
-                  disabled={readingFile}
-                  onClick={() => fileInputRef.current?.click()}
+                  // Spins while a file is read; pressing it then does
+                  // nothing.
+                  loading={readingFile}
+                  onClick={() => {
+                    if (!readingFile) fileInputRef.current?.click()
+                  }}
                   aria-label="Attach a document"
                   tooltipPosition="above"
                 />

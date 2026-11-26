@@ -18,7 +18,7 @@ export default function AttachmentChip({ name, onRemove }: Props) {
     // data-rr-mask: hidden in session recordings, like the message itself. A
     // file's name is often the visitor's own.
     <li
-      className={`${styles.attachment} border-plus-fill flex items-center gap-8px padding-left-12px${onRemove ? '' : ' padding-right-12px padding-top-4px padding-bottom-4px'}`}
+      className={`${styles.attachment} border-plus-fill flex items-center gap-8px padding-left-12px${onRemove ? '' : ' padding-right-12px'}`}
       data-rr-mask=""
     >
       <Icon src="/images/icons/document.svg" className="color-teal-grey-300" />
