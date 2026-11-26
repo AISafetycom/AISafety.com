@@ -4,11 +4,13 @@ import { useEffect } from 'react'
 
 // A listing card's link is its title alone, so a screen reader announces a
 // short link name (#819). An invisible box (the title link's ::after) is
-// stretched over the card, but it lets the pointer through to the text
-// beneath, so every word on the card can be selected and copied: drag on a
-// computer, long-press on a phone. (A double-click can't select a word: its
-// first click opens the link at once, as a click on any link does.) This
-// makes the whole card (any element marked data-card) act as the link:
+// stretched over the card. On a touch screen it catches the finger, so the
+// card is simply the link and a long-press shows the link's menu. With a
+// mouse it lets the pointer through to the text beneath, so every word on
+// the card can be selected and copied by dragging. (A double-click can't
+// select a word: its first click opens the link at once, as a click on any
+// link does.) This makes the whole card (any element marked data-card) act
+// as the link with a mouse:
 // - a plain click or tap anywhere opens it, unless it was part of
 //   selecting text
 // - Cmd/Ctrl-click, Shift-click and middle-click open it in a new tab or

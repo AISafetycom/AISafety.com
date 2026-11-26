@@ -1,0 +1,66 @@
+/* <Popover> — the site's popover panel. Fill and border come from the global
+   .border-plus-fill class, the shadow from .drop-shadow-extra-dark. Where it
+   sits (left, and top when floating) is set in Popover.tsx. The padding
+   belongs to what it holds: each use wraps its content in its own padded
+   element. */
+.popover {
+  position: absolute;
+  width: max-content;
+  border-radius: 16px;
+}
+
+/* Hangs under its parent, in the page, so it scrolls with it. */
+.inline {
+  top: calc(100% + 8px);
+  z-index: 10;
+}
+
+/* Floats over the page, above everything there but the nav: the sticky
+   filter bar (20), the Field map's zoom controls and search (95), and the
+   chatbot (96 to 100), whose own buttons open the correction form. Its spot
+   is set before it's painted; until then it waits at the top of the page,
+   not the end, so it never lengthens the page. */
+.floating {
+  top: 0;
+  left: 0;
+  z-index: 101;
+}
+
+/* A floating popover's caret: a square turned 45°, half out of the panel,
+   with the panel's fill and border (.border-plus-fill) showing on its two
+   outer sides. It sits on the edge facing the anchor; its spot along that
+   edge is set in Popover.tsx. */
+.caret {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+/* Under the anchor: on the top edge, pointing up. */
+.caret[data-side='below'] {
+  top: 0;
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+}
+
+/* Above it: on the bottom edge, pointing down. */
+.caret[data-side='above'] {
+  top: 100%;
+  border-top-color: transparent;
+  border-left-color: transparent;
+}
+
+/* Right of it: on the left edge, pointing left. */
+.caret[data-side='right'] {
+  left: 0;
+  border-top-color: transparent;
+  border-right-color: transparent;
+}
+
+/* Left of it: on the right edge, pointing right. */
+.caret[data-side='left'] {
+  left: 100%;
+  border-bottom-color: transparent;
+  border-left-color: transparent;
+}

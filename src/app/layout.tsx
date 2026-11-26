@@ -9,6 +9,7 @@ import MatomoRouteTracker from '@/components/MatomoRouteTracker'
 import PreviewBanner from '@/components/PreviewBanner'
 import ScrollToHash from '@/components/ScrollToHash'
 import SelectionMenu from '@/components/SelectionMenu'
+import FeedbackPopover from '@/components/FeedbackPopover'
 import SessionRecorder from '@/components/SessionRecorder'
 import { fetchAllCounts } from '@/lib/data/counts'
 import { LIVE_SITE_HOSTS } from '@/lib/live-site'
@@ -111,6 +112,7 @@ export default async function RootLayout({
           <ScrollToHash />
           <CardClicks />
           <SelectionMenu />
+          <FeedbackPopover />
           {children}
         </LayoutShell>
         <PreviewBanner />

@@ -240,7 +240,7 @@ interface AssistantMessageViewProps {
   // previously-shown listing still resolves even if this turn ran no search
   // (e.g. "show me that fund again").
   allCitations: CitationRef[]
-  onSuggest?: (query: string, type?: string) => void
+  onSuggest?: (query: string, type?: string, trigger?: HTMLElement) => void
   onCitationClick?: (c: CitationRef) => void
   onLinkClick?: (href: string, label: string) => void
 }
@@ -428,7 +428,12 @@ interface Props {
    *  `turnIndex` is the reply's position in the message list (matching its
    *  index in the stored history), so the admin can badge the button the
    *  visitor pressed. */
-  onSuggest?: (query: string, type?: string, turnIndex?: number) => void
+  onSuggest?: (
+    query: string,
+    type?: string,
+    turnIndex?: number,
+    trigger?: HTMLElement
+  ) => void
   /** `turnIndex` is the clicked card's position in the message list, which
    *  matches its index in the stored conversation history — so the admin can
    *  badge the exact card the visitor opened. */
@@ -996,7 +1001,9 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
 
   return (
     <>
-      <div className={styles.body} ref={bodyRef}>
+      {/* data-selection-menu: selecting text in the messages brings up the
+          site's selection menu (Copy, Give feedback), as on a page. */}
+      <div className={styles.body} ref={bodyRef} data-selection-menu>
         {messages.length === 0 ? (
           <>
             {greeting && (
@@ -1049,8 +1056,8 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
                   allCitations={allCitations}
                   onSuggest={
                     onSuggest
-                      ? (query: string, type?: string) =>
-                          onSuggest(query, type, turnIndex)
+                      ? (query: string, type?: string, trigger?: HTMLElement) =>
+                          onSuggest(query, type, turnIndex, trigger)
                       : undefined
                   }
                   onCitationClick={

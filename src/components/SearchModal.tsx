@@ -1,10 +1,10 @@
 'use client'
 
-import Image from 'next/image'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Button from '@/components/Button'
 import Icon from '@/components/Icon'
+import ListingLogo from '@/components/ListingLogo'
 import Pill from '@/components/Pill'
 import { trackSearchClick, trackSearchQuery } from '@/lib/analytics'
 import type { SearchEntry, SearchType } from '@/lib/data/search-index'
@@ -403,7 +403,11 @@ export default function SearchModal({
                       flatIndex === activeIndex ? styles['result-active'] : ''
                     } flex items-start gap-12px padding-top-12px padding-bottom-12px padding-left-12px padding-right-12px cursor-pointer`}
                   >
-                    <ResultIcon entry={entry} />
+                    <ListingLogo
+                      title={entry.title}
+                      logo={entry.logo}
+                      page={entry.type === 'page'}
+                    />
                     <div className={styles['result-body']}>
                       <p
                         className={`${styles['result-title']} paragraph-small-bold`}
@@ -441,52 +445,6 @@ export default function SearchModal({
       </div>
     </div>,
     document.body
-  )
-}
-
-function ResultIcon({ entry }: { entry: SearchEntry }) {
-  const [errored, setErrored] = useState(false)
-
-  if (entry.type === 'page' && entry.logo) {
-    return (
-      <div
-        className={`${styles['result-icon']} ${styles['result-icon-page']} drop-shadow-light flex items-center justify-center`}
-      >
-        <Icon src={entry.logo} size={16} className="color-teal-800" />
-      </div>
-    )
-  }
-
-  if (entry.logo && !errored) {
-    return (
-      <div
-        className={`${styles['result-icon']} ${styles['result-icon-logo']} flex items-center justify-center`}
-      >
-        <Image
-          src={entry.logo}
-          alt=""
-          width={40}
-          height={40}
-          onError={() => setErrored(true)}
-          unoptimized={!entry.logo.startsWith('/')}
-        />
-      </div>
-    )
-  }
-
-  const initials = entry.title
-    .split(/\s+/)
-    .slice(0, 2)
-    .map(w => w[0])
-    .join('')
-    .toUpperCase()
-
-  return (
-    <div
-      className={`${styles['result-icon']} ${styles['result-icon-initials']} paragraph-xs-bold flex items-center justify-center`}
-    >
-      {initials}
-    </div>
   )
 }
 

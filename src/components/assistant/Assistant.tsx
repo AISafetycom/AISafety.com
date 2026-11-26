@@ -6,6 +6,7 @@ import { chipsFor, greetingFor } from '@/lib/assistant/pages'
 import { getPageContext } from '@/lib/assistant/page-context'
 import { suggestFormUrl } from '@/lib/assistant/constants'
 import { trackEvent, trackedPath, isTrackingOptedOut } from '@/lib/analytics'
+import { openFeedbackForm } from '@/lib/feedback-form'
 import type { CitationRef } from '@/lib/assistant/types'
 import ChatBody, {
   type ChatBodyHandle,
@@ -206,7 +207,12 @@ export default function Assistant() {
   }, [])
 
   const handleSuggest = useCallback(
-    (query: string, type?: string, turnIndex?: number) => {
+    (
+      query: string,
+      type?: string,
+      turnIndex?: number,
+      trigger?: HTMLElement
+    ) => {
       void fireLog({
         kind: 'suggest',
         query,
@@ -215,6 +221,17 @@ export default function Assistant() {
         currentPage,
         sessionId: getSessionId(),
       })
+      // A correction or feedback opens the site's own form by the button;
+      // the other forms (suggest a listing, contact) are still Airtable's.
+      if (trigger && (type === 'correction' || type === 'feedback')) {
+        openFeedbackForm({
+          kind: type,
+          entry: 'chatbot',
+          trigger,
+          fallbackHref: suggestFormUrl(type),
+        })
+        return
+      }
       window.open(suggestFormUrl(type), '_blank', 'noopener')
     },
     [currentPage, fireLog]
@@ -538,8 +555,9 @@ export default function Assistant() {
               iconPosition="only"
               onClick={handleClose}
               aria-label="Close chatbot"
-              // Below, it would run past the panel's right edge.
-              tooltipPosition="left"
+              // An X plainly means close, so no tooltip (Melissa, 23
+              // November 2026).
+              tooltip={false}
             />
           </div>
         </header>

@@ -4,6 +4,7 @@ import { Fragment, useEffect, useState } from 'react'
 import base from '../page.module.css'
 import { FIELDS, OTHER_MAX, SECTIONS, maxLen, type Field } from './questions'
 import Button from '@/components/Button'
+import TextField from '@/components/TextField'
 import { withUtm } from '@/lib/utm'
 
 /** Answers by field key. Checkbox groups hold the ticked options; their
@@ -39,12 +40,6 @@ function Text({ children }: { children: string }) {
       })}
     </>
   )
-}
-
-/** Textareas grow with their content instead of scrolling internally. */
-function grow(el: HTMLTextAreaElement) {
-  el.style.height = 'auto'
-  el.style.height = `${el.scrollHeight + 2}px`
 }
 
 export default function DetailsForm() {
@@ -157,72 +152,47 @@ export default function DetailsForm() {
       case 'email':
       case 'tel':
         return (
-          <div key={f.key} className={`${base.field} ${width}`}>
-            <label
-              className="paragraph-small color-teal-grey-300"
-              htmlFor={f.key}
-            >
-              {label}
-            </label>
-            <input
-              id={f.key}
-              type={f.type}
-              className="text-field"
-              value={values.text[f.key] ?? ''}
-              onChange={e => setText(f.key, e.target.value)}
-              required={f.required}
-              maxLength={maxLen(f)}
-            />
-          </div>
+          <TextField
+            key={f.key}
+            className={width}
+            label={label}
+            id={f.key}
+            type={f.type}
+            value={values.text[f.key] ?? ''}
+            onChange={e => setText(f.key, e.target.value)}
+            required={f.required}
+            maxLength={maxLen(f)}
+          />
         )
 
       case 'textarea':
         return (
-          <div key={f.key} className={`${base.field} ${width}`}>
-            <label
-              className="paragraph-small color-teal-grey-300"
-              htmlFor={f.key}
-            >
-              {label}
-            </label>
-            <textarea
-              id={f.key}
-              className={`text-field ${base.textarea}`}
-              value={values.text[f.key] ?? ''}
-              onChange={e => {
-                grow(e.target)
-                setText(f.key, e.target.value)
-              }}
-              required={f.required}
-              maxLength={maxLen(f)}
-            />
-          </div>
+          <TextField
+            as="textarea"
+            key={f.key}
+            className={width}
+            label={label}
+            id={f.key}
+            value={values.text[f.key] ?? ''}
+            onChange={e => setText(f.key, e.target.value)}
+            required={f.required}
+            maxLength={maxLen(f)}
+          />
         )
 
       case 'select':
         return (
-          <div key={f.key} className={`${base.field} ${width}`}>
-            <label
-              className="paragraph-small color-teal-grey-300"
-              htmlFor={f.key}
-            >
-              {label}
-            </label>
-            <select
-              id={f.key}
-              className="text-field cursor-pointer"
-              value={values.text[f.key] ?? ''}
-              onChange={e => setText(f.key, e.target.value)}
-              required={f.required}
-            >
-              <option value="">Select…</option>
-              {f.options.map(o => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </select>
-          </div>
+          <TextField
+            as="select"
+            key={f.key}
+            className={width}
+            label={label}
+            id={f.key}
+            options={f.options}
+            value={values.text[f.key] ?? ''}
+            onChange={e => setText(f.key, e.target.value)}
+            required={f.required}
+          />
         )
 
       case 'checkboxes': {

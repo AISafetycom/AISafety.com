@@ -8,6 +8,8 @@ import MapControls from '@/components/MapControls'
 import MapSearch, { NO_MAP_SEARCH_CONTROL } from './MapSearch'
 import type { MapSearchControl } from './MapSearch'
 import { trackListingClick, trackListingHover } from '@/lib/analytics'
+import { isPlainClick, openFeedbackForm } from '@/lib/feedback-form'
+import { CORRECTIONS_FORM } from '@/lib/selection-feedback'
 import { withUtm } from '@/lib/utm'
 import { positionTooltip } from '@/lib/mapTooltip'
 import { MAP_BACKGROUND_URL } from '@/lib/map-images'
@@ -268,7 +270,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
       .attr('font-weight', 400)
       .attr('font-size', 72)
       .style('letter-spacing', '-2.16px')
-      .attr('fill', '#fff')
+      .attr('fill', 'var(--white)')
       .text('Map of AI Existential Safety')
 
     // Add area labels
@@ -299,7 +301,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         .attr('font-weight', 600)
         .attr('font-size', finalFontSize)
         .style('letter-spacing', '-0.01em')
-        .attr('fill', '#fff')
+        .attr('fill', 'var(--white)')
         .text(label)
 
       const bbox = textEl.node()?.getBBox()
@@ -312,7 +314,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
           .attr('height', bbox.height + finalPadY * 2)
           .attr('rx', (bbox.height + finalPadY * 2) / 2)
           .attr('ry', (bbox.height + finalPadY * 2) / 2)
-          .attr('fill', 'rgba(27, 43, 62, 0.6)')
+          .attr('fill', 'color-mix(in srgb, var(--teal-900) 60%, transparent)')
       }
     })
 
@@ -344,13 +346,42 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
       const linkEl = itemGroup
         .append(hasLink ? 'a' : 'g')
         .attr('class', 'mapItem')
+      // The "Suggest correction" item opens the site's own correction form
+      // by itself (FeedbackPopover), not the Airtable form in a new tab.
+      const siteForm = !!hasLink && org.link.startsWith(CORRECTIONS_FORM)
       if (hasLink) {
         linkEl
           .attr('xlink:href', withUtm(org.link, 'Map'))
           .attr('target', '_blank')
           .attr('rel', 'noopener noreferrer')
+          .attr('aria-haspopup', siteForm ? 'dialog' : null)
           .style('cursor', 'pointer')
           .on('click', event => {
+            // The correction form opens on the first click or tap (its
+            // tooltip would only repeat its name). A Cmd-click still opens
+            // the Airtable form.
+            if (siteForm) {
+              trackListingClick(
+                'Map',
+                org.title,
+                org.link,
+                org.id,
+                undefined,
+                'map',
+                firstCategory || undefined
+              )
+              if (!isPlainClick(event)) return
+              event.preventDefault()
+              // Its hover label would sit over the form's heading.
+              hideTooltip()
+              openFeedbackForm({
+                kind: 'correction',
+                entry: 'map',
+                trigger: event.currentTarget as SVGElement,
+                fallbackHref: org.link,
+              })
+              return
+            }
             // Mobile: first tap shows the tooltip instead of opening the
             // link. Second tap of the tooltip itself opens it. Matches the
             // pattern used on the /communities map.
@@ -417,7 +448,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         .attr('r', iconSize / 2)
         .attr('cx', 0)
         .attr('cy', 0)
-        .attr('fill', '#fff')
+        .attr('fill', 'var(--white)')
 
       // Logo image — single SVG <image> clipped to a circle. The browser
       // fetches/decodes the logo exactly once; preserveAspectRatio handles
@@ -441,7 +472,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
             .attr('r', contentSize / 2)
             .attr('cx', 0)
             .attr('cy', 0)
-            .attr('fill', '#f70')
+            .attr('fill', 'var(--teal-800)')
         })
       } else {
         linkEl
@@ -449,7 +480,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
           .attr('r', contentSize / 2)
           .attr('cx', 0)
           .attr('cy', 0)
-          .attr('fill', 'red')
+          .attr('fill', 'var(--teal-800)')
       }
 
       // Add label below logo
@@ -469,7 +500,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         .attr('font-weight', 600)
         .attr('font-size', fontSize)
         .style('letter-spacing', '-0.02em')
-        .attr('fill', '#000')
+        .attr('fill', 'var(--teal-900)')
         .text(labelName)
 
       // Get text bounding box and add background pill
@@ -488,7 +519,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
           .attr('height', rectH)
           .attr('rx', rectH / 2)
           .attr('ry', rectH / 2)
-          .attr('fill', '#fff')
+          .attr('fill', 'var(--white)')
 
         textEl.attr('y', bbox.height * 0.35)
 

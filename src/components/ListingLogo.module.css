@@ -1,0 +1,28 @@
+/* <ListingLogo> — moved here from the site search's results
+   (SearchModal.module.css), which now use it too. */
+.logo {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.logo img {
+  object-fit: contain;
+}
+
+.image img {
+  width: 100%;
+  height: 100%;
+}
+
+/* Page icons are dark-stroke and need a white circle, matching the nav. */
+.page {
+  background-color: var(--white);
+  border-radius: 50%;
+}
+
+.initials {
+  border-radius: 50%;
+}

@@ -1,11 +1,13 @@
-// Builds the link behind the selection menu's feedback button
-// (SelectionMenu): one of the site's two Airtable forms, opened with the
-// selected text, where it came from and a link back already filled in, so
-// the visitor only has to add what's wrong.
+// The site's two Airtable forms (corrections and feedback), and the link to
+// one of them with the selected text, where it came from and a link back
+// already filled in. The selection menu's button opens the site's own form
+// (FeedbackPopover) now; this link is what that form offers if sending
+// fails. resourceForPath is the corrections form's Resource choice for a
+// page, which the site's form sends too.
 
-const CORRECTIONS_FORM =
+export const CORRECTIONS_FORM =
   'https://airtable.com/appF8XfZUGXtfi40E/pagndDvdya1DSqoxN/form'
-const FEEDBACK_FORM =
+export const FEEDBACK_FORM =
   'https://airtable.com/appF8XfZUGXtfi40E/pageXZp18w3Sqm1Z7/form'
 
 // The corrections form's "Resource" choice for each resource page. A page
@@ -20,6 +22,19 @@ const RESOURCE_BY_PATH: Record<string, string> = {
   '/media-channels': 'Media channels',
   '/advisors': 'Advisors',
   '/founders': 'Founder toolkit',
+}
+
+/** The corrections form's Resource choice for a page, or undefined for a
+ *  page that has none (Jobs, the homepage). Training's recurring programs
+ *  (?view=recurring) are a choice of their own. */
+export function resourceForPath(
+  path: string,
+  view?: string | null
+): string | undefined {
+  if (path === '/training' && view === 'recurring') {
+    return 'Recurring training programs'
+  }
+  return RESOURCE_BY_PATH[path]
 }
 
 /** Longest quote put into a form link, so the link stays a sane length. */
@@ -62,11 +77,8 @@ export interface SelectionSource {
 export function selectionFormLink(source: SelectionSource): string {
   const body = `"${quoteForForm(source.text)}"\n${source.link}\n\n`
   if (source.listingName) {
-    const recurring = source.path === '/training' && source.view === 'recurring'
     return formLink(CORRECTIONS_FORM, {
-      prefill_Resource: recurring
-        ? 'Recurring training programs'
-        : RESOURCE_BY_PATH[source.path],
+      prefill_Resource: resourceForPath(source.path, source.view),
       [`prefill_${encodeURIComponent('Listing name')}`]: source.listingName,
       prefill_Correction: body,
     })

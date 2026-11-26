@@ -1,0 +1,23 @@
+/* <FeedbackPopover> — the correction and feedback form in a <Popover>.
+   Fields are <TextField>s, buttons <Button>s, the panel's padding the spacing
+   utilities; only the form's width and the quote's rule live here. */
+
+/* About as wide as Vercel's feedback box, and never wider than the screen
+   (16px from each edge, the panel's padding and its border). */
+.body {
+  width: 360px;
+  max-width: calc(100vw - 82px);
+}
+
+@media (max-width: 991px) {
+  /* The panel's padding is 16px here (the spacing utilities shrink). */
+  .body {
+    max-width: calc(100vw - 66px);
+  }
+}
+
+/* The selected text, set off by a line on its left (the default border
+   color). */
+.quote {
+  border-left: 2px solid var(--teal-800);
+}

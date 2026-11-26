@@ -3,6 +3,8 @@
 import Image from 'next/image'
 import Icon from '@/components/Icon'
 import { trackAirtableView, trackContributeClick } from '@/lib/analytics'
+import { isPlainClick, openFeedbackForm } from '@/lib/feedback-form'
+import { CORRECTIONS_FORM } from '@/lib/selection-feedback'
 import styles from './ContributeButtons.module.css'
 
 interface ExtraLink {
@@ -44,17 +46,21 @@ function ActionRow({
   icon,
   label,
   onClick,
+  opensDialog,
 }: {
   href: string
   icon: string
   label: string
-  onClick?: () => void
+  onClick?: (e: React.MouseEvent<HTMLAnchorElement>) => void
+  /** It opens a form on the page rather than following href. */
+  opensDialog?: boolean
 }) {
   return (
     <a
       href={href}
       target="_blank"
       rel="noopener noreferrer"
+      aria-haspopup={opensDialog ? 'dialog' : undefined}
       onClick={onClick}
       className={`flex items-center gap-8px link ${styles.row}`}
     >
@@ -80,6 +86,12 @@ function ContributeCard({
   track: (action: string, label: string, url: string) => void
 }) {
   const addLabel = `Add ${article(noun)} ${noun}`
+  // The Field map reads its link from a row in Airtable, which a dev server
+  // without Airtable access doesn't have ('#'): the corrections form then.
+  const correctionUrl =
+    suggestCorrectionUrl === '#' ? CORRECTIONS_FORM : suggestCorrectionUrl
+  // Only the site-wide corrections form has a form of the site's own.
+  const siteForm = correctionUrl.startsWith(CORRECTIONS_FORM)
   return (
     <div className={`border-only ${styles.card}`}>
       <p className="paragraph-xs color-teal-grey-300 padding-bottom-16px">
@@ -94,12 +106,23 @@ function ContributeCard({
           onClick={() => track('add', addLabel, suggestEntryUrl)}
         />
         <ActionRow
-          href={suggestCorrectionUrl}
+          href={correctionUrl}
           icon="/images/icons/pencil-small.svg"
           label="Suggest a correction"
-          onClick={() =>
-            track('correction', 'Suggest a correction', suggestCorrectionUrl)
-          }
+          opensDialog={siteForm}
+          onClick={e => {
+            track('correction', 'Suggest a correction', correctionUrl)
+            // The site's own form opens by the button (FeedbackPopover); a
+            // Cmd-click or middle click still opens the Airtable form.
+            if (!siteForm || !isPlainClick(e)) return
+            e.preventDefault()
+            openFeedbackForm({
+              kind: 'correction',
+              entry: 'contribute',
+              trigger: e.currentTarget,
+              fallbackHref: correctionUrl,
+            })
+          }}
         />
         {extraLinks?.map(link => (
           <ActionRow

@@ -37,14 +37,6 @@
     max-height: none;
     overflow: visible;
   }
-
-  /* iOS Safari auto-zooms focused fields with text under 16px; the site's
-     .text-field is 15px, so bump the form's fields on mobile. */
-  .fields input,
-  .fields textarea,
-  .fields select {
-    font-size: 16px;
-  }
 }
 
 /* Signup form layout — everything else on the page uses global utilities. */
@@ -81,15 +73,6 @@
   margin: 8px 0 0;
   padding-left: 24px;
   list-style: circle;
-}
-
-/* .text-field is a fixed-height single-line input; let textareas grow. */
-.textarea {
-  height: auto;
-  min-height: 80px;
-  padding: 14px 16px;
-  resize: vertical;
-  overflow-y: hidden;
 }
 
 /* Post-submit thank-you box on /hackathon/details. Fill and border come from

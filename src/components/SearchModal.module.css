@@ -141,35 +141,6 @@
   }
 }
 
-.result-icon {
-  flex: none;
-  width: 40px;
-  height: 40px;
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.result-icon img {
-  object-fit: contain;
-}
-
-.result-icon-logo img {
-  width: 100%;
-  height: 100%;
-}
-
-/* Page icons are dark-stroke and need a white circle, matching the nav. */
-.result-icon-page {
-  background-color: var(--white);
-  border-radius: 50%;
-}
-
-.result-icon-initials {
-  background-color: var(--teal-750);
-  color: var(--teal-300);
-  border-radius: 50%;
-}
-
 .result-body {
   flex: 1;
   min-width: 0;

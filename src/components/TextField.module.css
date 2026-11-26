@@ -1,0 +1,44 @@
+/* <TextField> — a label, the global .text-field box (its error border
+   included), and an error message. Only what .text-field doesn't already do
+   lives here. */
+
+/* A text area starts at about two lines and grows with its text (the
+   height is set in TextField.tsx as it's typed in). */
+.textarea {
+  height: auto;
+  min-height: 80px;
+  padding: 16px;
+  resize: vertical;
+  overflow-y: hidden;
+}
+
+/* A text box with suggestions: the list hangs under the box, as the
+   /events "Find events near you" list does, on the shared surface
+   (.border-plus-fill) with its shadow (.drop-shadow-dark). */
+.combo {
+  position: relative;
+}
+
+.suggestions {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  z-index: 1;
+  max-height: 280px;
+  padding: 8px;
+  border-radius: 16px;
+  overflow-y: auto;
+}
+
+/* A suggestion lights up under the pointer or the arrow keys, as the
+   /events list's places do. */
+.suggestion {
+  padding: 12px 16px;
+  border-radius: 8px;
+}
+
+.suggestion:hover,
+.suggestionActive {
+  background-color: color-mix(in srgb, var(--teal-400) 10%, transparent);
+}

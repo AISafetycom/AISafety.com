@@ -5,6 +5,7 @@ import { readLastMonthVisitors } from '@/lib/analytics/events'
 import { fetchAllCounts } from '@/lib/data/counts'
 import { roundToFigures } from '@/lib/round-figure'
 import { withUtm } from '@/lib/utm'
+import FeedbackFormLink from '@/components/FeedbackFormLink'
 import CopyButton from './CopyButton'
 import JumpLink from './JumpLink'
 import PressLink from './PressLink'
@@ -678,14 +679,13 @@ export default async function MediaPage() {
                 Suggest a listing
               </a>
               ,{' '}
-              <a
+              <FeedbackFormLink
+                kind="correction"
                 href="https://airtable.com/appF8XfZUGXtfi40E/pagndDvdya1DSqoxN/form"
-                target="_blank"
-                rel="noopener noreferrer"
                 className="link"
               >
                 report a correction
-              </a>
+              </FeedbackFormLink>
               , or{' '}
               <a
                 href="https://discord.gg/faamWzPcv8"

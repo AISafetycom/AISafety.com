@@ -49,12 +49,14 @@ export default function Footer() {
                   href="https://airtable.com/appF8XfZUGXtfi40E/pagndDvdya1DSqoxN/form"
                   section="Help us out"
                   label="Suggest a correction"
+                  form="correction"
                 />
                 <FooterLink
                   href="https://airtable.com/appF8XfZUGXtfi40E/pageXZp18w3Sqm1Z7/form"
                   section="Help us out"
                   label="Give anonymous feedback"
                   airtablePrefillField="Page"
+                  form="feedback"
                 />
                 <FooterLink
                   href="https://www.every.org/aisafetycom?donateTo=aisafetycom#/donate/card"

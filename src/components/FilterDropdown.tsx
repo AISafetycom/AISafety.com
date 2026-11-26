@@ -77,10 +77,9 @@ export default function FilterDropdown({
       // The × unticks every value, each recorded as unticking it would be.
       onClear={() => selected.forEach(toggle)}
       icon={icon}
-      // Each opening starts from the full list; a search changes the
-      // popover's width, so it is re-fitted to the screen as you type.
+      // Each opening starts from the full list. (A search changes the
+      // popover's width; <Popover> re-fits itself to the screen.)
       onOpen={() => setQuery('')}
-      measureKey={needle}
     >
       {searchable && (
         <SearchBar

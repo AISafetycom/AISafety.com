@@ -1,5 +1,11 @@
 import Link from 'next/link'
 import Button from '@/components/Button'
+import FeedbackFormLink from '@/components/FeedbackFormLink'
+import TextField from '@/components/TextField'
+import { CORRECTIONS_FORM, FEEDBACK_FORM } from '@/lib/selection-feedback'
+import ListingLogo from '@/components/ListingLogo'
+import PopoverDemo from './PopoverDemo'
+import SuggestionsDemo from './SuggestionsDemo'
 
 /* The design system, in public: every shared component in every variant,
    matching the Figma components. Add a section here for each new shared
@@ -157,6 +163,76 @@ export default function DesignSystemPage() {
             </div>
           </section>
         ))}
+      </div>
+
+      <h2 className="padding-top-40px padding-bottom-12px">Text fields</h2>
+      <p className="paragraph-small color-teal-grey-300 padding-bottom-24px">
+        The label, the box and an error message. Click into one to see its focus
+        state. A text area grows as you type.
+      </p>
+      <div className="flex flex-col gap-24px width-6-col">
+        <TextField label="Label" />
+        <TextField label="Label" defaultValue="Input text" />
+        <TextField label="Label" optional />
+        <TextField
+          label="Label"
+          defaultValue="Input text"
+          error="Error message"
+        />
+        <TextField as="textarea" label="Text area" />
+        <TextField
+          as="select"
+          label="Dropdown"
+          options={['First choice', 'Second choice']}
+        />
+        <SuggestionsDemo />
+      </div>
+
+      <h2 className="padding-top-40px padding-bottom-12px">Listing logo</h2>
+      <p className="paragraph-small color-teal-grey-300 padding-bottom-24px">
+        Starts a row in the site search&apos;s results and a text box&apos;s
+        suggestions: the logo, the name&apos;s initials when there&apos;s none,
+        or a page&apos;s icon.
+      </p>
+      <div className="flex items-center gap-16px">
+        <ListingLogo
+          title="AI Safety Quest"
+          logo="/images/ai-safety-quest.png"
+        />
+        <ListingLogo title="Alignment Forum" logo={null} />
+        <ListingLogo title="Events" logo="/images/icons/calendar.svg" page />
+      </div>
+
+      <h2 className="padding-top-40px padding-bottom-12px">Popover</h2>
+      <p className="paragraph-small color-teal-grey-300 padding-bottom-24px">
+        Holds anything: a filter&apos;s options, a form. Opened by something on
+        the page, it points at it and goes under it, or above or beside it when
+        there&apos;s no room, never over it. It closes on Escape or a click
+        outside.
+      </p>
+      <PopoverDemo />
+
+      <h2 className="padding-top-40px padding-bottom-12px">
+        Correction and feedback form
+      </h2>
+      <p className="paragraph-small color-teal-grey-300 padding-bottom-24px">
+        The site&apos;s own form, in a popover by what opened it. Links that
+        open it are FeedbackFormLinks: a plain click opens the form, a Cmd-click
+        the Airtable form. Selecting text on a page opens it too.
+      </p>
+      <div className="flex items-center gap-16px">
+        <Button
+          as={FeedbackFormLink}
+          kind="correction"
+          href={CORRECTIONS_FORM}
+          variant="clear-border"
+          size="small"
+        >
+          Suggest a correction
+        </Button>
+        <FeedbackFormLink kind="feedback" href={FEEDBACK_FORM} className="link">
+          Give feedback
+        </FeedbackFormLink>
       </div>
     </main>
   )

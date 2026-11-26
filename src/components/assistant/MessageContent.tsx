@@ -34,7 +34,7 @@ export function parseSuggestToken(raw: string): {
 interface Props {
   text: string
   citations: CitationRef[]
-  onSuggest?: (query: string, type?: string) => void
+  onSuggest?: (query: string, type?: string, trigger?: HTMLElement) => void
   onCitationClick?: (citation: CitationRef) => void
   onLinkClick?: (href: string, label: string) => void
   isStreaming?: boolean
@@ -139,7 +139,7 @@ function parseCardLine(line: string): CardSpec | null {
 function renderInline(
   text: string,
   citationsById: Map<string, CitationRef>,
-  onSuggest?: (query: string, type?: string) => void,
+  onSuggest?: (query: string, type?: string, trigger?: HTMLElement) => void,
   onCitationClick?: (c: CitationRef) => void,
   onLinkClick?: (href: string, label: string) => void
 ): ReactNode[] {
@@ -293,14 +293,16 @@ export function SuggestInline({
 }: {
   query: string
   type?: string
-  onSuggest?: (query: string, type?: string) => void
+  onSuggest?: (query: string, type?: string, trigger?: HTMLElement) => void
   /** Rendered inside the button, after the label — the admin log viewer uses
    *  this to badge a button the visitor pressed. The live chat passes none. */
   badge?: React.ReactNode
 }) {
-  const handleClick = (e: React.MouseEvent) => {
+  const handleClick = (e: React.MouseEvent<HTMLElement>) => {
     e.preventDefault()
-    onSuggest?.(query, type)
+    // The button goes along so the site's own correction or feedback form
+    // can open by it.
+    onSuggest?.(query, type, e.currentTarget)
   }
   const label =
     type === 'correction'
@@ -314,7 +316,11 @@ export function SuggestInline({
     <span className={styles.suggest}>
       <a href="#" className={styles.suggestButton} onClick={handleClick}>
         {label}
-        <Icon src="/images/icons/arrow-up-right.svg" size={16} />
+        {/* The arrow says it opens elsewhere: a correction or feedback opens
+            the site's own form right here instead. */}
+        {type !== 'correction' && type !== 'feedback' && (
+          <Icon src="/images/icons/arrow-up-right.svg" size={16} />
+        )}
         {badge}
       </a>
     </span>
