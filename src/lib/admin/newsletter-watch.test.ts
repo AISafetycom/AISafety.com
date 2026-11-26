@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { CampaignClicks } from '@/lib/newsletter-clicks'
 import type { Mail } from './mail'
 import {
   ALERTS_KEY,
@@ -85,6 +86,10 @@ interface Fake {
 
 let ac: Fake
 let calls: Array<{ method: string; url: URL }>
+/** Clicks counted on aisafety.com, by issue (none unless a test sets them). */
+let clickCounts: Record<string, CampaignClicks>
+/** The click store failing. */
+let clicksDown: boolean
 
 /** An AC date `msAgo` before `at`, in the account's -05:00 offset, the way
  *  the v3 API writes them ("2026-09-28T09:35:42-05:00"). */
@@ -174,6 +179,8 @@ async function judged(
 
 beforeEach(() => {
   warmup.on = true
+  clickCounts = {}
+  clicksDown = false
   process.env.ACTIVECAMPAIGN_URL = 'https://alignment23684.api-us1.com'
   process.env.ACTIVECAMPAIGN_KEY = KEY
   // No Upstash, as on a laptop: Vercel's build has it set, and the cancel's
@@ -309,7 +316,19 @@ function setup() {
     return true
   })
   const run = (at: Date = NOW, extra: { dry?: boolean } = {}) =>
-    runWatch({ now: at, store, mail, retryDelayMs: 0, ...extra })
+    runWatch({
+      now: at,
+      store,
+      mail,
+      retryDelayMs: 0,
+      clicks: async issues => {
+        if (clicksDown) throw new Error('Upstash down')
+        return new Map(
+          issues.map(i => [i, clickCounts[i] ?? { total: 0, links: [] }])
+        )
+      },
+      ...extra,
+    })
   return {
     store,
     sent,
@@ -1001,7 +1020,7 @@ describe('runWatch: waves still to go (approve once)', () => {
     ])
     expect(sent.map(m => m.subject)).toEqual([
       'Newsletter: Events · Week 41: waves 2–4 canceled – wave 1 came back red',
-      'Newsletter: Events · Week 41 wave 1/4 health check: red – hold the next wave',
+      'Newsletter: Events · Week 41 wave 1/4 analytics: red – hold the next wave',
     ])
     expect(sent[1].text).toContain(
       'The send watcher cancels the waves of it still scheduled.'
@@ -1380,12 +1399,12 @@ describe('runWatch: health checks', () => {
     const s = await run()
     expect(s.health).toEqual([{ campaignId: '260', verdict: 'red' }])
     expect(sent.map(m => m.subject)).toEqual([
-      'Newsletter: Training · Week 41 wave 1/4 health check: red – hold the next wave',
+      'Newsletter: Training · Week 41 wave 1/4 analytics: red – hold the next wave',
     ])
     expect(sent[0].text).toContain(
       'Sent to: 1,000 (the approval expected 1,003)'
     )
-    expect(sent[0].text).toContain('Hard bounces: 25 (2.5%)')
+    expect(sent[0].text).toContain('Bounces: 25 (2.5%): 25 hard (2.5%), 0 soft')
     expect(sent[0].text).toContain('Unsubscribes: 12 (1.2%)')
     const record = await store.get<HealthRecord>(HEALTH_PREFIX + '260')
     expect(record?.verdict).toBe('red')
@@ -1415,7 +1434,7 @@ describe('runWatch: health checks', () => {
     const s = await run()
     expect(s.health).toEqual([{ campaignId: '260', verdict: 'green' }])
     expect(sent[0].subject).toBe(
-      'Newsletter: Training · Week 41 wave 1/4 health check: green'
+      'Newsletter: Training · Week 41 wave 1/4 analytics'
     )
     expect(sent).toHaveLength(1)
     expect(s.alerts).toEqual([])
@@ -1540,13 +1559,13 @@ describe('runWatch: health checks', () => {
     ])
     expect(s.alerts).toEqual([])
     expect(sent.map(m => m.subject)).toEqual([
-      'Newsletter: Training · Week 41 wave 4/4 health check: amber – look before the next issue',
-      'Newsletter: Events · Week 41 wave 4/4 health check: red – look before the next issue',
+      'Newsletter: Training · Week 41 wave 4/4 analytics: amber – look before the next issue',
+      'Newsletter: Events · Week 41 wave 4/4 analytics: red – look before the next issue',
     ])
     expect(sent[1].text).toContain(
       'Events · Week 41 wave 4/4 needs a look before the next issue goes out: verified opens 14.96% (red under 15%).'
     )
-    expect(sent[1].text).toContain('Verified opens: 146 (14.96%)')
+    expect(sent[1].text).toContain('Opened: 146 (14.96%)')
     expect(sent[1].text).not.toContain('cancels the waves')
     // Still nothing on the banner on later runs.
     expect((await run(later(10 * MIN))).alerts).toEqual([])
@@ -1612,7 +1631,7 @@ describe('runWatch: health checks', () => {
       ],
     ])
     expect(sent.map(m => m.subject)).toContain(
-      'Newsletter: Training · Week 41 wave 4/4 health check: red – look before the next issue'
+      'Newsletter: Training · Week 41 wave 4/4 analytics: red – look before the next issue'
     )
   })
 
@@ -1672,16 +1691,145 @@ describe('runWatch: health checks', () => {
       'Training · Week 42 health check: amber – look before the next issue',
     ])
     expect(sent.map(m => m.subject)).toEqual([
-      'Newsletter: Training · Week 42 health check: amber – look before the next issue',
-      'Newsletter: Events · Week 42 health check: green',
+      'Newsletter: Training · Week 42 analytics: amber – look before the next issue',
+      'Newsletter: Events · Week 42 analytics',
     ])
     expect(sent[0].text).toContain(
       'Training · Week 42 needs a look before the next issue: verified opens 20% (amber under 25%).'
     )
     expect(sent[1].text).toContain(
-      'Events · Week 42 looks healthy 24 hours after it finished sending.\n'
+      'How Events · Week 42 did in the 24 hours after it finished sending.\n'
     )
     expect(sent[1].text).not.toContain('next wave')
+  })
+
+  it('gives the clicks, the most-clicked links and the last issue beside them', async () => {
+    warmup.on = false
+    const { store, sent, run } = setup()
+    const whole = { segmentid: '0' }
+    ac.campaigns = [
+      sentWave({
+        id: '261',
+        name: 'Events · Week 42, 2026',
+        ...whole,
+        cdate: acDate(26 * HOUR),
+        sdate: acDate(26 * HOUR),
+        ldate: acDate(25 * HOUR),
+        unsubscribes: '3',
+      }),
+      // A practice send since the last issue: too small to compare with.
+      sentWave({
+        id: '256',
+        name: 'Events · Week 42, 2026',
+        ...whole,
+        ldate: acDate(2 * DAY),
+        send_amt: '3',
+      }),
+      sentWave({
+        id: '250',
+        name: 'Events · Week 41, 2026',
+        ...whole,
+        ldate: acDate(8 * DAY),
+      }),
+    ]
+    ac.lists = { '261': ['6'] }
+    await approve(store, '261', {
+      listId: '6',
+      wave: null,
+      waves: null,
+      segmentId: null,
+      expected: 1000,
+    })
+    const earlier = (id: string, sendAmt: number): HealthRecord => ({
+      campaignId: id,
+      listId: '6',
+      name: 'Events · Week 41, 2026',
+      baseName: 'Events · Week 41, 2026',
+      wave: null,
+      waves: null,
+      verdict: 'green',
+      reasons: [],
+      numbers: {
+        sendAmt,
+        hardBounces: 0,
+        softBounces: 0,
+        unsubscribes: 9,
+        spamComplaints: 0,
+        verifiedOpens: 300,
+      },
+      expected: null,
+      finishedAt: new Date(NOW.getTime() - 8 * DAY).toISOString(),
+      checkedAt: new Date(NOW.getTime() - 7 * DAY).toISOString(),
+      smallSample: sendAmt < 50,
+      emailedAt: new Date(NOW.getTime() - 7 * DAY).toISOString(),
+      clicks: { total: 90, links: [] },
+    })
+    await store.set(HEALTH_PREFIX + '250', earlier('250', 900))
+    await store.set(HEALTH_PREFIX + '256', earlier('256', 3))
+    const link = (label: string, clicks: number) => ({
+      label,
+      url: `https://www.example.org/${clicks}`,
+      clicks,
+    })
+    clickCounts['Events · Week 42, 2026'] = {
+      total: 120,
+      links: [
+        link('MATS Winter Program', 40),
+        link('AI Safety Camp', 30),
+        link('ARENA 7.0', 20),
+        link('SPAR', 15),
+        link('BlueDot Impact', 10),
+        link('One more', 5),
+      ],
+    }
+
+    await run()
+    expect(sent.map(m => m.subject)).toEqual([
+      'Newsletter: Events · Week 42 analytics',
+    ])
+    const text = sent[0].text
+    expect(text).toContain('Opened: 400 (40%; last issue 33%)')
+    expect(text).toContain('Clicks: 120 (0.12 per email; last issue 0.10)')
+    expect(text).toContain('Unsubscribes: 3 (0.3%; last issue 1.0%)')
+    expect(text).toContain(
+      'Most-clicked links:\n1. MATS Winter Program (example.org): 40 clicks\n2. AI Safety Camp'
+    )
+    expect(text).toContain('5. BlueDot Impact (example.org): 10 clicks\n')
+    expect(text).not.toContain('One more')
+    expect(text).toContain(
+      'Last issue = Events · Week 41, at its own 24-hour mark.'
+    )
+    expect(text).toContain(
+      'Analytics: https://aisafety.com/admin/analytics?tab=newsletters'
+    )
+    // A green update leaves out the newsletter page and ActiveCampaign.
+    expect(text).not.toContain('Newsletter page:')
+    expect(sent[0].html).toContain(
+      '<a href="https://www.example.org/40">MATS Winter Program</a>'
+    )
+    const record = await store.get<HealthRecord>(HEALTH_PREFIX + '261')
+    expect(record?.clicks?.total).toBe(120)
+    expect(record?.clicks?.links).toHaveLength(5)
+  })
+
+  it('still sends the update when the clicks can’t be read, and on a wave says so', async () => {
+    const { store, sent, run } = setup()
+    ac.campaigns = [sentWave()]
+    ac.lists['260'] = ['7']
+    await approve(store, '260', { listId: '7', expected: 1000 })
+    clicksDown = true
+    await run()
+    expect(sent.map(m => m.subject)).toEqual([
+      'Newsletter: Training · Week 41 wave 1/4 analytics',
+    ])
+    expect(sent[0].text).toContain(
+      'Clicks (every wave so far): couldn’t be read'
+    )
+    expect(sent[0].text).not.toContain('Most-clicked links')
+    // A wave is never compared with an earlier issue.
+    expect(sent[0].text).not.toContain('last issue')
+    const record = await store.get<HealthRecord>(HEALTH_PREFIX + '260')
+    expect(record?.clicks).toBeNull()
   })
 
   it('waits 24 hours for a whole-list send, 18 for a wave', async () => {
@@ -1698,12 +1846,12 @@ describe('runWatch: health checks', () => {
     // 19 hours after both finished: only the wave is due.
     await run()
     expect(sent.map(m => m.subject)).toEqual([
-      'Newsletter: Training · Week 41 wave 1/4 health check: green',
+      'Newsletter: Training · Week 41 wave 1/4 analytics',
     ])
     // 24 hours after: the whole-list send too.
     await run(later(5 * HOUR))
     expect(sent.map(m => m.subject).slice(1)).toEqual([
-      'Newsletter: Events · Week 42 health check: green',
+      'Newsletter: Events · Week 42 analytics',
     ])
   })
 })
@@ -1771,7 +1919,7 @@ describe('runWatch: the three-day recheck', () => {
     await approve(store, '260', { listId: '7', expected: 1000 })
     await run()
     expect(sent.map(m => m.subject)).toEqual([
-      'Newsletter: Training · Week 41 wave 1/4 health check: green',
+      'Newsletter: Training · Week 41 wave 1/4 analytics',
     ])
     // Not yet: two days on, nothing is read again.
     await run(later(29 * HOUR))
@@ -2187,7 +2335,7 @@ describe('runWatch: review hardening', () => {
     expect(doc?.mailLog).toHaveLength(20)
   })
 
-  it('puts alerts before health checks when the ceiling is near', async () => {
+  it('puts alerts before analytics updates when the ceiling is near', async () => {
     const { store, sent, run } = setup()
     ac.campaigns = ['320', '321', '322', '323', '324'].map((id, i) =>
       campaign({
@@ -2216,7 +2364,7 @@ describe('runWatch: review hardening', () => {
     await run(later(71 * MIN))
     expect(sent).toHaveLength(6)
     expect(
-      sent.filter(m => m.subject.includes('health check')).map(m => m.subject)
+      sent.filter(m => m.subject.includes(' analytics')).map(m => m.subject)
     ).toHaveLength(5)
   })
 

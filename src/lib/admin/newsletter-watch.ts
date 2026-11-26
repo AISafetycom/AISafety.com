@@ -48,7 +48,11 @@
   HEALTH_CHECK_LISTS), 24 hours after a whole-list send finished or 18 hours
   after a wave did (healthAfterHours): a health
   check (bounces, unsubscribes, spam complaints, verified opens) with a
-  green/amber/red verdict, emailed and stored for the page. A red one cancels
+  green/amber/red verdict, stored for the page and emailed as an analytics
+  update (since 26 November 2026, Bryce: "Instead of having this a health
+  check, let's make it an analytics update"): the same numbers plus the
+  clicks counted on aisafety.com so far, the most-clicked links, and the
+  newsletter's previous issue beside them (healthMail). A red one cancels
   the waves of that issue still scheduled (above); amber cancels nothing.
   The banner shows an amber or red check for EVENT_ALERT_FOR, except one on
   an issue's last wave that rests on low opens alone. A check comes before
@@ -86,6 +90,7 @@ import {
   type WatcherCancel,
 } from '@/lib/admin/newsletter'
 import { ROOT_ADMINS } from '@/lib/admin/users'
+import { type CampaignClicks, readClicks } from '@/lib/newsletter-clicks'
 import {
   FAIL_CLOSED_MINUTES,
   HEALTH_CHECK_LISTS,
@@ -348,6 +353,11 @@ export interface HealthRecord {
   /** Too few recipients to judge: stored, not emailed. */
   smallSample: boolean
   emailedAt: string | null
+  /** The issue's clicks counted on aisafety.com when it was checked (every
+   *  wave of it so far), with its TOP_LINKS most-clicked links. Null when
+   *  the count couldn't be read; missing on checks from before 26 November
+   *  2026. */
+  clicks?: CampaignClicks | null
 }
 
 /** The three-day recheck of a checked send (RECHECK_AFTER): its numbers
@@ -961,11 +971,34 @@ function opensOnly(n: HealthNumbers): boolean {
   return healthVerdict({ ...n, verifiedOpens: n.sendAmt }).verdict === 'green'
 }
 
-export function healthMail(r: HealthRecord, origin: string): Mail {
+/** Links the analytics update lists, most-clicked first. */
+const TOP_LINKS = 5
+
+/** "0.12": clicks per email sent. */
+function perEmail(clicks: number, sent: number): string {
+  return sent > 0 ? (clicks / sent).toFixed(2) : '–'
+}
+
+/** The 24-hour check, emailed as an analytics update: how the send did
+ *  (opens, clicks, unsubscribes, bounces, spam complaints), its most-clicked
+ *  links, and, beside each rate, the newsletter's previous issue at its own
+ *  check (`previous`, from previousCheck). The verdict still leads when
+ *  it's amber or red. */
+export function healthMail(
+  r: HealthRecord,
+  origin: string,
+  previous: HealthRecord | null = null
+): Mail {
   const label = shortLabel(r.name, r.campaignId)
   const next = nextSend(r)
+  const hours = healthAfterHours(r)
   const n = r.numbers
   const s = n.sendAmt
+  const p = previous?.numbers
+  const ps = p?.sendAmt ?? 0
+  /** "; last issue 40%", inside the brackets after a rate. */
+  const last = (shown: string | null) => (shown ? `; last issue ${shown}` : '')
+  const bounces = n.hardBounces + n.softBounces
   const rows: Array<[string, string]> = [
     [
       'Sent to',
@@ -973,58 +1006,160 @@ export function healthMail(r: HealthRecord, origin: string): Mail {
     ],
     // Each rate beside the line it's judged by, as in the reasons above.
     [
-      'Verified opens',
-      `${num(n.verifiedOpens)} (${pctBeside(n.verifiedOpens, s, s > 0 && n.verifiedOpens / s < 0.15 ? 15 : 25)})`,
+      'Opened',
+      `${num(n.verifiedOpens)} (${pctBeside(n.verifiedOpens, s, s > 0 && n.verifiedOpens / s < 0.15 ? 15 : 25)}${last(p && ps > 0 ? pct(p.verifiedOpens, ps) : null)})`,
     ],
-    [
-      'Hard bounces',
-      `${num(n.hardBounces)} (${pctBeside(n.hardBounces, s, 2)})`,
-    ],
-    ['Soft bounces', `${num(n.softBounces)} (${pct(n.softBounces, s)})`],
+  ]
+  // Missing on a check from before the clicks were read: no row.
+  if (r.clicks !== undefined)
+    rows.push([
+      r.wave != null ? 'Clicks (every wave so far)' : 'Clicks',
+      r.clicks == null
+        ? 'couldn’t be read'
+        : `${num(r.clicks.total)} (${perEmail(r.clicks.total, s)} per email${last(previous?.clicks && ps > 0 ? perEmail(previous.clicks.total, ps) : null)})`,
+    ])
+  rows.push(
     [
       'Unsubscribes',
-      `${num(n.unsubscribes)} (${pctBeside(n.unsubscribes, s, 5)})`,
+      `${num(n.unsubscribes)} (${pctBeside(n.unsubscribes, s, 5)}${last(p && ps > 0 ? pct(p.unsubscribes, ps) : null)})`,
+    ],
+    [
+      'Bounces',
+      `${num(bounces)} (${pctBeside(bounces, s, 1)}): ${num(n.hardBounces)} hard (${pctBeside(n.hardBounces, s, 2)}), ${num(n.softBounces)} soft`,
     ],
     [
       'Spam complaints',
       `${num(n.spamComplaints)} (${pctBeside(n.spamComplaints, s, 0.1)}, non-Gmail readers only)`,
     ],
-  ]
+    ['Finished sending', longDate(r.finishedAt)]
+  )
+  const top = r.clicks?.links.slice(0, TOP_LINKS) ?? []
   const lead =
     r.verdict === 'green'
-      ? `${label} looks healthy ${healthAfterHours(r)} hours after it finished sending.${next === 'wave' ? ' Fine to go ahead with the next wave.' : ''}`
+      ? `How ${label} did in the ${hours} hours after it finished sending.${next === 'wave' ? ' Fine to go ahead with the next wave.' : ''}`
       : r.verdict === 'amber'
         ? `${label} needs a look before the next ${next}: ${r.reasons.join('; ')}.`
         : next === 'wave'
           ? `Hold the next wave of ${r.baseName.replace(/, \d{4}$/, '')}: ${r.reasons.join('; ')}. The send watcher cancels the waves of it still scheduled.`
           : `${label} needs a look before the next issue goes out: ${r.reasons.join('; ')}.`
-  const note =
-    'Verified opens leave out Apple’s automatic opens. Red: hard bounces at 2%, complaints above 0.1% or verified opens under 15%. Amber: bounces at 1%, unsubscribes above 5% or verified opens under 25%.'
-  const links = linksBlock(origin)
+  const note = [
+    'Opened leaves out Apple Mail’s automatic opens, so it reads lower than Opened on the Analytics page.',
+    'Clicks are counted on aisafety.com, every click so far, link checkers left out.',
+    ...(previous
+      ? [
+          // When it was really checked: whole-list sends were checked at
+          // 18 hours, like waves, until 20 November 2026.
+          `Last issue = ${shortLabel(previous.name, previous.campaignId)}, at its own ${Math.round((Date.parse(previous.checkedAt) - Date.parse(previous.finishedAt)) / HOUR)}-hour mark.`,
+        ]
+      : []),
+    'This email warns when hard bounces reach 2%, all bounces 1%, spam complaints pass 0.1%, unsubscribes pass 5% or opens fall under 25%.',
+  ].join(' ')
+  const analytics = `${origin}/admin/analytics?tab=newsletters`
+  // A green update needs only the numbers; a warning also needs the
+  // newsletter page and ActiveCampaign.
+  const links =
+    r.verdict === 'green' ? { text: [], html: '' } : linksBlock(origin)
+  const footer = `Sent by the site’s send watcher once per ${r.wave != null ? 'wave' : 'issue'}, ${hours} hours after it finishes sending. Times are UK time.`
+  const host = (url: string) => {
+    try {
+      return new URL(url).hostname.replace(/^www\./, '')
+    } catch {
+      return url
+    }
+  }
+  const clicksWord = (c: number) => `${num(c)} click${c === 1 ? '' : 's'}`
   return {
-    subject: `Newsletter: ${label} health check: ${verdictWords(r.verdict, next)}`,
+    subject: `Newsletter: ${label} analytics${r.verdict === 'green' ? '' : `: ${verdictWords(r.verdict, next)}`}`,
     text: [
       lead,
       '',
       ...rows.map(([k, v]) => `${k}: ${v}`),
-      `Finished sending: ${longDate(r.finishedAt)}`,
+      ...(top.length
+        ? [
+            '',
+            'Most-clicked links:',
+            ...top.map(
+              (l, i) =>
+                `${i + 1}. ${l.label} (${host(l.url)}): ${clicksWord(l.clicks)}`
+            ),
+          ]
+        : []),
       '',
       note,
       '',
+      `Analytics: ${analytics}`,
       ...links.text,
       '',
-      FOOTER,
+      footer,
     ].join('\n'),
     html: wrap(
       `<p>${esc(lead)}</p><ul>` +
         rows
           .map(([k, v]) => `<li><strong>${esc(k)}:</strong> ${esc(v)}</li>`)
           .join('') +
-        `<li><strong>Finished sending:</strong> ${esc(longDate(r.finishedAt))}</li></ul>` +
+        '</ul>' +
+        (top.length
+          ? '<p><strong>Most-clicked links</strong></p><ol>' +
+            top
+              .map(
+                l =>
+                  `<li><a href="${esc(l.url)}">${esc(l.label)}</a> <span style="color:#666">(${esc(host(l.url))})</span>: ${esc(clicksWord(l.clicks))}</li>`
+              )
+              .join('') +
+            '</ol>'
+          : '') +
         `<p style="color:#666;font-size:13px">${esc(note)}</p>` +
+        `<p><strong>Analytics:</strong> <a href="${esc(analytics)}">${esc(analytics)}</a></p>` +
         links.html +
-        `<p style="color:#666;font-size:13px">${esc(FOOTER)}</p>`
+        `<p style="color:#666;font-size:13px">${esc(footer)}</p>`
     ),
+  }
+}
+
+/** The newsletter's previous issue, for the analytics update's "last issue"
+ *  figures: the newest whole-list send to the same list, among the campaigns
+ *  read this run, that finished before this one and has a check of its own
+ *  stored (a practice send to a handful of addresses doesn't count). Null
+ *  for a wave, whose numbers cover part of a list, or when there's none. */
+async function previousCheck(
+  r: HealthRecord,
+  campaigns: RawCampaign[],
+  store: WatchStore
+): Promise<HealthRecord | null> {
+  const newsletter = LIST_LABELS[r.listId]
+  if (!newsletter || r.wave != null) return null
+  const before = Date.parse(r.finishedAt)
+  const earlier = campaigns
+    .filter(
+      c =>
+        c.id !== r.campaignId &&
+        c.status === '5' &&
+        c.name.startsWith(`${newsletter} · `) &&
+        waveOf(c.name).wave == null
+    )
+    .map(c => ({ id: c.id, at: timeOf(c.ldate) }))
+    .filter(
+      (c): c is { id: string; at: number } => c.at != null && c.at < before
+    )
+    .sort((a, b) => b.at - a.at)
+    .slice(0, 5)
+  if (earlier.length === 0) return null
+  try {
+    const records = await store.mget<HealthRecord>(
+      earlier.map(c => HEALTH_PREFIX + c.id)
+    )
+    return (
+      records.find(
+        p =>
+          p != null && !p.smallSample && p.listId === r.listId && p.wave == null
+      ) ?? null
+    )
+  } catch (err) {
+    // The update still goes, without the comparison.
+    console.warn(
+      `[newsletter-watch] previous issue for ${r.campaignId} unread: ${errorText(err)}`
+    )
+    return null
   }
 }
 
@@ -1051,6 +1186,8 @@ export interface WatchOptions {
   budgetMs?: number
   /** Pause before retrying a gateway error (tests use 0). */
   retryDelayMs?: number
+  /** Reads the issues' click counts (tests pass their own). */
+  clicks?: (issues: string[]) => Promise<Map<string, CampaignClicks>>
 }
 
 export interface WatchSummary {
@@ -1114,6 +1251,7 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
   const store = opts.store ?? sharedStore()
   const origin = opts.origin ?? PRODUCTION_ORIGIN
   const mail = opts.mail ?? mailOwner
+  const readIssueClicks = opts.clicks ?? readClicks
   const startedMs = Date.now()
   const summary: WatchSummary = {
     ran: false,
@@ -1477,6 +1615,19 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
             const { verdict, reasons } = healthVerdict(numbers)
             const w = waveOf(c.name)
             const a = approved.get(c.id)
+            // Counted per issue (every wave together), by its base name.
+            let clicks: CampaignClicks | null = null
+            try {
+              const got = (await readIssueClicks([w.baseName])).get(w.baseName)
+              clicks = got
+                ? { total: got.total, links: got.links.slice(0, TOP_LINKS) }
+                : null
+            } catch (err) {
+              // The check stands without them; the email says so.
+              console.warn(
+                `[newsletter-watch] clicks for ${c.id} unread: ${errorText(err)}`
+              )
+            }
             record = {
               campaignId: c.id,
               listId: lists.find(l => ISSUE_LISTS.includes(l)) ?? lists[0],
@@ -1492,6 +1643,7 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
               checkedAt: nowIso,
               smallSample: numbers.sendAmt < HEALTH_MIN_SAMPLE,
               emailedAt: null,
+              clicks,
             }
             summary.health.push({ campaignId: c.id, verdict })
           } catch (err) {
@@ -1951,7 +2103,7 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
       await saveAlerts()
     }
     for (const r of healthToEmail) {
-      const m = healthMail(r, origin)
+      const m = healthMail(r, origin, await previousCheck(r, campaigns, store))
       if (!(await mayTry())) {
         summary.deferred.push(m.subject)
         continue
