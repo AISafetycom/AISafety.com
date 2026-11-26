@@ -18,6 +18,10 @@ import FeaturedCard from '@/components/FeaturedCard'
 import ContributeButtons from '@/components/ContributeButtons'
 import FilterBar from '@/components/FilterBar'
 import FilterDropdown from '@/components/FilterDropdown'
+import {
+  APPLICATION_FILTER_OPTIONS,
+  applicationFilterValue,
+} from '@/lib/application-filter'
 import ModeToggle from '@/components/ModeToggle'
 import StickyBar, { scrollToAnchor } from '@/components/StickyBar'
 import { EVENT_TYPES, eventTypeColor } from '@/lib/event-types'
@@ -36,7 +40,6 @@ const SUGGEST_CORRECTION_URL =
 const AIRTABLE_VIEW_URL =
   'https://airtable.com/appF8XfZUGXtfi40E/shrteEg2cClc3x484/tblXbN9swwldwq8f7?viewControls=on'
 
-const applicationOptions = ['Open', 'Closed']
 // Cards show the full Airtable Cost value ("Pay to attend (assistance
 // available)", "Free (cash prize available)", …); the filter collapses
 // them to two groups.
@@ -97,9 +100,11 @@ function emptyStateMessage(
   const noun =
     selectedTypes.length > 0 ? pluralizeTypes(selectedTypes) : 'events'
   const applications =
-    selectedStatus.length === 1
-      ? ` with ${selectedStatus[0].toLowerCase()} applications`
-      : ''
+    selectedStatus.length !== 1
+      ? ''
+      : selectedStatus[0] === 'Not yet open'
+        ? ' with applications not yet open'
+        : ` with ${selectedStatus[0].toLowerCase()} applications`
   return `No results found for ${cost}${noun} ${modeLabel}${applications}. Try adjusting the filters.`
 }
 
@@ -381,7 +386,7 @@ export default function EventsClient({ events }: EventsClientProps) {
         if (
           skip !== 'status' &&
           selectedStatus.length > 0 &&
-          !selectedStatus.includes(event.applicationStatus)
+          !selectedStatus.includes(applicationFilterValue(event))
         )
           return false
         if (
@@ -419,7 +424,7 @@ export default function EventsClient({ events }: EventsClientProps) {
 
       return {
         filteredEvents: modeEvents.filter(e => matchesFilters(e)),
-        statusCounts: countBy('status', e => [e.applicationStatus]),
+        statusCounts: countBy('status', e => [applicationFilterValue(e)]),
         typeCounts: countBy('type', e => e.type),
         costCounts: countBy('cost', e => e.cost.map(costGroup)),
       }
@@ -554,7 +559,7 @@ export default function EventsClient({ events }: EventsClientProps) {
             trackingPage="Events"
             title="Applications"
             icon="/images/icons/paper.svg"
-            options={applicationOptions}
+            options={APPLICATION_FILTER_OPTIONS}
             selected={selectedStatus}
             counts={statusCounts}
             onToggle={v => toggleFilter(v, setSelectedStatus)}
