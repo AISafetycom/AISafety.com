@@ -2387,6 +2387,25 @@ select.input {
   flex: 1;
 }
 
+/* Decisions with a Fable chat at work or unread go first, under a heading
+   of their own, as "Fable chats" heads the list (Bryce, 26 Nov 2026). The
+   same letters as the list's section heads. */
+.doneGroupHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--q-text);
+}
+
+.doneGroupHead:not(:first-child) {
+  margin-top: 12px;
+}
+
 /* The decision picked in the search results, marked as a list row is. */
 .doneRowActive {
   background: var(--q-sel);

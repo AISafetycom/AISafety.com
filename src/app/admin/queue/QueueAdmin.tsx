@@ -2550,8 +2550,19 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
     }
   }, [agent, ruleWatchIds, load])
 
-  // The open item's replies are in front of Bryce: seen.
-  const openId = selectedId && !showDone ? selectedId : null
+  const selected = useMemo(() => {
+    if (!items) return null
+    return items.find(i => i.id === selectedId) ?? null
+  }, [items, selectedId])
+
+  // The open item's replies are in front of Bryce: seen. So are those of a
+  // decision opened from Done today, which otherwise would stay among its
+  // Fable chats after he had read them there.
+  const openId =
+    selectedId &&
+    (!showDone || (doneOpen && selected !== null && !isOpen(selected)))
+      ? selectedId
+      : null
   useEffect(() => {
     if (!openId || !chatSeen) return
     const last = chatRows[openId]?.last
@@ -2945,10 +2956,6 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
     visitorsOf,
   ])
 
-  const selected = useMemo(() => {
-    if (!items) return null
-    return items.find(i => i.id === selectedId) ?? null
-  }, [items, selectedId])
   selectedIdRef.current = selectedId
 
   // The record id in the search box to look up as a listing: the first one
@@ -4817,7 +4824,8 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
   const waiting = ordered.open
   // An older decision opened from the search sits in the done list but
   // was not done today.
-  const doneToday = ordered.done.filter(i => decidedSince(i, dayStart)).length
+  const doneTodayList = ordered.done.filter(i => decidedSince(i, dayStart))
+  const doneToday = doneTodayList.length
   // Rows the Mac's daily check took out this past week because their date
   // went by before he decided them (Bryce, 16 Nov 2026: "somehow I know
   // when this has happened"), less the ones whose line he closed. Only the
@@ -4890,7 +4898,12 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
                     setDoneOpen(false)
                   }}
                 >
-                  {doneToday} done today <kbd>T</kbd>
+                  {doneToday} done today
+                  {/* A decision Fable is answering on, or has answered
+                      unread: it has left the list, so the dot points the
+                      way (Bryce, 26 Nov 2026). */}
+                  {!showDone && <FableDot mark={markAmong(doneTodayList)} />}{' '}
+                  <kbd>T</kbd>
                 </button>
               </>
             )}
@@ -5340,6 +5353,7 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
                 onUndo={canEdit ? item => void act(item, 'undo') : null}
                 onReopen={canEdit ? item => void act(item, 'reopen') : null}
                 onOpen={showDecided}
+                fable={fableMarks}
               />
             ) : pane === 'detail' && selected ? (
               <Detail
@@ -10226,6 +10240,7 @@ function DoneList({
   onUndo,
   onReopen,
   onOpen,
+  fable,
 }: {
   items: QueueItem[]
   /** The decision picked in the search results: marked and scrolled to. */
@@ -10240,6 +10255,12 @@ function DoneList({
   onReopen: ((item: QueueItem) => void) | null
   /** Open a decision: the item as it was decided. */
   onOpen: (id: string) => void
+  /** The decisions Fable is answering on, or has answered since they were
+   *  last open: they go first, under "Fable chats", with the list's teal
+   *  bar (Bryce, 26 Nov 2026: "If something in here has a Fable chat
+   *  active or unread, a bit like our normal system it should be
+   *  separated out so I can see it"). Once read, back in their place. */
+  fable: Record<string, FableMark>
 }) {
   const listRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -10248,6 +10269,102 @@ function DoneList({
       ?.querySelector<HTMLElement>(`[data-id="${activeId}"]`)
       ?.scrollIntoView({ block: 'nearest' })
   }, [activeId])
+  const chats = items.filter(i => fable[i.id])
+  const rest = items.filter(i => !fable[i.id])
+  const row = (item: QueueItem) => (
+    <div
+      key={item.id}
+      data-id={item.id}
+      className={`${styles.doneRow} ${styles.doneRowOpen} ${item.id === activeId ? styles.doneRowActive : ''} ${fable[item.id] ? styles.rowFable : ''} ${fable[item.id] === 'answering' ? styles.rowFableLive : ''}`}
+      role="button"
+      tabIndex={0}
+      title={
+        fable[item.id]
+          ? `${FABLE_MARK_TITLE[fable[item.id]]}. Open it`
+          : 'Open it'
+      }
+      onClick={() => onOpen(item.id)}
+      onKeyDown={e => {
+        if (e.key === 'Enter' && e.target === e.currentTarget) {
+          e.preventDefault()
+          onOpen(item.id)
+        }
+      }}
+    >
+      {item.logo ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img className={styles.rowLogo} src={item.logo} alt="" />
+      ) : (
+        <span className={`${styles.rowLogo} ${styles.rowLogoEmpty}`}>
+          <Icon src={rowIcon(item)} />
+        </span>
+      )}
+      <span className={styles.rowBody}>
+        <span className={styles.rowTitle}>
+          <Marked text={splitTitle(item).name ?? item.title} search={search} />
+        </span>
+        <span className={styles.rowMeta}>
+          {item.source !== 'Comb' && <span>{item.source}</span>}
+          {item.page && <span>{pageLabel(item)}</span>}
+          <span
+            className={`${styles.withIcon} ${isRejected(item) ? styles.no : styles.yes}`}
+          >
+            <Icon src={doneIcon(item)} size={12} />
+            {doneLabel(item)}
+          </span>
+          {item.rejectReason && <span>{item.rejectReason}</span>}
+          {replyLabel(item) && <span>{replyLabel(item)}</span>}
+          <span>{ago(decidedAtOf(item))}</span>
+          <DecidedBy item={item} />
+          {item.reopening && <ReopeningTag reopening={item.reopening} />}
+        </span>
+      </span>
+      {/* The buttons act on their own, without opening the item. */}
+      <span className={styles.doneActions} onClick={e => e.stopPropagation()}>
+        {errorFor(item.id) && (
+          <span className={styles.error}>{errorFor(item.id)}</span>
+        )}
+        {item.source === 'Discord' &&
+          (item.status === 'Rejected'
+            ? discordRejectText(item)
+            : item.replyDraft) && (
+            <>
+              <CopyReply
+                text={
+                  (item.status === 'Rejected'
+                    ? discordRejectText(item)
+                    : item.replyDraft) ?? ''
+                }
+              />
+              {item.sourceLink && <OpenOnDiscord href={item.sourceLink} />}
+            </>
+          )}
+        {onReopen && takeBack(item) === 'reopen' ? (
+          <button
+            className={styles.ghost}
+            disabled={busyFor(item.id)}
+            onClick={() => onReopen(item)}
+            title="Bring it back: the listing is rebuilt if it was deleted (B)"
+          >
+            <Icon src={ICON.reopen} size={12} />
+            {busyFor(item.id) ? 'Reopening…' : 'Reopen'}
+          </button>
+        ) : (
+          onUndo &&
+          takeBack(item) === 'undo' && (
+            <button
+              className={styles.ghost}
+              disabled={busyFor(item.id)}
+              onClick={() => onUndo(item)}
+            >
+              <Icon src={ICON.undo} size={12} />
+              {busyFor(item.id) ? 'Undoing…' : 'Undo'}
+            </button>
+          )
+        )}
+      </span>
+    </div>
+  )
   return (
     <div className={styles.detailInner}>
       <h2 className={`${styles.title} ${styles.withIcon}`}>
@@ -10264,104 +10381,25 @@ function DoneList({
         </p>
       )}
       <div className={styles.doneList} ref={listRef}>
-        {items.map(item => (
-          <div
-            key={item.id}
-            data-id={item.id}
-            className={`${styles.doneRow} ${styles.doneRowOpen} ${item.id === activeId ? styles.doneRowActive : ''}`}
-            role="button"
-            tabIndex={0}
-            title="Open it"
-            onClick={() => onOpen(item.id)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && e.target === e.currentTarget) {
-                e.preventDefault()
-                onOpen(item.id)
-              }
-            }}
-          >
-            {item.logo ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img className={styles.rowLogo} src={item.logo} alt="" />
-            ) : (
-              <span className={`${styles.rowLogo} ${styles.rowLogoEmpty}`}>
-                <Icon src={rowIcon(item)} />
+        {chats.length > 0 && (
+          <>
+            <div className={styles.doneGroupHead}>
+              <span className={styles.groupIcon}>
+                <Icon src={ICON.stars} size={16} />
               </span>
+              Fable chats
+              <span className={styles.groupCount}>{chats.length}</span>
+            </div>
+            {chats.map(row)}
+            {rest.length > 0 && (
+              <div className={styles.doneGroupHead}>
+                Everything else
+                <span className={styles.groupCount}>{rest.length}</span>
+              </div>
             )}
-            <span className={styles.rowBody}>
-              <span className={styles.rowTitle}>
-                <Marked
-                  text={splitTitle(item).name ?? item.title}
-                  search={search}
-                />
-              </span>
-              <span className={styles.rowMeta}>
-                {item.source !== 'Comb' && <span>{item.source}</span>}
-                {item.page && <span>{pageLabel(item)}</span>}
-                <span
-                  className={`${styles.withIcon} ${isRejected(item) ? styles.no : styles.yes}`}
-                >
-                  <Icon src={doneIcon(item)} size={12} />
-                  {doneLabel(item)}
-                </span>
-                {item.rejectReason && <span>{item.rejectReason}</span>}
-                {replyLabel(item) && <span>{replyLabel(item)}</span>}
-                <span>{ago(decidedAtOf(item))}</span>
-                <DecidedBy item={item} />
-                {item.reopening && <ReopeningTag reopening={item.reopening} />}
-              </span>
-            </span>
-            {/* The buttons act on their own, without opening the item. */}
-            <span
-              className={styles.doneActions}
-              onClick={e => e.stopPropagation()}
-            >
-              {errorFor(item.id) && (
-                <span className={styles.error}>{errorFor(item.id)}</span>
-              )}
-              {item.source === 'Discord' &&
-                (item.status === 'Rejected'
-                  ? discordRejectText(item)
-                  : item.replyDraft) && (
-                  <>
-                    <CopyReply
-                      text={
-                        (item.status === 'Rejected'
-                          ? discordRejectText(item)
-                          : item.replyDraft) ?? ''
-                      }
-                    />
-                    {item.sourceLink && (
-                      <OpenOnDiscord href={item.sourceLink} />
-                    )}
-                  </>
-                )}
-              {onReopen && takeBack(item) === 'reopen' ? (
-                <button
-                  className={styles.ghost}
-                  disabled={busyFor(item.id)}
-                  onClick={() => onReopen(item)}
-                  title="Bring it back: the listing is rebuilt if it was deleted (B)"
-                >
-                  <Icon src={ICON.reopen} size={12} />
-                  {busyFor(item.id) ? 'Reopening…' : 'Reopen'}
-                </button>
-              ) : (
-                onUndo &&
-                takeBack(item) === 'undo' && (
-                  <button
-                    className={styles.ghost}
-                    disabled={busyFor(item.id)}
-                    onClick={() => onUndo(item)}
-                  >
-                    <Icon src={ICON.undo} size={12} />
-                    {busyFor(item.id) ? 'Undoing…' : 'Undo'}
-                  </button>
-                )
-              )}
-            </span>
-          </div>
-        ))}
+          </>
+        )}
+        {rest.map(row)}
       </div>
     </div>
   )
