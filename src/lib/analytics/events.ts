@@ -189,6 +189,15 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   // the path the chat was open on. The per-turn detail lives on the
   // conversation row (Ratings field); this is the aggregate signal.
   'chatbot_rating',
+  // The chatbot's paperclip: `source` is 'attached' (a document was read and
+  // lined up to send) or 'error' (a picked file couldn't be attached),
+  // `label` the kind of file ('pdf' | 'docx' | 'text') or the reason it
+  // failed, `page` the path. Never the file's name or anything in it.
+  'chatbot_attach',
+  // The chatbot's microphone: `source` is 'start' (dictation began) or
+  // 'error' (it stopped with a browser error, whose code is in `label`, e.g.
+  // 'not-allowed'), `page` the path. Never what was said.
+  'chatbot_dictate',
   // The privacy page's analytics switch: the opt-out is the browser's last
   // recorded event, the opt-in its first after coming back.
   'analytics_optout',
@@ -564,6 +573,11 @@ export interface ChatbotFunnel {
   typed: number
   /** Unique users who clicked a result it surfaced. */
   clicked: number
+  /** Unique users who attached a document to a message. Not a funnel stage:
+   *  shown beside the funnel. */
+  attached: number
+  /** Unique users who started dictating a message. Likewise. */
+  dictated: number
 }
 
 /** A clicked-out destination (from chatbot replies or search results). `name`
@@ -1072,7 +1086,7 @@ const EMPTY: Omit<DashboardData, 'source'> = {
   },
   topHovered: [],
   areaClicks: [],
-  funnel: { opened: 0, typed: 0, clicked: 0 },
+  funnel: { opened: 0, typed: 0, clicked: 0, attached: 0, dictated: 0 },
   chatbot: {
     opensByPage: [],
     openShareByPage: [],
@@ -1697,6 +1711,16 @@ function aggregateSite(
         opened: usersOf('chatbot_open'),
         typed: usersOf('chatbot_message'),
         clicked: usersOf('chatbot_click'),
+        attached: uniqueUsers(
+          inRange.filter(
+            e => e.type === 'chatbot_attach' && e.source === 'attached'
+          )
+        ),
+        dictated: uniqueUsers(
+          inRange.filter(
+            e => e.type === 'chatbot_dictate' && e.source === 'start'
+          )
+        ),
       },
       chatbot: chatbotPanels(inRange, unique),
       search: searchPanels(inRange, unique),

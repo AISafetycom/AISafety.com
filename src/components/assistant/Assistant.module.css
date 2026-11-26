@@ -539,6 +539,27 @@
   flex-shrink: 0;
 }
 
+/* A document attached to a message (AttachmentChip): a pill with the file's
+   name, which never grows wider than the chat. A long name ends in "…". */
+.attachment {
+  min-width: 0;
+  max-width: 100%;
+  border-radius: 100px;
+}
+
+.attachmentName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The pills on a sent message. Beside the edit button they may shrink, so a
+   long file name is cut short instead of pushing the row out of the chat. */
+.attachmentList {
+  min-width: 0;
+}
+
 /* Tool call pills — compact, icon-led, inline */
 
 .toolStrip {

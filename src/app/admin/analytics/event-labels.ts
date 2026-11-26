@@ -81,6 +81,16 @@ export function labelFor(e: {
     if (e.label === 'removed') return 'Took back a reply rating'
     return e.label === 'up' ? 'Rated a reply 👍' : 'Rated a reply 👎'
   }
+  // The chatbot's paperclip and microphone: `source` says how it went and
+  // `label` the kind of file or the reason it failed.
+  if (e.type === 'chatbot_attach')
+    return e.source === 'attached'
+      ? `Attached a document (${e.label ?? 'file'})`
+      : `Couldn’t attach a file (${e.label ?? 'unknown reason'})`
+  if (e.type === 'chatbot_dictate')
+    return e.source === 'start'
+      ? 'Started dictating'
+      : `Dictation failed (${e.label ?? 'unknown reason'})`
   // search_click carries the result's title as its label, like listing clicks.
   return e.label ?? EVENT_LABELS[e.type] ?? e.type
 }

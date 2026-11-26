@@ -191,6 +191,33 @@ export default function Assistant() {
     trackEvent('chatbot_message', { page: currentPage })
   }, [currentPage])
 
+  // Funnel: visitors who attach a document, and files that couldn't be
+  // attached. `label` is the kind of file ('pdf', 'docx', 'text') or the
+  // reason it failed. Never the file's name or anything in it.
+  const handleAttach = useCallback(
+    (outcome: 'attached' | 'error', detail: string) => {
+      trackEvent('chatbot_attach', {
+        source: outcome,
+        label: detail,
+        page: currentPage,
+      })
+    },
+    [currentPage]
+  )
+
+  // Funnel: visitors who dictate a message, and dictation that failed
+  // (`label` is the browser's error code, e.g. 'not-allowed').
+  const handleDictation = useCallback(
+    (outcome: 'start' | 'error', reason?: string) => {
+      trackEvent('chatbot_dictate', {
+        source: outcome,
+        ...(reason ? { label: reason } : {}),
+        page: currentPage,
+      })
+    },
+    [currentPage]
+  )
+
   const handleTogglePill = useCallback(() => {
     if (isOpen) {
       setIsOpen(false)
@@ -559,6 +586,9 @@ export default function Assistant() {
           onTurnLifecycle={handleTurnLifecycle}
           onHasMessagesChange={setHasMessages}
           resizeKey={`${isOpen}-${isExpanded}`}
+          visible={isOpen}
+          onAttach={handleAttach}
+          onDictation={handleDictation}
         />
       </aside>
     </>

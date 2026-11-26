@@ -13,6 +13,13 @@ import {
 import { looksLikeAnswerText, splitAnswerRedoMessage } from './split-answer'
 import { LISTING_POLICY_BLOCK } from './prompt'
 import { TOOL_DEFINITIONS, executeTool } from './tools'
+import {
+  MAX_CONVERSATION_ATTACHMENT_CHARS,
+  attachmentChars,
+  attachmentPromptBlock,
+  cleanAttachments,
+  logContent,
+} from './attachments'
 import type { Catalog, ChatMessage, CitationRef, Listing } from './types'
 
 // Generous so multi-card responses never truncate mid-token. Anthropic
@@ -270,26 +277,37 @@ export function validateMessages(messages: unknown): ChatMessage[] {
  *  cleaning below can drop messages mid-list (an errored turn's empty reply)
  *  and the windowing/size-trim drops them from the front, so a stored
  *  message's array position stops matching the widget's — the admin viewer
- *  needs the original positions to attach those reports to the right reply. */
+ *  needs the original positions to attach those reports to the right reply.
+ *
+ *  Attached documents are swapped for a note here (the file's name and
+ *  length), so a document's text can't reach the log through this list. */
 export function validateLogHistoryWithIndices(messages: unknown): {
   history: ChatMessage[]
   indices: number[]
 } {
   const { history, indices } = cleanMessagesIndexed(messages)
   return {
-    history: history.slice(-LOG_HISTORY),
+    history: history.slice(-LOG_HISTORY).map(forLog),
     indices: indices.slice(-LOG_HISTORY),
   }
 }
 
+/** A message as the conversation log keeps it: the words, plus a note in
+ *  place of any attached document. Never the document's text. */
+function forLog(m: ChatMessage): ChatMessage {
+  return { role: m.role, content: logContent(m) }
+}
+
 /** The ENTIRE cleaned conversation with the same widget positions — no
  *  window at all. This is what the full-transcript blob mirror stores for
- *  conversations that outgrow the Airtable row (see upsertConversation). */
+ *  conversations that outgrow the Airtable row (see upsertConversation).
+ *  Attached documents are swapped for a note, as in the log's own window. */
 export function validateFullHistoryWithIndices(messages: unknown): {
   history: ChatMessage[]
   indices: number[]
 } {
-  return cleanMessagesIndexed(messages)
+  const { history, indices } = cleanMessagesIndexed(messages)
+  return { history: history.map(forLog), indices }
 }
 
 function cleanMessages(messages: unknown): ChatMessage[] {
@@ -306,36 +324,86 @@ function cleanMessagesIndexed(messages: unknown): {
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i]
     if (!m || typeof m !== 'object') continue
-    const msg = m as { role?: unknown; content?: unknown }
+    const msg = m as {
+      role?: unknown
+      content?: unknown
+      attachments?: unknown
+    }
     if (msg.role !== 'user' && msg.role !== 'assistant') continue
     if (typeof msg.content !== 'string') continue
-    if (msg.content.length === 0) continue
+    // Only a visitor's message carries documents. One may be documents
+    // alone, with nothing typed.
+    const attachments =
+      msg.role === 'user' ? cleanAttachments(msg.attachments) : []
+    if (msg.content.length === 0 && attachments.length === 0) continue
     // User messages are bounded by the composer (4000 chars); assistant
     // history is the bot's own raw replies (reasoning + tokens included),
     // which routinely exceed 4000 — dropping those silently deleted long
     // replies from the bot's memory and from the stored transcript.
     if (msg.content.length > (msg.role === 'user' ? 4000 : 12000)) continue
-    out.push({ role: msg.role, content: msg.content })
+    out.push({
+      role: msg.role,
+      content: msg.content,
+      ...(attachments.length > 0 ? { attachments } : {}),
+    })
     indices.push(i)
   }
   if (out.length === 0) throw new Error('no valid messages')
   if (out[out.length - 1].role !== 'user') {
     throw new Error('last message must be from user')
   }
+  // The widget stops a conversation's documents at this total before
+  // sending, so more than this didn't come from the widget.
+  if (attachmentChars(out) > MAX_CONVERSATION_ATTACHMENT_CHARS) {
+    throw new Error('too much attached document text in one conversation')
+  }
   return { history: out, indices }
 }
 
+/** What stands in for the visitor's words when they sent documents and typed
+ *  nothing. */
+const NO_TEXT_WITH_DOCUMENT =
+  '(The visitor attached the document above and typed no message.)'
+
 /** Builds the Anthropic message list, prepending the context line to the
- *  final user turn so the model sees it as ambient setup. */
+ *  final user turn so the model sees it as ambient setup.
+ *
+ *  A message with attached documents becomes the documents first, each in
+ *  its own block, then the visitor's words. The documents come first so
+ *  their blocks read the same on every later turn (the context line, which
+ *  only the newest message carries, comes after them). That lets the newest
+ *  document be a prompt-cache point: a long CV is paid for in full once,
+ *  then read from the cache on the turn's later tool rounds and on the
+ *  turns that follow within the cache's lifetime. */
 export function buildApiMessages(
   messages: ChatMessage[],
   contextLine: string
 ): Anthropic.MessageParam[] {
+  let lastWithDocuments = -1
+  messages.forEach((m, idx) => {
+    if (m.attachments?.length) lastWithDocuments = idx
+  })
   return messages.map((m, idx) => {
-    if (idx === messages.length - 1 && m.role === 'user') {
-      return { role: m.role, content: `${contextLine}\n\n${m.content}` }
+    const isLast = idx === messages.length - 1 && m.role === 'user'
+    if (!m.attachments?.length) {
+      return {
+        role: m.role,
+        content: isLast ? `${contextLine}\n\n${m.content}` : m.content,
+      }
     }
-    return { role: m.role, content: m.content }
+    const typed = m.content || NO_TEXT_WITH_DOCUMENT
+    const blocks: Anthropic.TextBlockParam[] = m.attachments.map(a => ({
+      type: 'text',
+      text: attachmentPromptBlock(a),
+    }))
+    if (idx === lastWithDocuments) {
+      blocks[blocks.length - 1].cache_control = { type: 'ephemeral' }
+    }
+    blocks.push({
+      type: 'text',
+      text: isLast ? `${contextLine}\n\n${typed}` : typed,
+    })
+    return { role: m.role, content: blocks }
   })
 }
 

@@ -1,3 +1,5 @@
+import type { Attachment } from './attachments'
+
 export type ListingType =
   | 'job'
   | 'funder'
@@ -48,6 +50,9 @@ export type Role = 'user' | 'assistant'
 export interface ChatMessage {
   role: Role
   content: string
+  /** Documents the visitor attached to this message, as plain text (user
+   *  messages only). A message may be documents alone, with empty content. */
+  attachments?: Attachment[]
 }
 
 export interface AssistantRequest {
