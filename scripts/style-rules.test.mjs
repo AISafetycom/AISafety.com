@@ -351,6 +351,69 @@ describe('TSX rules', () => {
     )
     expect(rulesIn(found)).toEqual(['raw-button'])
   })
+
+  it('an icon button may switch its tooltip off', () => {
+    const found = tsx(
+      `import Button from '@/components/Button'\nexport default function A() {\n  return (\n    <>\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip={false} />\n      <Button icon="/images/icons/x.svg" iconPosition="only" aria-label="Close" tooltip="" />\n    </>\n  )\n}`
+    )
+    // Melissa, 23 November 2026: an icon-only button doesn't have to have a
+    // tooltip, though in most cases it's a good idea.
+    expect(found).toEqual([])
+  })
+
+  it('one module class on two kinds of element is a note', () => {
+    const found = tsx(
+      `import styles from './Popover.module.css'\nexport default function A() {\n  return (\n    <>\n      <p className={\`\${styles.note} paragraph-small\`}>One</p>\n      <div className={styles.note}>Two</div>\n      <span className={styles['note']}>Three</span>\n      <p className={styles.note}>Four</p>\n    </>\n  )\n}`
+    )
+    // One note for each further tag, so a third tag later is a new note.
+    expect(rulesIn(found)).toEqual(['class-on-two-tags', 'class-on-two-tags'])
+    expect(found.map(f => f.line)).toEqual([6, 7])
+    expect(found[0].what).toBe(
+      'styles.note is on <div> (line 6) as well as <p> (line 5)'
+    )
+    expect(found[1].what).toBe(
+      'styles.note is on <span> (line 7) as well as <p> (line 5)'
+    )
+  })
+
+  it('the note lands on the odd one out, wherever it is in the file', () => {
+    const found = tsx(
+      `import styles from './page.module.css'\nexport default function A() {\n  return (\n    <>\n      <p className={styles.row}>New, above the others</p>\n      <div className={styles.row}>One</div>\n      <div className={styles.row}>Two</div>\n    </>\n  )\n}`
+    )
+    expect(rulesIn(found)).toEqual(['class-on-two-tags'])
+    expect(found[0].line).toBe(5)
+    expect(found[0].what).toBe(
+      'styles.row is on <p> (line 5) as well as <div> (line 6)'
+    )
+  })
+
+  it('<Link> counts as an <a>; other components are not counted', () => {
+    const found = tsx(
+      `import Link from 'next/link'\nimport TrackedLink from '@/components/TrackedLink'\nimport styles from './page.module.css'\nexport default function A() {\n  return (\n    <>\n      <Link href="/events" className={styles.row}>One</Link>\n      <a href="https://example.org" className={styles.row}>Two</a>\n      <TrackedLink href="/jobs" className={styles.row}>Three</TrackedLink>\n      <div className={styles.row}>Four</div>\n    </>\n  )\n}`
+    )
+    expect(rulesIn(found)).toEqual(['class-on-two-tags'])
+    expect(found[0].line).toBe(10)
+    expect(found[0].what).toBe(
+      'styles.row is on <div> (line 10) as well as <a> (line 7)'
+    )
+  })
+
+  it('<input>, <select> and <textarea> count as one kind', () => {
+    const found = tsx(
+      `import styles from './Form.module.css'\nexport default function A() {\n  return (\n    <>\n      <input className={\`text-field \${styles.field}\`} />\n      <textarea className={\`text-field \${styles.field}\`} />\n      <select className={\`text-field \${styles.field}\`} />\n      <label className={styles.field}>Name</label>\n    </>\n  )\n}`
+    )
+    expect(rulesIn(found)).toEqual(['class-on-two-tags'])
+    expect(found[0].what).toBe(
+      'styles.field is on <label> (line 8) as well as <input> (line 5)'
+    )
+  })
+
+  it('utility classes may go on any element', () => {
+    const found = tsx(
+      `import styles from './page.module.css'\nexport default function A() {\n  return (\n    <>\n      <p className="flex gap-8px">One</p>\n      <div className="flex gap-8px">Two</div>\n      <div className={styles.row}>Three</div>\n      <div className={styles.row}>Four</div>\n    </>\n  )\n}`
+    )
+    expect(found).toEqual([])
+  })
 })
 
 describe('exceptions', () => {

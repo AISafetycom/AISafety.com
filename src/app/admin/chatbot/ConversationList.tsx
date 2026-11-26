@@ -13,6 +13,8 @@ import {
   useMemo,
   useRef,
   useState,
+  type Dispatch,
+  type SetStateAction,
 } from 'react'
 import { parseLog, parseNotes, stampToDate } from '@/lib/admin/annotation-log'
 import styles from '../admin.module.css'
@@ -759,10 +761,11 @@ export default function ConversationList() {
   /** Site-style multi-select toggle: clicking a checked value unchecks it. */
   const toggleFilter = (
     value: string,
-    list: string[],
-    set: (next: string[]) => void
+    set: Dispatch<SetStateAction<string[]>>
   ) => {
-    set(list.includes(value) ? list.filter(v => v !== value) : [...list, value])
+    set(list =>
+      list.includes(value) ? list.filter(v => v !== value) : [...list, value]
+    )
   }
 
   const markViewed = (id: string) => {
@@ -799,7 +802,7 @@ export default function ConversationList() {
           options={[...REVIEW_VALUES, 'Unrated']}
           selected={ratingFilter}
           counts={facets.ratings}
-          onToggle={v => toggleFilter(v, ratingFilter, setRatingFilter)}
+          onToggle={v => toggleFilter(v, setRatingFilter)}
         />
         {allLabels.length > 0 && (
           <FilterDropdown
@@ -807,7 +810,7 @@ export default function ConversationList() {
             options={allLabels}
             selected={labelFilter}
             counts={facets.labels}
-            onToggle={v => toggleFilter(v, labelFilter, setLabelFilter)}
+            onToggle={v => toggleFilter(v, setLabelFilter)}
           />
         )}
         <label title="Show only conversations where the chatbot searched the directory and found nothing — useful for spotting gaps in the listings">

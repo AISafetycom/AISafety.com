@@ -100,12 +100,33 @@ export function bottomMetaFor(event: EventListing) {
     })
   if (event.cost.length > 0)
     rows.push({
-      icon: '/images/icons/tag.svg',
+      // Money, as for stipends on /training (crossed out when it's free);
+      // the tag means the event's type on this page.
+      icon: event.cost.every(c => c.startsWith('Free'))
+        ? '/images/icons/money-off.svg'
+        : '/images/icons/money.svg',
       label: 'Cost',
       value: event.cost.join(', '),
     })
-  if (deadline)
-    rows.push({ icon: '/images/icons/paper.svg', label: null, value: deadline })
+  // As a program does on /training, an event shows its deadline only while
+  // it's open: before sign-up opens, or once the deadline has passed (the
+  // event itself can still be weeks away), it says so instead.
+  const signUp =
+    event.deadlineType === 'Register' ? 'Registration' : 'Applications'
+  if (event.notYetOpen)
+    rows.push({
+      icon: '/images/icons/paper-closed.svg',
+      label: null,
+      value: `${signUp} not yet open`,
+    })
+  else if (deadline) {
+    const open = event.applicationStatus === 'Open'
+    rows.push({
+      icon: open ? '/images/icons/paper.svg' : '/images/icons/paper-closed.svg',
+      label: null,
+      value: open ? deadline : `${signUp} closed`,
+    })
+  }
   return rows
 }
 

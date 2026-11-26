@@ -125,6 +125,8 @@ function testBenchListing(over: Partial<EventListing> = {}): EventListing {
     cost: ['Free'],
     deadlineType: 'Register',
     applicationsClose: '2026-10-18',
+    applicationStatus: 'Open',
+    notYetOpen: false,
     ...over,
   } as unknown as EventListing
 }

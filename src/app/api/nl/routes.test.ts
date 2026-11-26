@@ -73,7 +73,11 @@ describe('GET /api/nl/<list>/<n>', () => {
     expect(h.recordClick).not.toHaveBeenCalled()
     await runAfter()
     expect(h.isScannerBurst).toHaveBeenCalledWith(LIST, 1, '203.0.113.9')
-    expect(h.recordClick).toHaveBeenCalledWith(links.c, links.links[1])
+    expect(h.recordClick).toHaveBeenCalledWith(
+      links.c,
+      links.links[1],
+      undefined
+    )
   })
 
   it('keeps the list copy for after the redirect too', async () => {
@@ -165,7 +169,11 @@ describe('GET /api/nl/… (anything else)', () => {
     )
     expect(res.headers.get('location')).toBe('https://lensacademy.org/')
     await runAfter()
-    expect(h.recordClick).toHaveBeenCalledWith(links.c, links.links[1])
+    expect(h.recordClick).toHaveBeenCalledWith(
+      links.c,
+      links.links[1],
+      undefined
+    )
 
     const head = await restRoute.HEAD(
       req(`/api/nl/${LIST}/0/x/y`),
