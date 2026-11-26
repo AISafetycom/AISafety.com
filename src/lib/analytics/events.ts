@@ -205,6 +205,9 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   'map_search_open',
   'map_search_query',
   'map_search_pick',
+  // The Field map moving to an organization because a chatbot reply showed
+  // its card: `label` its title, `url` its link, `listingId` its record id.
+  'map_chat_focus',
   // A click on a numbered bubble of merged pins on the /communities map,
   // which zooms in to split it. `label` is how many pins it held.
   'map_cluster_click',

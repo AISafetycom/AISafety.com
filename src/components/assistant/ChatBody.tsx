@@ -16,6 +16,11 @@ import type {
 } from '@/lib/assistant/types'
 import { extractChips, stripChipTokens } from '@/lib/assistant/tokens'
 import {
+  MAP_FOCUS_EVENT,
+  firstMapOrgId,
+  type MapFocusDetail,
+} from '@/lib/assistant/map-focus'
+import {
   isDroppedBeforeReply,
   pauseBeforeRetry,
 } from '@/lib/assistant/dropped-connection'
@@ -717,6 +722,9 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
         let lastToolTextOffset = 0
         // The server reported a generation failure mid-stream.
         let sawServerError = false
+        // Every listing this turn's tool calls returned, to tell which of
+        // the reply's cards are Field map organizations (see below).
+        const turnListings: CitationRef[] = []
 
         while (true) {
           const { done, value } = await reader.read()
@@ -772,6 +780,7 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
             } else if (eventType === 'tool_call_done') {
               const incoming =
                 (data.listings as CitationRef[] | undefined) ?? []
+              turnListings.push(...incoming)
               setMessages(prev =>
                 prev.map(m => {
                   if (m.id !== asstId) return m
@@ -880,7 +889,18 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
           )
         )
         if (answer.trim() !== '' && !sawServerError) outcome = 'received'
-        else if (!sawServerError) errorText = 'empty reply'
+        // A reply that shows a card for an organization on the Field map
+        // moves the map to it, like the map's own search. Only the Field map
+        // listens, so on any other page this does nothing.
+        if (outcome === 'received') {
+          const orgId = firstMapOrgId(answer, turnListings)
+          if (orgId)
+            window.dispatchEvent(
+              new CustomEvent<MapFocusDetail>(MAP_FOCUS_EVENT, {
+                detail: { id: orgId },
+              })
+            )
+        } else if (!sawServerError) errorText = 'empty reply'
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') {
           outcome = 'stopped'
