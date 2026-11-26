@@ -108,19 +108,25 @@ export function bottomMetaFor(event: EventListing) {
       label: 'Cost',
       value: event.cost.join(', '),
     })
-  // An event announced before its sign-up opens says so, as a program does on
-  // /training, instead of a deadline it can't be applied by yet.
+  // As a program does on /training, an event shows its deadline only while
+  // it's open: before sign-up opens, or once the deadline has passed (the
+  // event itself can still be weeks away), it says so instead.
+  const signUp =
+    event.deadlineType === 'Register' ? 'Registration' : 'Applications'
   if (event.notYetOpen)
     rows.push({
       icon: '/images/icons/paper-closed.svg',
       label: null,
-      value:
-        event.deadlineType === 'Register'
-          ? 'Registration not yet open'
-          : 'Applications not yet open',
+      value: `${signUp} not yet open`,
     })
-  else if (deadline)
-    rows.push({ icon: '/images/icons/paper.svg', label: null, value: deadline })
+  else if (deadline) {
+    const open = event.applicationStatus === 'Open'
+    rows.push({
+      icon: open ? '/images/icons/paper.svg' : '/images/icons/paper-closed.svg',
+      label: null,
+      value: open ? deadline : `${signUp} closed`,
+    })
+  }
   return rows
 }
 
