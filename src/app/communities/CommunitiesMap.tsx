@@ -23,18 +23,21 @@ const INITIAL_CENTER: [number, number] = [0, 30]
 const INITIAL_ZOOM = 1.5
 
 // Basemap layers left off the map: the ocean and sea names ("North Atlantic
-// Ocean") and the seafloor shading, so the sea is one flat color. Mapbox
-// Standard has no switch for either alone (one switch covers every place
-// name), so they're dropped by layer.
+// Ocean"), the seafloor shading, so the sea is one flat color, and the pale
+// glow drawn under the borders. Mapbox Standard has no switch for any of them
+// alone (one switch covers every place name), so they're dropped by layer.
 const HIDDEN_BASEMAP_LAYERS = [
   'water-line-label',
   'water-point-label',
   'water-depth',
+  'admin-0-boundary-bg',
+  'admin-1-boundary-bg',
 ]
-// The sea's color as set. The style's dusk light darkens it to --teal-900 (the
-// page background) on screen. Mapbox can't take the light off the basemap's
-// water as it can for our land layer, so this one isn't read from globals.css.
-const SEA_BEFORE_DUSK_LIGHT = '#005343'
+const BORDER_LAYERS = [
+  'admin-0-boundary',
+  'admin-1-boundary',
+  'admin-0-boundary-disputed',
+]
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 declare global {
@@ -43,10 +46,54 @@ declare global {
   }
 }
 
+// A #rrggbb color from globals.css at the given opacity, as rgba(): Mapbox
+// can't read CSS color-mix().
+function withOpacity(hex: string, opacity: number) {
+  const n = parseInt(hex.slice(1), 16)
+  return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${opacity})`
+}
+
+// The basemap's lit layers that this map colors, made to show their config
+// color exactly. The style's dusk light would otherwise darken and tint them,
+// as it did the land.
+function restyleBasemapLayer(layer: any) {
+  if (layer.id === 'water')
+    return {
+      ...layer,
+      paint: {
+        ...layer.paint,
+        'fill-color': ['config', 'colorWater'],
+        'fill-emissive-strength': 1,
+      },
+    }
+  if (BORDER_LAYERS.includes(layer.id))
+    return {
+      ...layer,
+      paint: {
+        ...layer.paint,
+        'line-color': ['config', 'colorAdminBoundaries'],
+        'line-emissive-strength': 1,
+      },
+    }
+  // Place names, which Mapbox lightens under the dusk light and rings with a
+  // grey halo.
+  const textColor = JSON.stringify(layer.paint?.['text-color'] ?? null)
+  if (textColor.includes('colorPlaceLabels'))
+    return {
+      ...layer,
+      paint: {
+        ...layer.paint,
+        'text-color': ['config', 'colorPlaceLabels'],
+        'text-halo-width': 0,
+        'text-emissive-strength': 1,
+      },
+    }
+  return layer
+}
+
 // Puts the map in the site's colors (globals.css) and drops the ocean names
-// and seafloor shading.
-// The Mapbox Studio style supplies the shapes; its colors are replaced here so
-// the map matches the page around it.
+// and seafloor shading. The Mapbox Studio style supplies the shapes; its
+// colors are replaced here so the map matches the page around it.
 function applySiteLook(map: any) {
   const palette = getComputedStyle(document.documentElement)
   const color = (name: string) => palette.getPropertyValue(name).trim()
@@ -70,15 +117,17 @@ function applySiteLook(map: any) {
     ...basemap,
     config: {
       ...basemap.config,
-      colorWater: SEA_BEFORE_DUSK_LIGHT,
-      colorAdminBoundaries: color('--teal-600'),
+      // The page background, so the map blends into the page.
+      colorWater: color('--teal-900'),
+      // The guide's alt border color: --teal-300 at 30%.
+      colorAdminBoundaries: withOpacity(color('--teal-300'), 0.3),
       colorPlaceLabels: color('--teal-grey-300'),
     },
     data: {
       ...basemap.data,
-      layers: basemap.data.layers.filter(
-        (l: any) => !HIDDEN_BASEMAP_LAYERS.includes(l.id)
-      ),
+      layers: basemap.data.layers
+        .filter((l: any) => !HIDDEN_BASEMAP_LAYERS.includes(l.id))
+        .map(restyleBasemapLayer),
     },
   })
 }
