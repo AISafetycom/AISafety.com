@@ -145,6 +145,12 @@ interface Draft {
   editLock: string | null
   /** The inbox preview line (hidden preheader), as Gmail shows it. */
   preview: string | null
+  /** A subject line A/B test: what each half of the list sees in the inbox
+   *  (half A the highlights as the subject, half B as the preview line). */
+  abTest: {
+    a: { subject: string; preview: string }
+    b: { subject: string; preview: string }
+  } | null
   /** The last issue sent on its list ("Week 45, 2026") when the email's
    *  design has changed since: a Send test is worth it. */
   designChangedSince: string | null
@@ -300,20 +306,25 @@ const LINEUP: Array<{
    *  put in an issue yet (Newsletter not ticked), so the caption says so
    *  (Bryce, 22 Oct 2026). */
   after?: string
+  /** The resource page the listings are on: each name opens its card there
+   *  (Bryce, 25 Nov 2026). */
+  page: string
 }> = [
   {
     key: 'events',
     label: 'Events',
     since: 'added since',
     after: 'and not yet in an issue',
+    page: '/events',
   },
   {
     key: 'training',
     label: 'Training',
     since: 'added since',
     after: 'and not yet in an issue',
+    page: '/training',
   },
-  { key: 'funding', label: 'Funding', since: 'new since' },
+  { key: 'funding', label: 'Funding', since: 'new since', page: '/funding' },
 ]
 
 /** How often the page rereads ActiveCampaign on its own, so an approved
@@ -1298,7 +1309,7 @@ export default function NewsletterAdmin({
           already in a draft waiting below aren’t counted.
         </p>
         <div className={styles.lineup}>
-          {LINEUP.map(({ key, label, since, after }) => {
+          {LINEUP.map(({ key, label, since, after, page }) => {
             const section = data?.lineup[key]
             return (
               <div key={key} className={styles.lineupTile}>
@@ -1308,7 +1319,12 @@ export default function NewsletterAdmin({
                 ) : 'error' in section ? (
                   <span className={styles.noticeError}>{section.error}</span>
                 ) : (
-                  <LineupCounts section={section} since={since} after={after} />
+                  <LineupCounts
+                    section={section}
+                    since={since}
+                    after={after}
+                    page={page}
+                  />
                 )}
               </div>
             )
@@ -1391,17 +1407,40 @@ export default function NewsletterAdmin({
                 </span>
               </div>
               <p className={styles.draftMeta}>
-                <span>
-                  Subject{' '}
-                  <span className={styles.draftMetaValue}>{draft.subject}</span>
-                </span>
-                {draft.preview && (
-                  <span>
-                    Preview{' '}
-                    <span className={styles.draftMetaValue}>
-                      {draft.preview}
+                {draft.abTest ? (
+                  <>
+                    <span>
+                      A/B test, half A{' '}
+                      <span className={styles.draftMetaValue}>
+                        {draft.abTest.a.subject}
+                      </span>
+                      {draft.abTest.a.preview && ` · ${draft.abTest.a.preview}`}
                     </span>
-                  </span>
+                    <span>
+                      Half B{' '}
+                      <span className={styles.draftMetaValue}>
+                        {draft.abTest.b.subject}
+                      </span>
+                      {draft.abTest.b.preview && ` · ${draft.abTest.b.preview}`}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span>
+                      Subject{' '}
+                      <span className={styles.draftMetaValue}>
+                        {draft.subject}
+                      </span>
+                    </span>
+                    {draft.preview && (
+                      <span>
+                        Preview{' '}
+                        <span className={styles.draftMetaValue}>
+                          {draft.preview}
+                        </span>
+                      </span>
+                    )}
+                  </>
                 )}
                 <span>
                   To{' '}
@@ -2896,12 +2935,32 @@ function ConfirmSend({
           <dd>
             {draft.fromName} &lt;{draft.fromEmail}&gt;
           </dd>
-          <dt>Subject</dt>
-          <dd>{draft.subject}</dd>
-          {draft.preview && (
+          {draft.abTest ? (
+            // A subject line A/B test: each half of the list, at random.
+            (['a', 'b'] as const).map(h => (
+              <Fragment key={h}>
+                <dt>Half {h.toUpperCase()}</dt>
+                <dd>
+                  {draft.abTest![h].subject}
+                  {draft.abTest![h].preview && (
+                    <span className={styles.muted}>
+                      {' '}
+                      · {draft.abTest![h].preview}
+                    </span>
+                  )}
+                </dd>
+              </Fragment>
+            ))
+          ) : (
             <>
-              <dt>Preview</dt>
-              <dd className={styles.muted}>{draft.preview}</dd>
+              <dt>Subject</dt>
+              <dd>{draft.subject}</dd>
+              {draft.preview && (
+                <>
+                  <dt>Preview</dt>
+                  <dd className={styles.muted}>{draft.preview}</dd>
+                </>
+              )}
             </>
           )}
           <dt>To</dt>
@@ -3235,15 +3294,21 @@ const STOP_LABELS: Record<StopAction, string> = {
 }
 
 /** One newsletter's numbers in the Lined up block, and the listings behind
- *  them. Funding has a second number: closing in the next two weeks. */
+ *  them, always shown (Bryce, 25 Nov 2026: no "Show listings" toggle). Each
+ *  name opens its card on the live page in a new tab: every site card
+ *  carries its record id as an anchor, which ScrollToHash finds once the
+ *  page has rendered. Funding has a second number: closing in the next two
+ *  weeks. */
 function LineupCounts({
   section,
   since,
   after,
+  page,
 }: {
   section: Extract<LineupSection, { items: unknown }>
   since: string
   after?: string
+  page: string
 }) {
   const groups = [
     { title: section.closing ? 'New' : null, items: section.items },
@@ -3271,19 +3336,27 @@ function LineupCounts({
         )}
       </div>
       {groups.length > 0 && (
-        <details className={styles.lineupList}>
-          <summary>Show listings</summary>
+        <div className={styles.lineupList}>
           {groups.map(g => (
             <div key={g.title ?? 'items'}>
               {g.title && <p className={styles.lineupGroup}>{g.title}</p>}
               <ul>
                 {g.items.map(item => (
-                  <li key={item.id}>{item.name}</li>
+                  <li key={item.id}>
+                    <a
+                      href={`https://aisafety.com${page}#${item.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Open its card on the site"
+                    >
+                      {item.name}
+                    </a>
+                  </li>
                 ))}
               </ul>
             </div>
           ))}
-        </details>
+        </div>
       )}
     </>
   )

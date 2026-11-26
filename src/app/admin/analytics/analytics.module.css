@@ -1296,3 +1296,129 @@
   margin-top: 8px;
   max-width: 360px;
 }
+
+/* ─── Recordings tab ──────────────────────────────────────────────────── */
+
+.recordingPills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.recordingLink {
+  color: var(--teal-300);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color var(--hover-transition);
+}
+
+.recordingLink:hover {
+  color: var(--white);
+}
+
+/* ─── One recorded visit (recordings/[id]) ────────────────────────────── */
+
+.replayGap {
+  margin-top: 16px;
+}
+
+.replayPages {
+  margin: -12px 0 20px;
+  font-size: 13px;
+  color: var(--teal-grey-300);
+}
+
+.replayLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 991px) {
+  .replayLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.replayFrame {
+  width: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* rrweb-player comes as a white card with purple controls; recolor it to
+   sit on the dashboard's dark panels. Its own rules carry three classes
+   each (Svelte's scoping), so these repeat a class to outrank them. */
+.replayFrame :global(.rr-player.rr-player) {
+  background-color: var(--teal-grey-850);
+  box-shadow: none;
+  border: 1px solid var(--teal-grey-800);
+  border-radius: 10px;
+}
+
+.replayFrame :global(.rr-player .rr-controller.rr-controller) {
+  background-color: var(--teal-grey-850);
+  color: var(--white);
+}
+
+.replayFrame :global(.rr-player .rr-timeline__time.rr-timeline__time) {
+  color: var(--teal-grey-300);
+}
+
+.replayFrame :global(.rr-player .rr-progress.rr-progress) {
+  background-color: var(--teal-grey-800);
+  border-color: var(--teal-grey-850);
+}
+
+.replayFrame :global(.rr-player .rr-progress__step.rr-progress__step) {
+  background-color: var(--teal-grey-700);
+}
+
+.replayFrame :global(.rr-player .rr-progress__handler.rr-progress__handler),
+.replayFrame
+  :global(.rr-player .rr-controller__btns.rr-controller__btns button.active) {
+  color: var(--teal-grey-900);
+  background-color: var(--teal-300);
+}
+
+.replayFrame :global(.rr-player .rr-controller__btns svg) {
+  fill: currentColor;
+}
+
+.momentBtn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 0;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: var(--white);
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--teal-grey-800);
+  cursor: pointer;
+  transition: color var(--hover-transition);
+}
+
+.momentBtn:hover:not(:disabled) .momentLabel {
+  color: var(--teal-300);
+}
+
+.momentBtn:disabled {
+  cursor: default;
+}
+
+/* Still ahead of the replay's current time. */
+.momentLater {
+  opacity: 0.5;
+}
+
+.momentLabel {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  transition: color var(--hover-transition);
+}

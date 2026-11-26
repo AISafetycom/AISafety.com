@@ -8,6 +8,8 @@ import {
   useRef,
   useState,
   useLayoutEffect,
+  type Dispatch,
+  type SetStateAction,
 } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Icon from '@/components/Icon'
@@ -466,11 +468,10 @@ export default function EventsClient({ events }: EventsClientProps) {
   const savedScrollY = useRef<number | null>(null)
   const toggleFilter = (
     value: string,
-    current: string[],
-    setter: (v: string[]) => void
+    setter: Dispatch<SetStateAction<string[]>>
   ) => {
     savedScrollY.current = window.scrollY
-    setter(
+    setter(current =>
       current.includes(value)
         ? current.filter(v => v !== value)
         : [...current, value]
@@ -552,26 +553,29 @@ export default function EventsClient({ events }: EventsClientProps) {
           <FilterDropdown
             trackingPage="Events"
             title="Applications"
+            icon="/images/icons/paper.svg"
             options={applicationOptions}
             selected={selectedStatus}
             counts={statusCounts}
-            onToggle={v => toggleFilter(v, selectedStatus, setSelectedStatus)}
+            onToggle={v => toggleFilter(v, setSelectedStatus)}
           />
           <FilterDropdown
             trackingPage="Events"
             title="Type"
+            icon="/images/icons/tag.svg"
             options={[...EVENT_TYPES]}
             selected={selectedTypes}
             counts={typeCounts}
-            onToggle={v => toggleFilter(v, selectedTypes, setSelectedTypes)}
+            onToggle={v => toggleFilter(v, setSelectedTypes)}
           />
           <FilterDropdown
             trackingPage="Events"
             title="Cost"
+            icon="/images/icons/money.svg"
             options={costOptions}
             selected={selectedCost}
             counts={costCounts}
-            onToggle={v => toggleFilter(v, selectedCost, setSelectedCost)}
+            onToggle={v => toggleFilter(v, setSelectedCost)}
           />
         </FilterBar>
 

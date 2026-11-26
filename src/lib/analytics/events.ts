@@ -290,7 +290,7 @@ const bulkStore =
  *  its own file even with the keys pulled into .env.local. Unlike the
  *  newsletter's checks this fails open: a production server that somehow lacks
  *  VERCEL_ENV still records, since losing real visitors is the worse mistake. */
-function writesSharedStore(): boolean {
+export function writesSharedStore(): boolean {
   const env = process.env.VERCEL_ENV
   if (env === 'preview' || env === 'development') return false
   return process.env.NODE_ENV !== 'development'

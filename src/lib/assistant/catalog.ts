@@ -305,9 +305,10 @@ export async function buildCatalog(): Promise<Catalog> {
       meta: compact({
         category: o.category,
         // Named region the org's logo sits in on /map — decided by its FIRST
-        // category only. Lets the model answer "what's in Advocacy Anchorage"
+        // category only (or the Graveyard, when its Status says it shut
+        // down). Lets the model answer "what's in Advocacy Anchorage"
         // without mistaking every org tagged Advocacy for one drawn there.
-        mapArea: mapAreaFor(o.category),
+        mapArea: mapAreaFor(o.category, o.status),
         status: o.status,
         scale: o.scale,
         // Acronym/short name (e.g. "AED", "MIRI") so users can search the org

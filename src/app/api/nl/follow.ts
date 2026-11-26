@@ -57,7 +57,7 @@ export async function followLink(
       if (await isAdmin()) return
       if (await isTestCopyClick(links.c)) return
       if (await isScannerBurst(list, Number(n), ip)) return
-      await recordClick(links.c, link)
+      await recordClick(links.c, link, links.ab)
     })
   }
   return new Response(null, {

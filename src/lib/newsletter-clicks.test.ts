@@ -35,6 +35,13 @@ describe('parseLinkList', () => {
     expect(parsed?.links[1].k).toBe('recfEPy5dMqKPzLAc')
   })
 
+  it('keeps which half of an A/B test the list went to, and nothing else', () => {
+    expect(parseLinkList({ ...list, ab: 'subject' })?.ab).toBe('subject')
+    expect(parseLinkList({ ...list, ab: 'preview' })?.ab).toBe('preview')
+    expect(parseLinkList({ ...list, ab: 'other' })?.ab).toBeUndefined()
+    expect(parseLinkList(list)?.ab).toBeUndefined()
+  })
+
   it('sends only a bad entry to the homepage, keeping every link in its place', () => {
     const parsed = parseLinkList({
       ...list,
