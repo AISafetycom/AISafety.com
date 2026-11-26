@@ -16,6 +16,10 @@ import FeaturedCard from '@/components/FeaturedCard'
 import ContributeButtons from '@/components/ContributeButtons'
 import FilterBar from '@/components/FilterBar'
 import FilterDropdown from '@/components/FilterDropdown'
+import {
+  APPLICATION_FILTER_OPTIONS,
+  applicationFilterValue,
+} from '@/lib/application-filter'
 import ModeToggle from '@/components/ModeToggle'
 import StickyBar, { scrollToAnchor } from '@/components/StickyBar'
 import {
@@ -60,7 +64,6 @@ const AIRTABLE_VIEW_URLS: Record<Mode, string> = {
     'https://airtable.com/appF8XfZUGXtfi40E/shrjEwxwchrKPvnDO/tblEEIbj6dW5oS4cX?viewControls=on',
 }
 
-const applicationOptions = ['Open', 'Closed']
 const focusOptions = ['General', 'Technical', 'Governance']
 const locationOptions = ['Online', 'In person', 'Hybrid']
 
@@ -195,7 +198,7 @@ export default function TrainingClient({
         dated &&
         skip !== 'status' &&
         selectedStatus.length > 0 &&
-        !selectedStatus.includes(dated.applicationStatus)
+        !selectedStatus.includes(applicationFilterValue(dated))
       )
         return false
       if (
@@ -249,7 +252,7 @@ export default function TrainingClient({
     return {
       filtered: modePrograms.filter(p => matchesFilters(p)),
       statusCounts: upcoming
-        ? countBy('status', p => [(p as TrainingProgram).applicationStatus])
+        ? countBy('status', p => [applicationFilterValue(p as TrainingProgram)])
         : {},
       typeCounts: countBy('type', p => p.type),
       focusCounts: countBy('focus', p => p.focus),
@@ -418,7 +421,7 @@ export default function TrainingClient({
             trackingPage="Training"
             title="Applications"
             icon="/images/icons/paper.svg"
-            options={applicationOptions}
+            options={APPLICATION_FILTER_OPTIONS}
             selected={selectedStatus}
             counts={statusCounts}
             onToggle={v => toggleFilter(v, setSelectedStatus)}
