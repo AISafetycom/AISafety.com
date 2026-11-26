@@ -145,8 +145,6 @@ export function compareCard(
   card: CardInfo,
   site: SiteField[]
 ): { changes: FieldChange[]; updatable: boolean; note: string | null } {
-  const shape = (fs: Array<{ name: string; icon: string | null }>) =>
-    fs.map(f => `${f.name}:${f.icon ?? ''}`).join(' ')
   const bySite = new Map(site.map(f => [f.name, f]))
   const changes: FieldChange[] = []
   for (const f of card.fields) {
@@ -161,7 +159,16 @@ export function compareCard(
         site: s.value,
       })
   }
-  const sameShape = shape(card.fields) === shape(site)
+  // An event's Cost row moved from the tag to the money icons on 26 Nov 2026
+  // (site PR 907), so a tag in an email built before then matches either.
+  const sameIcon = (email: string | null, now: string | null) =>
+    email === now ||
+    (email === 'tag' && (now === 'money' || now === 'money-off'))
+  const sameShape =
+    card.fields.length === site.length &&
+    card.fields.every(
+      (f, i) => f.name === site[i].name && sameIcon(f.icon, site[i].icon)
+    )
   if (sameShape) return { changes, updatable: true, note: null }
   // Rows added, gone or with another icon: list what the site has instead.
   const have = new Set(card.fields.map(f => tidy(f.value)))

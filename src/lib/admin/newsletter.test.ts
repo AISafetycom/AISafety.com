@@ -861,6 +861,21 @@ describe('card text fields on site cards', () => {
     )
   })
 
+  it("labels an event's money row as Cost and a program's as Stipend", () => {
+    // Since 26 Nov 2026 the site draws an event's cost with the money icon.
+    const input = events.input.replace(
+      /<!--f:b1:tag-->/g,
+      '<!--f:b1:money-off-->'
+    )
+    expect(input).not.toBe(events.input)
+    const card = cardGroups(input)![0].cards.find(c => c.key === events.key)!
+    expect(card.fields.find(f => f.name === 'b1')!.label).toBe('Cost')
+    const stipend = cardGroups(training.input)![0]
+      .cards.flatMap(c => c.fields)
+      .find(f => f.icon === 'money' || f.icon === 'money-off')
+    expect(stipend?.label).toBe('Stipend')
+  })
+
   it('never flags Events and Training cards as site-drawn Funding cards', () => {
     for (const c of [training, events])
       expect(cardGroups(c.input)![0].cards.every(k => !k.site)).toBe(true)
