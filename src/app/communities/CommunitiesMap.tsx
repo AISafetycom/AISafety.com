@@ -49,6 +49,10 @@ declare global {
 // A #rrggbb color from globals.css at the given opacity, as rgba(): Mapbox
 // can't read CSS color-mix().
 function withOpacity(hex: string, opacity: number) {
+  if (!/^#[0-9a-f]{6}$/i.test(hex))
+    throw new Error(
+      `[communities map] Expected a #rrggbb color from globals.css, got "${hex}"`
+    )
   const n = parseInt(hex.slice(1), 16)
   return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${opacity})`
 }
@@ -235,7 +239,10 @@ export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
       } else {
         map.once('style.load', () => resolve())
       }
-    }).then(() => applySiteLook(map))
+    })
+    // Recolored on its own, not in the chain the pins wait on: a failure here
+    // is logged as an error and leaves Studio's colors, but the pins still load.
+    styleLoadPromise.then(() => applySiteLook(map))
 
     Promise.all([pinImagePromise, styleLoadPromise]).then(([pinImage]) => {
       // Mapbox rasterizes an added image once and then scales that bitmap on
