@@ -52,9 +52,9 @@ function recognitionConstructor(): RecognitionConstructor | null {
 interface Options {
   /** The message box's whole new text, each time more words are heard. */
   onText: (text: string) => void
-  /** Dictation started, or stopped with an error (`reason` is the browser's
-   *  error code). For analytics. */
-  onEvent?: (outcome: 'start' | 'error', reason?: string) => void
+  /** Dictation started (`detail` is how: 'button' or 'shortcut'), or stopped
+   *  with an error (`detail` is the browser's error code). For analytics. */
+  onEvent?: (outcome: 'start' | 'error', detail?: string) => void
 }
 
 export interface Dictation {
@@ -66,8 +66,8 @@ export interface Dictation {
   /** Shown under the message box after a failure; null otherwise. */
   error: string | null
   /** Start listening. `before` is what is already in the box; the spoken
-   *  words go after it. */
-  start: (before: string) => void
+   *  words go after it. `how` is for analytics. */
+  start: (before: string, how?: 'button' | 'shortcut') => void
   /** Stop listening and keep everything heard, the last words included. */
   stop: () => void
   /** Stop at once and take no more words: the visitor has sent the message
@@ -119,7 +119,7 @@ export function useDictation({ onText, onEvent }: Options): Dictation {
   }, [])
 
   const start = useCallback(
-    (before: string) => {
+    (before: string, how: 'button' | 'shortcut' = 'button') => {
       const Constructor = recognitionConstructor()
       if (!Constructor) return
       cancel()
@@ -158,7 +158,7 @@ export function useDictation({ onText, onEvent }: Options): Dictation {
         return
       }
       setListening(true)
-      onEventRef.current?.('start')
+      onEventRef.current?.('start', how)
     },
     [cancel]
   )

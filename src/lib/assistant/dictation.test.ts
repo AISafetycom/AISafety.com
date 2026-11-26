@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   dictationErrorMessage,
+  dictationShortcutLabel,
+  isDictationShortcut,
   joinDictation,
   spokenText,
   type SpokenPhrases,
@@ -63,5 +65,65 @@ describe('dictationErrorMessage', () => {
   it('has a message for any other code', () => {
     expect(dictationErrorMessage('network')).toContain('speech service')
     expect(dictationErrorMessage('something-new')).toContain('unexpectedly')
+  })
+})
+
+describe('isDictationShortcut', () => {
+  const press = (
+    key: string,
+    mods: Partial<
+      Record<'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey', boolean>
+    > = {},
+    code = `Key${key.toUpperCase()}`
+  ) => ({
+    key,
+    code,
+    metaKey: false,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+    ...mods,
+  })
+
+  it('is ⌘D on a Mac', () => {
+    expect(isDictationShortcut(press('d', { metaKey: true }), true)).toBe(true)
+    expect(isDictationShortcut(press('D', { metaKey: true }), true)).toBe(true)
+  })
+
+  it('leaves Ctrl+D alone on a Mac, where it deletes the next letter', () => {
+    expect(isDictationShortcut(press('d', { ctrlKey: true }), true)).toBe(false)
+  })
+
+  it('is Ctrl+D off a Mac, and not the Windows key with D', () => {
+    expect(isDictationShortcut(press('d', { ctrlKey: true }), false)).toBe(true)
+    expect(isDictationShortcut(press('d', { metaKey: true }), false)).toBe(
+      false
+    )
+  })
+
+  it('ignores D with Shift or Alt added, and a plain D', () => {
+    expect(
+      isDictationShortcut(press('d', { metaKey: true, shiftKey: true }), true)
+    ).toBe(false)
+    expect(
+      isDictationShortcut(press('d', { metaKey: true, altKey: true }), true)
+    ).toBe(false)
+    expect(isDictationShortcut(press('d'), true)).toBe(false)
+  })
+
+  it('counts the D key on a keyboard where it types another letter', () => {
+    // Russian layout: the D key types в.
+    expect(
+      isDictationShortcut(press('в', { metaKey: true }, 'KeyD'), true)
+    ).toBe(true)
+    // But not a Latin letter that merely sits on that key (Dvorak's E).
+    expect(
+      isDictationShortcut(press('e', { metaKey: true }, 'KeyD'), true)
+    ).toBe(false)
+  })
+
+  it('is written the way each system writes it', () => {
+    expect(dictationShortcutLabel(true)).toBe('⌘D')
+    expect(dictationShortcutLabel(false)).toBe('Ctrl+D')
   })
 })

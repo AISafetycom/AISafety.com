@@ -205,13 +205,14 @@ export default function Assistant() {
     [currentPage]
   )
 
-  // Funnel: visitors who dictate a message, and dictation that failed
-  // (`label` is the browser's error code, e.g. 'not-allowed').
+  // Funnel: visitors who dictate a message, and dictation that failed.
+  // `label` is how it was started ('button' or 'shortcut', the ⌘D keys) or
+  // the browser's error code (e.g. 'not-allowed').
   const handleDictation = useCallback(
-    (outcome: 'start' | 'error', reason?: string) => {
+    (outcome: 'start' | 'error', detail?: string) => {
       trackEvent('chatbot_dictate', {
         source: outcome,
-        ...(reason ? { label: reason } : {}),
+        ...(detail ? { label: detail } : {}),
         page: currentPage,
       })
     },

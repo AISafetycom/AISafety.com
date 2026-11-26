@@ -555,9 +555,10 @@ interface Props {
    *  couldn't be attached. `detail` is the kind of file ('pdf', 'docx',
    *  'text') or the reason it failed. Never the file's name or its text. */
   onAttach?: (outcome: 'attached' | 'error', detail: string) => void
-  /** Fires when the visitor starts dictating, or dictation stops with an
-   *  error (`reason` is the browser's error code). */
-  onDictation?: (outcome: 'start' | 'error', reason?: string) => void
+  /** Fires when the visitor starts dictating (`detail` is how: 'button' or
+   *  'shortcut'), or dictation stops with an error (`detail` is the browser's
+   *  error code). */
+  onDictation?: (outcome: 'start' | 'error', detail?: string) => void
 }
 
 const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(

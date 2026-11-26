@@ -194,9 +194,10 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   // `label` the kind of file ('pdf' | 'docx' | 'text') or the reason it
   // failed, `page` the path. Never the file's name or anything in it.
   'chatbot_attach',
-  // The chatbot's microphone: `source` is 'start' (dictation began) or
-  // 'error' (it stopped with a browser error, whose code is in `label`, e.g.
-  // 'not-allowed'), `page` the path. Never what was said.
+  // The chatbot's microphone: `source` is 'start' (dictation began, `label`
+  // saying how: 'button' or 'shortcut', the ⌘D keys) or 'error' (it stopped
+  // with a browser error, whose code is in `label`, e.g. 'not-allowed'),
+  // `page` the path. Never what was said.
   'chatbot_dictate',
   // The privacy page's analytics switch: the opt-out is the browser's last
   // recorded event, the opt-in its first after coming back.

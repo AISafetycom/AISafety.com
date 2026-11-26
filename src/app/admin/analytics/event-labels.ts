@@ -87,10 +87,13 @@ export function labelFor(e: {
     return e.source === 'attached'
       ? `Attached a document (${e.label ?? 'file'})`
       : `Couldn’t attach a file (${e.label ?? 'unknown reason'})`
-  if (e.type === 'chatbot_dictate')
-    return e.source === 'start'
-      ? 'Started dictating'
-      : `Dictation failed (${e.label ?? 'unknown reason'})`
+  if (e.type === 'chatbot_dictate') {
+    if (e.source !== 'start')
+      return `Dictation failed (${e.label ?? 'unknown reason'})`
+    return e.label === 'shortcut'
+      ? 'Started dictating (⌘D)'
+      : 'Started dictating'
+  }
   // search_click carries the result's title as its label, like listing clicks.
   return e.label ?? EVENT_LABELS[e.type] ?? e.type
 }

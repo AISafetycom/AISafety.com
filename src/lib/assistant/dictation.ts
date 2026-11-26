@@ -29,6 +29,31 @@ export function joinDictation(before: string, spoken: string): string {
   return /\s$/.test(before) ? before + spoken : `${before} ${spoken}`
 }
 
+/** Whether a key press is the dictation shortcut: ⌘D on a Mac, Ctrl+D
+ *  anywhere else (on a Mac, Ctrl+D in a text box deletes the next letter, so
+ *  it is left alone there). The same keys as the admin Queue's dictation. A
+ *  keyboard whose D key types another letter (Russian, Greek) still counts
+ *  by the key's place. */
+export function isDictationShortcut(
+  e: Pick<
+    KeyboardEvent,
+    'key' | 'code' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey'
+  >,
+  mac: boolean
+): boolean {
+  if (e.shiftKey || e.altKey) return false
+  const isD =
+    e.key.toLowerCase() === 'd' ||
+    (!/^[a-z]$/i.test(e.key) && e.code === 'KeyD')
+  if (!isD) return false
+  return mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
+}
+
+/** The shortcut as the tooltip shows it. */
+export function dictationShortcutLabel(mac: boolean): string {
+  return mac ? '⌘D' : 'Ctrl+D'
+}
+
 /** What to tell the visitor when dictation stops with one of the browser's
  *  error codes. null for the ones that need no message: silence, or the
  *  visitor stopping it themselves. */
