@@ -7,7 +7,12 @@ import * as d3 from 'd3'
 import MapControls from '@/components/MapControls'
 import MapSearch, { NO_MAP_SEARCH_CONTROL } from './MapSearch'
 import type { MapSearchControl } from './MapSearch'
-import { trackListingClick, trackListingHover } from '@/lib/analytics'
+import {
+  trackEvent,
+  trackListingClick,
+  trackListingHover,
+} from '@/lib/analytics'
+import { MAP_FOCUS_EVENT, type MapFocusDetail } from '@/lib/assistant/map-focus'
 import { withUtm } from '@/lib/utm'
 import { positionTooltip } from '@/lib/mapTooltip'
 import { MAP_BACKGROUND_URL } from '@/lib/map-images'
@@ -122,6 +127,59 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
   // and tab focus. Keeping the last zoom transform here lets the rebuild
   // restore the viewport instead of jumping back to the zoomed-out default.
   const savedTransformRef = useRef<d3.ZoomTransform | null>(null)
+
+  // The chatbot names an organization that's on the map → fly to it and
+  // ring it, exactly as a pick in the map's search does. A search pick's ring
+  // ends when the search closes; this one ends the next time the visitor
+  // touches, scrolls, zooms or resets the map, so after closing the chat on
+  // a phone they still see which pin it was.
+  const chatRingRef = useRef(false)
+  const clearChatRing = () => {
+    if (!chatRingRef.current) return
+    chatRingRef.current = false
+    searchRef.current.clearHighlight()
+  }
+  useEffect(() => {
+    const container = containerRef.current
+    const onFocus = (e: Event) => {
+      const { id } = (e as CustomEvent<MapFocusDetail>).detail
+      const org = searchOrgs.find(o => o.id === id)
+      if (!org) return
+      searchRef.current.flyTo(org)
+      chatRingRef.current = true
+      trackEvent('map_chat_focus', {
+        page: 'Map',
+        label: org.title,
+        url: org.link,
+        listingId: org.id,
+      })
+    }
+    // ESC on the map ends the ring too, but not an ESC that closes the chat
+    // or is typed in a field (the same skip as the map's own ESC handler).
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      const target = e.target as HTMLElement | null
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable ||
+          target.closest('[role="dialog"]'))
+      )
+        return
+      clearChatRing()
+    }
+    window.addEventListener(MAP_FOCUS_EVENT, onFocus)
+    window.addEventListener('keydown', onKey)
+    container?.addEventListener('pointerdown', clearChatRing)
+    container?.addEventListener('wheel', clearChatRing, { passive: true })
+    return () => {
+      window.removeEventListener(MAP_FOCUS_EVENT, onFocus)
+      window.removeEventListener('keydown', onKey)
+      container?.removeEventListener('pointerdown', clearChatRing)
+      container?.removeEventListener('wheel', clearChatRing)
+    }
+  }, [searchOrgs])
 
   useEffect(() => {
     if (!containerRef.current || orgs.length === 0) return
@@ -723,9 +781,18 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
 
       <MapControls
         className={styles['map-controls']}
-        onZoomIn={() => controlsRef.current.zoomIn()}
-        onZoomOut={() => controlsRef.current.zoomOut()}
-        onReset={() => controlsRef.current.reset()}
+        onZoomIn={() => {
+          clearChatRing()
+          controlsRef.current.zoomIn()
+        }}
+        onZoomOut={() => {
+          clearChatRing()
+          controlsRef.current.zoomOut()
+        }}
+        onReset={() => {
+          clearChatRing()
+          controlsRef.current.reset()
+        }}
       />
 
       <MapSearch
@@ -733,7 +800,11 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         orgs={searchOrgs}
         suggestEntryUrl={suggestEntryUrl}
         controlRef={searchControlRef}
-        onPick={org => searchRef.current.flyTo(org)}
+        onPick={org => {
+          // The search's own ring replaces the chat's.
+          chatRingRef.current = false
+          searchRef.current.flyTo(org)
+        }}
         onClear={() => searchRef.current.clearHighlight()}
       />
 
