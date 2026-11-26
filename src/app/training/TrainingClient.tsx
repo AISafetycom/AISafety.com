@@ -7,6 +7,8 @@ import {
   useRef,
   useState,
   useLayoutEffect,
+  type Dispatch,
+  type SetStateAction,
 } from 'react'
 import { useSearchParams } from 'next/navigation'
 import ListingCard from '@/components/ListingCard'
@@ -313,11 +315,10 @@ export default function TrainingClient({
   const savedScrollY = useRef<number | null>(null)
   const toggleFilter = (
     value: string,
-    current: string[],
-    setter: (v: string[]) => void
+    setter: Dispatch<SetStateAction<string[]>>
   ) => {
     savedScrollY.current = window.scrollY
-    setter(
+    setter(current =>
       current.includes(value)
         ? current.filter(v => v !== value)
         : [...current, value]
@@ -418,59 +419,66 @@ export default function TrainingClient({
           <FilterDropdown
             trackingPage="Training"
             title="Applications"
+            icon="/images/icons/paper.svg"
             options={applicationOptions}
             selected={selectedStatus}
             counts={statusCounts}
-            onToggle={v => toggleFilter(v, selectedStatus, setSelectedStatus)}
+            onToggle={v => toggleFilter(v, setSelectedStatus)}
           />
         )}
         <FilterDropdown
           trackingPage="Training"
           title="Type"
+          icon="/images/icons/tag.svg"
           options={[...TRAINING_TYPES]}
           selected={selectedTypes}
           counts={typeCounts}
-          onToggle={v => toggleFilter(v, selectedTypes, setSelectedTypes)}
+          onToggle={v => toggleFilter(v, setSelectedTypes)}
         />
         <FilterDropdown
           trackingPage="Training"
           title="Focus"
+          icon="/images/icons/target.svg"
           options={focusOptions}
           selected={selectedFocus}
           counts={focusCounts}
-          onToggle={v => toggleFilter(v, selectedFocus, setSelectedFocus)}
+          onToggle={v => toggleFilter(v, setSelectedFocus)}
         />
         <FilterDropdown
           trackingPage="Training"
           title="Entry bar"
+          icon="/images/icons/entry-mid.svg"
           options={[...ENTRY_BARS]}
           selected={selectedEntryBar}
           counts={entryBarCounts}
-          onToggle={v => toggleFilter(v, selectedEntryBar, setSelectedEntryBar)}
+          onToggle={v => toggleFilter(v, setSelectedEntryBar)}
         />
         <FilterDropdown
           trackingPage="Training"
           title="Stipend"
+          icon="/images/icons/money.svg"
           options={[...STIPEND_OPTIONS]}
           selected={selectedStipend}
           counts={stipendCounts}
-          onToggle={v => toggleFilter(v, selectedStipend, setSelectedStipend)}
+          onToggle={v => toggleFilter(v, setSelectedStipend)}
         />
         <FilterDropdown
           trackingPage="Training"
           title="Length"
+          icon="/images/icons/calendar.svg"
           options={[...LENGTH_BUCKETS]}
           selected={selectedLength}
           counts={lengthCounts}
-          onToggle={v => toggleFilter(v, selectedLength, setSelectedLength)}
+          onToggle={v => toggleFilter(v, setSelectedLength)}
         />
         <FilterDropdown
           trackingPage="Training"
           title="Location"
+          icon="/images/icons/pin.svg"
           options={locationOptions}
           selected={selectedLocation}
           counts={locationCounts}
-          onToggle={v => toggleFilter(v, selectedLocation, setSelectedLocation)}
+          onToggle={v => toggleFilter(v, setSelectedLocation)}
         />
       </FilterBar>
 

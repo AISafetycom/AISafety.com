@@ -215,15 +215,6 @@
   color: var(--teal-grey-300);
 }
 
-.map-search-suggest {
-  color: var(--teal-400);
-  cursor: pointer;
-}
-
-.map-search-suggest:hover {
-  text-decoration: underline;
-}
-
 @media (max-width: 767px) {
   .map-search {
     top: 16px;
@@ -294,8 +285,7 @@
   bottom: 24px;
   left: 24px;
   z-index: 1000;
-  box-shadow: 0 12px 24px
-    color-mix(in srgb, var(--teal-grey-900) 50%, transparent);
+  box-shadow: 0 12px 24px color-mix(in srgb, var(--teal-900) 50%, transparent);
 }
 
 @media (max-width: 991px) {

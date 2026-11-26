@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.0",
+    "@rrweb/record": "^2.2.2",
     "@tiptap/core": "^3.31.3",
     "@tiptap/extension-link": "^3.31.3",
     "@tiptap/pm": "^3.31.3",
@@ -36,6 +37,7 @@
     "qrcode": "^1.5.4",
     "react": "19.2.0",
     "react-dom": "19.2.0",
+    "rrweb-player": "^2.2.2",
     "sharp": "^0.35.5"
   },
   "devDependencies": {

@@ -12,10 +12,14 @@ interface ExtraLink {
   icon?: string
 }
 
-interface ContributeButtonsProps {
-  suggestEntryUrl: string
-  suggestCorrectionUrl: string
-  noun: string
+// The "Contribute to this page" card needs all three of these. A page with no
+// suggestion forms (Jobs, synced from 80,000 Hours) leaves all three out and
+// gets the "View data in Airtable" card alone.
+type ContributeProps =
+  | { suggestEntryUrl: string; suggestCorrectionUrl: string; noun: string }
+  | { suggestEntryUrl?: never; suggestCorrectionUrl?: never; noun?: never }
+
+type ContributeButtonsProps = ContributeProps & {
   /** Airtable grid/view URL for the "View data in Airtable" card. */
   airtableUrl?: string
   /** Extra line under "View data in Airtable", e.g. "(includes past events)". */
@@ -62,6 +66,55 @@ function ActionRow({
   )
 }
 
+function ContributeCard({
+  suggestEntryUrl,
+  suggestCorrectionUrl,
+  noun,
+  extraLinks,
+  track,
+}: {
+  suggestEntryUrl: string
+  suggestCorrectionUrl: string
+  noun: string
+  extraLinks?: ExtraLink[]
+  track: (action: string, label: string, url: string) => void
+}) {
+  const addLabel = `Add ${article(noun)} ${noun}`
+  return (
+    <div className={`border-only ${styles.card}`}>
+      <p className="paragraph-xs color-teal-grey-300 padding-bottom-16px">
+        Contribute to this page
+      </p>
+
+      <div className="flex flex-col gap-8px">
+        <ActionRow
+          href={suggestEntryUrl}
+          icon="/images/icons/plus-small.svg"
+          label={addLabel}
+          onClick={() => track('add', addLabel, suggestEntryUrl)}
+        />
+        <ActionRow
+          href={suggestCorrectionUrl}
+          icon="/images/icons/pencil-small.svg"
+          label="Suggest a correction"
+          onClick={() =>
+            track('correction', 'Suggest a correction', suggestCorrectionUrl)
+          }
+        />
+        {extraLinks?.map(link => (
+          <ActionRow
+            key={link.url}
+            href={link.url}
+            icon={link.icon || '/images/icons/star-small.svg'}
+            label={link.label}
+            onClick={() => track('extra', link.label, link.url)}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function ContributeButtons({
   suggestEntryUrl,
   suggestCorrectionUrl,
@@ -75,41 +128,18 @@ export default function ContributeButtons({
   const track = (action: string, label: string, url: string) => {
     if (trackingPage) trackContributeClick(trackingPage, action, label, url)
   }
-  const addLabel = `Add ${article(noun)} ${noun}`
   const cards = (
     <div className="flex flex-col gap-16px">
       {/* Contribute card */}
-      <div className={`border-only ${styles.card}`}>
-        <p className="paragraph-xs color-teal-grey-300 padding-bottom-16px">
-          Contribute to this page
-        </p>
-
-        <div className="flex flex-col gap-8px">
-          <ActionRow
-            href={suggestEntryUrl}
-            icon="/images/icons/plus-small.svg"
-            label={addLabel}
-            onClick={() => track('add', addLabel, suggestEntryUrl)}
-          />
-          <ActionRow
-            href={suggestCorrectionUrl}
-            icon="/images/icons/pencil-small.svg"
-            label="Suggest a correction"
-            onClick={() =>
-              track('correction', 'Suggest a correction', suggestCorrectionUrl)
-            }
-          />
-          {extraLinks?.map(link => (
-            <ActionRow
-              key={link.url}
-              href={link.url}
-              icon={link.icon || '/images/icons/star-small.svg'}
-              label={link.label}
-              onClick={() => track('extra', link.label, link.url)}
-            />
-          ))}
-        </div>
-      </div>
+      {noun && (
+        <ContributeCard
+          suggestEntryUrl={suggestEntryUrl}
+          suggestCorrectionUrl={suggestCorrectionUrl}
+          noun={noun}
+          extraLinks={extraLinks}
+          track={track}
+        />
+      )}
 
       {/* View data in Airtable card */}
       <a

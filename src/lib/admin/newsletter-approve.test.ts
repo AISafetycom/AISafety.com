@@ -1354,3 +1354,171 @@ describe('an Updates issue on list 9', () => {
     expect(d.designChangedSince).toBe('Issue #5, 2026')
   })
 })
+
+/* ─── A subject line A/B test (newsletter-ab.ts, 24 Nov 2026) ─────────── */
+
+describe('a subject line A/B test', () => {
+  const S_LIST = 'fedcba9876543210'
+  const card = (key: string, title: string) => ({
+    key,
+    title,
+    fields: [
+      ['title', '', title],
+      ['m1', 'calendar', '20–21 November 2099'],
+      ['desc', '', `${title}, described.`],
+    ] as Array<[string, string, string]>,
+  })
+  const LINKS = [
+    { u: 'https://thebigtent.example/', k: 'page', t: 'Read more' },
+  ]
+
+  function abAC(opts: Parameters<typeof makeAC>[0] = {}, s: unknown = 'ok') {
+    const marker = Buffer.from(
+      JSON.stringify({
+        v: 1,
+        picks: [
+          { k: 'recCCCCCCCCCCCCCC', t: 'Third Thing' },
+          { k: 'recAAAAAAAAAAAAAA', t: 'Big Tent' },
+        ],
+        p: LINK_LIST,
+        s: S_LIST,
+      })
+    ).toString('base64')
+    return makeAC({
+      email: buildEmail({
+        cards: [
+          card('recAAAAAAAAAAAAAA', 'The Big Tent'),
+          card('recBBBBBBBBBBBBBB', 'Second Thing'),
+          card('recCCCCCCCCCCCCCC', 'Third Thing Summit'),
+        ],
+        body: `<!--aisafety-ab:${marker}-->`,
+      }),
+      blob: {
+        [LINK_LIST]: {
+          v: 1,
+          c: 'Events · Week 41, 2026',
+          ab: 'preview',
+          links: LINKS,
+        },
+        ...(s === 'ok'
+          ? {
+              [S_LIST]: {
+                v: 1,
+                c: 'Events · Week 41, 2026',
+                ab: 'subject',
+                links: LINKS,
+              },
+            }
+          : s === 'missing'
+            ? {}
+            : { [S_LIST]: s }),
+      },
+      ...opts,
+    })
+  }
+  const LINE = 'Big Tent, Third Thing, and 1 more'
+
+  it('shows both halves on the page', async () => {
+    const ac = abAC()
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const [d] = await nl.listDrafts()
+    expect(d.blocks).toEqual([])
+    expect(d.abTest).toEqual({
+      a: { subject: LINE, preview: 'This is a weekly newsletter.' },
+      b: { subject: 'Week 41, 2026', preview: LINE },
+    })
+  })
+
+  it('goes out as an even split of its two halves', async () => {
+    const ac = abAC()
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const r = await nl.approveAndSend('200', '6', WHO)
+    expect(r.campaignId).toBe('201')
+    expect(ac.creates).toHaveLength(1)
+    expect(ac.addedMsgs).toEqual(['501', '502'])
+    const create = ac.calls.find(c => c.action === 'campaign_create')!
+    expect(create.form!.get('type')).toBe('split')
+    expect(create.form!.get('split_type')).toBe('even')
+    expect(create.form!.get('split_content')).toBe('1')
+    expect(create.form!.get('m[501]')).toBe('50')
+    expect(create.form!.get('m[502]')).toBe('50')
+    expect(create.form!.has('m[300]')).toBe(false)
+    const subjectHalf = ac.msgs.get('501')!
+    const previewHalf = ac.msgs.get('502')!
+    expect(subjectHalf.subject).toBe(LINE)
+    expect(subjectHalf.html).toContain('This is a weekly newsletter.&nbsp;')
+    expect(subjectHalf.html).toContain(`/api/nl/${S_LIST}/0`)
+    expect(subjectHalf.html).not.toContain(`/api/nl/${LINK_LIST}/`)
+    expect(subjectHalf.text).toContain(`/api/nl/${S_LIST}/0`)
+    expect(previewHalf.subject).toBe('Week 41, 2026')
+    expect(previewHalf.html).toContain(`>${LINE}&nbsp;&zwnj;</div>`)
+    expect(previewHalf.html).toContain(`/api/nl/${LINK_LIST}/0`)
+    // Each half carries its own content marker, as a card edit writes it.
+    for (const m of [subjectHalf, previewHalf])
+      expect(m.html).toMatch(/^<!--aisafety-issue:[0-9a-f]{16}-->/)
+    // Once it has gone out, the issue's own page finds it (either half is
+    // the issue).
+    Object.assign(ac.camps.find(c => c.id === '201')!, {
+      status: '5',
+      send_amt: '3',
+    })
+    const sent = await nl.sentIssueHtml('Events · Week 41, 2026', '6')
+    expect(sent).toContain('The Big Tent')
+  })
+
+  it('is deleted at once when ActiveCampaign doesn’t keep the split', async () => {
+    const ac = abAC({ createdSplit: { type: 'single' } })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const r = await outcome(nl.approveAndSend('200', '6', WHO))
+    expect(r.err).toBeInstanceOf(nl.SplitDroppedError)
+    expect(ac.camps.find(c => c.id === '201')).toBeUndefined()
+  })
+
+  it('is deleted at once when the split would send one half’s content to all', async () => {
+    const ac = abAC({ createdSplit: { split_content: '0' } })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const r = await outcome(nl.approveAndSend('200', '6', WHO))
+    expect(r.err).toBeInstanceOf(nl.SplitDroppedError)
+    expect(ac.camps.find(c => c.id === '201')).toBeUndefined()
+  })
+
+  it('is blocked, with nothing made, when the second link list is missing', async () => {
+    const ac = abAC({}, 'missing')
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const r = await outcome(nl.approveAndSend('200', '6', WHO))
+    expect(r.err).toBeInstanceOf(nl.DraftProblemError)
+    expect(
+      (r.err as InstanceType<NL['DraftProblemError']>).problems.join(' ')
+    ).toMatch(/second link list .* isn’t on the Blob store/)
+    expect(ac.addedMsgs).toEqual([])
+    expect(ac.creates).toHaveLength(0)
+  })
+
+  it('is refused, with nothing sent, when the halves can’t be made; then goes once they can', async () => {
+    const ac = abAC({ messageAddFails: true })
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    const r = await outcome(nl.approveAndSend('200', '6', WHO))
+    expect(r.err).toBeInstanceOf(nl.DraftProblemError)
+    expect(
+      (r.err as InstanceType<NL['DraftProblemError']>).problems[0]
+    ).toMatch(/two halves couldn’t be made .* nothing was sent/)
+    expect(ac.creates).toHaveLength(0)
+  })
+
+  it('a usual issue still goes out as one message', async () => {
+    const ac = makeAC()
+    vi.stubGlobal('fetch', ac.fetchMock)
+    const nl = await freshModule()
+    await nl.approveAndSend('200', '6', WHO)
+    const create = ac.calls.find(c => c.action === 'campaign_create')!
+    expect(create.form!.get('type')).toBe('single')
+    expect(create.form!.get('m[300]')).toBe('100')
+    expect(ac.addedMsgs).toEqual([])
+  })
+})

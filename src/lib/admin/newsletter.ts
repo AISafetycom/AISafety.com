@@ -135,6 +135,14 @@ import {
   noteTestCopy,
   readClicks,
 } from '@/lib/newsletter-clicks'
+import {
+  abHalves,
+  abListProblems,
+  abTestOf,
+  abVariants,
+  type AbHalf,
+  type AbTest,
+} from '@/lib/admin/newsletter-ab'
 import { minReadersOnList } from '@/lib/newsletter-archive'
 import {
   keepRemovalCopy,
@@ -670,6 +678,10 @@ export interface DraftSummary {
   /** The inbox preview line (the email's hidden preheader), as Gmail shows it
    *  after the subject. Null when the email has none. */
   preview: string | null
+  /** A subject line A/B test (newsletter-ab.ts): what each half of the list
+   *  sees in the inbox, as it would go out now. Null for a usual issue, or
+   *  when the test can't be made (its block says why). */
+  abTest: { a: AbHalf; b: AbHalf } | null
   /** The last issue sent on its list ("Week 45, 2026") when the email's
    *  design has changed since (designChangedSince): a Send test is worth it.
    *  Null when it hasn't, or when that can't be told. */
@@ -2209,6 +2221,46 @@ async function linkListBlocks(html: string, text: string): Promise<string[]> {
   return out
 }
 
+/** Why a subject line A/B test issue can't go out as one: the marker,
+ *  the halves made from the email as it is now, and the second link list
+ *  (the same links as the email's own, so the halves' clicks count apart). */
+async function abBlocks(msg: RawMessage): Promise<string[]> {
+  const html = msg.html ?? ''
+  const test = abTestOf(html)
+  if (test == null) return []
+  if (test === 'malformed')
+    return ['the email’s A/B test note is unreadable – rebuild the issue']
+  const made = abVariants(
+    { subject: msg.subject, html, text: msg.text ?? '' },
+    test
+  )
+  if (typeof made === 'string') return [made]
+  const used = [...nlLinkRefs(html, msg.text ?? '').lists.keys()]
+  if (used.length !== 1 || used[0] !== test.p)
+    return [
+      `the email’s links use ${used.length === 1 ? `link list ${used[0]}` : `${used.length} link lists`}, not the A/B test’s ${test.p} – rebuild the issue`,
+    ]
+  const [p, s] = await Promise.all([
+    readLinkListRaw(test.p),
+    readLinkListRaw(test.s),
+  ])
+  return abListProblems(test, p, s)
+}
+
+/** What each half of an A/B test issue sees in the inbox, for the page;
+ *  null for a usual issue or one abBlocks refuses. */
+function abTestShown(msg: RawMessage): DraftSummary['abTest'] {
+  const html = msg.html ?? ''
+  const test = abTestOf(html)
+  if (test == null || test === 'malformed') return null
+  const made = abVariants(
+    { subject: msg.subject, html, text: msg.text ?? '' },
+    test
+  )
+  if (typeof made === 'string') return null
+  return abHalves(msg.subject, previewText(html), made.line)
+}
+
 /** Pure: an issue's place in its newsletter's run (year, then week or issue
  *  number), from "Events · Week 41, 2026" / "Funding · Issue #21, 2026".
  *  Null for names the pipeline didn't write. */
@@ -2349,6 +2401,7 @@ export async function listDrafts(): Promise<DraftSummary[]> {
       deletable: deleteRefusal(listIds) == null && wavesStillToGo(sent) == null,
       editLock,
       preview: previewText(msg.html ?? ''),
+      abTest: abTestShown(msg),
       designChangedSince: designSince,
       cards: shown == null ? null : cardGroups(shown),
       removed: shown == null ? [] : removedCards(shown),
@@ -2394,6 +2447,7 @@ async function sendChecks(
       ...cardBlocks,
       ...own.blocks,
       ...(await linkListBlocks(sent, text)),
+      ...(await abBlocks(msg)),
       ...olderIssueBlocks(draft.name, sameListDrafts),
     ],
     warnings: own.warnings,
@@ -3337,9 +3391,22 @@ const ICON_LABELS: Record<string, string> = {
   target: 'Detail',
 }
 
-function fieldLabel(name: string, icon: string | undefined, funding: boolean) {
+function fieldLabel(
+  name: string,
+  icon: string | undefined,
+  funding: boolean,
+  value: string
+) {
   if (name === 'title') return 'Title'
   if (name === 'desc') return 'Description'
+  // Since 26 Nov 2026 an event's Cost row has the money icon too (site PR
+  // 907), crossed out when free. Its values start "Free" or "Pay to attend";
+  // a training program's stipend values never do.
+  if (
+    (icon === 'money' || icon === 'money-off') &&
+    /^(free|pay)\b/i.test(value)
+  )
+    return 'Cost'
   // Funding drafts built before 28 Oct 2026 have a Type row; the site's
   // funder card, and Pen's fallback since (PEN_CARDS), have none.
   if (icon === 'tag') return funding ? 'Type' : 'Cost'
@@ -3361,7 +3428,7 @@ function cardFields(
     const value = stripHtml(m[3])
     out.push({
       name: m[1],
-      label: fieldLabel(m[1], m[2], funding),
+      label: fieldLabel(m[1], m[2], funding, value),
       value,
       original:
         typeof orig === 'string' && stripHtml(orig) !== value
@@ -4025,7 +4092,10 @@ async function sentIssueHtmlIn(
       campaignListIds(c.id),
       campaignMessageIds(c.id),
     ])
-    if (!lists.includes(listId) || messages.length !== 1) continue
+    // A subject line A/B test went out as two messages with the same body
+    // (newsletter-ab.ts): either one is the issue.
+    if (!lists.includes(listId) || messages.length === 0 || messages.length > 2)
+      continue
     const html = (await message(messages[0])).html ?? ''
     if (MARKER_RE.test(html)) return html
   }
@@ -4091,7 +4161,8 @@ export async function previewHtml(
   let id = messageId
   if (!id) {
     const messageIds = await campaignMessageIds(campaignId)
-    if (messageIds.length !== 1) return null
+    // Two for a subject line A/B test (newsletter-ab.ts): the same body.
+    if (messageIds.length === 0 || messageIds.length > 2) return null
     id = messageIds[0]
   }
   const msg = await message(id).catch(() => null)
@@ -4596,6 +4667,10 @@ export class LinkTrackingError extends SendDeletedError {}
 /** …because it didn't keep the wave: it would have gone to the whole list. */
 export class WaveDroppedError extends SendDeletedError {}
 
+/** …because a subject line A/B test didn't come back as an even split of
+ *  its two halves (newsletter-ab.ts). */
+export class SplitDroppedError extends SendDeletedError {}
+
 /** …because the new wave couldn't be read back to check it (ActiveCampaign
  *  failing to answer, not misbehaving): it's gone, so the approval's lock
  *  goes too and the wave can be approved again at once. */
@@ -4757,6 +4832,13 @@ export async function approveAndSend(
       problems.length > 0 ? problems : ['no message on the draft']
     )
   }
+  // A subject line A/B test goes to the whole list at once, so both halves
+  // go out at the same time (newsletter-ab.ts).
+  const ab = abTestOf(msg.html ?? '')
+  if (ab != null && range)
+    throw new DraftProblemError([
+      'this issue is a subject line A/B test: send it to the whole list, not in waves',
+    ])
   const baseName = baseIssueName(campaign.name)
   const lockKey = approveLockKey(listId, baseName)
   const claim = await claimApproveLock(
@@ -4894,6 +4976,13 @@ export async function approveAndSend(
       ])
 
     const listName = names.get(listId) ?? null
+    // A subject line A/B test: its two halves, made from the email as it is
+    // now. Messages alone send nothing, so a failure here still releases
+    // the lock.
+    const sendMessages =
+      ab != null && ab !== 'malformed'
+        ? await makeAbHalves(msg, listId, ab)
+        : [messageId]
     // From here on a send may exist even when an answer says it doesn't:
     // the lock stays (unless every campaign made is known to be deleted
     // again), and every unclear error tells the approver not to press again.
@@ -4903,7 +4992,7 @@ export async function approveAndSend(
       return await createAndConfirm({
         draftId,
         listId,
-        messageId,
+        messageIds: sendMessages,
         baseName,
         sdate: formatLocal(sendAt, offset),
         active,
@@ -4952,6 +5041,102 @@ export async function approveAndSend(
   }
 }
 
+/** A subject line A/B test's two halves as new messages on the list, made
+ *  from the draft's message as it is now (newsletter-ab.ts), each stamped
+ *  and read back like a card edit. Returns [subject half, preview half].
+ *  Messages alone send nothing: on any failure the ones made are deleted
+ *  again and the approval is refused, so it can be pressed again. */
+async function makeAbHalves(
+  msg: RawMessage,
+  listId: string,
+  test: AbTest
+): Promise<string[]> {
+  const halves = abVariants(
+    {
+      subject: msg.subject,
+      html: (msg.html ?? '').replace(MARKER_RE, ''),
+      text: msg.text ?? '',
+    },
+    test
+  )
+  if (typeof halves === 'string') throw new DraftProblemError([halves])
+  const made: string[] = []
+  try {
+    for (const half of [halves.subject, halves.preview]) {
+      const html =
+        `<!--aisafety-issue:${contentDigest(half.html)}-->` + half.html
+      const out = await v1('message_add', {
+        format: 'html',
+        subject: half.subject,
+        fromemail: msg.fromemail,
+        fromname: msg.fromname,
+        reply2: msg.reply2 || msg.fromemail,
+        priority: 3,
+        charset: 'utf-8',
+        encoding: 'quoted-printable',
+        htmlconstructor: 'editor',
+        html,
+        textconstructor: 'editor',
+        text: half.text,
+        [`p[${listId}]`]: listId,
+      })
+      const id = acId(String(out.id))
+      made.push(id)
+      const stored = await message(id)
+      const m = MARKER_RE.exec(stored.html ?? '')
+      if (
+        !m ||
+        m[1] !== contentDigest(stored.html ?? '') ||
+        stored.subject !== half.subject ||
+        (stored.text ?? '') !== half.text
+      )
+        throw new Error(`message ${id} didn’t read back as it was written`)
+    }
+    return made
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err)
+    console.error(`[newsletter] making the A/B test's halves failed: ${why}`)
+    for (const id of made) {
+      await v1('message_delete', { id }).catch(e =>
+        console.error(
+          `[newsletter] deleting A/B half message ${id} failed: ${e instanceof Error ? e.message : String(e)}`
+        )
+      )
+    }
+    throw new DraftProblemError([
+      `the A/B test’s two halves couldn’t be made in ActiveCampaign (${why.slice(0, 160)}) – nothing was sent; try again in a minute`,
+    ])
+  }
+}
+
+/** Why a new A/B test campaign isn't the even split of its two halves, or
+ *  null when it is. */
+async function splitProblem(
+  campaignId: string,
+  live: RawCampaign,
+  messageIds: string[]
+): Promise<string | null> {
+  const c = live as RawCampaign & {
+    type?: string | null
+    split_type?: string | null
+    split_content?: string | number | null
+  }
+  if (c.type !== 'split') return `it came back as type ${String(c.type)}`
+  if (c.split_type !== 'even')
+    return `its split came back as ${String(c.split_type)}, not even`
+  if (String(c.split_content ?? '') !== '1')
+    return 'it would have sent the first half’s content to everyone'
+  try {
+    const stored = await campaignMessageIds(campaignId)
+    const want = [...messageIds].sort().join(',')
+    if ([...stored].sort().join(',') !== want)
+      return `its messages came back as ${stored.join(', ') || 'none'}, not ${messageIds.join(', ')}`
+  } catch (err) {
+    return `its messages couldn’t be read back (${err instanceof Error ? err.message.slice(0, 120) : String(err)})`
+  }
+  return null
+}
+
 /** campaign_create for one send — the whole list, or one wave (`segmentId`)
  *  — then the read back of what ActiveCampaign stored: link tracking off, a
  *  wave's segment kept, a status that sends. Throws a SendDeletedError when
@@ -4961,7 +5146,8 @@ export async function approveAndSend(
 async function createVerified(a: {
   draftId: string
   listId: string
-  messageId: string
+  /** One message, or a subject line A/B test's two halves (an even split). */
+  messageIds: string[]
   sdate: string
   /** The wave's saved segment; null for the whole list. */
   segmentId: string | null
@@ -4970,8 +5156,9 @@ async function createVerified(a: {
   const { facts } = a
   let newId: string | null = null
   try {
+    const split = a.messageIds.length === 2
     const created = await v1answer('campaign_create', {
-      type: 'single',
+      type: split ? 'split' : 'single',
       name: facts.name,
       status: 1,
       public: 0,
@@ -4991,7 +5178,17 @@ async function createVerified(a: {
       ...(a.segmentId ? { segmentid: a.segmentId } : {}),
       sdate: a.sdate,
       [`p[${a.listId}]`]: a.listId,
-      [`m[${a.messageId}]`]: 100,
+      // A/B test: each half to an even, random half of the list, its own
+      // content too (split_content 1: the preview lines differ), no winner.
+      // Probed on test list 5, 24 Nov 2026.
+      ...(split
+        ? {
+            split_type: 'even',
+            split_content: 1,
+            [`m[${a.messageIds[0]}]`]: 50,
+            [`m[${a.messageIds[1]}]`]: 50,
+          }
+        : { [`m[${a.messageIds[0]}]`]: 100 }),
     })
     if (Number(created.result_code) !== 1) {
       throw new Error(
@@ -5035,6 +5232,10 @@ async function createVerified(a: {
       const wrong = await segmentProblem(live.segmentid, a.segmentId)
       if (wrong) await deleteBadSend(newId, 'wave', wrong, facts)
     }
+    if (split) {
+      const wrong = await splitProblem(newId, live, a.messageIds)
+      if (wrong) await deleteBadSend(newId, 'split', wrong, facts)
+    }
     // '7' = ActiveCampaign holds the send for its compliance review. The
     // campaign exists and will go out once they approve it, so this counts as
     // scheduled.
@@ -5065,7 +5266,7 @@ async function createVerified(a: {
 async function createAndConfirm(a: {
   draftId: string
   listId: string
-  messageId: string
+  messageIds: string[]
   baseName: string
   sdate: string
   active: number | null
@@ -5075,7 +5276,7 @@ async function createAndConfirm(a: {
   const { newId, live } = await createVerified({
     draftId: a.draftId,
     listId: a.listId,
-    messageId: a.messageId,
+    messageIds: a.messageIds,
     sdate: a.sdate,
     segmentId: null,
     facts,
@@ -5107,7 +5308,7 @@ async function createAndConfirm(a: {
       if (note) notes.push(note)
     }
     console.info(
-      `[newsletter] draft ${a.draftId} approved by ${facts.approver} → campaign ${newId} “${facts.name}” (${facts.expected ?? '?'} contacts) ${held ? 'held for ActiveCampaign review' : 'scheduled'} for ${live.sdate ?? a.sdate} on list ${a.listId}`
+      `[newsletter] draft ${a.draftId} approved by ${facts.approver} → campaign ${newId} “${facts.name}”${a.messageIds.length === 2 ? ' (subject line A/B test, two halves)' : ''} (${facts.expected ?? '?'} contacts) ${held ? 'held for ActiveCampaign review' : 'scheduled'} for ${live.sdate ?? a.sdate} on list ${a.listId}`
     )
     return {
       ...facts,
@@ -5270,7 +5471,7 @@ async function createWaves(a: {
       const one = await createVerified({
         draftId: a.draftId,
         listId: a.listId,
-        messageId: a.messageId,
+        messageIds: [a.messageId],
         sdate: formatLocal(new Date(slot.startsAt), a.offset),
         segmentId: segment.segmentId,
         facts,
@@ -5448,7 +5649,7 @@ async function segmentProblem(
  *  couldn't be deleted. */
 async function deleteBadSend(
   campaignId: string,
-  kind: 'tracking' | 'wave' | 'unread',
+  kind: 'tracking' | 'wave' | 'unread' | 'split',
   why: string,
   facts: ApprovalFacts
 ): Promise<never> {
@@ -5476,6 +5677,10 @@ async function deleteBadSend(
   if (kind === 'unread')
     throw new ReadBackDeletedError(
       `ActiveCampaign created campaign ${campaignId} for wave ${facts.wave}, but it couldn’t be read back to check it kept the wave, so it was deleted at once. Nothing was sent, and the draft is still here: approve again in a minute.`
+    )
+  if (kind === 'split')
+    throw new SplitDroppedError(
+      `ActiveCampaign didn’t keep the A/B test’s two halves on the new campaign ${campaignId} (${why}). It was deleted at once: nothing was sent, and the draft is still here. Tell Claude before trying again.`
     )
   if (kind === 'tracking')
     throw new LinkTrackingError(

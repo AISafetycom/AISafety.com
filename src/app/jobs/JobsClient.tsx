@@ -1,9 +1,18 @@
 'use client'
 
-import { useState, useMemo, useRef, useLayoutEffect, useEffect } from 'react'
+import {
+  useState,
+  useMemo,
+  useRef,
+  useLayoutEffect,
+  useEffect,
+  type Dispatch,
+  type SetStateAction,
+} from 'react'
 import FilterBar from '@/components/FilterBar'
 import FilterDropdown from '@/components/FilterDropdown'
 import ListingCard from '@/components/ListingCard'
+import ContributeButtons from '@/components/ContributeButtons'
 import { Job } from '@/lib/data/jobs'
 import { withUtm } from '@/lib/utm'
 import { formatDate } from '@/lib/format-date'
@@ -15,6 +24,12 @@ import styles from './page.module.css'
 interface JobsClientProps {
   jobs: Job[]
 }
+
+// Public read-only view of the jobs on this page ("AISafety.com/jobs" in the
+// Jobs table's "Publicly shared" section). Its filter copies the site's view,
+// "Jobs AI Safety Only": when that filter changes, change this one too.
+const AIRTABLE_VIEW_URL =
+  'https://airtable.com/appF8XfZUGXtfi40E/shroBLhvX7XmuZRlO/tblyLelYCQjP6w3nV?viewControls=on'
 
 // The labels the published jobs carry. When the 80k data adds or renames
 // one, update this list and the chatbot's two copies (skillSet in
@@ -335,16 +350,15 @@ export default function JobsClient({ jobs }: JobsClientProps) {
 
   const toggleFilter = (
     value: string,
-    current: string[],
-    setter: (v: string[]) => void
+    setter: Dispatch<SetStateAction<string[]>>
   ) => {
     savedScrollY.current = window.scrollY
     setSkipOffscreen(true)
-    if (current.includes(value)) {
-      setter(current.filter(v => v !== value))
-    } else {
-      setter([...current, value])
-    }
+    setter(current =>
+      current.includes(value)
+        ? current.filter(v => v !== value)
+        : [...current, value]
+    )
   }
 
   useLayoutEffect(() => {
@@ -390,7 +404,7 @@ export default function JobsClient({ jobs }: JobsClientProps) {
           options={skillSetOptions}
           selected={selectedSkills}
           counts={skillCounts}
-          onToggle={v => toggleFilter(v, selectedSkills, setSelectedSkills)}
+          onToggle={v => toggleFilter(v, setSelectedSkills)}
         />
         <FilterDropdown
           trackingPage="Jobs"
@@ -399,9 +413,7 @@ export default function JobsClient({ jobs }: JobsClientProps) {
           options={experienceOptions}
           selected={selectedExperience}
           counts={experienceCounts}
-          onToggle={v =>
-            toggleFilter(v, selectedExperience, setSelectedExperience)
-          }
+          onToggle={v => toggleFilter(v, setSelectedExperience)}
         />
         <FilterDropdown
           trackingPage="Jobs"
@@ -410,7 +422,7 @@ export default function JobsClient({ jobs }: JobsClientProps) {
           options={roleTypeOptions}
           selected={selectedRoles}
           counts={roleCounts}
-          onToggle={v => toggleFilter(v, selectedRoles, setSelectedRoles)}
+          onToggle={v => toggleFilter(v, setSelectedRoles)}
         />
         <FilterDropdown
           trackingPage="Jobs"
@@ -419,9 +431,7 @@ export default function JobsClient({ jobs }: JobsClientProps) {
           options={workLocationOptions}
           selected={selectedWorkLocation}
           counts={workLocationCounts}
-          onToggle={v =>
-            toggleFilter(v, selectedWorkLocation, setSelectedWorkLocation)
-          }
+          onToggle={v => toggleFilter(v, setSelectedWorkLocation)}
         />
         <FilterDropdown
           trackingPage="Jobs"
@@ -430,9 +440,7 @@ export default function JobsClient({ jobs }: JobsClientProps) {
           options={countryOptions}
           selected={selectedCountries}
           counts={countryCounts}
-          onToggle={v =>
-            toggleFilter(v, selectedCountries, setSelectedCountries)
-          }
+          onToggle={v => toggleFilter(v, setSelectedCountries)}
         />
         <FilterDropdown
           trackingPage="Jobs"
@@ -441,7 +449,7 @@ export default function JobsClient({ jobs }: JobsClientProps) {
           options={degreeOptions}
           selected={selectedDegrees}
           counts={degreeCounts}
-          onToggle={v => toggleFilter(v, selectedDegrees, setSelectedDegrees)}
+          onToggle={v => toggleFilter(v, setSelectedDegrees)}
         />
       </FilterBar>
 
@@ -567,15 +575,23 @@ export default function JobsClient({ jobs }: JobsClientProps) {
         </ul>
 
         <div className="hide-mobile width-3-col">
-          <p className="paragraph-small padding-bottom-4px">Source:</p>
-          <a
-            href={withUtm('https://jobs.80000hours.org/', 'Jobs')}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="color-teal-300"
-          >
-            80,000 Hours Job Board
-          </a>
+          <div className="flex flex-col gap-16px">
+            <div>
+              <p className="paragraph-small padding-bottom-4px">Source:</p>
+              <a
+                href={withUtm('https://jobs.80000hours.org/', 'Jobs')}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="link paragraph-small"
+              >
+                80,000 Hours Job Board
+              </a>
+            </div>
+            <ContributeButtons
+              airtableUrl={AIRTABLE_VIEW_URL}
+              trackingPage="Jobs"
+            />
+          </div>
         </div>
       </div>
     </>
