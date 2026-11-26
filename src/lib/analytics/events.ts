@@ -208,6 +208,9 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   // The Field map moving to an organization because a chatbot reply showed
   // its card: `label` its title, `url` its link, `listingId` its record id.
   'map_chat_focus',
+  // A click on a numbered bubble of merged pins on the /communities map,
+  // which zooms in to split it. `label` is how many pins it held.
+  'map_cluster_click',
   // The global nav's +N pill (the pages that don't fit the bar) opening its
   // menu. `source` is how: 'hover' (mouse/trackpad) or 'tap' (touch screens);
   // `page` the path it happened on. One per closed→open transition.
