@@ -75,10 +75,10 @@ function restyleBasemapLayer(layer: any) {
         'line-emissive-strength': 1,
       },
     }
-  // Place names, which Mapbox lightens under the dusk light and rings with a
-  // grey halo.
-  const textColor = JSON.stringify(layer.paint?.['text-color'] ?? null)
-  if (textColor.includes('colorPlaceLabels'))
+  // Every name on the map (places, mountains and deserts, points of
+  // interest), which Mapbox otherwise colors several ways, lightens under the
+  // dusk light and rings with a grey halo.
+  if (layer.type === 'symbol' && layer.layout?.['text-field'])
     return {
       ...layer,
       paint: {
