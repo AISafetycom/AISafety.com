@@ -3391,9 +3391,22 @@ const ICON_LABELS: Record<string, string> = {
   target: 'Detail',
 }
 
-function fieldLabel(name: string, icon: string | undefined, funding: boolean) {
+function fieldLabel(
+  name: string,
+  icon: string | undefined,
+  funding: boolean,
+  value: string
+) {
   if (name === 'title') return 'Title'
   if (name === 'desc') return 'Description'
+  // Since 26 Nov 2026 an event's Cost row has the money icon too (site PR
+  // 907), crossed out when free. Its values start "Free" or "Pay to attend";
+  // a training program's stipend values never do.
+  if (
+    (icon === 'money' || icon === 'money-off') &&
+    /^(free|pay)\b/i.test(value)
+  )
+    return 'Cost'
   // Funding drafts built before 28 Oct 2026 have a Type row; the site's
   // funder card, and Pen's fallback since (PEN_CARDS), have none.
   if (icon === 'tag') return funding ? 'Type' : 'Cost'
@@ -3415,7 +3428,7 @@ function cardFields(
     const value = stripHtml(m[3])
     out.push({
       name: m[1],
-      label: fieldLabel(m[1], m[2], funding),
+      label: fieldLabel(m[1], m[2], funding, value),
       value,
       original:
         typeof orig === 'string' && stripHtml(orig) !== value

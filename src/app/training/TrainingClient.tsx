@@ -417,6 +417,7 @@ export default function TrainingClient({
           <FilterDropdown
             trackingPage="Training"
             title="Applications"
+            icon="/images/icons/paper.svg"
             options={applicationOptions}
             selected={selectedStatus}
             counts={statusCounts}
@@ -426,6 +427,7 @@ export default function TrainingClient({
         <FilterDropdown
           trackingPage="Training"
           title="Type"
+          icon="/images/icons/tag.svg"
           options={[...TRAINING_TYPES]}
           selected={selectedTypes}
           counts={typeCounts}
@@ -434,6 +436,7 @@ export default function TrainingClient({
         <FilterDropdown
           trackingPage="Training"
           title="Focus"
+          icon="/images/icons/target.svg"
           options={focusOptions}
           selected={selectedFocus}
           counts={focusCounts}
@@ -442,6 +445,7 @@ export default function TrainingClient({
         <FilterDropdown
           trackingPage="Training"
           title="Entry bar"
+          icon="/images/icons/entry-mid.svg"
           options={[...ENTRY_BARS]}
           selected={selectedEntryBar}
           counts={entryBarCounts}
@@ -450,6 +454,7 @@ export default function TrainingClient({
         <FilterDropdown
           trackingPage="Training"
           title="Stipend"
+          icon="/images/icons/money.svg"
           options={[...STIPEND_OPTIONS]}
           selected={selectedStipend}
           counts={stipendCounts}
@@ -458,6 +463,7 @@ export default function TrainingClient({
         <FilterDropdown
           trackingPage="Training"
           title="Length"
+          icon="/images/icons/calendar.svg"
           options={[...LENGTH_BUCKETS]}
           selected={selectedLength}
           counts={lengthCounts}
@@ -466,6 +472,7 @@ export default function TrainingClient({
         <FilterDropdown
           trackingPage="Training"
           title="Location"
+          icon="/images/icons/pin.svg"
           options={locationOptions}
           selected={selectedLocation}
           counts={locationCounts}
