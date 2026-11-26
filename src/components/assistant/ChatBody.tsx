@@ -24,6 +24,20 @@ import {
   isDroppedBeforeReply,
   pauseBeforeRetry,
 } from '@/lib/assistant/dropped-connection'
+import {
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  MAX_CONVERSATION_ATTACHMENT_CHARS,
+  attachmentChars,
+  documentKind,
+  fitToBudget,
+  type Attachment,
+} from '@/lib/assistant/attachments'
+import {
+  DocumentError,
+  documentErrorMessage,
+  extractDocument,
+} from '@/lib/assistant/extract-document'
+import AttachmentChip from './AttachmentChip'
 import Composer from './Composer'
 import MessageContent from './MessageContent'
 import ToolCallPill from './ToolCallPill'
@@ -200,7 +214,17 @@ export interface UIMessage {
   /** Visitor's thumbs rating of this assistant reply, if any. Kept in the
    *  session-persisted message so it survives a reload within the tab. */
   rating?: 'up' | 'down'
+  /** Documents the visitor attached to this message (user messages only), as
+   *  plain text. Sent along with the message on every turn, like its words. */
+  attachments?: Attachment[]
+  /** The visitor used the microphone for some or all of this message's words
+   *  (user messages only). Sent with the message so the log can show it. */
+  dictated?: boolean
 }
+
+/** Less room than this left in a conversation's document allowance counts as
+ *  none: a document cut to a few lines helps nobody. */
+const MIN_DOCUMENT_ROOM = 2000
 
 export interface ChatBodyHandle {
   clear: () => void
@@ -237,6 +261,63 @@ function describeFailure(
       ? `${arrivedChars} characters had arrived`
       : 'nothing had arrived'
   return `${what} (${arrived}${retryNote ? `, ${retryNote}` : ''})`
+}
+
+/** Renders one of the visitor's messages: the bubble with their words and,
+ *  when they attached documents, a pill for each above it. A message that is
+ *  documents alone shows just the pills. The edit button appears on hover. */
+function UserMessageView({
+  message,
+  onEdit,
+}: {
+  message: UIMessage
+  onEdit: () => void
+}) {
+  const editButton = (
+    <Button
+      variant="clear"
+      size="xs"
+      icon="/images/icons/pencil.svg"
+      iconPosition="only"
+      className={styles.editButton}
+      onClick={onEdit}
+      aria-label="Edit message"
+      tooltipPosition="above"
+    />
+  )
+  const bubble = message.content ? (
+    // data-rr-mask: hidden in session recordings.
+    <div className={styles.userMessage} data-rr-mask="">
+      {message.content}
+    </div>
+  ) : null
+  if (!message.attachments?.length) {
+    return (
+      <div className={styles.userMessageWrap}>
+        {editButton}
+        {bubble}
+      </div>
+    )
+  }
+  const documents = (
+    <ul
+      role="list"
+      className={`${styles.attachmentList} flex flex-wrap justify-end gap-4px`}
+    >
+      {message.attachments.map((a, i) => (
+        <AttachmentChip key={`${a.name}-${i}`} name={a.name} />
+      ))}
+    </ul>
+  )
+  return (
+    <div className="flex flex-col gap-4px">
+      {bubble && documents}
+      <div className={styles.userMessageWrap}>
+        {editButton}
+        {bubble ?? documents}
+      </div>
+    </div>
+  )
 }
 
 interface AssistantMessageViewProps {
@@ -451,7 +532,7 @@ interface Props {
   /** Fires when the user sends a message (typed or via a chip), excluding
    *  retries — lets the public chatbot count engagement while the admin
    *  playground (which doesn't pass this) stays out of the numbers. */
-  onUserSend?: () => void
+  onUserSend?: (detail: { dictated: boolean; documents: number }) => void
   /** Fires once when a reply's request goes out ('start') and once when it
    *  ends: 'received' (the stream finished and an answer showed), 'stopped'
    *  (the visitor pressed Stop / cleared the chat), or 'error' (the request
@@ -470,6 +551,17 @@ interface Props {
   /** When true, snap to bottom whenever the parent layout might have
    *  changed dimensions (e.g. panel expand toggle). */
   resizeKey?: string | number
+  /** False while the chat is out of sight (the public chatbot's panel is
+   *  closed). Stops dictation, so the microphone is never left on. */
+  visible?: boolean
+  /** Fires when the visitor attaches a document, or a file they picked
+   *  couldn't be attached. `detail` is the kind of file ('pdf', 'docx',
+   *  'text') or the reason it failed. Never the file's name or its text. */
+  onAttach?: (outcome: 'attached' | 'error', detail: string) => void
+  /** Fires when the visitor starts dictating (`detail` is how: 'button' or
+   *  'shortcut'), or dictation stops with an error (`detail` is the browser's
+   *  error code). */
+  onDictation?: (outcome: 'start' | 'error', detail?: string) => void
 }
 
 const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
@@ -490,12 +582,29 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
     closeOnEscape,
     onCloseEscape,
     resizeKey,
+    visible,
+    onAttach,
+    onDictation,
   },
   ref
 ) {
   const [messages, setMessages] = useState<UIMessage[]>([])
   const [input, setInput] = useState('')
+  // Whether the message being written has words from the microphone in it.
+  // Stays true if the visitor then edits them by hand; goes when the box is
+  // emptied, the message is sent, or the chat is cleared.
+  const [draftDictated, setDraftDictated] = useState(false)
+  const handleInput = useCallback((v: string) => {
+    setInput(v)
+    if (!v.trim()) setDraftDictated(false)
+  }, [])
   const [isWaiting, setIsWaiting] = useState(false)
+  // Documents picked for the message being written; they go out with it.
+  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([])
+  // Whether a picked file is being read right now, and why the last one
+  // failed.
+  const [readingFile, setReadingFile] = useState(false)
+  const [attachError, setAttachError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -515,6 +624,16 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
   useEffect(() => {
     messagesRef.current = messages
   }, [messages])
+  // Latest waiting documents and onAttach, for the file reader: reading a
+  // file takes a moment, and the visitor may remove a document meanwhile.
+  const pendingAttachmentsRef = useRef(pendingAttachments)
+  useEffect(() => {
+    pendingAttachmentsRef.current = pendingAttachments
+  }, [pendingAttachments])
+  const onAttachRef = useRef(onAttach)
+  useEffect(() => {
+    onAttachRef.current = onAttach
+  }, [onAttach])
 
   // Hydrate from session storage (when key provided)
   useEffect(() => {
@@ -589,6 +708,9 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
   const handleClear = useCallback(() => {
     setMessages([])
     setInput('')
+    setDraftDictated(false)
+    setPendingAttachments([])
+    setAttachError(null)
     abortRef.current?.abort()
     abortRef.current = null
     setIsWaiting(false)
@@ -623,9 +745,20 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
       isAutoRetry = false
     ) => {
       const trimmed = text.trim()
-      if (!trimmed || isWaiting) return
+      // A fresh message takes the documents waiting in the composer; a
+      // re-send already has its own in the history it was handed. A message
+      // may be documents alone, with nothing typed.
+      const documents = historyOverride ? [] : pendingAttachments
+      const hasDocuments = historyOverride
+        ? Boolean(
+            historyOverride[historyOverride.length - 1]?.attachments?.length
+          )
+        : documents.length > 0
+      if ((!trimmed && !hasDocuments) || isWaiting) return
       // A fresh user message (not a retry/regenerate) — funnel "sent a message".
-      if (!historyOverride) onUserSendRef.current?.()
+      const dictated = !historyOverride && draftDictated && Boolean(trimmed)
+      if (!historyOverride)
+        onUserSendRef.current?.({ dictated, documents: documents.length })
 
       const baseHistory: UIMessage[] = historyOverride ?? [
         ...messages,
@@ -633,11 +766,13 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
           id: `u-${Date.now()}`,
           role: 'user',
           content: trimmed,
-          events: [{ kind: 'text', text: trimmed }],
+          events: trimmed ? [{ kind: 'text', text: trimmed }] : [],
           toolCalls: [],
           citations: [],
           followUpChips: [],
           isStreaming: false,
+          ...(documents.length > 0 ? { attachments: documents } : {}),
+          ...(dictated ? { dictated: true } : {}),
         },
       ]
       const asstId = `a-${Date.now()}`
@@ -653,6 +788,11 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
       }
       setMessages([...baseHistory, asstMsg])
       setInput('')
+      if (!historyOverride) setDraftDictated(false)
+      if (!historyOverride) {
+        setPendingAttachments([])
+        setAttachError(null)
+      }
       setIsWaiting(true)
       requestAnimationFrame(() => {
         const el = bodyRef.current
@@ -691,6 +831,8 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
             messages: baseHistory.map(m => ({
               role: m.role,
               content: m.content,
+              ...(m.attachments?.length ? { attachments: m.attachments } : {}),
+              ...(m.dictated ? { dictated: true } : {}),
             })),
             ...extras,
           }),
@@ -951,8 +1093,81 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
       // as a new message. The visitor just keeps seeing the reply coming.
       if (retryAutomatically) void send(trimmed, baseHistory, true)
     },
-    [bodyExtras, endpoint, isWaiting, messages]
+    [
+      bodyExtras,
+      endpoint,
+      isWaiting,
+      messages,
+      pendingAttachments,
+      draftDictated,
+    ]
   )
+
+  // Read each picked file into text, here in the browser, and line it up to
+  // go with the next message. A file that can't be read is explained under
+  // the message box; the ones that can still attach.
+  const handleAttachFiles = useCallback(async (files: File[]) => {
+    setAttachError(null)
+    for (const file of files) {
+      const waiting = pendingAttachmentsRef.current
+      if (waiting.length >= MAX_ATTACHMENTS_PER_MESSAGE) {
+        setAttachError(
+          `A message can carry up to ${MAX_ATTACHMENTS_PER_MESSAGE} documents.`
+        )
+        onAttachRef.current?.('error', 'too-many')
+        break
+      }
+      setReadingFile(true)
+      try {
+        let document = await extractDocument(file)
+        // What the conversation's document allowance still has room for,
+        // counting the documents already sent and the ones waiting.
+        const room =
+          MAX_CONVERSATION_ATTACHMENT_CHARS -
+          attachmentChars(messagesRef.current) -
+          attachmentChars([{ attachments: pendingAttachmentsRef.current }])
+        if (room < MIN_DOCUMENT_ROOM) {
+          setAttachError(
+            'This conversation has reached its limit for attached documents. Clear the chat to attach more.'
+          )
+          onAttachRef.current?.('error', 'conversation-full')
+          break
+        }
+        if (document.text.length > room) {
+          document = {
+            ...document,
+            text: fitToBudget(document.text, room).text,
+            truncated: true,
+          }
+        }
+        const attached = document
+        // Updated here as well as by the effect, so the next file in this
+        // same batch sees this one.
+        pendingAttachmentsRef.current = [
+          ...pendingAttachmentsRef.current,
+          attached,
+        ]
+        setPendingAttachments(prev => [...prev, attached])
+        onAttachRef.current?.(
+          'attached',
+          documentKind(file.name, file.type) ?? 'unknown'
+        )
+      } catch (err) {
+        const code = err instanceof DocumentError ? err.code : 'unreadable'
+        if (!(err instanceof DocumentError)) {
+          console.warn('[assistant] attaching a file failed', err)
+        }
+        setAttachError(documentErrorMessage(code))
+        onAttachRef.current?.('error', code)
+      }
+    }
+    setReadingFile(false)
+  }, [])
+
+  const handleRemoveAttachment = useCallback((index: number) => {
+    setPendingAttachments(prev => prev.filter((_, i) => i !== index))
+    setAttachError(null)
+  }, [])
 
   const handleChipClick = useCallback((chip: string) => void send(chip), [send])
 
@@ -979,6 +1194,11 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
       const target = messages[idx]
       if (target.role !== 'user') return
       setInput(target.content)
+      // Its documents go back to the composer with its words, and so does
+      // its dictation mark.
+      setPendingAttachments(target.attachments ?? [])
+      setDraftDictated(Boolean(target.dictated))
+      setAttachError(null)
       setMessages(messages.slice(0, idx))
     },
     [messages]
@@ -1046,22 +1266,11 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
         ) : (
           messages.map((m, turnIndex) =>
             m.role === 'user' ? (
-              <div key={m.id} className={styles.userMessageWrap}>
-                <Button
-                  variant="clear"
-                  size="xs"
-                  icon="/images/icons/pencil.svg"
-                  iconPosition="only"
-                  className={styles.editButton}
-                  onClick={() => handleEdit(m.id)}
-                  aria-label="Edit message"
-                  tooltipPosition="above"
-                />
-                {/* data-rr-mask: hidden in session recordings. */}
-                <div className={styles.userMessage} data-rr-mask="">
-                  {m.content}
-                </div>
-              </div>
+              <UserMessageView
+                key={m.id}
+                message={m}
+                onEdit={() => handleEdit(m.id)}
+              />
             ) : (
               <div key={m.id} className={styles.message}>
                 <AssistantMessageView
@@ -1154,11 +1363,19 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
       <Composer
         ref={composerRef}
         value={input}
-        onChange={setInput}
+        onChange={handleInput}
+        onDictatedText={() => setDraftDictated(true)}
         onSubmit={handleSubmit}
         disabled={isWaiting && !abortRef.current}
         isStreaming={isWaiting}
         onStop={handleStop}
+        attachments={pendingAttachments}
+        readingFile={readingFile}
+        attachError={attachError}
+        onAttachFiles={handleAttachFiles}
+        onRemoveAttachment={handleRemoveAttachment}
+        visible={visible}
+        onDictationEvent={onDictation}
       />
     </>
   )

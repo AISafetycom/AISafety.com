@@ -83,7 +83,7 @@ export default function PrivacyPage() {
           <AnalyticsOptOut />
 
           <h3 className="padding-bottom-16px">The chatbot</h3>
-          <p className="color-teal-grey-300 padding-bottom-40px">
+          <p className="color-teal-grey-300 padding-bottom-24px">
             The chatbot is powered by Claude, an AI model from Anthropic – your
             messages are sent to Anthropic to generate each reply, and Anthropic
             doesn&apos;t train its models on them. Conversations are saved so we
@@ -96,6 +96,15 @@ export default function PrivacyPage() {
             before you type anything. Please don&apos;t share sensitive personal
             information in the chat, and if you&apos;d like a conversation
             deleted, contact us using the form below.
+          </p>
+          <p className="color-teal-grey-300 padding-bottom-40px">
+            If you attach a document, your browser reads it and sends only its
+            text, which goes to Anthropic along with your message. The file
+            itself never leaves your computer, and the saved conversation keeps
+            only the file&apos;s name and length, not its text. If you use the
+            microphone button, your browser turns your speech into text – the
+            audio goes to the company that makes your browser (Google, Apple, or
+            Microsoft) and never to us.
           </p>
 
           <h3 className="padding-bottom-16px">Newsletters</h3>
@@ -153,7 +162,7 @@ export default function PrivacyPage() {
           </p>
 
           <p className="paragraph-small color-teal-grey-300 padding-bottom-80px">
-            Last updated: 25 November 2026
+            Last updated: 26 November 2026
           </p>
         </div>
       </div>

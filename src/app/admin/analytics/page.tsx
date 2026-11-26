@@ -3370,6 +3370,23 @@ function ChatbotView({
         />
       </Panel>
 
+      <Panel title="Documents and dictation · unique users">
+        <div className={styles.funnel}>
+          <Stat label="attached a document" value={n(funnel.attached)} />
+          <Stat label="started dictating" value={n(funnel.dictationStarted)} />
+          <Stat
+            label="sent a dictated message"
+            value={n(funnel.dictatedSent)}
+          />
+        </div>
+        <p className={styles.caption}>
+          Counted since both were added to the chatbot. The dictation button
+          only shows on computers, in browsers that can do it (not Firefox).
+          Each dictated message is marked “[Dictated with the microphone.]” in
+          the chatbot log.
+        </p>
+      </Panel>
+
       <Panel title="Repeat use · unique users">
         <div className={styles.funnel}>
           <Stat

@@ -533,10 +533,42 @@
   font-family: inherit;
 }
 
+/* The hint stays on one line. Where the box is too narrow for it (a window
+   320px wide with both small buttons showing), it is cut short instead of
+   wrapping onto a second line that the box's edge would slice through. */
+.composerInput::placeholder {
+  overflow: hidden;
+  white-space: nowrap;
+}
+
 /* Send and Stop are <Button>s; this only keeps them from shrinking when the
    message gets long. */
 .composerButton {
   flex-shrink: 0;
+}
+
+/* A document attached to a message (AttachmentChip): a pill with the file's
+   name, which never grows wider than the chat. A long name ends in "…". It
+   is as tall with the × as without: the 32px button plus the 1px border
+   above and below it. */
+.attachment {
+  min-width: 0;
+  max-width: 100%;
+  min-height: 34px;
+  border-radius: 100px;
+}
+
+.attachmentName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The pills on a sent message. Beside the edit button they may shrink, so a
+   long file name is cut short instead of pushing the row out of the chat. */
+.attachmentList {
+  min-width: 0;
 }
 
 /* Tool call pills — compact, icon-led, inline */

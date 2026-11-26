@@ -187,9 +187,51 @@ export default function Assistant() {
   // Funnel: unique users who send the chatbot a message. Fired from the public
   // chatbot only (the admin playground doesn't pass onUserSend), so internal
   // testing never inflates the numbers.
-  const handleUserSend = useCallback(() => {
-    trackEvent('chatbot_message', { page: currentPage })
-  }, [currentPage])
+  // `label` says what else the message was: 'dictated' (some or all of it
+  // spoken with the microphone), 'document' (it carried one), or both.
+  const handleUserSend = useCallback(
+    (detail: { dictated: boolean; documents: number }) => {
+      const label = [
+        detail.dictated ? 'dictated' : '',
+        detail.documents > 0 ? 'document' : '',
+      ]
+        .filter(Boolean)
+        .join(', ')
+      trackEvent('chatbot_message', {
+        page: currentPage,
+        ...(label ? { label } : {}),
+      })
+    },
+    [currentPage]
+  )
+
+  // Funnel: visitors who attach a document, and files that couldn't be
+  // attached. `label` is the kind of file ('pdf', 'docx', 'text') or the
+  // reason it failed. Never the file's name or anything in it.
+  const handleAttach = useCallback(
+    (outcome: 'attached' | 'error', detail: string) => {
+      trackEvent('chatbot_attach', {
+        source: outcome,
+        label: detail,
+        page: currentPage,
+      })
+    },
+    [currentPage]
+  )
+
+  // Funnel: visitors who dictate a message, and dictation that failed.
+  // `label` is how it was started ('button' or 'shortcut', the ⌘D keys) or
+  // the browser's error code (e.g. 'not-allowed').
+  const handleDictation = useCallback(
+    (outcome: 'start' | 'error', detail?: string) => {
+      trackEvent('chatbot_dictate', {
+        source: outcome,
+        ...(detail ? { label: detail } : {}),
+        page: currentPage,
+      })
+    },
+    [currentPage]
+  )
 
   const handleTogglePill = useCallback(() => {
     if (isOpen) {
@@ -559,6 +601,9 @@ export default function Assistant() {
           onTurnLifecycle={handleTurnLifecycle}
           onHasMessagesChange={setHasMessages}
           resizeKey={`${isOpen}-${isExpanded}`}
+          visible={isOpen}
+          onAttach={handleAttach}
+          onDictation={handleDictation}
         />
       </aside>
     </>
