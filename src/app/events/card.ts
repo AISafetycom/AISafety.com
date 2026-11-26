@@ -108,7 +108,18 @@ export function bottomMetaFor(event: EventListing) {
       label: 'Cost',
       value: event.cost.join(', '),
     })
-  if (deadline)
+  // An event announced before its sign-up opens says so, as a program does on
+  // /training, instead of a deadline it can't be applied by yet.
+  if (event.notYetOpen)
+    rows.push({
+      icon: '/images/icons/paper-closed.svg',
+      label: null,
+      value:
+        event.deadlineType === 'Register'
+          ? 'Registration not yet open'
+          : 'Applications not yet open',
+    })
+  else if (deadline)
     rows.push({ icon: '/images/icons/paper.svg', label: null, value: deadline })
   return rows
 }
