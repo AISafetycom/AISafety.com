@@ -157,6 +157,7 @@ import {
   sortValue,
 } from '@/lib/admin/queue-place'
 import {
+  addedDates,
   byUrgency,
   urgencyOf,
   type ListingDates,
@@ -1412,7 +1413,18 @@ const ANSWERED: Urgency = { days: null, label: 'Answered your question' }
 
 /** Where the question he asked on an open item stands now, or null. */
 function askedNow(item: QueueItem): AskedState | null {
-  return item.asked ? askedState(item, Date.now()) : null
+  return item.asked
+    ? askedState({ ...item, dates: addedDates(item) }, Date.now())
+    : null
+}
+
+/** What the "Waiting on them" button does on this open item now: `wait`
+ *  (he has asked them something outside email), `stop` (it is waiting on
+ *  such a question), or null when it waits on an emailed question, which
+ *  the Mac follows in Gmail by itself (queue-asked.ts). */
+function waitChoice(item: QueueItem): 'wait' | 'stop' | null {
+  if (askedNow(item) !== 'waiting') return 'wait'
+  return item.asked?.elsewhere ? 'stop' : null
 }
 
 /** Fable's second look at an addition, once they have answered. */
@@ -3583,6 +3595,86 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
     [canEdit]
   )
 
+  /** "Waiting on them" on or off (waitItem, queue-asked.ts). On takes the
+   *  item out of the list, so the page moves on to the next one as W does;
+   *  Stop waiting leaves it open where it is. A failure shows on the item. */
+  const setWaiting = useCallback(
+    async (item: QueueItem, on: boolean) => {
+      if (!canEdit || !isOpen(item)) return
+      let next: QueueItem | undefined
+      if (on && selectedIdRef.current === item.id) {
+        const walk = ordered.walk
+        const i = walk.findIndex(x => x.id === item.id)
+        const free = (x: QueueItem) =>
+          x.id !== item.id && !pendingRef.current[x.id]
+        next = fableFirst(
+          item.id,
+          walk.slice(i + 1).find(free) ??
+            walk.slice(0, Math.max(0, i)).reverse().find(free),
+          free
+        )
+      }
+      setDraft(item.id, { busy: true, error: null })
+      try {
+        const res = await fetch(API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: item.id, action: 'wait', on }),
+        })
+        const data = (await res.json()) as { item?: QueueItem; error?: string }
+        if (!res.ok || !data.item) {
+          setDraft(item.id, {
+            busy: false,
+            error: `${on ? 'Waiting on them' : 'Stop waiting'} failed · ${data.error ?? `HTTP ${res.status}`}`,
+          })
+          return
+        }
+        // A read of the list that began before this landed is stale now.
+        loadSeq.current++
+        const updated = {
+          ...data.item,
+          logo: data.item.logo ?? item.logo,
+          url: data.item.url ?? item.url,
+        }
+        setItems(prev =>
+          prev ? prev.map(i => (i.id === updated.id ? updated : i)) : prev
+        )
+        setDraft(item.id, { busy: false })
+        if (next && selectedIdRef.current === item.id) reveal(next)
+      } catch {
+        setDraft(item.id, {
+          busy: false,
+          error: `${on ? 'Waiting on them' : 'Stop waiting'} failed · no answer from the site`,
+        })
+      }
+    },
+    [canEdit, ordered.walk, fableFirst, reveal, setDraft]
+  )
+
+  /** The row again after the chat moved it into or out of Waiting on them
+   *  (its ```waiting or ```answer block, written on the Mac). It stays
+   *  open: he is talking to Fable about it. */
+  const refreshRow = useCallback(async (item: QueueItem) => {
+    try {
+      const r = await fetch(`${API}?id=${encodeURIComponent(item.id)}`, {
+        cache: 'no-store',
+      })
+      const data = (await r.json()) as { item?: QueueItem }
+      if (!r.ok || !data.item) return
+      loadSeq.current++
+      const fresh = {
+        ...data.item,
+        logo: data.item.logo ?? item.logo,
+        url: data.item.url ?? item.url,
+      }
+      setItems(prev =>
+        prev ? prev.map(i => (i.id === fresh.id ? fresh : i)) : prev
+      )
+    } catch {
+      // the next refresh of the list has it
+    }
+  }, [])
+
   /** A field fixed on an addition already published, from Done today: it
    *  goes straight onto the live listing (fixItem). Resolves to an error to
    *  show, or null. */
@@ -4560,6 +4652,22 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
             void act(item, 'later')
           }
           break
+        case 'g': {
+          // Waiting on them, or Stop waiting (Bryce, 26 Nov 2026).
+          const choice = item && isOpen(item) ? waitChoice(item) : null
+          if (
+            canEdit &&
+            item &&
+            choice &&
+            item.status !== 'Revising' &&
+            d.mode === 'idle' &&
+            !d.busy
+          ) {
+            e.preventDefault()
+            void setWaiting(item, choice === 'wait')
+          }
+          break
+        }
         case 'r':
           if (
             canEdit &&
@@ -4794,6 +4902,7 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
     drafts,
     move,
     act,
+    setWaiting,
     undoable,
     toast,
     queueUndo,
@@ -5395,6 +5504,8 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
                 d={draft(selected.id)}
                 setD={patch => setDraft(selected.id, patch)}
                 act={(action, extra) => void act(selected, action, extra)}
+                onWait={on => void setWaiting(selected, on)}
+                onRowChanged={() => void refreshRow(selected)}
                 chatAgent={canEdit && agentChat ? agent : null}
                 chatDictate={agentDictate}
                 chatFocus={chatFocus}
@@ -5655,6 +5766,16 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
                 the day you set it aside
               </dd>
               <dt>
+                <kbd>G</kbd>
+              </dt>
+              <dd>
+                waiting on them, once you have asked them something outside
+                email: out of the list until you paste their answer into the
+                chat, or after two weeks, sooner when its date is near. Telling
+                Fable you have asked them does the same. On an item that waits,{' '}
+                <kbd>G</kbd> stops waiting
+              </dd>
+              <dt>
                 <kbd>X</kbd>
               </dt>
               <dd>
@@ -5818,13 +5939,14 @@ function AskedTag({ item, told }: { item: QueueItem; told?: boolean }) {
     )
   }
   const sent = asked.sentAt as string
-  const ends = waitEnds(asked)
+  const ends = waitEnds(asked, addedDates(item))
   return state === 'waiting' ? (
     <span
       className={styles.withIcon}
-      title={`You asked them a question on ${dayMonth(sent)}. It comes back when they answer${ends ? `, or on ${dayMonth(ends)} if they don't` : ''}.`}
+      title={`You asked them a question on ${dayMonth(sent)}. It comes back when ${asked.elsewhere ? 'you paste their answer into the chat' : 'they answer'}${ends ? `, or on ${dayMonth(ends)} if they don't` : ''}.`}
     >
-      <Icon src={ICON.mail} size={12} />
+      {/* Asked outside email: the plane, as on the item, not the envelope. */}
+      <Icon src={asked.elsewhere ? ICON.sent : ICON.mail} size={12} />
       Asked {askedDay(sent)}
     </span>
   ) : (
@@ -6454,6 +6576,8 @@ function Detail({
   d,
   setD,
   act,
+  onWait,
+  onRowChanged,
   chatAgent,
   chatDictate,
   chatFocus,
@@ -6500,6 +6624,11 @@ function Detail({
   d: Draft
   setD: (patch: Partial<Draft>) => void
   act: (action: Action, extra?: Record<string, unknown>) => void
+  /** "Waiting on them" on (asked outside email) or off. */
+  onWait: (on: boolean) => void
+  /** The chat moved the item into or out of Waiting on them: read the row
+   *  again. */
+  onRowChanged: () => void
   /** The Mac agent, when it is up and can chat; null hides the panel. */
   chatAgent: AgentInfo | null
   /** The Mac can turn speech into text (Cmd+D in the chat). */
@@ -7287,7 +7416,7 @@ function Detail({
           {question === 'draft'
             ? 'Your question is saved as a draft in Gmail, not sent yet · once you send it, this item waits out of the way until they answer'
             : question === 'waiting'
-              ? `Waiting on them · you asked on ${dayMonth(asked.sentAt as string)} · it comes back when they answer, or on ${dayMonth(waitEnds(asked) as string)} if they don't`
+              ? `Waiting on them · you asked on ${dayMonth(asked.sentAt as string)} · it comes back when ${asked.elsewhere ? 'you paste their answer into the chat' : 'they answer'}, or on ${dayMonth(waitEnds(asked, addedDates(item)) as string)} if they don't`
               : `No answer · you asked on ${dayMonth(asked.sentAt as string)} and they haven't replied`}
           {asked.sentLink && (
             <a
@@ -8063,6 +8192,7 @@ function Detail({
                 if (isOpen(item)) setD({ decline: text, editingDecline: false })
               }}
               onWrote={onWrote}
+              onRowChanged={onRowChanged}
               onFlag={onFlag}
               onFableChanges={list => {
                 // The same list again (every history load sends one) keeps
@@ -8281,6 +8411,24 @@ function Detail({
               <Icon src={ICON.clock} size={12} />
               Review again in a week <kbd>W</kbd>
             </button>
+            {waitChoice(item) && (
+              <button
+                className={styles.ghost}
+                disabled={d.busy}
+                title={
+                  waitChoice(item) === 'stop'
+                    ? 'Back in its place in the list now'
+                    : "You've asked them something outside email: out of the list until you paste their answer into the chat"
+                }
+                onClick={() => onWait(waitChoice(item) === 'wait')}
+              >
+                <Icon src={ICON.sent} size={12} />
+                {waitChoice(item) === 'stop'
+                  ? 'Stop waiting'
+                  : 'Waiting on them'}{' '}
+                <kbd>G</kbd>
+              </button>
+            )}
             <button
               className={styles.ghost}
               disabled={d.busy}

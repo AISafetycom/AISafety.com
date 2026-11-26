@@ -31,8 +31,10 @@
        map strip on a /map addition – queue-map.ts
   POST /api/admin/queue  body { id, action, edits?, reason?, replyDraft? } → { item }
        action: accept | reject | edit | later | undo | flag | reopen | fix
-       | delete
+       | delete | wait
        (later sets the item aside for a week, Fable reviews it again then;
+       wait, body { on }, puts it in Waiting on them for a question he asked
+       them outside email, or with on: false takes it out – waitItem;
        delete discards an open item silently: an addition's unpublished
        record goes too, the row closes, no reply, no Undo – deleteItem;
        undo also brings back an item set aside; edit keeps the page's pending edits, and the reply draft as
@@ -90,6 +92,7 @@ import {
   saveEdits,
   undoItem,
   unflagItem,
+  waitItem,
 } from '@/lib/admin/queue'
 import { parseFlag } from '@/lib/admin/queue-flag'
 import { publicChoiceOf } from '@/lib/admin/queue-rule-instant'
@@ -188,6 +191,7 @@ const ACTIONS = new Set([
   'reopen',
   'fix',
   'delete',
+  'wait',
 ])
 
 export async function POST(req: NextRequest) {
@@ -254,6 +258,8 @@ export async function POST(req: NextRequest) {
       await fixItem(item, sanitiseEdits(body.edits), by)
     } else if (action === 'later') {
       await laterItem(item, by)
+    } else if (action === 'wait') {
+      await waitItem(item, body.on !== false, by)
     } else if (action === 'delete') {
       await deleteItem(item, by)
     } else if (action === 'reopen') {

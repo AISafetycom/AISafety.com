@@ -55,7 +55,7 @@ import {
   type Placed,
 } from './queue-place'
 import { fillFirst, neededLeft } from './queue-needed'
-import type { ListingDates } from './queue-urgent'
+import { addedDates, type ListingDates } from './queue-urgent'
 import { reviewAgainAt } from './queue-later'
 import {
   passedBlock,
@@ -86,7 +86,14 @@ import {
   type RulePublic,
 } from './queue-rule-instant'
 import { alreadyRepliedOf, type AlreadyReplied } from './queue-already'
-import { askedOf, type Asked } from './queue-asked'
+import {
+  askedOf,
+  askedState,
+  ELSEWHERE_KEY,
+  elsewhereOf,
+  latestAsked,
+  type Asked,
+} from './queue-asked'
 import { replyAlsoOf } from './queue-also'
 import { reasonsText, type FlagUpdate } from './queue-flag'
 import { LEFT_OUT_KEY, leftOutOf, withLeftOut } from './queue-left-out'
@@ -266,9 +273,10 @@ export interface QueueItem {
    *  the proposal's `no_reply` (worker duty f); shown where the draft would
    *  be (Bryce, 8 Oct 2026). Null once a `reply` block is there. */
   noReply: NoReply | null
-  /** Email/Form: a question he asked them before deciding, and where it
-   *  stands: a draft, sent and waiting on them, or answered. From the
-   *  proposal's reply.asked, kept current by the Mac (queue-asked.ts). */
+  /** A question he asked them before deciding, and where it stands: a
+   *  draft, sent and waiting on them, or answered. From the proposal's
+   *  reply.asked (by email, kept current by the Mac) or, for one asked
+   *  anywhere else, `waiting_on`, whichever is later (queue-asked.ts). */
   asked: Asked | null
   /** Email/Form: the owner already replied to them by hand in the
    *  request's Gmail thread, so neither Publish nor Reject saves a draft.
@@ -713,6 +721,9 @@ function rowToItem(
   let checked: CheckedClaim[] = []
   const preparedLogos = preparedFilesOf(f[F.preparedLogo], isExpiredAttachment)
   if (isRecord(proposal)) {
+    // Asked outside email (the chat's waiting block or the G button); an
+    // emailed question, read below, counts instead when it is later.
+    asked = elsewhereOf(proposal[ELSEWHERE_KEY])
     passed = passedOf(proposal.passed)
     fieldFlags = fieldFlagsOf(proposal[FIELD_FLAGS_KEY])
     checked = checkedOf(proposal[CHECKED_KEY])
@@ -751,7 +762,7 @@ function rowToItem(
       replyAlso = replyAlsoOf(proposal.also_reply)
       rejectReply = rejectReplyOf(proposal.reply.reject, str(f[F.decidedAt]))
       alreadyReplied = alreadyRepliedOf(proposal.reply.already)
-      asked = askedOf(proposal.reply.asked)
+      asked = latestAsked(askedOf(proposal.reply.asked), asked)
       if (proposal.reply.platform === 'discord' && who) {
         const how = str(proposal.reply.how)
         saidBy = {
@@ -2619,6 +2630,55 @@ export async function laterItem(
   await patchQueueRow(item.id, {
     [F.reviewAgainOn]: reviewAgainAt(Date.now()),
     ...stamped(item, by, 'later', now()),
+  })
+}
+
+/** "Waiting on them" by hand (Bryce, 26 Nov 2026, on Common Ground: AI
+ *  Safety, translated: he had messaged the host on Luma and the item stayed
+ *  in the list – "We need a button to mark as waiting on them maybe?").
+ *  `on`: he has asked them something outside email, so the item waits in
+ *  the folded section until he pastes their answer into the chat, or the
+ *  wait runs out (queue-asked.ts); what he asked, when the chat recorded it
+ *  before, is kept. Off: Stop waiting, the item is back in its place. Only a
+ *  question asked outside email is ever taken off: an emailed one is
+ *  followed in Gmail by the Mac. */
+export async function waitItem(
+  item: QueueItem,
+  on: boolean,
+  by: string | null = null
+): Promise<void> {
+  requireOpen(item)
+  const f = await rawQueueFields(item.id)
+  const proposal = parseJson(f[F.proposal])
+  const next: Record<string, unknown> = isRecord(proposal)
+    ? { ...proposal }
+    : {}
+  const held = elsewhereOf(next[ELSEWHERE_KEY])
+  const at = now()
+  if (on) {
+    if (
+      item.asked &&
+      askedState({ ...item, dates: addedDates(item) }, Date.now()) === 'waiting'
+    ) {
+      throw new QueueError(
+        'It is waiting on them already. Reload the page.',
+        409
+      )
+    }
+    next[ELSEWHERE_KEY] = {
+      at,
+      text: held && !held.answer ? held.text : '',
+      ...(by ? { by } : {}),
+    }
+  } else {
+    if (!held) {
+      throw new QueueError('It is not waiting on them. Reload the page.', 409)
+    }
+    delete next[ELSEWHERE_KEY]
+  }
+  await patchQueueRow(item.id, {
+    [F.proposal]: JSON.stringify(next, null, 1),
+    ...stamped(item, by, on ? 'wait' : 'unwait', at),
   })
 }
 

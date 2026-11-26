@@ -35,6 +35,10 @@ export type HistoryDid =
   | 'fix'
   | 'reopen'
   | 'delete'
+  // "Waiting on them" set or stopped by hand, or set from the chat
+  // (queue-asked.ts, 26 Nov 2026).
+  | 'wait'
+  | 'unwait'
   // Written by the Mac: Fable changed the listing from the item's chat.
   | 'fable'
 
@@ -46,6 +50,8 @@ const DID: readonly string[] = [
   'fix',
   'reopen',
   'delete',
+  'wait',
+  'unwait',
   'fable',
 ]
 
@@ -293,6 +299,10 @@ export function lineText(line: HistoryLine): string {
       return 'Reopened'
     case 'delete':
       return 'Deleted'
+    case 'wait':
+      return 'Marked as waiting on them'
+    case 'unwait':
+      return 'Stopped waiting on them'
     case 'undo':
       if (line.undid === 'later') return 'Brought back early'
       if (line.undid === 'reject') return 'Undid the reject'

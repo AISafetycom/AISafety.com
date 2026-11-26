@@ -46,10 +46,10 @@ describe('takesTyping', () => {
 
 describe('shortcutAllowed', () => {
   const detail: KeyScene = { help: false, view: 'detail', editing: false }
-  const DECIDE = ['a', 'Enter', 'x', 'w', 'r', 'c', '1', '2', '3']
+  const DECIDE = ['a', 'Enter', 'x', 'w', 'g', 'r', 'c', '1', '2', '3']
   const OPEN = ['f', 'p', 'e']
   const LINKS = ['s', 'q', 'd']
-  const ELSEWHERE = ['Tab', 'ArrowDown', 'ArrowUp', 't', '/', 'u', 'g', 'v']
+  const ELSEWHERE = ['Tab', 'ArrowDown', 'ArrowUp', 't', '/', 'u', 'v']
 
   it('lets every key through on an item whose detail is showing', () => {
     for (const key of [...DECIDE, ...OPEN, ...LINKS, 'b', ...ELSEWHERE]) {
