@@ -187,9 +187,23 @@ export default function Assistant() {
   // Funnel: unique users who send the chatbot a message. Fired from the public
   // chatbot only (the admin playground doesn't pass onUserSend), so internal
   // testing never inflates the numbers.
-  const handleUserSend = useCallback(() => {
-    trackEvent('chatbot_message', { page: currentPage })
-  }, [currentPage])
+  // `label` says what else the message was: 'dictated' (some or all of it
+  // spoken with the microphone), 'document' (it carried one), or both.
+  const handleUserSend = useCallback(
+    (detail: { dictated: boolean; documents: number }) => {
+      const label = [
+        detail.dictated ? 'dictated' : '',
+        detail.documents > 0 ? 'document' : '',
+      ]
+        .filter(Boolean)
+        .join(', ')
+      trackEvent('chatbot_message', {
+        page: currentPage,
+        ...(label ? { label } : {}),
+      })
+    },
+    [currentPage]
+  )
 
   // Funnel: visitors who attach a document, and files that couldn't be
   // attached. `label` is the kind of file ('pdf', 'docx', 'text') or the

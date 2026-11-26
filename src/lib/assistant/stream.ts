@@ -16,9 +16,9 @@ import { TOOL_DEFINITIONS, executeTool } from './tools'
 import {
   MAX_CONVERSATION_ATTACHMENT_CHARS,
   attachmentChars,
+  attachmentLogNote,
   attachmentPromptBlock,
   cleanAttachments,
-  logContent,
 } from './attachments'
 import type { Catalog, ChatMessage, CitationRef, Listing } from './types'
 
@@ -298,6 +298,21 @@ function forLog(m: ChatMessage): ChatMessage {
   return { role: m.role, content: logContent(m) }
 }
 
+/** The note the conversation log adds to a message the visitor dictated, so
+ *  the log shows (and its search finds) which messages were spoken. */
+export const DICTATED_LOG_NOTE = '[Dictated with the microphone.]'
+
+/** A message's text as the log stores it: what the visitor wrote or said,
+ *  then a note if they dictated it and one for any documents (their names
+ *  and lengths, never their text). */
+export function logContent(m: ChatMessage): string {
+  const notes = [
+    m.dictated ? DICTATED_LOG_NOTE : '',
+    attachmentLogNote(m.attachments ?? []),
+  ].filter(Boolean)
+  return [m.content, ...notes].filter(Boolean).join('\n\n')
+}
+
 /** The ENTIRE cleaned conversation with the same widget positions — no
  *  window at all. This is what the full-transcript blob mirror stores for
  *  conversations that outgrow the Airtable row (see upsertConversation).
@@ -328,6 +343,7 @@ function cleanMessagesIndexed(messages: unknown): {
       role?: unknown
       content?: unknown
       attachments?: unknown
+      dictated?: unknown
     }
     if (msg.role !== 'user' && msg.role !== 'assistant') continue
     if (typeof msg.content !== 'string') continue
@@ -341,10 +357,14 @@ function cleanMessagesIndexed(messages: unknown): {
     // which routinely exceed 4000 — dropping those silently deleted long
     // replies from the bot's memory and from the stored transcript.
     if (msg.content.length > (msg.role === 'user' ? 4000 : 12000)) continue
+    // Only a visitor's own words can have been dictated.
+    const dictated =
+      msg.role === 'user' && msg.dictated === true && msg.content.length > 0
     out.push({
       role: msg.role,
       content: msg.content,
       ...(attachments.length > 0 ? { attachments } : {}),
+      ...(dictated ? { dictated: true } : {}),
     })
     indices.push(i)
   }
@@ -364,6 +384,18 @@ function cleanMessagesIndexed(messages: unknown): {
  *  nothing. */
 const NO_TEXT_WITH_DOCUMENT =
   '(The visitor attached the document above and typed no message.)'
+
+/** Put before a message the visitor dictated, so the model reads a misheard
+ *  word by its meaning ("air safety" for "AI safety"). The prompt explains
+ *  it under "Dictated messages". */
+export const DICTATED_PROMPT_NOTE =
+  '[Dictated with the microphone: a word may be misheard.]'
+
+/** A visitor's words as the model reads them: with the dictation note in
+ *  front when they spoke them. */
+function wordsForModel(m: ChatMessage, words: string): string {
+  return m.dictated ? `${DICTATED_PROMPT_NOTE}\n${words}` : words
+}
 
 /** Builds the Anthropic message list, prepending the context line to the
  *  final user turn so the model sees it as ambient setup.
@@ -386,12 +418,15 @@ export function buildApiMessages(
   return messages.map((m, idx) => {
     const isLast = idx === messages.length - 1 && m.role === 'user'
     if (!m.attachments?.length) {
+      const words = wordsForModel(m, m.content)
       return {
         role: m.role,
-        content: isLast ? `${contextLine}\n\n${m.content}` : m.content,
+        content: isLast ? `${contextLine}\n\n${words}` : words,
       }
     }
-    const typed = m.content || NO_TEXT_WITH_DOCUMENT
+    const typed = m.content
+      ? wordsForModel(m, m.content)
+      : NO_TEXT_WITH_DOCUMENT
     const blocks: Anthropic.TextBlockParam[] = m.attachments.map(a => ({
       type: 'text',
       text: attachmentPromptBlock(a),

@@ -36,6 +36,8 @@ interface Props {
   /** False while the chat is out of sight (its panel is closed), which stops
    *  any dictation: the microphone is never left on behind a closed panel. */
   visible?: boolean
+  /** Words from the microphone went into the box. */
+  onDictatedText?: () => void
   /** Dictation started (`detail` 'button' or 'shortcut'), or stopped with
    *  an error (`detail` the browser's error code). For analytics. */
   onDictationEvent?: (outcome: 'start' | 'error', detail?: string) => void
@@ -56,6 +58,7 @@ const Composer = forwardRef<HTMLTextAreaElement, Props>(function Composer(
     onAttachFiles,
     onRemoveAttachment,
     visible = true,
+    onDictatedText,
     onDictationEvent,
   },
   forwardedRef
@@ -63,7 +66,10 @@ const Composer = forwardRef<HTMLTextAreaElement, Props>(function Composer(
   const ref = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dictation = useDictation({
-    onText: onChange,
+    onText: text => {
+      onChange(text)
+      onDictatedText?.()
+    },
     onEvent: onDictationEvent,
   })
   const { cancel: cancelDictation } = dictation

@@ -155,14 +155,3 @@ export function attachmentLogNote(attachments: Attachment[]): string {
   )
   return `[Attached: ${parts.join('; ')}. Document text is not stored.]`
 }
-
-/** A message's text as the log stores it: what the visitor typed, then the
- *  note about any documents. */
-export function logContent(m: {
-  content: string
-  attachments?: Attachment[]
-}): string {
-  const note = attachmentLogNote(m.attachments ?? [])
-  if (!note) return m.content
-  return m.content ? `${m.content}\n\n${note}` : note
-}

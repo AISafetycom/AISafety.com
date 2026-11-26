@@ -183,6 +183,9 @@ export const ALLOWED_EVENT_TYPES = new Set<string>([
   // name and `listingId` its record. Never carries the selected text.
   'selection_menu',
   'chatbot_open',
+  // A message sent to the chatbot. `label`, when set, says what else it was:
+  // 'dictated' (spoken with the microphone), 'document' (it carried one), or
+  // 'dictated, document'. Unset for an ordinary typed message.
   'chatbot_message',
   'chatbot_click',
   // A thumbs up/down on a chatbot reply. `label` is 'up' | 'down', `page`
@@ -577,8 +580,10 @@ export interface ChatbotFunnel {
   /** Unique users who attached a document to a message. Not a funnel stage:
    *  shown beside the funnel. */
   attached: number
-  /** Unique users who started dictating a message. Likewise. */
-  dictated: number
+  /** Unique users who started dictating. Likewise. */
+  dictationStarted: number
+  /** Unique users who sent a message they had dictated (some or all of). */
+  dictatedSent: number
 }
 
 /** A clicked-out destination (from chatbot replies or search results). `name`
@@ -1087,7 +1092,14 @@ const EMPTY: Omit<DashboardData, 'source'> = {
   },
   topHovered: [],
   areaClicks: [],
-  funnel: { opened: 0, typed: 0, clicked: 0, attached: 0, dictated: 0 },
+  funnel: {
+    opened: 0,
+    typed: 0,
+    clicked: 0,
+    attached: 0,
+    dictationStarted: 0,
+    dictatedSent: 0,
+  },
   chatbot: {
     opensByPage: [],
     openShareByPage: [],
@@ -1717,9 +1729,16 @@ function aggregateSite(
             e => e.type === 'chatbot_attach' && e.source === 'attached'
           )
         ),
-        dictated: uniqueUsers(
+        dictationStarted: uniqueUsers(
           inRange.filter(
             e => e.type === 'chatbot_dictate' && e.source === 'start'
+          )
+        ),
+        dictatedSent: uniqueUsers(
+          inRange.filter(
+            e =>
+              e.type === 'chatbot_message' &&
+              (e.label ?? '').split(', ').includes('dictated')
           )
         ),
       },

@@ -12,6 +12,7 @@ import {
 import { DEFAULT_MODEL_ID } from '@/lib/assistant/models'
 import {
   buildApiMessages,
+  logContent,
   runAssistantStream,
   sseResponse,
   validateFullHistoryWithIndices,
@@ -29,7 +30,6 @@ import {
   checkAssistantRateLimit,
   getClientIp,
 } from '@/lib/assistant/rate-limit'
-import { logContent } from '@/lib/assistant/attachments'
 import type { AssistantRequest, ChatMessage } from '@/lib/assistant/types'
 
 export const runtime = 'nodejs'
@@ -162,8 +162,9 @@ export async function POST(req: NextRequest) {
   }
   const apiMessages = buildApiMessages(messages, buildContextLine(ctx))
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-  // What the log shows as the visitor's message: their words, with a note in
-  // place of any attached document (its name and length, never its text).
+  // What the log shows as the visitor's message: their words, with a note if
+  // they dictated it and one in place of any attached document (its name and
+  // length, never its text).
   const userQuery = logContent(messages[messages.length - 1])
   const startedAt = Date.now()
   // Settled here rather than inside the stream: isAdmin() reads cookies, which

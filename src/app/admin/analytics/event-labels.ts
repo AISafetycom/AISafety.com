@@ -81,6 +81,18 @@ export function labelFor(e: {
     if (e.label === 'removed') return 'Took back a reply rating'
     return e.label === 'up' ? 'Rated a reply 👍' : 'Rated a reply 👎'
   }
+  // A chatbot message's label says whether it was dictated or carried a
+  // document.
+  if (e.type === 'chatbot_message' && e.label) {
+    const parts = e.label.split(', ')
+    const how = [
+      parts.includes('dictated') ? 'dictated' : '',
+      parts.includes('document') ? 'with a document' : '',
+    ]
+      .filter(Boolean)
+      .join(', ')
+    return how ? `Sent a message (${how})` : 'Sent a message'
+  }
   // The chatbot's paperclip and microphone: `source` says how it went and
   // `label` the kind of file or the reason it failed.
   if (e.type === 'chatbot_attach')

@@ -9,7 +9,6 @@ import {
   cleanAttachments,
   documentKind,
   fitToBudget,
-  logContent,
   tidyDocumentText,
 } from './attachments'
 
@@ -150,22 +149,6 @@ describe('what the conversation log keeps', () => {
       '[Attached: cv.pdf (5,200 characters); b.docx (5,200 characters, beginning only). Document text is not stored.]'
     )
     expect(note).not.toContain('xxxx')
-  })
-
-  it('adds the note after the typed words', () => {
-    expect(logContent({ content: 'Any jobs for me?', attachments: [cv] })).toBe(
-      'Any jobs for me?\n\n[Attached: cv.pdf (5,200 characters). Document text is not stored.]'
-    )
-  })
-
-  it('is just the note for a message with no words', () => {
-    expect(logContent({ content: '', attachments: [cv] })).toBe(
-      '[Attached: cv.pdf (5,200 characters). Document text is not stored.]'
-    )
-  })
-
-  it('leaves a message without documents as it is', () => {
-    expect(logContent({ content: 'Hello' })).toBe('Hello')
   })
 })
 

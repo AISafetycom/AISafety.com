@@ -217,6 +217,9 @@ export interface UIMessage {
   /** Documents the visitor attached to this message (user messages only), as
    *  plain text. Sent along with the message on every turn, like its words. */
   attachments?: Attachment[]
+  /** The visitor used the microphone for some or all of this message's words
+   *  (user messages only). Sent with the message so the log can show it. */
+  dictated?: boolean
 }
 
 /** Less room than this left in a conversation's document allowance counts as
@@ -529,7 +532,7 @@ interface Props {
   /** Fires when the user sends a message (typed or via a chip), excluding
    *  retries — lets the public chatbot count engagement while the admin
    *  playground (which doesn't pass this) stays out of the numbers. */
-  onUserSend?: () => void
+  onUserSend?: (detail: { dictated: boolean; documents: number }) => void
   /** Fires once when a reply's request goes out ('start') and once when it
    *  ends: 'received' (the stream finished and an answer showed), 'stopped'
    *  (the visitor pressed Stop / cleared the chat), or 'error' (the request
@@ -587,6 +590,14 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
 ) {
   const [messages, setMessages] = useState<UIMessage[]>([])
   const [input, setInput] = useState('')
+  // Whether the message being written has words from the microphone in it.
+  // Stays true if the visitor then edits them by hand; goes when the box is
+  // emptied, the message is sent, or the chat is cleared.
+  const [draftDictated, setDraftDictated] = useState(false)
+  const handleInput = useCallback((v: string) => {
+    setInput(v)
+    if (!v.trim()) setDraftDictated(false)
+  }, [])
   const [isWaiting, setIsWaiting] = useState(false)
   // Documents picked for the message being written; they go out with it.
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([])
@@ -697,6 +708,7 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
   const handleClear = useCallback(() => {
     setMessages([])
     setInput('')
+    setDraftDictated(false)
     setPendingAttachments([])
     setAttachError(null)
     abortRef.current?.abort()
@@ -744,7 +756,9 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
         : documents.length > 0
       if ((!trimmed && !hasDocuments) || isWaiting) return
       // A fresh user message (not a retry/regenerate) — funnel "sent a message".
-      if (!historyOverride) onUserSendRef.current?.()
+      const dictated = !historyOverride && draftDictated && Boolean(trimmed)
+      if (!historyOverride)
+        onUserSendRef.current?.({ dictated, documents: documents.length })
 
       const baseHistory: UIMessage[] = historyOverride ?? [
         ...messages,
@@ -758,6 +772,7 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
           followUpChips: [],
           isStreaming: false,
           ...(documents.length > 0 ? { attachments: documents } : {}),
+          ...(dictated ? { dictated: true } : {}),
         },
       ]
       const asstId = `a-${Date.now()}`
@@ -773,6 +788,7 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
       }
       setMessages([...baseHistory, asstMsg])
       setInput('')
+      if (!historyOverride) setDraftDictated(false)
       if (!historyOverride) {
         setPendingAttachments([])
         setAttachError(null)
@@ -816,6 +832,7 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
               role: m.role,
               content: m.content,
               ...(m.attachments?.length ? { attachments: m.attachments } : {}),
+              ...(m.dictated ? { dictated: true } : {}),
             })),
             ...extras,
           }),
@@ -1076,7 +1093,14 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
       // as a new message. The visitor just keeps seeing the reply coming.
       if (retryAutomatically) void send(trimmed, baseHistory, true)
     },
-    [bodyExtras, endpoint, isWaiting, messages, pendingAttachments]
+    [
+      bodyExtras,
+      endpoint,
+      isWaiting,
+      messages,
+      pendingAttachments,
+      draftDictated,
+    ]
   )
 
   // Read each picked file into text, here in the browser, and line it up to
@@ -1170,8 +1194,10 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
       const target = messages[idx]
       if (target.role !== 'user') return
       setInput(target.content)
-      // Its documents go back to the composer with its words.
+      // Its documents go back to the composer with its words, and so does
+      // its dictation mark.
       setPendingAttachments(target.attachments ?? [])
+      setDraftDictated(Boolean(target.dictated))
       setAttachError(null)
       setMessages(messages.slice(0, idx))
     },
@@ -1337,7 +1363,8 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
       <Composer
         ref={composerRef}
         value={input}
-        onChange={setInput}
+        onChange={handleInput}
+        onDictatedText={() => setDraftDictated(true)}
         onSubmit={handleSubmit}
         disabled={isWaiting && !abortRef.current}
         isStreaming={isWaiting}

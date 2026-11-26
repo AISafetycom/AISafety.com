@@ -53,6 +53,9 @@ export interface ChatMessage {
   /** Documents the visitor attached to this message, as plain text (user
    *  messages only). A message may be documents alone, with empty content. */
   attachments?: Attachment[]
+  /** The visitor used the microphone for some or all of this message's
+   *  words (user messages only). */
+  dictated?: boolean
 }
 
 export interface AssistantRequest {
