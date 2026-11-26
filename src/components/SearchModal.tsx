@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Button from '@/components/Button'
 import Icon from '@/components/Icon'
+import Pill from '@/components/Pill'
 import { trackSearchClick, trackSearchQuery } from '@/lib/analytics'
 import type { SearchEntry, SearchType } from '@/lib/data/search-index'
 import {
@@ -252,7 +253,7 @@ export default function SearchModal({
           {activeType && (
             <button
               type="button"
-              className={`${styles['filter-chip']} paragraph-xs-bold inline-flex items-center gap-8px padding-top-4px padding-bottom-4px padding-left-12px padding-right-8px`}
+              className={`${styles['filter-chip']} paragraph-xs-bold color-teal-900 inline-flex items-center gap-8px padding-top-4px padding-bottom-4px padding-left-12px padding-right-8px`}
               onClick={() => setActiveType(null)}
               aria-label={`Remove ${TYPE_LABEL[activeType]} filter`}
             >
@@ -311,59 +312,32 @@ export default function SearchModal({
           {showBrowseGrid && (
             <div className={styles['browse-grid']}>
               {BROWSE_TYPES.map(type => {
-                const icon = TYPE_ICON[type]
                 const count = counts.get(type) ?? 0
                 return (
-                  <button
+                  <Pill
                     key={type}
-                    type="button"
+                    icon={TYPE_ICON[type] ?? undefined}
+                    count={count}
+                    fullWidth
+                    variant="teal-alt"
                     onClick={() => setActiveType(type)}
-                    className={`${styles['browse-card']} flex items-center gap-12px padding-top-8px padding-bottom-8px padding-left-8px padding-right-12px cursor-pointer`}
                     disabled={count === 0}
                   >
-                    <div
-                      className={`${styles['browse-card-icon']} drop-shadow-light flex items-center justify-center`}
-                    >
-                      {icon && (
-                        <Icon src={icon} size={16} className="color-teal-800" />
-                      )}
-                    </div>
-                    <span
-                      className={`${styles['browse-card-title']} paragraph-small-bold`}
-                    >
-                      {TYPE_LABEL[type]}
-                    </span>
-                    {count > 0 && (
-                      <span
-                        className={`${styles['browse-card-count']} paragraph-xs-bold`}
-                      >
-                        {count}
-                      </span>
-                    )}
-                  </button>
+                    {TYPE_LABEL[type]}
+                  </Pill>
                 )
               })}
-              {/* The donation guide has no records to filter, so its card
+              {/* The donation guide has no records to filter, so its pill
                   links straight to the page instead of scoping the search. */}
-              <a
+              <Pill
+                as="a"
                 href="/donation-guide"
-                className={`${styles['browse-card']} flex items-center gap-12px padding-top-8px padding-bottom-8px padding-left-8px padding-right-12px cursor-pointer`}
+                icon="/images/icons/heart.svg"
+                fullWidth
+                variant="teal-alt"
               >
-                <div
-                  className={`${styles['browse-card-icon']} drop-shadow-light flex items-center justify-center`}
-                >
-                  <Icon
-                    src="/images/icons/heart.svg"
-                    size={16}
-                    className="color-teal-grey-300"
-                  />
-                </div>
-                <span
-                  className={`${styles['browse-card-title']} paragraph-small-bold`}
-                >
-                  Donation guide
-                </span>
-              </a>
+                Donation guide
+              </Pill>
             </div>
           )}
 
@@ -371,7 +345,11 @@ export default function SearchModal({
             <div
               className={`${styles.empty} padding-top-32px padding-bottom-32px padding-left-24px padding-right-24px`}
             >
-              <p className="paragraph-small color-teal-grey-300">
+              {/* data-rr-mask: hidden in session recordings. */}
+              <p
+                className="paragraph-small color-teal-grey-300"
+                data-rr-mask=""
+              >
                 {activeType
                   ? `No ${TYPE_LABEL[activeType].toLowerCase()} match “${query}”.`
                   : `No results for “${query}”.`}

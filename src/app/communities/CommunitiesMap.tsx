@@ -23,11 +23,118 @@ interface CommunitiesMapProps {
 const INITIAL_CENTER: [number, number] = [0, 30]
 const INITIAL_ZOOM = 1.5
 
+// Basemap layers left off the map: the ocean and sea names ("North Atlantic
+// Ocean"), the seafloor shading, so the sea is one flat color, and the pale
+// glow drawn under the borders. Mapbox Standard has no switch for any of them
+// alone (one switch covers every place name), so they're dropped by layer.
+const HIDDEN_BASEMAP_LAYERS = [
+  'water-line-label',
+  'water-point-label',
+  'water-depth',
+  'admin-0-boundary-bg',
+  'admin-1-boundary-bg',
+]
+const BORDER_LAYERS = [
+  'admin-0-boundary',
+  'admin-1-boundary',
+  'admin-0-boundary-disputed',
+]
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 declare global {
   interface Window {
     mapboxgl: any
   }
+}
+
+// A #rrggbb color from globals.css at the given opacity, as rgba(): Mapbox
+// can't read CSS color-mix().
+function withOpacity(hex: string, opacity: number) {
+  if (!/^#[0-9a-f]{6}$/i.test(hex))
+    throw new Error(
+      `[communities map] Expected a #rrggbb color from globals.css, got "${hex}"`
+    )
+  const n = parseInt(hex.slice(1), 16)
+  return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${opacity})`
+}
+
+// The basemap's lit layers that this map colors, made to show their config
+// color exactly. The style's dusk light would otherwise darken and tint them,
+// as it did the land.
+function restyleBasemapLayer(layer: any) {
+  if (layer.id === 'water')
+    return {
+      ...layer,
+      paint: {
+        ...layer.paint,
+        'fill-color': ['config', 'colorWater'],
+        'fill-emissive-strength': 1,
+      },
+    }
+  if (BORDER_LAYERS.includes(layer.id))
+    return {
+      ...layer,
+      paint: {
+        ...layer.paint,
+        'line-color': ['config', 'colorAdminBoundaries'],
+        'line-emissive-strength': 1,
+      },
+    }
+  // Every name on the map (places, mountains and deserts, points of
+  // interest), which Mapbox otherwise colors several ways, lightens under the
+  // dusk light and rings with a grey halo.
+  if (layer.type === 'symbol' && layer.layout?.['text-field'])
+    return {
+      ...layer,
+      paint: {
+        ...layer.paint,
+        'text-color': ['config', 'colorPlaceLabels'],
+        'text-halo-width': 0,
+        'text-emissive-strength': 1,
+      },
+    }
+  return layer
+}
+
+// Puts the map in the site's colors (globals.css) and drops the ocean names
+// and seafloor shading. The Mapbox Studio style supplies the shapes; its
+// colors are replaced here so the map matches the page around it.
+function applySiteLook(map: any) {
+  const palette = getComputedStyle(document.documentElement)
+  const color = (name: string) => palette.getPropertyValue(name).trim()
+  // Land is the Studio style's own country fill. Full emissive strength keeps
+  // the dusk light from tinting it navy, so it shows exactly --teal-800.
+  map.setPaintProperty('country-boundaries', 'fill-color', color('--teal-800'))
+  map.setPaintProperty(
+    'country-boundaries',
+    'fill-outline-color',
+    color('--teal-800')
+  )
+  map.setPaintProperty('country-boundaries', 'fill-emissive-strength', 1)
+  const basemap = map.getStyle().imports?.find((i: any) => i.id === 'basemap')
+  if (!basemap?.data) {
+    console.warn(
+      '[communities map] The style has no embedded basemap, so its colors and ocean names were left as they are'
+    )
+    return
+  }
+  map.updateImport('basemap', {
+    ...basemap,
+    config: {
+      ...basemap.config,
+      // The page background, so the map blends into the page.
+      colorWater: color('--teal-900'),
+      // The guide's alt border color: --teal-300 at 30%.
+      colorAdminBoundaries: withOpacity(color('--teal-300'), 0.3),
+      colorPlaceLabels: color('--teal-grey-300'),
+    },
+    data: {
+      ...basemap.data,
+      layers: basemap.data.layers
+        .filter((l: any) => !HIDDEN_BASEMAP_LAYERS.includes(l.id))
+        .map(restyleBasemapLayer),
+    },
+  })
 }
 
 export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
@@ -134,6 +241,9 @@ export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
         map.once('style.load', () => resolve())
       }
     })
+    // Recolored on its own, not in the chain the pins wait on: a failure here
+    // is logged as an error and leaves Studio's colors, but the pins still load.
+    styleLoadPromise.then(() => applySiteLook(map))
 
     Promise.all([pinImagePromise, styleLoadPromise]).then(([pinImage]) => {
       // Mapbox rasterizes an added image once and then scales that bitmap on
@@ -182,10 +292,12 @@ export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
             0,
             Math.PI * 2
           )
-          ctx.fillStyle = '#14b8a6'
+          // The palette's colors, read from globals.css, not hard-coded.
+          const palette = getComputedStyle(document.documentElement)
+          ctx.fillStyle = palette.getPropertyValue('--teal-400').trim()
           ctx.fill()
           ctx.lineWidth = dpr
-          ctx.strokeStyle = '#ffffff'
+          ctx.strokeStyle = palette.getPropertyValue('--white').trim()
           ctx.stroke()
         }
         return ctx.getImageData(0, 0, canvas.width, canvas.height)
@@ -762,7 +874,10 @@ export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
       />
       <div ref={mapContainerRef} className={styles.mapContainer}>
         {!pinsLoaded && (
-          <div className={styles.mapLoading} aria-live="polite">
+          <div
+            className={`${styles.mapLoading} border-plus-fill`}
+            aria-live="polite"
+          >
             <div className={styles.mapSpinner} aria-hidden="true" />
             <p className="paragraph-small">Loading map…</p>
           </div>

@@ -26,7 +26,7 @@ export default function PrivacyPage() {
           <p className="color-teal-grey-300 padding-bottom-40px">
             AISafety.com is run by a small nonprofit team – you can meet us on
             the{' '}
-            <Link href="/about" className="color-teal-300">
+            <Link href="/about" className="link">
               about page
             </Link>
             . Bryce Robertson, the site&apos;s project manager, is responsible
@@ -35,7 +35,7 @@ export default function PrivacyPage() {
               href="https://airtable.com/appF8XfZUGXtfi40E/pagUmmzVb8OnVvTZS/form"
               target="_blank"
               rel="noopener noreferrer"
-              className="color-teal-300"
+              className="link"
             >
               send us a message
             </a>
@@ -46,14 +46,15 @@ export default function PrivacyPage() {
           <p className="color-teal-grey-300 padding-bottom-40px">
             This site doesn&apos;t set cookies for visitors. The only cookie we
             use anywhere is the one our own team gets when signing in to the
-            site&apos;s admin area. The site does keep two small things in your
-            browser&apos;s own storage: your chatbot conversation, so it
-            isn&apos;t lost as you move between pages (it&apos;s cleared when
-            you close the tab), and the anonymous analytics ID described below,
-            which you can switch off. Nothing in your browser is used for
-            advertising or to track you across other sites – the things cookie
-            banners exist to ask consent for – which is why there&apos;s no
-            banner.
+            site&apos;s admin area. The site does keep three small things in
+            your browser&apos;s own storage: your chatbot conversation, so it
+            isn&apos;t lost as you move between pages; a note of whether your
+            visit is one of the recorded sample described below (both are
+            cleared when you close the tab); and the anonymous analytics ID
+            described below, which you can switch off. Nothing in your browser
+            is used for advertising or to track you across other sites – the
+            things cookie banners exist to ask consent for – which is why
+            there&apos;s no banner.
           </p>
 
           <h3 className="padding-bottom-16px">Analytics</h3>
@@ -69,9 +70,15 @@ export default function PrivacyPage() {
             other sites.
           </p>
           <p className="color-teal-grey-300 padding-bottom-24px">
+            We also record a sample of visits that reach a few of the main pages
+            – how the site changes as you scroll, move the mouse, and click – to
+            see where it&apos;s confusing. Anything you type is hidden in these
+            recordings.
+          </p>
+          <p className="color-teal-grey-300 padding-bottom-24px">
             If you&apos;d rather not be counted, you can switch analytics off
-            for this browser. This also stops your chatbot conversations from
-            being saved.
+            for this browser. This also stops your visits from being recorded
+            and your chatbot conversations from being saved.
           </p>
           <AnalyticsOptOut />
 
@@ -106,7 +113,7 @@ export default function PrivacyPage() {
             anonymously – it isn&apos;t tied to you or your email address. Every
             email has an unsubscribe link at the bottom, and a Manage
             subscriptions link that opens your newsletters on{' '}
-            <Link href="/newsletter" className="color-teal-300">
+            <Link href="/newsletter" className="link">
               aisafety.com/newsletter
             </Link>{' '}
             so you can change which ones you get; the private code in that link
@@ -134,7 +141,7 @@ export default function PrivacyPage() {
               href="https://airtable.com/appF8XfZUGXtfi40E/pagUmmzVb8OnVvTZS/form"
               target="_blank"
               rel="noopener noreferrer"
-              className="color-teal-300"
+              className="link"
             >
               sending us a message
             </a>
@@ -146,7 +153,7 @@ export default function PrivacyPage() {
           </p>
 
           <p className="paragraph-small color-teal-grey-300 padding-bottom-80px">
-            Last updated: 17 November 2026
+            Last updated: 25 November 2026
           </p>
         </div>
       </div>

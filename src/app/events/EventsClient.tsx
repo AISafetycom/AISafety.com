@@ -8,6 +8,8 @@ import {
   useRef,
   useState,
   useLayoutEffect,
+  type Dispatch,
+  type SetStateAction,
 } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Icon from '@/components/Icon'
@@ -16,6 +18,10 @@ import FeaturedCard from '@/components/FeaturedCard'
 import ContributeButtons from '@/components/ContributeButtons'
 import FilterBar from '@/components/FilterBar'
 import FilterDropdown from '@/components/FilterDropdown'
+import {
+  APPLICATION_FILTER_OPTIONS,
+  applicationFilterValue,
+} from '@/lib/application-filter'
 import ModeToggle from '@/components/ModeToggle'
 import StickyBar, { scrollToAnchor } from '@/components/StickyBar'
 import { EVENT_TYPES, eventTypeColor } from '@/lib/event-types'
@@ -34,7 +40,6 @@ const SUGGEST_CORRECTION_URL =
 const AIRTABLE_VIEW_URL =
   'https://airtable.com/appF8XfZUGXtfi40E/shrteEg2cClc3x484/tblXbN9swwldwq8f7?viewControls=on'
 
-const applicationOptions = ['Open', 'Closed']
 // Cards show the full Airtable Cost value ("Pay to attend (assistance
 // available)", "Free (cash prize available)", …); the filter collapses
 // them to two groups.
@@ -95,9 +100,11 @@ function emptyStateMessage(
   const noun =
     selectedTypes.length > 0 ? pluralizeTypes(selectedTypes) : 'events'
   const applications =
-    selectedStatus.length === 1
-      ? ` with ${selectedStatus[0].toLowerCase()} applications`
-      : ''
+    selectedStatus.length !== 1
+      ? ''
+      : selectedStatus[0] === 'Not yet open'
+        ? ' with applications not yet open'
+        : ` with ${selectedStatus[0].toLowerCase()} applications`
   return `No results found for ${cost}${noun} ${modeLabel}${applications}. Try adjusting the filters.`
 }
 
@@ -379,7 +386,7 @@ export default function EventsClient({ events }: EventsClientProps) {
         if (
           skip !== 'status' &&
           selectedStatus.length > 0 &&
-          !selectedStatus.includes(event.applicationStatus)
+          !selectedStatus.includes(applicationFilterValue(event))
         )
           return false
         if (
@@ -417,7 +424,7 @@ export default function EventsClient({ events }: EventsClientProps) {
 
       return {
         filteredEvents: modeEvents.filter(e => matchesFilters(e)),
-        statusCounts: countBy('status', e => [e.applicationStatus]),
+        statusCounts: countBy('status', e => [applicationFilterValue(e)]),
         typeCounts: countBy('type', e => e.type),
         costCounts: countBy('cost', e => e.cost.map(costGroup)),
       }
@@ -466,11 +473,10 @@ export default function EventsClient({ events }: EventsClientProps) {
   const savedScrollY = useRef<number | null>(null)
   const toggleFilter = (
     value: string,
-    current: string[],
-    setter: (v: string[]) => void
+    setter: Dispatch<SetStateAction<string[]>>
   ) => {
     savedScrollY.current = window.scrollY
-    setter(
+    setter(current =>
       current.includes(value)
         ? current.filter(v => v !== value)
         : [...current, value]
@@ -552,26 +558,29 @@ export default function EventsClient({ events }: EventsClientProps) {
           <FilterDropdown
             trackingPage="Events"
             title="Applications"
-            options={applicationOptions}
+            icon="/images/icons/paper.svg"
+            options={APPLICATION_FILTER_OPTIONS}
             selected={selectedStatus}
             counts={statusCounts}
-            onToggle={v => toggleFilter(v, selectedStatus, setSelectedStatus)}
+            onToggle={v => toggleFilter(v, setSelectedStatus)}
           />
           <FilterDropdown
             trackingPage="Events"
             title="Type"
+            icon="/images/icons/tag.svg"
             options={[...EVENT_TYPES]}
             selected={selectedTypes}
             counts={typeCounts}
-            onToggle={v => toggleFilter(v, selectedTypes, setSelectedTypes)}
+            onToggle={v => toggleFilter(v, setSelectedTypes)}
           />
           <FilterDropdown
             trackingPage="Events"
             title="Cost"
+            icon="/images/icons/money.svg"
             options={costOptions}
             selected={selectedCost}
             counts={costCounts}
-            onToggle={v => toggleFilter(v, selectedCost, setSelectedCost)}
+            onToggle={v => toggleFilter(v, setSelectedCost)}
           />
         </FilterBar>
 

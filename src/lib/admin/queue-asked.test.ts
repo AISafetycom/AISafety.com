@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   WAIT_DAYS,
+  answeredReview,
   askedOf,
   askedState,
   reviewStage,
@@ -62,6 +63,8 @@ describe('askedOf', () => {
       text: 'One of three themes.',
       link: 'https://mail.google.com/mail/#all/a1',
       reviewed: true,
+      reviewedAt: '2026-11-17T08:06:00Z',
+      review: null,
     })
   })
 
@@ -82,6 +85,50 @@ describe('askedOf', () => {
     })
     expect(got?.sentLink).toBeNull()
     expect(got?.answer?.link).toBeNull()
+  })
+
+  it('reads the review before their answer and the one with it', () => {
+    const got = askedOf({
+      at: SAVED,
+      answer: {
+        text: 'About 60%.',
+        reviewed: '2026-11-25T07:03:06Z',
+        review: {
+          before: { verdict: 'Unsure', reasons: [' Waiting on them '] },
+          after: {
+            verdict: 'Publish',
+            reasons: ['Their answer settles it.'],
+            chips: ['Not focused on AI x-risk'],
+          },
+        },
+      },
+    })
+    expect(got?.answer?.reviewedAt).toBe('2026-11-25T07:03:06Z')
+    expect(got?.answer?.review).toEqual({
+      before: { verdict: 'Unsure', reasons: ['Waiting on them'], chips: null },
+      after: {
+        verdict: 'Publish',
+        reasons: ['Their answer settles it.'],
+        chips: ['Not focused on AI x-risk'],
+      },
+    })
+  })
+
+  it('drops a kept review that is not a whole pair', () => {
+    const read = (review: unknown) =>
+      askedOf({ at: SAVED, answer: { text: 'Yes', review } })?.answer?.review
+    const after = { verdict: 'Publish', reasons: ['Fine.'] }
+    expect(read({ after })).toBeNull()
+    expect(read({ before: { verdict: 'Maybe', reasons: ['x'] }, after })).toBe(
+      null
+    )
+    expect(read({ before: { verdict: 'Unsure', reasons: [] }, after })).toBe(
+      null
+    )
+    expect(read({ before: { verdict: 'Unsure', reasons: [3] }, after })).toBe(
+      null
+    )
+    expect(read('both')).toBeNull()
   })
 
   it('is null without a readable time, or for anything but a block', () => {
@@ -124,6 +171,8 @@ describe('askedState', () => {
         text: 'Yes',
         link: null,
         reviewed: false,
+        reviewedAt: null,
+        review: null,
       },
     })
     expect(askedState(item(a), sentAt + 60 * DAY)).toBe('answered')
@@ -138,6 +187,8 @@ describe('askedState', () => {
         text: 'Yes',
         link: null,
         reviewed: false,
+        reviewedAt: null,
+        review: null,
       },
     })
     expect(
@@ -189,6 +240,8 @@ describe('reviewStage', () => {
         text: 'Yes',
         link: null,
         reviewed,
+        reviewedAt: reviewed ? '2026-11-17T08:06:00Z' : null,
+        review: null,
       },
     })
   const at = Date.parse('2026-11-17T08:00:00Z')
@@ -213,5 +266,44 @@ describe('reviewStage', () => {
       reviewStage({ type: 'Add', asked: asked({ sentAt: SENT }) }, at)
     ).toBeNull()
     expect(reviewStage({ type: 'Add', asked: null }, at)).toBeNull()
+  })
+})
+
+describe('answeredReview', () => {
+  const before = { verdict: 'Unsure' as const, reasons: ['Ask'], chips: null }
+  const after = { verdict: 'Publish' as const, reasons: ['Fine'], chips: null }
+  const answered = (over: Record<string, unknown>) =>
+    asked({
+      sentAt: SENT,
+      answer: {
+        at: '2026-11-17T08:00:00Z',
+        who: 'Yarne',
+        text: 'Yes',
+        link: null,
+        reviewed: true,
+        reviewedAt: '2026-11-17T08:06:00Z',
+        review: { before, after },
+        ...over,
+      },
+    })
+
+  it('gives both reviews once Fable has reviewed it again', () => {
+    expect(answeredReview({ type: 'Add', asked: answered({}) })).toEqual({
+      at: '2026-11-17T08:06:00Z',
+      who: 'Yarne',
+      before,
+      after,
+    })
+  })
+
+  it('is null before the review, without the kept pair, or on a change', () => {
+    expect(
+      answeredReview({ type: 'Add', asked: answered({ reviewed: false }) })
+    ).toBeNull()
+    expect(
+      answeredReview({ type: 'Add', asked: answered({ review: null }) })
+    ).toBeNull()
+    expect(answeredReview({ type: 'Change', asked: answered({}) })).toBeNull()
+    expect(answeredReview({ type: 'Add', asked: null })).toBeNull()
   })
 })

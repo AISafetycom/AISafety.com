@@ -1,6 +1,13 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import {
   fableChangesOf,
   wentOut,
@@ -13,6 +20,7 @@ import {
   verdictWords,
   type FlagUpdate,
 } from '@/lib/admin/queue-flag'
+import { answeredReview, type ShownReview } from '@/lib/admin/queue-asked'
 import Icon from '@/components/Icon'
 import type { AgentInfo, QueueItem } from '@/lib/admin/queue'
 import { reviewNewerThanChat } from '@/lib/admin/queue-reopen'
@@ -238,22 +246,29 @@ const CUT_OFF =
 
 const EDITS_RE = /```edits\s*\n([\s\S]*?)```/g
 const REPLY_RE = /```reply\s*\n([\s\S]*?)```/g
-const BLOCK_RE = /```(edits|reply)\s*\n([\s\S]*?)```/g
+const DECLINE_RE = /```decline\s*\n([\s\S]*?)```/g
+const BLOCK_RE = /```(edits|reply|decline)\s*\n([\s\S]*?)```/g
 
-/** The fenced blocks Fable's reply may carry: new field values and a new
- *  reply draft. Both are applied to the page the moment the reply lands
- *  (nothing reaches Airtable's live records before Accept, and a reply
- *  draft is never sent), so asking for a change makes the change –
- *  Bryce, 14 Sept 2026: "It should update the actual draft". */
+/** The fenced blocks Fable's reply may carry: new field values, a new
+ *  reply draft (the "Reply if you publish" box) and a new decline (the
+ *  "Reply if you reject" box; 23 Nov 2026, UN autonomous weapons talk: the
+ *  chat could fill only the publish box, so a decline landed there). All
+ *  are applied to the page the moment the reply lands (nothing reaches
+ *  Airtable's live records before Accept, and a reply is never sent), so
+ *  asking for a change makes the change – Bryce, 14 Sept 2026: "It should
+ *  update the actual draft". */
 function blocksOf(text: string): {
   edits: Record<string, string> | null
   reply: string | null
+  decline: string | null
 } {
   let edits: Record<string, string> | null = null
   let reply: string | null = null
+  let decline: string | null = null
   for (const m of text.matchAll(EDITS_RE)) edits = parseEdits(m[1]) ?? edits
   for (const m of text.matchAll(REPLY_RE)) reply = m[1].trim() || reply
-  return { edits, reply }
+  for (const m of text.matchAll(DECLINE_RE)) decline = m[1].trim() || decline
+  return { edits, reply, decline }
 }
 
 /** Values as the page's editors hold them: text, and a list (a
@@ -287,15 +302,28 @@ interface Undo {
   edits?: Record<string, string | null>
   /** The reply draft before. */
   reply?: string
+  /** The "Reply if you reject" box's edit before (null: it showed the
+   *  decline written for the reason). */
+  decline?: string | null
 }
 
-/** What a reply's cards can do once it has landed: put its edits or draft
- *  on the page (again), or take them back off. */
+/** What a reply's cards can do once it has landed: put its edits or
+ *  drafts on the page (again), or take them back off. */
 interface CardActs {
   applyEdits: (usable: Record<string, string>) => void
   applyReply: (text: string) => void
+  applyDecline: (text: string) => void
   undoEdits?: () => void
   undoReply?: () => void
+  undoDecline?: () => void
+}
+
+/** The "Reply if you reject" box as the page shows it now. */
+export interface DeclineBox {
+  /** What it reads. */
+  text: string
+  /** The edit on the page (null: the decline written for the reason). */
+  edited: string | null
 }
 
 /** A decided item, opened from Done today: its cards are read-only and
@@ -309,6 +337,8 @@ export interface Decided {
   sent: Record<string, string>
   /** The reply draft that went with the decision; null when none did. */
   reply: string | null
+  /** The decline that went with a Reject; null when none did. */
+  decline: string | null
 }
 
 /** The Description length cap for the item's page – the numbers in
@@ -350,10 +380,12 @@ export default function Chat({
   agent,
   edits,
   reply,
+  decline,
   canEditField,
   decided,
   onSetEdits,
   onSetReply,
+  onSetDecline,
   onWrote,
   onFlag,
   onFableChanges,
@@ -366,6 +398,9 @@ export default function Chat({
   edits: Record<string, string>
   /** The reply draft as the page shows it now (null: the item has none). */
   reply: string | null
+  /** The "Reply if you reject" box (null: the item has none – nobody to
+   *  reply to, or they already have a decline). */
+  decline: DeclineBox | null
   /** Whether the page lets this field be edited (no formulas, no
    *  housekeeping); a change to any other field is left out. */
   canEditField: (field: string) => boolean
@@ -375,6 +410,9 @@ export default function Chat({
   onSetEdits: (edits: Record<string, string>) => void
   /** Set the reply draft as edited on the page (null: as it came). */
   onSetReply: (text: string | null) => void
+  /** Set the "Reply if you reject" box as edited on the page (null: the
+   *  decline written for the reason). */
+  onSetDecline: (text: string | null) => void
   /** A reply that changed Airtable has landed: re-read the live record. */
   onWrote?: () => void
   /** Write a flag update onto the row, or undo it; resolves to an error
@@ -440,6 +478,8 @@ export default function Chat({
   const cap = descriptionCap(item)
   const replyRef = useRef(reply)
   replyRef.current = reply
+  const declineRef = useRef(decline)
+  declineRef.current = decline
   const itemRef = useRef(item)
   itemRef.current = item
   const onFlagRef = useRef(onFlag)
@@ -525,6 +565,19 @@ export default function Chat({
     },
     [keep, onSetReply]
   )
+  /** The same for a reply's new decline, into the "Reply if you reject"
+   *  box. */
+  const putDecline = useCallback(
+    (at: string, text: string) => {
+      const before = declineRef.current
+      if (before === null || before.text === text) return
+      undoRef.current[at] = { ...undoRef.current[at], decline: before.edited }
+      declineRef.current = { text, edited: text }
+      onSetDecline(text)
+      keep()
+    },
+    [keep, onSetDecline]
+  )
   /** A reply's new flag onto the Queue row, as the card's button does it,
    *  unless the row already says it. Undo is the row's own (flag_before),
    *  so it lasts past a reload without anything kept here. */
@@ -549,7 +602,11 @@ export default function Chat({
       // A decided item keeps what went with its decision: a reply that
       // lands after it changes nothing on the page.
       if (decided) return
-      const { edits: proposed, reply: draft } = blocksOf(textOf(msg))
+      const {
+        edits: proposed,
+        reply: draft,
+        decline: no,
+      } = blocksOf(textOf(msg))
       if (proposed) {
         const usable = Object.fromEntries(
           Object.entries(proposed).filter(([k]) => canEditField(k))
@@ -557,9 +614,10 @@ export default function Chat({
         if (Object.keys(usable).length) putEdits(msg.at, usable)
       }
       if (draft) putReply(msg.at, draft)
+      if (no) putDecline(msg.at, no)
       if (withFlag && msg.flag !== undefined) putFlag(msg)
     },
-    [canEditField, decided, onWrote, putEdits, putFlag, putReply]
+    [canEditField, decided, onWrote, putDecline, putEdits, putFlag, putReply]
   )
   // Read through a ref by loadHistory, so that it changes only with the
   // item. The page hands down new callbacks on every render, and each
@@ -574,20 +632,23 @@ export default function Chat({
   const dropUndo = (at: string, part: keyof Undo) => {
     const rest = { ...undoRef.current[at] }
     delete rest[part]
-    if (rest.edits || rest.reply !== undefined) undoRef.current[at] = rest
+    if (rest.edits || rest.reply !== undefined || rest.decline !== undefined)
+      undoRef.current[at] = rest
     else delete undoRef.current[at]
     keep()
   }
 
-  /** What a landed reply's cards can do: its edits and its draft each have
-   *  their own Undo, and their own Apply once taken back off. */
+  /** What a landed reply's cards can do: its edits and its drafts each
+   *  have their own Undo, and their own Apply once taken back off. */
   const actsFor = (msg: Msg): CardActs => {
     const u = undoRef.current[msg.at]
     const edits = u?.edits
     const draft = u?.reply
+    const no = u?.decline
     return {
       applyEdits: usable => putEdits(msg.at, usable),
       applyReply: text => putReply(msg.at, text),
+      applyDecline: text => putDecline(msg.at, text),
       undoEdits: edits
         ? () => {
             const next = { ...editsRef.current }
@@ -606,6 +667,15 @@ export default function Chat({
               replyRef.current = draft
               onSetReply(draft)
               dropUndo(msg.at, 'reply')
+            }
+          : undefined,
+      undoDecline:
+        no !== undefined
+          ? () => {
+              const box = declineRef.current
+              if (box) declineRef.current = { ...box, edited: no }
+              onSetDecline(no)
+              dropUndo(msg.at, 'decline')
             }
           : undefined,
     }
@@ -1366,7 +1436,24 @@ export default function Chat({
   }, [])
 
   const thread = messages ?? []
-  const hasThread = thread.length > 0 || live !== null
+  // Fable's review with their answer, after the messages that came before
+  // it (at the end when its time was not kept).
+  const answered = answeredReview(item)
+  const answeredAt = Date.parse(answered?.at ?? '')
+  const firstAfter = Number.isFinite(answeredAt)
+    ? thread.findIndex(m => Date.parse(m.at) > answeredAt)
+    : -1
+  const cut = firstAfter < 0 ? thread.length : firstAfter
+  const answeredCard = answered && (
+    <AnsweredReviewCard
+      key="answered"
+      review={answered.after}
+      item={item}
+      decided={decided}
+      onFlag={onFlag}
+    />
+  )
+  const hasThread = thread.length > 0 || live !== null || answered !== null
   // Something in the box to send: while Fable answers, the round button is
   // then Send rather than Stop.
   const hasDraft = text.trim() !== '' || quote !== null || files.length > 0
@@ -1390,45 +1477,50 @@ export default function Chat({
     >
       {hasThread && (
         <div className={styles.chatThread}>
-          {thread.map((m, i) =>
-            m.role === 'you' ? (
-              <div key={i} className={styles.chatMsg}>
-                <span className={styles.chatWho}>You</span>
-                <YouText
-                  text={m.text ?? ''}
-                  attachments={m.attachments}
-                  fetchFile={fetchFile}
-                />
-              </div>
-            ) : m.role === 'error' ? (
-              <p key={i} className={styles.chatError}>
-                {m.text}
-              </p>
-            ) : (
-              <div key={i} className={styles.chatMsg}>
-                <span className={styles.chatWho}>Fable</span>
-                {m.note && <p className={styles.chatTool}>{m.note}</p>}
-                <Parts
-                  parts={m.parts ?? []}
-                  edits={edits}
-                  reply={reply}
-                  canEditField={canEditField}
-                  decided={decided}
-                  acts={actsFor(m)}
-                  cap={cap}
-                />
-                {m.flag !== undefined && (
-                  <FlagCard
-                    raw={m.flag}
-                    item={item}
-                    decided={decided}
-                    onFlag={onFlag}
-                    auto={autoFlag?.at === m.at ? autoFlag : null}
+          {thread.map((m, i) => (
+            <Fragment key={i}>
+              {i === cut && answeredCard}
+              {m.role === 'you' ? (
+                <div key={i} className={styles.chatMsg}>
+                  <span className={styles.chatWho}>You</span>
+                  <YouText
+                    text={m.text ?? ''}
+                    attachments={m.attachments}
+                    fetchFile={fetchFile}
                   />
-                )}
-              </div>
-            )
-          )}
+                </div>
+              ) : m.role === 'error' ? (
+                <p key={i} className={styles.chatError}>
+                  {m.text}
+                </p>
+              ) : (
+                <div key={i} className={styles.chatMsg}>
+                  <span className={styles.chatWho}>Fable</span>
+                  {m.note && <p className={styles.chatTool}>{m.note}</p>}
+                  <Parts
+                    parts={m.parts ?? []}
+                    edits={edits}
+                    reply={reply}
+                    decline={decline}
+                    canEditField={canEditField}
+                    decided={decided}
+                    acts={actsFor(m)}
+                    cap={cap}
+                  />
+                  {m.flag !== undefined && (
+                    <FlagCard
+                      raw={m.flag}
+                      item={item}
+                      decided={decided}
+                      onFlag={onFlag}
+                      auto={autoFlag?.at === m.at ? autoFlag : null}
+                    />
+                  )}
+                </div>
+              )}
+            </Fragment>
+          ))}
+          {cut === thread.length && answeredCard}
           {live !== null && (
             <div className={styles.chatMsg}>
               <span className={styles.chatWho}>Fable</span>
@@ -1437,6 +1529,7 @@ export default function Chat({
                 parts={live}
                 edits={edits}
                 reply={reply}
+                decline={decline}
                 canEditField={canEditField}
                 decided={decided}
                 streaming
@@ -1908,6 +2001,7 @@ function Parts({
   parts,
   edits,
   reply,
+  decline,
   canEditField,
   decided,
   acts,
@@ -1917,6 +2011,7 @@ function Parts({
   parts: Part[]
   edits: Record<string, string>
   reply: string | null
+  decline: DeclineBox | null
   canEditField: (field: string) => boolean
   decided: Decided | null
   /** Missing while the reply is still being written. */
@@ -1942,6 +2037,7 @@ function Parts({
             text={p.text}
             edits={edits}
             reply={reply}
+            decline={decline}
             canEditField={canEditField}
             decided={decided}
             acts={acts}
@@ -1959,6 +2055,7 @@ function Prose({
   text,
   edits,
   reply,
+  decline,
   canEditField,
   decided,
   acts,
@@ -1969,6 +2066,7 @@ function Prose({
   text: string
   edits: Record<string, string>
   reply: string | null
+  decline: DeclineBox | null
   canEditField: (field: string) => boolean
   decided: Decided | null
   acts?: CardActs
@@ -1991,6 +2089,16 @@ function Prose({
           key={`r${n}`}
           proposed={m[2].trim()}
           current={reply}
+          decided={decided}
+          acts={acts}
+        />
+      )
+    } else if (m[1] === 'decline') {
+      out.push(
+        <DeclineCard
+          key={`d${n}`}
+          proposed={m[2].trim()}
+          current={decline}
           decided={decided}
           acts={acts}
         />
@@ -2152,6 +2260,58 @@ function ReplyCard({
   )
 }
 
+/** A new decline from a reply: put in the page's "Reply if you reject" box
+ *  once the reply has landed, with a small Undo. Reject then saves it as it
+ *  reads, whatever the reason; nothing is sent. */
+function DeclineCard({
+  proposed,
+  current,
+  decided,
+  acts,
+}: {
+  proposed: string
+  current: DeclineBox | null
+  decided: Decided | null
+  acts?: CardActs
+}) {
+  if (current === null && !decided) {
+    return (
+      <p className={styles.chatTool}>
+        This item has no &ldquo;Reply if you reject&rdquo; box to put a decline
+        in.
+      </p>
+    )
+  }
+  const applied = decided
+    ? decided.decline?.trim() === proposed
+    : current?.text === proposed
+  return (
+    <div className={styles.chatEdits}>
+      <span className={styles.chatWho}>
+        {applied ? 'Reply if you reject, updated' : 'New reply if you reject'}
+      </span>
+      <pre className={styles.chatPre}>{proposed}</pre>
+      {decided ? (
+        <DecidedFoot
+          done={applied}
+          text={applied ? 'Went with Reject' : 'Not used'}
+        />
+      ) : (
+        <CardFoot
+          applied={applied}
+          appliedText="In the box – goes with Reject"
+          offText="Not what the box says"
+          waitText="Goes in the box when Fable finishes"
+          applyText="Use it"
+          onApply={acts ? () => acts.applyDecline(proposed) : undefined}
+          undoText="Undo"
+          undo={acts?.undoDecline}
+        />
+      )}
+    </div>
+  )
+}
+
 /** A field change's new value, as the card shows it. */
 function shownValue(v: unknown): string {
   if (v === true) return 'ticked'
@@ -2278,6 +2438,79 @@ function FlagCard({
         />
       )}
       {error && <p className={styles.chatError}>{error}</p>}
+    </div>
+  )
+}
+
+/** Fable's review with their answer to his question (queue-asked.ts
+ *  answeredReview), in the chat where it happened, after the messages that
+ *  came before it; the review the item showed before stays at the panel's
+ *  head (Bryce, 25 Nov 2026, Fangcun AI: "Fable's new review after they
+ *  replied should come at the bottom of the chat"). Laid out like a
+ *  verdict the chat sets; when something later replaced it, Update verdict
+ *  puts it back on. */
+export function AnsweredReviewCard({
+  review,
+  item,
+  decided,
+  onFlag,
+}: {
+  review: ShownReview
+  item: QueueItem
+  decided: Decided | null
+  onFlag: (body: { flag: FlagUpdate }) => Promise<string | null>
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const flag: FlagUpdate = {
+    verdict: review.verdict,
+    reasons: review.reasons,
+    chips: review.chips,
+    title: null,
+    changes: null,
+  }
+  const shown = flagShown(item, flag)
+  const apply = async () => {
+    setBusy(true)
+    setError(null)
+    const failed = await onFlag({ flag })
+    setBusy(false)
+    if (failed) setError(failed)
+  }
+  return (
+    <div className={styles.chatMsg}>
+      <span className={styles.chatWho}>Fable</span>
+      <div className={styles.chatEdits}>
+        <span className={styles.chatWho}>Reviewed again with their answer</span>
+        <div className={styles.chatEditRow}>
+          <span className={styles.label}>Verdict</span>
+          <span>{verdictWords(review.verdict)}</span>
+        </div>
+        <div className={styles.chatEditRow}>
+          <span className={styles.label}>Reasons</span>
+          <ul className={styles.reasons}>
+            {review.reasons.map((r, i) => (
+              <li key={i}>{r}</li>
+            ))}
+          </ul>
+        </div>
+        {decided ? (
+          <DecidedFoot
+            done={shown}
+            text={shown ? 'Decided on this verdict' : 'Not used'}
+          />
+        ) : (
+          <CardFoot
+            applied={shown}
+            appliedText="The item shows this verdict"
+            offText="Not the verdict on the item"
+            waitText="Updating the verdict…"
+            applyText="Update verdict"
+            onApply={busy ? undefined : () => void apply()}
+          />
+        )}
+        {error && <p className={styles.chatError}>{error}</p>}
+      </div>
     </div>
   )
 }

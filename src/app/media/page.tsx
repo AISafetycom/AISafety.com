@@ -167,7 +167,7 @@ export default async function MediaPage() {
               action="contact"
               label="Emailed the press inbox"
               newTab
-              className={styles.inlineLink}
+              className="link"
             >
               {PRESS_EMAIL}
             </PressLink>
@@ -210,16 +210,17 @@ export default async function MediaPage() {
         </p>
         <div className={styles.copyBlocks}>
           {BOILERPLATE.map(block => (
-            <div key={block.id} className={styles.copyBlock}>
+            <div
+              key={block.id}
+              className={`${styles.copyBlock} border-plus-fill`}
+            >
               <div className={`${styles.copyHead} paragraph-small-bold`}>
                 <div>
                   {block.label} <span>· {wordCount(block.text)} words</span>
                 </div>
                 <CopyButton text={block.text} label={block.trackingName} />
               </div>
-              <p className={`paragraph-small ${styles.copyText}`}>
-                {block.text}
-              </p>
+              <p className="paragraph-small">{block.text}</p>
             </div>
           ))}
         </div>
@@ -243,6 +244,7 @@ export default async function MediaPage() {
           <dd>
             Nonprofit project fiscally sponsored by{' '}
             <a
+              className="hover-white"
               href={withUtm('https://www.ashgro.org/', 'Media')}
               target="_blank"
               rel="noopener noreferrer"
@@ -258,6 +260,7 @@ export default async function MediaPage() {
           <dd>
             Grants from the{' '}
             <a
+              className="hover-white"
               href={withUtm('https://survivalandflourishing.fund/', 'Media')}
               target="_blank"
               rel="noopener noreferrer"
@@ -276,13 +279,16 @@ export default async function MediaPage() {
             if (typeof count !== 'number') return null
             return (
               <FactRow key={path} label={label}>
-                <Link href={path}>{count.toLocaleString('en-US')}</Link>
+                <Link href={path} className="hover-white">
+                  {count.toLocaleString('en-US')}
+                </Link>
               </FactRow>
             )
           })}
           <dt>Sister site</dt>
           <dd>
             <a
+              className="hover-white"
               href={withUtm('https://aisafety.info', 'Media')}
               target="_blank"
               rel="noopener noreferrer"
@@ -306,7 +312,7 @@ export default async function MediaPage() {
             action="contact"
             label="Emailed the press inbox"
             newTab
-            className={styles.inlineLink}
+            className="link"
           >
             {PRESS_EMAIL}
           </PressLink>
@@ -343,7 +349,7 @@ export default async function MediaPage() {
         </div>
         <p className={`paragraph-small ${styles.afterPeople}`}>
           Learn more about the AISafety.com team on our{' '}
-          <Link href="/about#team" className={styles.inlineLink}>
+          <Link href="/about#team" className="link">
             about page
           </Link>
           .
@@ -363,7 +369,7 @@ export default async function MediaPage() {
           <div className={styles.topic}>
             <p>
               Our{' '}
-              <Link href="/map" className={styles.inlineLink}>
+              <Link href="/map" className="link">
                 field map
               </Link>{' '}
               lists organizations, programs, and projects by what they work on,
@@ -380,7 +386,7 @@ export default async function MediaPage() {
                 href={withUtm('https://aisafety.info', 'Media')}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={styles.inlineLink}
+                className="link"
               >
                 AISafety.info
               </a>{' '}
@@ -390,7 +396,7 @@ export default async function MediaPage() {
             </p>
             <p>
               Our{' '}
-              <Link href="/self-study" className={styles.inlineLink}>
+              <Link href="/self-study" className="link">
                 self-study list
               </Link>{' '}
               points to the primary material.
@@ -420,7 +426,7 @@ export default async function MediaPage() {
             </p>
             <p>
               Every directory is also open data: the{' '}
-              <Link href="/developers" className={styles.inlineLink}>
+              <Link href="/developers" className="link">
                 Data API
               </Link>{' '}
               serves the same listings as JSON, free, under a CC BY license.
@@ -456,7 +462,7 @@ export default async function MediaPage() {
             <li key={org.name}>
               {'before' in org && org.before}
               {org.url.startsWith('/') ? (
-                <Link href={org.url} className={styles.inlineLink}>
+                <Link href={org.url} className="link">
                   {org.name}
                 </Link>
               ) : (
@@ -464,7 +470,7 @@ export default async function MediaPage() {
                   href={withUtm(org.url, 'Media')}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className={styles.inlineLink}
+                  className="link"
                 >
                   {org.name}
                 </a>
@@ -489,11 +495,14 @@ export default async function MediaPage() {
 
         <div className={styles.assetGrid}>
           {LOGOS.map(logo => (
-            <div key={logo.id} className={styles.assetCard}>
+            <div
+              key={logo.id}
+              className={`${styles.assetCard} border-plus-fill`}
+            >
               <div
                 className={`${styles.assetPreview} ${
                   logo.on === 'dark'
-                    ? styles.onDark
+                    ? 'bg-teal-900'
                     : logo.on === 'light'
                       ? styles.onLight
                       : styles.onTile
@@ -522,7 +531,7 @@ export default async function MediaPage() {
                 <span className={`paragraph-xs ${styles.assetNote}`}>
                   {logo.note}
                 </span>
-                <div className={`paragraph-xs ${styles.assetLinks}`}>
+                <div className={`paragraph-xs link-group ${styles.assetLinks}`}>
                   {'svg' in logo && (
                     <PressLink
                       href={logo.svg}
@@ -598,7 +607,7 @@ export default async function MediaPage() {
         <h2>News</h2>
         <p className={`paragraph-small ${styles.lead}`}>
           What we have launched, and where it was announced. Our{' '}
-          <Link href="/newsletter/updates" className={styles.inlineLink}>
+          <Link href="/newsletter/updates" className="link">
             updates newsletter
           </Link>{' '}
           goes out when we launch a major new feature – about a few times a
@@ -627,7 +636,7 @@ export default async function MediaPage() {
               action="contact"
               label="Emailed the press inbox"
               newTab
-              className={styles.email}
+              className={`link ${styles.email}`}
             >
               {PRESS_EMAIL}
             </PressLink>
@@ -664,7 +673,7 @@ export default async function MediaPage() {
                 href="https://airtable.com/appF8XfZUGXtfi40E/pagUmmzVb8OnVvTZS/form"
                 target="_blank"
                 rel="noopener noreferrer"
-                className={styles.inlineLink}
+                className="link"
               >
                 Suggest a listing
               </a>
@@ -673,7 +682,7 @@ export default async function MediaPage() {
                 href="https://airtable.com/appF8XfZUGXtfi40E/pagndDvdya1DSqoxN/form"
                 target="_blank"
                 rel="noopener noreferrer"
-                className={styles.inlineLink}
+                className="link"
               >
                 report a correction
               </a>
@@ -682,7 +691,7 @@ export default async function MediaPage() {
                 href="https://discord.gg/faamWzPcv8"
                 target="_blank"
                 rel="noopener noreferrer"
-                className={styles.inlineLink}
+                className="link"
               >
                 volunteer
               </a>

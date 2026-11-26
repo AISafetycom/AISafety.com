@@ -179,7 +179,7 @@ export default function ApplicationForm() {
           {busy ? 'Applying…' : 'Apply'}
         </Button>
         {error && (
-          <p className="paragraph-small color-orange-300 margin-top-16px">
+          <p className="paragraph-small color-red-300 margin-top-16px">
             {error}
           </p>
         )}

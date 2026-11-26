@@ -100,6 +100,47 @@ describe('suggestSpot', () => {
     expect(distance(onLand, anywhere)).toBeGreaterThanOrEqual(0.7)
   })
 
+  it('sits beside the listings it is most like', () => {
+    // A 4 by 4 block 2.4 apart: plenty of room everywhere inside it.
+    const pins = block(28, 22, 4, 4, 2.4)
+    const corner = pins[pins.length - 1] // bottom right
+    const plain = suggestSpot(pins, ask)!
+    const spot = suggestSpot(pins, { ...ask, like: [corner.id] })!
+    expect(distance(spot, corner)).toBeLessThan(1.6)
+    expect(distance(plain, corner)).toBeGreaterThan(3)
+    // No other pin is any closer to it than that one.
+    for (const p of pins) {
+      expect(distance(spot, p)).toBeGreaterThanOrEqual(
+        distance(spot, corner) - 0.01
+      )
+    }
+  })
+
+  it('leans towards the most alike when they sit apart', () => {
+    const pins = block(28, 22, 4, 4, 2.4)
+    const [first, last] = [pins[0], pins[pins.length - 1]]
+    const spot = suggestSpot(pins, { ...ask, like: [first.id, last.id] })!
+    expect(distance(spot, first)).toBeLessThan(distance(spot, last))
+  })
+
+  it('passes over a listing named alike that sits in another area', () => {
+    const own = block(28, 22, 4, 4, 2.4)
+    const elsewhere = pin(5, 5, OTHER)
+    const plain = suggestSpot([...own, elsewhere], ask)
+    const named = suggestSpot([...own, elsewhere], {
+      ...ask,
+      like: [elsewhere.id],
+    })
+    expect(named).toEqual(plain)
+  })
+
+  it('still keeps clear of the listings it is most like', () => {
+    const pins = block(28, 22, 4, 4, 2.4)
+    const spot = suggestSpot(pins, { ...ask, like: [pins[5].id] })!
+    const nearest = Math.min(...pins.map(p => distance(p, spot)))
+    expect(nearest).toBeGreaterThanOrEqual(0.8 * typicalSpacing(pins, pins))
+  })
+
   it('puts the first listing of an area just under its name', () => {
     const label = AREA_LABELS.find(l => l.label === AREA)!
     const spot = suggestSpot(block(5, 5, 3, 3, 1.2, OTHER), ask)!

@@ -197,7 +197,7 @@ export default function NewsletterChooser({
         <>
           {view.note && (
             <div className="padding-bottom-40px">
-              <p className="color-orange-300" role="status">
+              <p className="color-red-300" role="status">
                 {view.note}
               </p>
               {view.retryKey && (
@@ -414,7 +414,7 @@ function SignupForm({ newsletters }: { newsletters: Newsletter[] }) {
           state === 'done'
             ? 'color-teal-300 padding-top-32px'
             : error
-              ? 'paragraph-xs color-orange-300 padding-top-8px'
+              ? 'paragraph-xs color-red-300 padding-top-8px'
               : ''
         }
       >
@@ -544,7 +544,7 @@ function ManageForm({
           status
             ? status.ok
               ? 'color-teal-300 padding-top-24px'
-              : 'paragraph-small color-orange-300 padding-top-24px'
+              : 'paragraph-small color-red-300 padding-top-24px'
             : ''
         }
       >
