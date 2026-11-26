@@ -28,7 +28,6 @@ import {
   MAX_ATTACHMENTS_PER_MESSAGE,
   MAX_CONVERSATION_ATTACHMENT_CHARS,
   attachmentChars,
-  cleanAttachmentName,
   documentKind,
   fitToBudget,
   type Attachment,
@@ -590,8 +589,9 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
   const [isWaiting, setIsWaiting] = useState(false)
   // Documents picked for the message being written; they go out with it.
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([])
-  // The name of a file being read right now, and why the last one failed.
-  const [readingFile, setReadingFile] = useState<string | null>(null)
+  // Whether a picked file is being read right now, and why the last one
+  // failed.
+  const [readingFile, setReadingFile] = useState(false)
   const [attachError, setAttachError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -1092,7 +1092,7 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
         onAttachRef.current?.('error', 'too-many')
         break
       }
-      setReadingFile(cleanAttachmentName(file.name))
+      setReadingFile(true)
       try {
         let document = await extractDocument(file)
         // What the conversation's document allowance still has room for,
@@ -1136,7 +1136,7 @@ const ChatBody = forwardRef<ChatBodyHandle, Props>(function ChatBody(
         onAttachRef.current?.('error', code)
       }
     }
-    setReadingFile(null)
+    setReadingFile(false)
   }, [])
 
   const handleRemoveAttachment = useCallback((index: number) => {

@@ -22,8 +22,8 @@ interface Props {
   onStop?: () => void
   /** Documents that will go with the next message. */
   attachments?: Attachment[]
-  /** The name of a file being read right now, if one is. */
-  readingFile?: string | null
+  /** True while a picked file is being read. */
+  readingFile?: boolean
   /** Why the last file couldn't be attached; shown under the message box. */
   attachError?: string | null
   /** The visitor picked files to attach. */
@@ -46,7 +46,7 @@ const Composer = forwardRef<HTMLTextAreaElement, Props>(function Composer(
     isStreaming,
     onStop,
     attachments = [],
-    readingFile = null,
+    readingFile = false,
     attachError = null,
     onAttachFiles,
     onRemoveAttachment,
@@ -134,7 +134,7 @@ const Composer = forwardRef<HTMLTextAreaElement, Props>(function Composer(
           )}
           {readingFile && (
             <p className="paragraph-xs color-teal-grey-300" role="status">
-              Reading {readingFile}
+              Reading the document
             </p>
           )}
         </div>
@@ -178,10 +178,9 @@ const Composer = forwardRef<HTMLTextAreaElement, Props>(function Composer(
                   size="xs"
                   icon="/images/icons/paperclip.svg"
                   iconPosition="only"
-                  disabled={Boolean(readingFile)}
+                  disabled={readingFile}
                   onClick={() => fileInputRef.current?.click()}
                   aria-label="Attach a document"
-                  tooltip="Attach a PDF, Word, or text file"
                   tooltipPosition="above"
                 />
               </>

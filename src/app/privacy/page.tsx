@@ -83,7 +83,7 @@ export default function PrivacyPage() {
           <AnalyticsOptOut />
 
           <h3 className="padding-bottom-16px">The chatbot</h3>
-          <p className="color-teal-grey-300 padding-bottom-16px">
+          <p className="color-teal-grey-300 padding-bottom-24px">
             The chatbot is powered by Claude, an AI model from Anthropic – your
             messages are sent to Anthropic to generate each reply, and Anthropic
             doesn&apos;t train its models on them. Conversations are saved so we
