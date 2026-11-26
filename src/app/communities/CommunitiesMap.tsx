@@ -22,11 +22,58 @@ interface CommunitiesMapProps {
 const INITIAL_CENTER: [number, number] = [0, 30]
 const INITIAL_ZOOM = 1.5
 
+// The basemap's ocean and sea names ("North Atlantic Ocean"). Mapbox Standard
+// has one switch for every place name, so these are dropped by layer instead.
+const OCEAN_LABEL_LAYERS = ['water-line-label', 'water-point-label']
+// The sea's color as set. The style's dusk light darkens it to --teal-900 (the
+// page background) on screen. Mapbox can't take the light off the basemap's
+// water as it can for our land layer, so this one isn't read from globals.css.
+const SEA_BEFORE_DUSK_LIGHT = '#008263'
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 declare global {
   interface Window {
     mapboxgl: any
   }
+}
+
+// Puts the map in the site's colors (globals.css) and drops the ocean names.
+// The Mapbox Studio style supplies the shapes; its colors are replaced here so
+// the map matches the page around it.
+function applySiteLook(map: any) {
+  const palette = getComputedStyle(document.documentElement)
+  const color = (name: string) => palette.getPropertyValue(name).trim()
+  // Land is the Studio style's own country fill. Full emissive strength keeps
+  // the dusk light from tinting it navy, so it shows exactly --teal-800.
+  map.setPaintProperty('country-boundaries', 'fill-color', color('--teal-800'))
+  map.setPaintProperty(
+    'country-boundaries',
+    'fill-outline-color',
+    color('--teal-800')
+  )
+  map.setPaintProperty('country-boundaries', 'fill-emissive-strength', 1)
+  const basemap = map.getStyle().imports?.find((i: any) => i.id === 'basemap')
+  if (!basemap?.data) {
+    console.warn(
+      '[communities map] The style has no embedded basemap, so its colors and ocean names were left as they are'
+    )
+    return
+  }
+  map.updateImport('basemap', {
+    ...basemap,
+    config: {
+      ...basemap.config,
+      colorWater: SEA_BEFORE_DUSK_LIGHT,
+      colorAdminBoundaries: color('--teal-600'),
+      colorPlaceLabels: color('--teal-grey-300'),
+    },
+    data: {
+      ...basemap.data,
+      layers: basemap.data.layers.filter(
+        (l: any) => !OCEAN_LABEL_LAYERS.includes(l.id)
+      ),
+    },
+  })
 }
 
 export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
@@ -132,7 +179,7 @@ export default function CommunitiesMap({ communities }: CommunitiesMapProps) {
       } else {
         map.once('style.load', () => resolve())
       }
-    })
+    }).then(() => applySiteLook(map))
 
     Promise.all([pinImagePromise, styleLoadPromise]).then(([pinImage]) => {
       // Mapbox rasterizes an added image once and then scales that bitmap on
