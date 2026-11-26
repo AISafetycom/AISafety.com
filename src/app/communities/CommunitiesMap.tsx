@@ -22,13 +22,19 @@ interface CommunitiesMapProps {
 const INITIAL_CENTER: [number, number] = [0, 30]
 const INITIAL_ZOOM = 1.5
 
-// The basemap's ocean and sea names ("North Atlantic Ocean"). Mapbox Standard
-// has one switch for every place name, so these are dropped by layer instead.
-const OCEAN_LABEL_LAYERS = ['water-line-label', 'water-point-label']
+// Basemap layers left off the map: the ocean and sea names ("North Atlantic
+// Ocean") and the seafloor shading, so the sea is one flat color. Mapbox
+// Standard has no switch for either alone (one switch covers every place
+// name), so they're dropped by layer.
+const HIDDEN_BASEMAP_LAYERS = [
+  'water-line-label',
+  'water-point-label',
+  'water-depth',
+]
 // The sea's color as set. The style's dusk light darkens it to --teal-900 (the
 // page background) on screen. Mapbox can't take the light off the basemap's
 // water as it can for our land layer, so this one isn't read from globals.css.
-const SEA_BEFORE_DUSK_LIGHT = '#008263'
+const SEA_BEFORE_DUSK_LIGHT = '#005343'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 declare global {
@@ -37,7 +43,8 @@ declare global {
   }
 }
 
-// Puts the map in the site's colors (globals.css) and drops the ocean names.
+// Puts the map in the site's colors (globals.css) and drops the ocean names
+// and seafloor shading.
 // The Mapbox Studio style supplies the shapes; its colors are replaced here so
 // the map matches the page around it.
 function applySiteLook(map: any) {
@@ -70,7 +77,7 @@ function applySiteLook(map: any) {
     data: {
       ...basemap.data,
       layers: basemap.data.layers.filter(
-        (l: any) => !OCEAN_LABEL_LAYERS.includes(l.id)
+        (l: any) => !HIDDEN_BASEMAP_LAYERS.includes(l.id)
       ),
     },
   })
