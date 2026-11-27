@@ -131,6 +131,25 @@
   accent-color: #f5b942;
 }
 
+/* The Queue's "Bryce checks first", after "can edit": teal, since it holds
+   the live writes back rather than letting them through. "can edit" is no
+   longer the pill's last segment there, so it keeps square corners. */
+.pickEdit:has(+ .pickCheck):has(input:checked) {
+  border-radius: 0;
+}
+
+.pick .pickCheck {
+  color: var(--teal-300);
+}
+
+.pickCheck:has(input:checked) {
+  background-color: var(--teal-grey-800);
+}
+
+.pick .pickCheck input {
+  accent-color: var(--teal-300);
+}
+
 .pickDisabled .pickTab,
 .pickDisabled .pickEdit {
   cursor: default;

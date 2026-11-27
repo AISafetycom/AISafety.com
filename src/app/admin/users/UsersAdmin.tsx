@@ -4,8 +4,10 @@ import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ACCESS_AREAS,
+  CHECKER_NAME,
   DEFAULT_NEW_ACCESS,
   describeAccess,
+  SUGGEST_LABEL,
   type AccessFlags,
 } from '@/lib/admin/access'
 import {
@@ -117,7 +119,11 @@ function action(
 /** One tick per tab. Tabs that can change the live site carry a second,
  *  "can edit" tick: the first opens the tab to look, the second lets its
  *  writes through. Ticking "can edit" on a closed tab opens it too; unticking
- *  the tab takes "can edit" with it. */
+ *  the tab takes "can edit" with it. The Queue has a third, "Bryce checks
+ *  first" (the 'suggest' grant): their Publish, Reject, Delete and Review
+ *  again in a week wait as suggestions until someone who can edit confirms
+ *  them. Ticking it ticks the other two; unticking "can edit" takes it
+ *  too. */
 function AccessPicker({
   value,
   onChange,
@@ -163,7 +169,7 @@ function AccessPicker({
                 <input
                   type="checkbox"
                   id={`${idPrefix}-${area.key}-edit`}
-                  checked={grant === 'edit'}
+                  checked={grant === 'edit' || grant === 'suggest'}
                   disabled={disabled}
                   onChange={e =>
                     onChange?.({
@@ -177,6 +183,26 @@ function AccessPicker({
                   }
                 />
                 can edit
+              </label>
+            )}
+            {area.key === 'queue' && (
+              <label
+                className={`${styles.pickEdit} ${styles.pickCheck}`}
+                title={`Publish, Reject, Delete and Review again in a week become suggestions that wait for ${CHECKER_NAME} (or anyone who can edit the Queue) to confirm. Everything else on the Queue works as with can edit.`}
+              >
+                <input
+                  type="checkbox"
+                  id={`${idPrefix}-${area.key}-check`}
+                  checked={grant === 'suggest'}
+                  disabled={disabled}
+                  onChange={e =>
+                    onChange?.({
+                      ...value,
+                      [area.key]: e.target.checked ? 'suggest' : 'edit',
+                    })
+                  }
+                />
+                {SUGGEST_LABEL}
               </label>
             )}
           </span>

@@ -6,12 +6,15 @@ import { adminHomeHref } from '@/app/admin/nav'
 import {
   canEdit,
   canOpen,
+  canWorkQueue as canWorkQueueWith,
   NO_ACCESS,
+  queueModeOf,
   type AccessArea,
   type AccessFlags,
+  type QueueMode,
 } from './access'
 import { openToken, sealToken } from './session'
-import { findAdminUser } from './users'
+import { findAdminUser, isRootAdmin } from './users'
 
 // One way into the admin: a Google session (SESSION_COOKIE), minted by
 // /api/admin/auth/google/callback after Google vouched for an email that is a
@@ -235,9 +238,27 @@ export async function canViewQueue(): Promise<boolean> {
 }
 
 /** May accept, reject or revise proposals. Every accept is a write to the
- *  live base (a publish, a field change, a deletion later). */
+ *  live base (a publish, a field change, a deletion later). False for a
+ *  'suggest' grant ("Bryce checks first"): see queueMode. */
 export async function canReviewQueue(): Promise<boolean> {
   return canEdit(await currentAccess(), 'queue')
+}
+
+/** How this session works on the Queue (access.ts, QueueMode); null when it
+ *  has no Queue tab. A root admin always decides: the 'suggest' grant is
+ *  only ever on a managed person's card. */
+export async function queueMode(): Promise<QueueMode | null> {
+  const s = await currentSession()
+  if (!s) return null
+  const mode = queueModeOf(s.access)
+  return mode && isRootAdmin(s.email) ? 'edit' : mode
+}
+
+/** May write to the Queue at all: decide items ('edit'), or work on them
+ *  and suggest decisions ('suggest'). The Queue's route and its picture
+ *  upload take this; the decisions themselves are told apart there. */
+export async function canWorkQueue(): Promise<boolean> {
+  return canWorkQueueWith(await currentAccess())
 }
 
 /** May open /admin/users and see who can sign in. */
