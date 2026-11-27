@@ -161,6 +161,22 @@ with the "Mac" dot at the top right.
     again with the new value on it. The next press goes. The same holds for
     a rule's edits.
 
+12. An addition is published as you saw it. As Bryce, open "Demo: Harbor
+    City AI Safety Unconference" on the Additions tab, then change its
+    unpublished record by hand in `.admin-dev/queue-demo.json` (under
+    `records`, the table `tblXbN9swwldwq8f7`, the record
+    `recDEMOEVENT00001`: its `Description`, say), and press Publish. It is
+    refused: "This listing's record is not what your page showed", and
+    nothing is published. Open the item again (the toast's Open): it shows
+    the record as it is now, and the next Publish goes.
+
+13. Decisions wait for the chat. As Rob, open an addition, say `slow` in
+    the chat, and look at the buttons while the reply is being written:
+    they are off, with "Fable is still replying on this item. You can
+    decide when the reply is done." under them, and A does nothing. When
+    the reply ends they come back, and the page has read the item and its
+    record again.
+
 /admin/users shows Rob's card with "Bryce checks first" ticked; unticking it
 or ticking it again writes the change to the log with the old and new value.
 
