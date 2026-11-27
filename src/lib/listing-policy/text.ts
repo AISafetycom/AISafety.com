@@ -113,7 +113,7 @@ Each page adds its own bar, and seriousness is a separate gate: on topic isn't t
 - Jailbreak and adversarial-ML material is borderline.
 - It has to be current, and we usually don't add near-duplicates of existing listings.
 - A resource built on someone else's reading list has to add a lot of its own. A concept map or summaries of that list usually aren't enough.
-- A resource that says it's mostly AI-generated isn't listed, even when the content is accurate.
+- A resource that is mostly AI-written isn't listed.
 
 **/media-channels** – blogs, newsletters, podcasts, YouTube channels, forums, Twitter/X lists, books, and a few standalone articles.
 - AI safety has to be a substantial, recurring focus.
