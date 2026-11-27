@@ -2088,6 +2088,14 @@ function suggestLabel(mode: QueueMode, label: string): string {
     : label
 }
 
+/** Under a reply or decline draft, for someone whose decisions are
+ *  suggestions: their click makes no draft, Bryce's confirm does. */
+function suggestReplyNote(item: QueueItem): string {
+  return item.source === 'Discord'
+    ? 'Once Bryce confirms, this is copied for him to paste in Discord. Nothing is sent.'
+    : 'Once Bryce confirms, this is saved as a Gmail draft. Nothing is sent.'
+}
+
 export default function QueueAdmin({
   mode,
   canMoveMap = false,
@@ -8167,12 +8175,18 @@ function Detail({
       )}
       {!declineFromReason && (
         <p className={styles.note}>
-          {d.decline !== null || !declineChip
-            ? 'Reject'
-            : `Reject for “${declineChip}”`}
-          {item.source === 'Discord'
-            ? ' copies this, ready to paste in Discord. Nothing is sent.'
-            : ' saves this as a Gmail draft. Nothing is sent.'}
+          {mode === 'suggest' ? (
+            suggestReplyNote(item)
+          ) : (
+            <>
+              {d.decline !== null || !declineChip
+                ? 'Reject'
+                : `Reject for “${declineChip}”`}
+              {item.source === 'Discord'
+                ? ' copies this, ready to paste in Discord. Nothing is sent.'
+                : ' saves this as a Gmail draft. Nothing is sent.'}
+            </>
+          )}
         </p>
       )}
     </section>
@@ -8232,8 +8246,14 @@ function Detail({
         {item.source === 'Discord' ? (
           isOpen(item) && (
             <p className={styles.note}>
-              {acceptLabel(item, activeEdits(d), d.leftOut)} copies this, ready
-              to paste in Discord. Nothing is sent.
+              {mode === 'suggest' ? (
+                suggestReplyNote(item)
+              ) : (
+                <>
+                  {acceptLabel(item, activeEdits(d), d.leftOut)} copies this,
+                  ready to paste in Discord. Nothing is sent.
+                </>
+              )}
             </p>
           )
         ) : (
@@ -8254,7 +8274,11 @@ function Detail({
             ) : item.replyStatus === 'Failed' ? (
               `The draft could not be saved${item.error ? `: ${item.error}` : '.'}`
             ) : isOpen(item) ? (
-              `${acceptLabel(item, activeEdits(d), d.leftOut)} saves this as a Gmail draft. Nothing is sent.`
+              mode === 'suggest' ? (
+                suggestReplyNote(item)
+              ) : (
+                `${acceptLabel(item, activeEdits(d), d.leftOut)} saves this as a Gmail draft. Nothing is sent.`
+              )
             ) : (
               replyLabel(item)
             )}
