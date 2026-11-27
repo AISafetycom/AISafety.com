@@ -48,10 +48,11 @@
   HEALTH_CHECK_LISTS), 24 hours after a whole-list send finished or 18 hours
   after a wave did (healthAfterHours): a health
   check (bounces, unsubscribes, spam complaints, verified opens) with a
-  green/amber/red verdict, stored for the page and emailed as an analytics
-  update (since 26 November 2026, Bryce: "Instead of having this a health
-  check, let's make it an analytics update"): the same numbers plus the
-  clicks counted on aisafety.com so far, the most-clicked links, and the
+  green/amber/red verdict, stored with the clicks counted on aisafety.com
+  so far and the most-clicked links. Only an amber or red check is emailed
+  (since 27 November 2026, Bryce: the Monday site pulse carries every
+  issue's numbers instead of an email per issue, from the recheck below); the email is an analytics update (since 26 November 2026) that
+  leads with the warning: the numbers, the most-clicked links, and the
   newsletter's previous issue beside them (healthMail). A red one cancels
   the waves of that issue still scheduled (above); amber cancels nothing.
   The banner shows an amber or red check for EVENT_ALERT_FOR, except one on
@@ -61,6 +62,9 @@
   its numbers are read once more: bounces and spam complaints keep coming
   in after the first check, and when they (or unsubscribes) now give a
   worse verdict, that's an alert of its own. The recheck cancels nothing.
+  It stores the clicks again too: the site pulse reports each issue's
+  numbers from the recheck, 72 hours on (Bryce, 27 November 2026), and only
+  falls back on the first check's clicks for rechecks from before then.
 
   Upstash keys (the site's analytics database; no expiry on any of them):
     aisafety:newsletter:watch:state    { lastRunAt, campaigns, api, account }
@@ -361,14 +365,18 @@ export interface HealthRecord {
 }
 
 /** The three-day recheck of a checked send (RECHECK_AFTER): its numbers
- *  read again, once, and what they say. */
+ *  read again, once, and what they say. The Monday site pulse reports each
+ *  issue's numbers from here, 72 hours on (Bryce, 27 November 2026). */
 export interface RecheckRecord {
   campaignId: string
   checkedAt: string
   numbers: HealthNumbers
   /** recheckNews: the verdict on bounces, complaints and unsubscribes
-   *  when it's worse than at the 18-hour check, else null. */
+   *  when it's worse than at the first check, else null. */
   worse: { verdict: 'amber' | 'red'; reasons: string[] } | null
+  /** The issue's clicks by then, as on HealthRecord. Null when they
+   *  couldn't be read; missing on rechecks from before 27 November 2026. */
+  clicks?: CampaignClicks | null
 }
 
 interface CampaignState {
@@ -982,8 +990,9 @@ function perEmail(clicks: number, sent: number): string {
 /** The 24-hour check, emailed as an analytics update: how the send did
  *  (opens, clicks, unsubscribes, bounces, spam complaints), its most-clicked
  *  links, and, beside each rate, the newsletter's previous issue at its own
- *  check (`previous`, from previousCheck). The verdict still leads when
- *  it's amber or red. */
+ *  check (`previous`, from previousCheck). The run emails only an amber or
+ *  red check, whose warning leads; a green one still renders (the lead then
+ *  just says how it did). */
 export function healthMail(
   r: HealthRecord,
   origin: string,
@@ -1059,7 +1068,7 @@ export function healthMail(
   // newsletter page and ActiveCampaign.
   const links =
     r.verdict === 'green' ? { text: [], html: '' } : linksBlock(origin)
-  const footer = `Sent by the site’s send watcher once per ${r.wave != null ? 'wave' : 'issue'}, ${hours} hours after it finishes sending. Times are UK time.`
+  const footer = `Sent by the site’s send watcher when a ${r.wave != null ? 'wave' : 'issue'}’s check ${hours} hours after it finishes sending finds a problem; every issue’s numbers are in the Monday site pulse. Times are UK time.`
   const host = (url: string) => {
     try {
       return new URL(url).hostname.replace(/^www\./, '')
@@ -1252,6 +1261,25 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
   const origin = opts.origin ?? PRODUCTION_ORIGIN
   const mail = opts.mail ?? mailOwner
   const readIssueClicks = opts.clicks ?? readClicks
+  /** An issue's clicks so far (every wave together, by its base name) with
+   *  its TOP_LINKS most-clicked links; null when they can't be read, and
+   *  the check stands without them. */
+  const issueClicks = async (
+    baseName: string,
+    id: string
+  ): Promise<CampaignClicks | null> => {
+    try {
+      const got = (await readIssueClicks([baseName])).get(baseName)
+      return got
+        ? { total: got.total, links: got.links.slice(0, TOP_LINKS) }
+        : null
+    } catch (err) {
+      console.warn(
+        `[newsletter-watch] clicks for ${id} unread: ${errorText(err)}`
+      )
+      return null
+    }
+  }
   const startedMs = Date.now()
   const summary: WatchSummary = {
     ran: false,
@@ -1615,19 +1643,8 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
             const { verdict, reasons } = healthVerdict(numbers)
             const w = waveOf(c.name)
             const a = approved.get(c.id)
-            // Counted per issue (every wave together), by its base name.
-            let clicks: CampaignClicks | null = null
-            try {
-              const got = (await readIssueClicks([w.baseName])).get(w.baseName)
-              clicks = got
-                ? { total: got.total, links: got.links.slice(0, TOP_LINKS) }
-                : null
-            } catch (err) {
-              // The check stands without them; the email says so.
-              console.warn(
-                `[newsletter-watch] clicks for ${c.id} unread: ${errorText(err)}`
-              )
-            }
+            // Unreadable clicks leave null; the email says so.
+            const clicks = await issueClicks(w.baseName, c.id)
             record = {
               campaignId: c.id,
               listId: lists.find(l => ISSUE_LISTS.includes(l)) ?? lists[0],
@@ -1656,8 +1673,11 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
         // Stored before its email, so it's worked out and read only once.
         if (!dry && stored[i] == null)
           await store.set(HEALTH_PREFIX + c.id, record)
+        // Green is stored, not emailed: the Monday site pulse reports it
+        // (Bryce, 27 November 2026).
         if (
           !record.smallSample &&
+          record.verdict !== 'green' &&
           !record.emailedAt &&
           nowMs - Date.parse(record.checkedAt) <= HEALTH_EMAIL_RETRY_FOR
         )
@@ -1746,6 +1766,7 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
               checkedAt: nowIso,
               numbers,
               worse: recheckNews(first.numbers, numbers),
+              clicks: await issueClicks(first.baseName, c.id),
             }
           } catch (err) {
             summary.errors.push(`recheck ${c.id}: ${errorText(err)}`)
