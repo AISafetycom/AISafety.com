@@ -2009,6 +2009,38 @@ describe('runWatch: the three-day recheck', () => {
     expect(v1Reads()).toBe(2)
   })
 
+  it('stores the clicks by then, for the site pulse, or null when unreadable', async () => {
+    const { store, run } = setup()
+    ac.campaigns = [sentWave(), sentWave({ id: '261' })]
+    ac.lists = { '260': ['7'], '261': ['7'] }
+    await approve(store, '260', { listId: '7', expected: 1000 })
+    await approve(store, '261', { listId: '7', expected: 1000 })
+    clickCounts['Training · Week 41, 2026'] = { total: 10, links: [] }
+    await run()
+    const links = Array.from({ length: 7 }, (_, i) => ({
+      label: `Link ${i + 1}`,
+      url: `https://example.org/${i + 1}`,
+      clicks: 40 - i,
+    }))
+    clickCounts['Training · Week 41, 2026'] = { total: 400, links }
+    ac.campaigns = [sentWave()]
+    await run(later(54 * HOUR))
+    const record = await store.get<RecheckRecord>(RECHECK_PREFIX + '260')
+    expect(record?.clicks).toEqual({ total: 400, links: links.slice(0, 5) })
+    expect(
+      (await store.get<HealthRecord>(HEALTH_PREFIX + '260'))?.clicks?.total
+    ).toBe(10)
+
+    clicksDown = true
+    ac.campaigns = [sentWave({ id: '261' })]
+    const s = await run(later(55 * HOUR))
+    // The recheck stands without them.
+    expect(s.rechecks).toEqual([{ campaignId: '261', worse: null }])
+    expect(
+      (await store.get<RecheckRecord>(RECHECK_PREFIX + '261'))?.clicks
+    ).toBeNull()
+  })
+
   it('leaves rehearsals out, and a dry run reads but writes nothing', async () => {
     const { store, run } = setup()
     ac.campaigns = [

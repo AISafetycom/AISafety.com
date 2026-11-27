@@ -50,9 +50,8 @@
   check (bounces, unsubscribes, spam complaints, verified opens) with a
   green/amber/red verdict, stored with the clicks counted on aisafety.com
   so far and the most-clicked links. Only an amber or red check is emailed
-  (since 27 November 2026, Bryce: the Monday site pulse, which reads these
-  stored checks, carries every issue's numbers instead of an email per
-  issue); the email is an analytics update (since 26 November 2026) that
+  (since 27 November 2026, Bryce: the Monday site pulse carries every
+  issue's numbers instead of an email per issue, from the recheck below); the email is an analytics update (since 26 November 2026) that
   leads with the warning: the numbers, the most-clicked links, and the
   newsletter's previous issue beside them (healthMail). A red one cancels
   the waves of that issue still scheduled (above); amber cancels nothing.
@@ -63,6 +62,9 @@
   its numbers are read once more: bounces and spam complaints keep coming
   in after the first check, and when they (or unsubscribes) now give a
   worse verdict, that's an alert of its own. The recheck cancels nothing.
+  It stores the clicks again too: the site pulse reports each issue's
+  numbers from the recheck, 72 hours on (Bryce, 27 November 2026), and only
+  falls back on the first check's clicks for rechecks from before then.
 
   Upstash keys (the site's analytics database; no expiry on any of them):
     aisafety:newsletter:watch:state    { lastRunAt, campaigns, api, account }
@@ -363,14 +365,18 @@ export interface HealthRecord {
 }
 
 /** The three-day recheck of a checked send (RECHECK_AFTER): its numbers
- *  read again, once, and what they say. */
+ *  read again, once, and what they say. The Monday site pulse reports each
+ *  issue's numbers from here, 72 hours on (Bryce, 27 November 2026). */
 export interface RecheckRecord {
   campaignId: string
   checkedAt: string
   numbers: HealthNumbers
   /** recheckNews: the verdict on bounces, complaints and unsubscribes
-   *  when it's worse than at the 18-hour check, else null. */
+   *  when it's worse than at the first check, else null. */
   worse: { verdict: 'amber' | 'red'; reasons: string[] } | null
+  /** The issue's clicks by then, as on HealthRecord. Null when they
+   *  couldn't be read; missing on rechecks from before 27 November 2026. */
+  clicks?: CampaignClicks | null
 }
 
 interface CampaignState {
@@ -1255,6 +1261,25 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
   const origin = opts.origin ?? PRODUCTION_ORIGIN
   const mail = opts.mail ?? mailOwner
   const readIssueClicks = opts.clicks ?? readClicks
+  /** An issue's clicks so far (every wave together, by its base name) with
+   *  its TOP_LINKS most-clicked links; null when they can't be read, and
+   *  the check stands without them. */
+  const issueClicks = async (
+    baseName: string,
+    id: string
+  ): Promise<CampaignClicks | null> => {
+    try {
+      const got = (await readIssueClicks([baseName])).get(baseName)
+      return got
+        ? { total: got.total, links: got.links.slice(0, TOP_LINKS) }
+        : null
+    } catch (err) {
+      console.warn(
+        `[newsletter-watch] clicks for ${id} unread: ${errorText(err)}`
+      )
+      return null
+    }
+  }
   const startedMs = Date.now()
   const summary: WatchSummary = {
     ran: false,
@@ -1618,19 +1643,8 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
             const { verdict, reasons } = healthVerdict(numbers)
             const w = waveOf(c.name)
             const a = approved.get(c.id)
-            // Counted per issue (every wave together), by its base name.
-            let clicks: CampaignClicks | null = null
-            try {
-              const got = (await readIssueClicks([w.baseName])).get(w.baseName)
-              clicks = got
-                ? { total: got.total, links: got.links.slice(0, TOP_LINKS) }
-                : null
-            } catch (err) {
-              // The check stands without them; the email says so.
-              console.warn(
-                `[newsletter-watch] clicks for ${c.id} unread: ${errorText(err)}`
-              )
-            }
+            // Unreadable clicks leave null; the email says so.
+            const clicks = await issueClicks(w.baseName, c.id)
             record = {
               campaignId: c.id,
               listId: lists.find(l => ISSUE_LISTS.includes(l)) ?? lists[0],
@@ -1752,6 +1766,7 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
               checkedAt: nowIso,
               numbers,
               worse: recheckNews(first.numbers, numbers),
+              clicks: await issueClicks(first.baseName, c.id),
             }
           } catch (err) {
             summary.errors.push(`recheck ${c.id}: ${errorText(err)}`)
