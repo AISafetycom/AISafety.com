@@ -48,10 +48,12 @@
   HEALTH_CHECK_LISTS), 24 hours after a whole-list send finished or 18 hours
   after a wave did (healthAfterHours): a health
   check (bounces, unsubscribes, spam complaints, verified opens) with a
-  green/amber/red verdict, stored for the page and emailed as an analytics
-  update (since 26 November 2026, Bryce: "Instead of having this a health
-  check, let's make it an analytics update"): the same numbers plus the
-  clicks counted on aisafety.com so far, the most-clicked links, and the
+  green/amber/red verdict, stored with the clicks counted on aisafety.com
+  so far and the most-clicked links. Only an amber or red check is emailed
+  (since 27 November 2026, Bryce: the Monday site pulse, which reads these
+  stored checks, carries every issue's numbers instead of an email per
+  issue); the email is an analytics update (since 26 November 2026) that
+  leads with the warning: the numbers, the most-clicked links, and the
   newsletter's previous issue beside them (healthMail). A red one cancels
   the waves of that issue still scheduled (above); amber cancels nothing.
   The banner shows an amber or red check for EVENT_ALERT_FOR, except one on
@@ -982,8 +984,9 @@ function perEmail(clicks: number, sent: number): string {
 /** The 24-hour check, emailed as an analytics update: how the send did
  *  (opens, clicks, unsubscribes, bounces, spam complaints), its most-clicked
  *  links, and, beside each rate, the newsletter's previous issue at its own
- *  check (`previous`, from previousCheck). The verdict still leads when
- *  it's amber or red. */
+ *  check (`previous`, from previousCheck). The run emails only an amber or
+ *  red check, whose warning leads; a green one still renders (the lead then
+ *  just says how it did). */
 export function healthMail(
   r: HealthRecord,
   origin: string,
@@ -1059,7 +1062,7 @@ export function healthMail(
   // newsletter page and ActiveCampaign.
   const links =
     r.verdict === 'green' ? { text: [], html: '' } : linksBlock(origin)
-  const footer = `Sent by the site’s send watcher once per ${r.wave != null ? 'wave' : 'issue'}, ${hours} hours after it finishes sending. Times are UK time.`
+  const footer = `Sent by the site’s send watcher when a ${r.wave != null ? 'wave' : 'issue'}’s check ${hours} hours after it finishes sending finds a problem; every issue’s numbers are in the Monday site pulse. Times are UK time.`
   const host = (url: string) => {
     try {
       return new URL(url).hostname.replace(/^www\./, '')
@@ -1656,8 +1659,11 @@ export async function runWatch(opts: WatchOptions = {}): Promise<WatchSummary> {
         // Stored before its email, so it's worked out and read only once.
         if (!dry && stored[i] == null)
           await store.set(HEALTH_PREFIX + c.id, record)
+        // Green is stored, not emailed: the Monday site pulse reports it
+        // (Bryce, 27 November 2026).
         if (
           !record.smallSample &&
+          record.verdict !== 'green' &&
           !record.emailedAt &&
           nowMs - Date.parse(record.checkedAt) <= HEALTH_EMAIL_RETRY_FOR
         )

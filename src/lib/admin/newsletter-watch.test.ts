@@ -8,6 +8,7 @@ import {
   type ApprovedRecord,
   HEALTH_PREFIX,
   type HealthRecord,
+  healthMail,
   healthVerdict,
   LOCK_KEY,
   memoryWatchStore,
@@ -1426,17 +1427,21 @@ describe('runWatch: health checks', () => {
     ).toHaveLength(1)
   })
 
-  it('emails a green check and raises nothing', async () => {
+  it('stores a green check, emails nothing and raises nothing', async () => {
+    // The Monday site pulse reports green checks (27 November 2026).
     const { store, sent, run } = setup()
     ac.campaigns = [sentWave()]
     ac.lists['260'] = ['7']
     await approve(store, '260', { listId: '7', expected: 1000 })
     const s = await run()
     expect(s.health).toEqual([{ campaignId: '260', verdict: 'green' }])
-    expect(sent[0].subject).toBe(
-      'Newsletter: Training · Week 41 wave 1/4 analytics'
-    )
-    expect(sent).toHaveLength(1)
+    expect(sent).toEqual([])
+    const record = await store.get<HealthRecord>(HEALTH_PREFIX + '260')
+    expect(record?.verdict).toBe('green')
+    expect(record?.emailedAt).toBeNull()
+    // Nor on a later run.
+    await run(later(10 * MIN))
+    expect(sent).toEqual([])
     expect(s.alerts).toEqual([])
   })
 
@@ -1513,7 +1518,8 @@ describe('runWatch: health checks', () => {
 
   it('retries a health email that did not go out, without rereading', async () => {
     const { store, sent, run, breakMail } = setup()
-    ac.campaigns = [sentWave()]
+    // Amber (bounces 1.5%): a green check isn't emailed at all.
+    ac.campaigns = [sentWave({ softbounces: '15' })]
     ac.lists['260'] = ['7']
     await approve(store, '260', { listId: '7', expected: 1000 })
     breakMail(true)
@@ -1690,17 +1696,48 @@ describe('runWatch: health checks', () => {
     expect(s.alerts.map(a => a.title)).toEqual([
       'Training · Week 42 health check: amber – look before the next issue',
     ])
+    // Events came back green: stored for the site pulse, not emailed.
     expect(sent.map(m => m.subject)).toEqual([
       'Newsletter: Training · Week 42 analytics: amber – look before the next issue',
-      'Newsletter: Events · Week 42 analytics',
     ])
     expect(sent[0].text).toContain(
       'Training · Week 42 needs a look before the next issue: verified opens 20% (amber under 25%).'
     )
-    expect(sent[1].text).toContain(
+    expect(sent[0].text).not.toContain('next wave')
+    expect(s.health).toContainEqual({ campaignId: '261', verdict: 'green' })
+  })
+
+  it('still words a green update, for a direct call', () => {
+    const r: HealthRecord = {
+      campaignId: '261',
+      listId: '6',
+      name: 'Events · Week 42, 2026',
+      baseName: 'Events · Week 42, 2026',
+      wave: null,
+      waves: null,
+      verdict: 'green',
+      reasons: [],
+      numbers: {
+        sendAmt: 1000,
+        hardBounces: 0,
+        softBounces: 0,
+        unsubscribes: 1,
+        spamComplaints: 0,
+        verifiedOpens: 400,
+      },
+      expected: 1000,
+      finishedAt: NOW.toISOString(),
+      checkedAt: NOW.toISOString(),
+      smallSample: false,
+      emailedAt: null,
+      clicks: null,
+    }
+    const m = healthMail(r, 'https://aisafety.com')
+    expect(m.subject).toBe('Newsletter: Events · Week 42 analytics')
+    expect(m.text).toContain(
       'How Events · Week 42 did in the 24 hours after it finished sending.\n'
     )
-    expect(sent[1].text).not.toContain('next wave')
+    expect(m.text).not.toContain('next wave')
   })
 
   it('gives the clicks, the most-clicked links and the last issue beside them', async () => {
@@ -1716,6 +1753,8 @@ describe('runWatch: health checks', () => {
         sdate: acDate(26 * HOUR),
         ldate: acDate(25 * HOUR),
         unsubscribes: '3',
+        // Amber (bounces 1.5%), so it's emailed: a green check isn't.
+        softbounces: '15',
       }),
       // A practice send since the last issue: too small to compare with.
       sentWave({
@@ -1785,7 +1824,7 @@ describe('runWatch: health checks', () => {
 
     await run()
     expect(sent.map(m => m.subject)).toEqual([
-      'Newsletter: Events · Week 42 analytics',
+      'Newsletter: Events · Week 42 analytics: amber – look before the next issue',
     ])
     const text = sent[0].text
     expect(text).toContain('Opened: 400 (40%; last issue 33%)')
@@ -1802,8 +1841,8 @@ describe('runWatch: health checks', () => {
     expect(text).toContain(
       'Analytics: https://aisafety.com/admin/analytics?tab=newsletters'
     )
-    // A green update leaves out the newsletter page and ActiveCampaign.
-    expect(text).not.toContain('Newsletter page:')
+    // A warning also links the newsletter page.
+    expect(text).toContain('Newsletter page:')
     expect(sent[0].html).toContain(
       '<a href="https://www.example.org/40">MATS Winter Program</a>'
     )
@@ -1814,13 +1853,14 @@ describe('runWatch: health checks', () => {
 
   it('still sends the update when the clicks can’t be read, and on a wave says so', async () => {
     const { store, sent, run } = setup()
-    ac.campaigns = [sentWave()]
+    // Amber (bounces 1.5%), so it's emailed.
+    ac.campaigns = [sentWave({ softbounces: '15' })]
     ac.lists['260'] = ['7']
     await approve(store, '260', { listId: '7', expected: 1000 })
     clicksDown = true
     await run()
     expect(sent.map(m => m.subject)).toEqual([
-      'Newsletter: Training · Week 41 wave 1/4 analytics',
+      'Newsletter: Training · Week 41 wave 1/4 analytics: amber – look before the next wave',
     ])
     expect(sent[0].text).toContain(
       'Clicks (every wave so far): couldn’t be read'
@@ -1843,16 +1883,14 @@ describe('runWatch: health checks', () => {
     const whole = { wave: null, waves: null, segmentId: null }
     await approve(store, '260', { listId: '6', ...whole, expected: 1000 })
     await approve(store, '261', { listId: '7', expected: 1000 })
-    // 19 hours after both finished: only the wave is due.
-    await run()
-    expect(sent.map(m => m.subject)).toEqual([
-      'Newsletter: Training · Week 41 wave 1/4 analytics',
-    ])
+    // 19 hours after both finished: only the wave is due. (Both are green,
+    // so neither is emailed: the checks themselves show the timing.)
+    let s = await run()
+    expect(s.health).toEqual([{ campaignId: '261', verdict: 'green' }])
     // 24 hours after: the whole-list send too.
-    await run(later(5 * HOUR))
-    expect(sent.map(m => m.subject).slice(1)).toEqual([
-      'Newsletter: Events · Week 42 analytics',
-    ])
+    s = await run(later(5 * HOUR))
+    expect(s.health).toEqual([{ campaignId: '260', verdict: 'green' }])
+    expect(sent).toEqual([])
   })
 })
 
@@ -1918,9 +1956,8 @@ describe('runWatch: the three-day recheck', () => {
     ac.lists['260'] = ['7']
     await approve(store, '260', { listId: '7', expected: 1000 })
     await run()
-    expect(sent.map(m => m.subject)).toEqual([
-      'Newsletter: Training · Week 41 wave 1/4 analytics',
-    ])
+    // Green at 18 hours: stored, not emailed.
+    expect(sent).toEqual([])
     // Not yet: two days on, nothing is read again.
     await run(later(29 * HOUR))
     expect(v1Reads()).toBe(1)
@@ -1932,16 +1969,16 @@ describe('runWatch: the three-day recheck', () => {
     expect(s.rechecks).toEqual([{ campaignId: '260', worse: 'red' }])
     expect(ids(s)).toEqual(['recheck:260'])
     expect(s.alerts[0].severity).toBe('red')
-    expect(sent.map(m => m.subject).slice(1)).toEqual([
+    expect(sent.map(m => m.subject)).toEqual([
       'Newsletter: Training · Week 41 wave 1/4 3-day recheck: now red',
     ])
-    expect(sent[1].text).toContain(
+    expect(sent[0].text).toContain(
       'Read again three days after it finished: spam complaints 0.2% (red above 0.1%); bounces 1.3% (amber at 1%). At the 18-hour check it was green.'
     )
-    expect(sent[1].text).toContain(
+    expect(sent[0].text).toContain(
       'Since then: hard bounces 0 → 4, soft bounces 0 → 9, spam complaints 0 → 2. Sent to 1,000.'
     )
-    expect(sent[1].text).toContain('The watcher cancels nothing on a recheck')
+    expect(sent[0].text).toContain('The watcher cancels nothing on a recheck')
     const record = await store.get<RecheckRecord>(RECHECK_PREFIX + '260')
     expect(record?.worse?.verdict).toBe('red')
     expect(record?.numbers.spamComplaints).toBe(2)
@@ -1950,7 +1987,7 @@ describe('runWatch: the three-day recheck', () => {
     const again = await run(later(54 * HOUR + 10 * MIN))
     expect(again.rechecks).toEqual([])
     expect(ids(again)).toEqual(['recheck:260'])
-    expect(sent).toHaveLength(2)
+    expect(sent).toHaveLength(1)
     expect(v1Reads()).toBe(2)
   })
 
@@ -1966,7 +2003,8 @@ describe('runWatch: the three-day recheck', () => {
     const s = await run(later(54 * HOUR))
     expect(s.rechecks).toEqual([{ campaignId: '260', worse: null }])
     expect(s.alerts).toEqual([])
-    expect(sent).toHaveLength(1)
+    // Green at 18 hours and no worse since: no email at all.
+    expect(sent).toEqual([])
     await run(later(60 * HOUR))
     expect(v1Reads()).toBe(2)
   })
@@ -2347,7 +2385,8 @@ describe('runWatch: review hardening', () => {
         ldate: acDate(19 * HOUR),
         send_amt: '1000',
         total_amt: '1000',
-        verified_unique_opens: '400',
+        // Amber (opens 20%), so each is emailed: a green check isn't.
+        verified_unique_opens: '200',
       })
     )
     ac.campaigns.push(campaign({ id: '325', status: '3' }))
