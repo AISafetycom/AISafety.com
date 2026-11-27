@@ -139,13 +139,18 @@ import {
 } from '@/lib/admin/queue-suggest'
 import { CHAT_SOURCE, chatHeading } from '@/lib/admin/queue-chat-source'
 import {
-  RECORD_NOT_READ,
   REPLY_HOLDS,
   heldIds,
   repliesEnded,
   withPanelWord,
   type Replying,
 } from '@/lib/admin/queue-chat-replying'
+import {
+  RECORD_NOT_READ,
+  publishWaits,
+  readDue,
+  readStands,
+} from '@/lib/admin/queue-record-read'
 import { COMPUTED_TYPES, HOUSEKEEPING } from '@/lib/admin/queue-fields'
 import {
   editChanges,
@@ -2357,6 +2362,15 @@ function QueueInbox({
   // not answer, or it sent no fingerprint): Publish is not held for a read
   // that may never come, and the site says what is wrong.
   const liveFailed = useRef<Set<string>>(new Set())
+  // One read at a time per record (queue-record-read.ts). Each thing that
+  // may have moved a record bumps its number; a read belongs to the number
+  // it began in, and `liveReads` holds the one on its way.
+  const liveGen = useRef<Map<string, number>>(new Map())
+  const liveReads = useRef<Map<string, number>>(new Map())
+  // The addition Publish was pressed on in the moment its record was still
+  // being read: a line under its buttons says so, until it is decided or
+  // he moves on. Not an error: the item is not tagged as failed.
+  const [recordWait, setRecordWait] = useState<string | null>(null)
   // A published event's or training's start date and deadline, by record,
   // so a Change on one that is about to happen counts as urgent.
   const [listingDates, setListingDates] = useState<
@@ -3323,6 +3337,9 @@ function QueueInbox({
   ])
 
   selectedIdRef.current = selectedId
+  // The line about a Publish pressed too soon belongs to the item it was
+  // pressed on: it goes when he moves to another.
+  if (recordWait && recordWait !== selectedId) setRecordWait(null)
 
   // The record id in the search box to look up as a listing: the first one
   // no open item holds (that item is the listing, in the results already)
@@ -3464,11 +3481,25 @@ function QueueInbox({
     // And so is one this page has written to since (a picture dropped in
     // a slot): the record's fingerprint is no longer the one it holds.
     const had = live[selected.id]
-    if (had && !had.stale && !hasExpiredPicture(had.fields)) return
     const id = selected.id
+    const gen = liveGen.current.get(id) ?? 0
+    // One read at a time: this runs again whenever the list or the row is
+    // read again, which says nothing about the record, and the read it
+    // wants may be on its way already (queue-record-read.ts).
+    if (
+      !readDue(
+        had
+          ? { stale: had.stale, expired: hasExpiredPicture(had.fields) }
+          : null,
+        liveReads.current.get(id),
+        gen
+      )
+    ) {
+      return
+    }
+    liveReads.current.set(id, gen)
     const target = `${selected.targetTable}/${selected.targetRecord}`
     const fresh = freshTargets.current.has(id)
-    let cancelled = false
     void (async () => {
       try {
         const res = await fetch(
@@ -3481,7 +3512,9 @@ function QueueInbox({
           schema?: FieldInfo[]
           shown?: string
         }
-        if (cancelled) return
+        // Something may have moved the record while this read was on its
+        // way: it is not the record as it is now.
+        if (!readStands(gen, liveGen.current.get(id) ?? 0)) return
         if (res.ok && data.fields) {
           const fields = data.fields
           const schema = data.schema ?? []
@@ -3496,16 +3529,32 @@ function QueueInbox({
         }
       } catch {
         // the snapshot stays
-        if (!cancelled) liveFailed.current.add(id)
+        if (readStands(gen, liveGen.current.get(id) ?? 0)) {
+          liveFailed.current.add(id)
+        }
+      } finally {
+        if (liveReads.current.get(id) === gen) liveReads.current.delete(id)
+        // Thrown away, with no newer read begun meanwhile: this runs
+        // again, and begins it.
+        if (
+          !readStands(gen, liveGen.current.get(id) ?? 0) &&
+          !liveReads.current.has(id)
+        ) {
+          setLive(prev => ({ ...prev }))
+        }
       }
     })()
-    return () => {
-      cancelled = true
-    }
   }, [selected, live, fableIds])
+
+  /** Something may have moved this item's record: a read of it that is on
+   *  its way no longer counts (queue-record-read.ts). */
+  const movedLive = useCallback((id: string) => {
+    liveGen.current.set(id, (liveGen.current.get(id) ?? 0) + 1)
+  }, [])
 
   const setLiveField = useCallback(
     (id: string, field: string, value: unknown) => {
+      movedLive(id)
       setLive(prev => {
         const cur = prev[id]
         if (!cur) return prev
@@ -3522,31 +3571,40 @@ function QueueInbox({
         }
       })
     },
-    []
+    [movedLive]
   )
 
   // A chat reply on the item has ended, and may have changed its record:
   // what the page shows of it stays up while the effect above reads it
   // again (no jump back to the snapshot for a moment), but it no longer
   // counts as read, so a Publish waits for the new read.
-  const staleLive = useCallback((id: string) => {
-    setLive(prev => {
-      const cur = prev[id]
-      if (!cur || cur.stale) return prev
-      return { ...prev, [id]: { ...cur, stale: true } }
-    })
-  }, [])
+  const staleLive = useCallback(
+    (id: string) => {
+      movedLive(id)
+      setLive(prev => {
+        const cur = prev[id]
+        // With none held yet, the read on its way is thrown away as it
+        // lands, and made again.
+        return cur ? { ...prev, [id]: { ...cur, stale: true } } : prev
+      })
+    },
+    [movedLive]
+  )
 
   // Fable changed the record from the chat on the Mac: drop the live read
   // so the effect above fetches it again.
-  const forgetLive = useCallback((id: string) => {
-    setLive(prev => {
-      if (!prev[id]) return prev
-      const next = { ...prev }
-      delete next[id]
-      return next
-    })
-  }, [])
+  const forgetLive = useCallback(
+    (id: string) => {
+      movedLive(id)
+      setLive(prev => {
+        if (!prev[id]) return prev
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
+    },
+    [movedLive]
+  )
 
   // A row's picture link has stopped working (Airtable links last a few
   // hours): show the plain box and ask for a fresh link.
@@ -4592,15 +4650,22 @@ function QueueInbox({
       // the read that is on its way. Only on the item in focus, whose
       // record is being read, and not after a read that failed: then the
       // site is asked, and says what is wrong.
+      // Said in a line under the buttons, not as an error: nothing failed,
+      // and the item stays where it is.
       if (
-        wantsRecordShown(item, action) &&
-        isOpen(item) &&
-        selectedIdRef.current === item.id &&
-        !liveFailed.current.has(item.id) &&
-        !shownFor(itemsRef.current, liveRef.current, item, action)
+        publishWaits({
+          publishes: wantsRecordShown(item, action) && isOpen(item),
+          inFocus: selectedIdRef.current === item.id,
+          readFailed: liveFailed.current.has(item.id),
+          shown: shownFor(itemsRef.current, liveRef.current, item, action),
+        })
       ) {
-        setDraft(item.id, { busy: false, error: RECORD_NOT_READ })
+        setRecordWait(item.id)
+        setBlockedFlash(n => n + 1)
         return
+      }
+      if (isDecision(action)) {
+        setRecordWait(was => (was === item.id ? null : was))
       }
       // Bryce checks first: a decision is a suggestion, on its own path.
       if (mode === 'suggest' && isDecision(action)) {
@@ -6355,6 +6420,7 @@ function QueueInbox({
                 onSavePublic={text => savePublic(selected, text)}
                 onRowChanged={() => void refreshRow(selected)}
                 replyHolds={isOpen(selected) && held.has(selected.id)}
+                recordWaits={recordWait === selected.id}
                 onReplying={on => onReplying(selected.id, on)}
                 chatAgent={canEdit && agentChat ? agent : null}
                 chatTeam={
@@ -7787,6 +7853,7 @@ function Detail({
   onSavePublic,
   onRowChanged,
   replyHolds = false,
+  recordWaits = false,
   onReplying,
   chatAgent,
   chatTeam,
@@ -7856,6 +7923,9 @@ function Detail({
   /** A chat reply for this item is still being written: its decisions
    *  wait (queue-chat-replying.ts). */
   replyHolds?: boolean
+  /** Publish was pressed while the item's record was still being read:
+   *  a line under the buttons says so (queue-record-read.ts). */
+  recordWaits?: boolean
   /** The item's chat panel says whether a reply is under way in it (null:
    *  it has no word on it any more). */
   onReplying?: (on: boolean | null) => void
@@ -9830,6 +9900,10 @@ function Detail({
             </button>
             {askButton}
             {replyHolds && !d.busy && blockedNote('reply', REPLY_HOLDS)}
+            {recordWaits &&
+              !replyHolds &&
+              !d.busy &&
+              blockedNote('record', RECORD_NOT_READ)}
             {item.passed &&
               !d.busy &&
               blockedNote('passed', passedBlock(item.passed))}

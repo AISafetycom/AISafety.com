@@ -105,8 +105,3 @@ export function heldIds(panels: Replying, answering: Answering): Set<string> {
 /** Said under the buttons while they wait, and when a key asks anyway. */
 export const REPLY_HOLDS =
   'Fable is still replying on this item. You can decide when the reply is done.'
-
-/** An addition whose record this page has not finished reading: Publish
- *  waits for the read. */
-export const RECORD_NOT_READ =
-  'Not done yet: this page was still reading the listing’s record. Look at it as it is now, then decide.'
