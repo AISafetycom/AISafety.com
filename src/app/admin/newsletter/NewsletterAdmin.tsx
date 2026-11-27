@@ -61,6 +61,9 @@ interface ListingAlert {
     status: string
     changes: Array<{ field: string; from: string; to: string }>
     reason: string | null
+    /** The fingerprint of the Queue row these changes were read from; sent
+     *  back with Fix, which is refused when the row has changed since. */
+    shown?: string | null
   }>
   changes: Array<{ name: string; label: string; email: string; site: string }>
   /** The card can be rewritten from the listing line by line. */
@@ -1188,6 +1191,11 @@ export default function NewsletterAdmin({
           campaign: draft.id,
           key: alert.key,
           queue: queueId,
+          // What this page listed for that Broom item (the fingerprint that
+          // came with its changes): the Fix goes on that, or not at all.
+          shown: queueId
+            ? (alert.broom.find(b => b.id === queueId)?.shown ?? undefined)
+            : undefined,
           message: draft.messageId ?? undefined,
         }),
       })
@@ -1200,6 +1208,10 @@ export default function NewsletterAdmin({
         error?: string
         problems?: string[]
       }
+      // Broom's change is no longer the one listed here: nothing was
+      // applied, and the listings are read again so the list says what the
+      // row holds now.
+      if (res.status === 412) recheckListings(draft.id)
       if (!res.ok || !body.cards || !body.alerts)
         throw new Error(
           body.problems?.join('; ') ?? body.error ?? `HTTP ${res.status}`

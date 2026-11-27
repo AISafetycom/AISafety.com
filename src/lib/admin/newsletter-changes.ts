@@ -15,6 +15,11 @@
   the Queue's Apply does, then rewrite the card) or Update email (rewrite the
   card from the listing).
 
+  Fix is a Queue decision like any other, so it goes on what the page
+  showed (queue-shown.ts): each Broom item comes with the fingerprint of the
+  row its listed changes were read from, the page sends it back, and a row
+  that reads differently by then is refused, 412, and read again.
+
   Events and Training cards are drawn by the site's own card builders
   (~/Newsletter/sitecards.py runs eventCardProps / trainingCardProps on the
   public Data API), and so are Funding cards since 28 October 2026
@@ -56,6 +61,7 @@ import {
   getQueueItem,
   listQueue,
   QueueError,
+  requireShown,
   sanitiseEdits,
   type PreviewListing,
   type QueueItem,
@@ -90,6 +96,11 @@ export interface BroomFix {
   changes: Array<{ field: string; from: string; to: string }>
   /** Fable Review's first reason, as the Queue shows it. */
   reason: string | null
+  /** The fingerprint of the row these changes were read from: the row's own
+   *  (queue-shown.ts, over its whole Proposal `changes` and its target), not
+   *  one worked out from the text above, which is those same changes
+   *  flattened for reading. The page sends it back with Fix. */
+  shown: string | null
 }
 
 export interface ListingAlert {
@@ -201,6 +212,7 @@ function broomFix(item: QueueItem): BroomFix {
       to: display(c.to),
     })),
     reason: item.reasons[0] ?? null,
+    shown: item.shown ?? null,
   }
 }
 
@@ -379,7 +391,10 @@ export async function fixListing(
   queueId: string | null,
   messageId?: string,
   /** Who pressed Fix, for the Queue row's history (queue-history.ts). */
-  by: string | null = null
+  by: string | null = null,
+  /** With `queueId`: the fingerprint the page was given with that Broom
+   *  item's changes (BroomFix.shown). */
+  shown: unknown = null
 ): Promise<FixResult> {
   if (!isRecordId(key)) throw new QueueError('Not a listing card.', 400)
   let groups = await draftCardGroups(draftId, messageId)
@@ -399,6 +414,10 @@ export async function fixListing(
         'That Broom item is gone or isn’t about this listing. Reload the page.',
         409
       )
+    // Before anything is written: the row's changes are still the ones the
+    // page listed (412 otherwise, and the page reads its alerts again). The
+    // history entry the Apply below writes carries the same fingerprint.
+    requireShown(item, shown)
     const keep = await alreadyChanged(item)
     // The page's edits as the Queue saved them, and the fields left out
     // there, which Apply does not write from here either.

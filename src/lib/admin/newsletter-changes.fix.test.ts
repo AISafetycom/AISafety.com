@@ -30,8 +30,11 @@ vi.mock('./queue', async importOriginal => ({
   getPreviewListings: vi.fn(async () => ({})),
 }))
 
-import { fixListing } from './newsletter-changes'
+import { fixListing, listingAlerts } from './newsletter-changes'
+import { getQueueItem } from './queue'
+import { actingAs } from './queue-actor'
 import { GONE_KEY } from './queue-retired'
+import { shownOf } from './queue-shown'
 
 const QUEUE = 'tblonlKwIFJ7Aa8QN'
 const FUNDING = 'tblzMTLDZWZKqTxrq'
@@ -43,6 +46,7 @@ const F = {
   edits: 'fldzCgKQbopgcbrwq',
   targetTable: 'fld45SUjstUZROuXl',
   targetRecord: 'fldszXtLdUijgFG4l',
+  history: 'fldjRsqYJAwR6CXpA',
 }
 const rid = (n: string) => `rec${n.padStart(14, '0')}`
 const ID = rid('broom')
@@ -170,9 +174,18 @@ describe('fixListing on a Broom item that names a deleted column', () => {
   })
 
   const saved = () => JSON.parse(String(row[F.edits])) as unknown
+  /** The fingerprint the page was given with this row's changes. */
+  const shown = () =>
+    shownOf({
+      type: 'Change',
+      proposal: JSON.parse(String(row[F.proposal])),
+      targetTable: FUNDING,
+      targetRecord: FUND,
+    })
+  const fix = () => fixListing('draft1', FUND, ID, undefined, null, shown())
 
   it('says the field was left out because its column is gone, and applies the rest', async () => {
-    const res = await fixListing('draft1', FUND, ID)
+    const res = await fix()
     expect(res.applied).toBe(true)
     expect(res.note).toBe(
       'Accepting applications? was left out: that column is no longer in Airtable. Use Application status and Deadline instead.'
@@ -193,7 +206,7 @@ describe('fixListing on a Broom item that names a deleted column', () => {
   it('writes it as before while the column is still there', async () => {
     columns = [...NEW_COLUMNS, OLD_COLUMN]
     listing = { ...listing, [OLD]: 'Applications close 23 October 2026' }
-    const res = await fixListing('draft1', FUND, ID)
+    const res = await fix()
     expect(res.note).toBeNull()
     expect(writes).toEqual([
       {
@@ -209,7 +222,7 @@ describe('fixListing on a Broom item that names a deleted column', () => {
   it('still leaves a field someone changed by hand while its column is there', async () => {
     columns = [...NEW_COLUMNS, OLD_COLUMN]
     listing = { ...listing, [OLD]: 'Applications on a rolling basis' }
-    const res = await fixListing('draft1', FUND, ID)
+    const res = await fix()
     expect(res.note).toBe(
       'Left Accepting applications? as it is: someone changed it on the listing after Broom’s check.'
     )
@@ -222,5 +235,110 @@ describe('fixListing on a Broom item that names a deleted column', () => {
       },
     ])
     expect(saved()).toEqual({ '(kept by Fable)': [OLD] })
+  })
+
+  // A Fix is a Queue decision: it goes on what the page listed, as one made
+  // on the Queue page does (queue-shown.ts).
+  describe('on what the page showed', () => {
+    const history = () =>
+      JSON.parse(String(row[F.history] ?? '[]')) as Record<string, unknown>[]
+    /** The Broom item as the page is handed it, in the draft's alerts. */
+    const listed = async () => {
+      const item = await getQueueItem(ID)
+      const [alert] = listingAlerts(
+        await mocks.draftCardGroups(),
+        item ? [item] : [],
+        {}
+      )
+      return alert.broom[0]
+    }
+    const rewrite = (to: string) => {
+      const proposal = JSON.parse(String(row[F.proposal])) as {
+        changes: { to: unknown }[]
+      }
+      proposal.changes[1].to = to
+      row[F.proposal] = JSON.stringify(proposal)
+    }
+
+    it('hands the page the row’s own fingerprint with the changes it lists', async () => {
+      const broom = await listed()
+      // Every change of the row is listed, and the fingerprint is the row's
+      // (its whole Proposal `changes` and its target), so a Fix pressed on
+      // an unchanged row is never refused.
+      expect(broom.changes.map(c => c.field)).toEqual([
+        OLD,
+        'Application status',
+      ])
+      expect(broom.shown).toBe(shown())
+      expect(broom.shown).toMatch(/^[0-9a-f]{64}$/)
+    })
+
+    it('applies it, and the history says what it was made on and by whom', async () => {
+      const broom = await listed()
+      const res = await actingAs('Bryce@Example.org', () =>
+        fixListing('draft1', FUND, ID, undefined, 'Bryce', broom.shown)
+      )
+      expect(res.applied).toBe(true)
+      expect(row[F.status]).toBe('Applied')
+      const entry = history().at(-1)
+      expect(entry).toMatchObject({
+        by: 'Bryce',
+        email: 'bryce@example.org',
+        did: 'accept',
+        shown: broom.shown,
+      })
+    })
+
+    it('refuses a row whose changes were rewritten after the page read them', async () => {
+      const broom = await listed()
+      rewrite('Something nobody looked at')
+      await expect(
+        fixListing('draft1', FUND, ID, undefined, 'Bryce', broom.shown)
+      ).rejects.toMatchObject({
+        status: 412,
+        message: expect.stringContaining('not what your page showed'),
+      })
+      // Nothing written: not the listing, not the row.
+      expect(writes).toEqual([])
+      expect(row[F.status]).toBe('Pending')
+      expect(row[F.history]).toBeUndefined()
+      // Read again, the page has the new changes and their fingerprint, and
+      // the next press goes through on those.
+      const again = await listed()
+      expect(again.shown).not.toBe(broom.shown)
+      expect(again.changes[1].to).toBe('Something nobody looked at')
+      await fixListing('draft1', FUND, ID, undefined, 'Bryce', again.shown)
+      expect(writes.at(-1)?.fields).toMatchObject({
+        'Application status': 'Something nobody looked at',
+      })
+      expect(history().at(-1)).toMatchObject({ shown: again.shown })
+    })
+
+    it('refuses a row pointed at another listing meanwhile', async () => {
+      const broom = await listed()
+      // Same changes, another record: the route's own check (the item is
+      // about this card's listing) answers first, and nothing is written.
+      row[F.targetRecord] = rid('other')
+      await expect(
+        fixListing('draft1', FUND, ID, undefined, 'Bryce', broom.shown)
+      ).rejects.toMatchObject({ status: 409 })
+      expect(writes).toEqual([])
+    })
+
+    it('refuses a page that says nothing of what it showed', async () => {
+      for (const sent of [undefined, null, '', 42, { shown: shown() }]) {
+        await expect(
+          fixListing('draft1', FUND, ID, undefined, 'Bryce', sent)
+        ).rejects.toMatchObject({ status: 412 })
+      }
+      expect(writes).toEqual([])
+      expect(row[F.status]).toBe('Pending')
+    })
+
+    it('needs none for a card rewritten from the listing, with no Broom item', async () => {
+      const res = await fixListing('draft1', FUND, null)
+      expect(res.applied).toBe(false)
+      expect(row[F.status]).toBe('Pending')
+    })
   })
 })

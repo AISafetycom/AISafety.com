@@ -8,8 +8,9 @@
 //
 // The address is kept for the length of one request here, rather than
 // handed down through every function that ends in a History write: the
-// Queue's route runs its action inside `actingAs`, and the one place that
-// writes an entry asks `actorEmail`. Each request has its own, however many
+// Queue's route runs its action inside `actingAs` (and so does the
+// newsletter page's Fix, which applies a Queue item), and the one place
+// that writes an entry asks `actorEmail`. Each request has its own, however many
 // run at once. Outside a request (a test, a script) there is none, and the
 // entry is written without one.
 import { AsyncLocalStorage } from 'node:async_hooks'

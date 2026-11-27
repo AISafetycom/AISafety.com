@@ -2,7 +2,7 @@
   GET  /api/admin/newsletter/changes?draft=ID&message=MID
        → { alerts: ListingAlert[] }
   POST /api/admin/newsletter/changes
-       body { campaign, key, queue?, message? }
+       body { campaign, key, queue?, shown?, message? }
        → { cards, alerts, applied, cardUpdated, note }
 
   Listings in a waiting newsletter that changed since it was built (see
@@ -17,6 +17,13 @@
   rewrites the card (Newsletter sending). Only from the admin page itself.
   409 with { problems } when the draft fails its checks, 409/4xx with
   { error } for a Queue problem (the item was decided meanwhile, say).
+
+  Applying a Broom item is a Queue decision, held to the Queue page's rule
+  (queue-shown.ts): `shown` is the fingerprint that came with the item's
+  changes in the alerts, and a row whose changes read differently by now
+  (or a page that sent none) gets 412 with { error }, nothing written, and
+  the page reads the alerts again. The row's history entry carries that
+  fingerprint and the signed-in admin's address, as any decision's does.
 */
 
 import { NextRequest } from 'next/server'
@@ -33,6 +40,7 @@ import {
 } from '@/lib/admin/newsletter'
 import { draftListingAlerts, fixListing } from '@/lib/admin/newsletter-changes'
 import { QueueError } from '@/lib/admin/queue'
+import { actingAs } from '@/lib/admin/queue-actor'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -104,7 +112,7 @@ export async function POST(req: NextRequest) {
     return json(
       {
         error:
-          'body must be { campaign: id, key: rec…, queue?: rec…, message?: id }',
+          'body must be { campaign: id, key: rec…, queue?: rec…, shown?: text, message?: id }',
       },
       400
     )
@@ -113,12 +121,17 @@ export async function POST(req: NextRequest) {
     return json({ error: 'Fixing a listing needs Queue access.' }, 401)
   try {
     const me = await currentAdmin()
-    const result = await fixListing(
-      campaign,
-      key,
-      queue,
-      message,
-      me?.name || me?.email || null
+    // The history entry a Fix writes names this person by address too
+    // (queue-actor.ts): the Mac goes by the address.
+    const result = await actingAs(me?.email, () =>
+      fixListing(
+        campaign,
+        key,
+        queue,
+        message,
+        me?.name || me?.email || null,
+        body.shown
+      )
     )
     console.info(
       `[newsletter] draft ${campaign} listing ${key}: ${
