@@ -45,9 +45,11 @@ import {
   queueTargets,
   emailLinkOf,
   noReplyOf,
+  readTarget,
   rejectItem,
   rejectReplyOf,
   reopenItem,
+  requireRecordShown,
   requireShown,
   saveEdits,
   savePublicWording,
@@ -58,7 +60,7 @@ import {
 } from './queue'
 import { actingAs } from './queue-actor'
 import { LEFT_OUT_KEY } from './queue-left-out'
-import { shownOf } from './queue-shown'
+import { shownOf, shownOfRecord } from './queue-shown'
 import { GONE_KEY } from './queue-retired'
 
 const QUEUE = 'tblonlKwIFJ7Aa8QN'
@@ -1683,6 +1685,217 @@ describe('what a decision on a change or a rule is made on', () => {
   })
 })
 
+describe('an addition is published as its record stood on the page', () => {
+  // A table of its own: the field list is kept ten minutes per table, and
+  // other tests here leave theirs behind.
+  const TABLE = 'tblSHOWNRECORD001'
+  const REC = rid('unpublished')
+  const COLUMNS = [
+    { id: 'fldN', name: 'Name', type: 'singleLineText' },
+    { id: 'fldD', name: 'Description', type: 'multilineText' },
+    { id: 'fldL', name: 'Logo', type: 'multipleAttachments' },
+    { id: 'fldF', name: 'Days left', type: 'formula' },
+  ]
+  let columns: typeof COLUMNS
+  let stored: Record<string, unknown> | null
+  let writes: number
+  let schemaReads: number
+
+  beforeEach(() => {
+    columns = COLUMNS
+    stored = {
+      Name: 'Careers Evening',
+      Description: 'Short talks, then questions.',
+      Logo: [
+        {
+          id: 'attLOGO0000000001',
+          url: 'https://v5.airtableusercontent.com/first-link',
+          filename: 'logo.png',
+          size: 1200,
+        },
+      ],
+      'Days left': 12,
+      'Publish?': false,
+    }
+    writes = 0
+    schemaReads = 0
+    process.env.AIRTABLE_TOKEN = 'test-token'
+    process.env.AIRTABLE_BASE_ID = 'appTest'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        schemaReads++
+        return Response.json({
+          tables: [{ id: TABLE, primaryFieldId: 'fldN', fields: columns }],
+        })
+      })
+    )
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(
+      async (path: string, init?: RequestInit) => {
+        if (init?.method) {
+          writes++
+          return new Response('{}', { status: 200 })
+        }
+        return path.startsWith(`${TABLE}/${REC}`) && stored
+          ? Response.json({ id: REC, fields: stored })
+          : new Response('not here', { status: 404 })
+      }
+    )
+  })
+
+  const addition = (over: Partial<QueueItem> = {}) =>
+    item({ targetTable: TABLE, targetRecord: REC, ...over })
+  /** The page's read of the record, with the field list read anew. */
+  const pageRead = async () => {
+    const read = await readTarget(TABLE, REC, true)
+    if (!read) throw new Error('record gone')
+    return read
+  }
+
+  it('hands the page the record’s fingerprint with its read of it', async () => {
+    const read = await pageRead()
+    expect(read.fields).toMatchObject({
+      Name: 'Careers Evening',
+      Description: 'Short talks, then questions.',
+    })
+    expect(read.schema.map(f => f.name)).toEqual(COLUMNS.map(c => c.name))
+    // Over what the page shows of it: no computed field, no Publish?.
+    expect(read.shown).toBe(
+      shownOfRecord({
+        table: TABLE,
+        record: REC,
+        fields: {
+          Name: 'Careers Evening',
+          Description: 'Short talks, then questions.',
+          Logo: [{ id: 'attLOGO0000000001', url: 'any' }],
+        },
+        types: new Map(),
+      })
+    )
+    expect(await readTarget(TABLE, rid('nosuch'))).toBeNull()
+  })
+
+  it('lets Publish through on the record the page read, and says what it was made on', async () => {
+    const { shown } = await pageRead()
+    const it0 = addition()
+    await expect(requireRecordShown(it0, shown)).resolves.toBeUndefined()
+    // For the decision's History entry.
+    expect(it0.shown).toBe(shown)
+    expect(writes).toBe(0)
+  })
+
+  it('refuses when a field was rewritten after the page read it', async () => {
+    const { shown } = await pageRead()
+    for (const rewrite of [
+      (f: Record<string, unknown>) => (f.Description = 'Put there by a chat.'),
+      (f: Record<string, unknown>) => (f.Name = 'Another name'),
+      (f: Record<string, unknown>) => (f.Link = 'https://example.org/new'),
+      (f: Record<string, unknown>) => delete f.Logo,
+      (f: Record<string, unknown>) =>
+        (f.Logo = [{ id: 'attLOGO0000000002', url: 'https://x/y' }]),
+    ]) {
+      const was = { ...(stored as Record<string, unknown>) }
+      rewrite(stored as Record<string, unknown>)
+      const it0 = addition()
+      await expect(requireRecordShown(it0, shown)).rejects.toMatchObject({
+        status: 412,
+        message: expect.stringContaining('not what your page showed'),
+      })
+      expect(it0.shown ?? null).toBeNull()
+      stored = was
+    }
+    expect(writes).toBe(0)
+    // Read again, the page has the record as it is, and Publish goes.
+    ;(stored as Record<string, unknown>).Description = 'Put there by a chat.'
+    const again = await pageRead()
+    expect(again.shown).not.toBe(shown)
+    expect(again.fields.Description).toBe('Put there by a chat.')
+    await expect(
+      requireRecordShown(addition(), again.shown)
+    ).resolves.toBeUndefined()
+  })
+
+  it('does not refuse for what moves by itself', async () => {
+    const { shown } = await pageRead()
+    const f = stored as Record<string, unknown>
+    // A formula on today's date, a picture's link renewed by Airtable, and
+    // the Publish? box, which the page is never handed.
+    f['Days left'] = 11
+    f.Logo = [
+      {
+        id: 'attLOGO0000000001',
+        url: 'https://v5.airtableusercontent.com/second-link',
+        filename: 'logo.png',
+        size: 1200,
+        type: 'image/png',
+      },
+    ]
+    await expect(requireRecordShown(addition(), shown)).resolves.toBeUndefined()
+  })
+
+  it('refuses a page that had not read the record', async () => {
+    for (const sent of [undefined, null, 42, { shown: 'x' }]) {
+      await expect(requireRecordShown(addition(), sent)).rejects.toMatchObject({
+        status: 412,
+        message: expect.stringContaining('had not read this listing’s record'),
+      })
+    }
+    // A change's or a rule's fingerprint is no record's.
+    await expect(
+      requireRecordShown(addition(), 'a'.repeat(64))
+    ).rejects.toMatchObject({ status: 412 })
+  })
+
+  it('reads the field list anew before refusing, so a list that just changed refuses nothing', async () => {
+    // This server still holds the list from before "Days left" was made a
+    // formula (it read as a number column then, which the page shows).
+    columns = COLUMNS.map(c =>
+      c.name === 'Days left' ? { ...c, type: 'number' } : c
+    )
+    await readTarget(TABLE, REC, true)
+    // The page read it elsewhere, with the list as it is now.
+    columns = COLUMNS
+    const shown = shownOfRecord({
+      table: TABLE,
+      record: REC,
+      fields: stored as Record<string, unknown>,
+      types: new Map(COLUMNS.map(c => [c.name, c.type])),
+      never: new Set(['Publish?', 'Hide?']),
+    })
+    const before = schemaReads
+    await expect(requireRecordShown(addition(), shown)).resolves.toBeUndefined()
+    expect(schemaReads).toBe(before + 1)
+    // And a record that really changed is still refused, after that look.
+    ;(stored as Record<string, unknown>).Name = 'Another name'
+    await expect(requireRecordShown(addition(), shown)).rejects.toMatchObject({
+      status: 412,
+    })
+  })
+
+  it('has nothing to check where no record is about to be published', async () => {
+    const reads = () =>
+      mocks.airtableRequest.mock.calls.filter(c => !c[1]?.method).length
+    for (const one of [
+      addition({ type: 'Change' }),
+      addition({ type: 'Rule', targetTable: null, targetRecord: null }),
+      // Decided already: the accept says so itself.
+      addition({ status: 'Applied' }),
+      addition({ status: 'Rejected' }),
+      addition({ targetRecord: null }),
+      addition({ targetRecord: 'not a record id' }),
+    ]) {
+      await expect(requireRecordShown(one, undefined)).resolves.toBeUndefined()
+    }
+    expect(reads()).toBe(0)
+    // Its record is gone: the accept has its own words for that.
+    stored = null
+    await expect(
+      requireRecordShown(addition(), 'a'.repeat(64))
+    ).resolves.toBeUndefined()
+  })
+})
+
 describe('flagItem / unflagItem', () => {
   const ID = rid('bruin')
   const FLD = {
@@ -3206,6 +3419,30 @@ describe('who did what, on the row’s history', () => {
         shown,
       },
     ])
+  })
+
+  it('keeps the record an addition was published on, from the check that let it through', async () => {
+    // requireRecordShown puts the fingerprint that passed on the item.
+    const one = item({
+      page: '/funding',
+      targetTable: FUNDING,
+      targetRecord: rid('fund'),
+    })
+    const { shown } = (await readTarget(FUNDING, rid('fund'), true)) ?? {}
+    await requireRecordShown(one, shown)
+    await actingAs('bryce@example.org', () =>
+      acceptItem(one, {}, null, [], null, 'Bryce')
+    )
+    const { fields, entries } = written()
+    expect(fields[STATUS]).toBe('Applied')
+    expect(entries.at(-1)).toEqual({
+      at: fields[DECIDED],
+      by: 'Bryce',
+      email: 'bryce@example.org',
+      did: 'accept',
+      shown,
+    })
+    expect(shown).toMatch(/^[0-9a-f]{64}$/)
   })
 
   it('keeps it on a reject, a set-aside and a delete of a change too', async () => {

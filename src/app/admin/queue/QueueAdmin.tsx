@@ -139,6 +139,15 @@ import {
 } from '@/lib/admin/queue-suggest'
 import { CHAT_SOURCE, chatHeading } from '@/lib/admin/queue-chat-source'
 import {
+  RECORD_NOT_READ,
+  REPLY_HOLDS,
+  heldIds,
+  repliesEnded,
+  withPanelWord,
+  type Replying,
+} from '@/lib/admin/queue-chat-replying'
+import { COMPUTED_TYPES, HOUSEKEEPING } from '@/lib/admin/queue-fields'
+import {
   editChanges,
   shownEdit,
   type RuleEdit,
@@ -2078,6 +2087,45 @@ function shownNow(items: QueueItem[] | null, item: QueueItem): string | null {
   return (items?.find(i => i.id === item.id) ?? item).shown ?? null
 }
 
+/** An item's record as the page last read it: its fields, the table's
+ *  field list, and the fingerprint that came with the read (queue-shown.ts)
+ *  – null from a server that sent none. `stale`: this page has written to
+ *  the record since, so the fingerprint is out of date until the next
+ *  read lands. */
+type LiveRecord = {
+  fields: Record<string, unknown>
+  schema: FieldInfo[]
+  shown?: string | null
+  stale?: boolean
+}
+
+/** Publishing an addition (or suggesting it) goes on its record as this
+ *  page read it, so it needs that read. */
+function wantsRecordShown(item: QueueItem, action: string): boolean {
+  return (
+    action === 'accept' &&
+    item.type === 'Add' &&
+    Boolean(item.targetTable && item.targetRecord)
+  )
+}
+
+/** What a decision says it was made on: for publishing an addition, the
+ *  fingerprint of its record as this page read it (null while it has no
+ *  read that still holds); otherwise the item's own, of its changes or
+ *  edits. */
+function shownFor(
+  items: QueueItem[] | null,
+  live: Record<string, LiveRecord>,
+  item: QueueItem,
+  action: string
+): string | null {
+  if (wantsRecordShown(item, action)) {
+    const read = live[item.id]
+    return read && !read.stale ? (read.shown ?? null) : null
+  }
+  return shownNow(items, item)
+}
+
 /** How the page reads the list: `sync` closes rows handled in Airtable
  *  itself first; `remake` makes these items' drafts again from the rows
  *  read (after a refused decision on a suggested item, queue-suggest.ts). */
@@ -2298,9 +2346,17 @@ function QueueInbox({
   const wantedRef = useRef<string | null>(null)
   // The focused item's record as it is in Airtable now, plus the table's
   // field list, so empty fields (a missing logo) show as empty. By item id.
-  const [live, setLive] = useState<
-    Record<string, { fields: Record<string, unknown>; schema: FieldInfo[] }>
-  >({})
+  const [live, setLive] = useState<Record<string, LiveRecord>>({})
+  // The same, for a decision pressed now to say what it was made on.
+  const liveRef = useRef(live)
+  liveRef.current = live
+  // Items whose next read asks for the table's field list anew: a Publish
+  // was refused because the record is not what this page showed.
+  const freshTargets = useRef<Set<string>>(new Set())
+  // Items whose last read of the record failed (it is gone, the site did
+  // not answer, or it sent no fingerprint): Publish is not held for a read
+  // that may never come, and the site says what is wrong.
+  const liveFailed = useRef<Set<string>>(new Set())
   // A published event's or training's start date and deadline, by record,
   // so a Change on one that is about to happen counts as urgent.
   const [listingDates, setListingDates] = useState<
@@ -2774,6 +2830,23 @@ function QueueInbox({
       document.removeEventListener('visibilitychange', poll)
     }
   }, [chatOn, agent])
+
+  // The items a chat reply is under way on (queue-chat-replying.ts): as
+  // this page's chat panels say, and, for the owner, as the Mac says of
+  // the items Fable is answering. Decisions on them wait for the reply,
+  // and each is read again when its reply ends (further down).
+  const [replying, setReplying] = useState<Replying>({})
+  const onReplying = useCallback(
+    (id: string, on: boolean | null) =>
+      setReplying(prev => withPanelWord(prev, id, on)),
+    []
+  )
+  const held = useMemo(
+    () => heldIds(replying, chatOn ? chatRows : {}),
+    [replying, chatOn, chatRows]
+  )
+  const heldRef = useRef(held)
+  heldRef.current = held
 
   // A rule being drafted from one of his decisions: ask the Mac every few
   // seconds, and read the list again the moment it is written, so the card
@@ -3388,29 +3461,42 @@ function QueueInbox({
     if (!selected.targetTable || !selected.targetRecord) return
     // A read whose picture links have run out (the page was left open for
     // hours) is made again, or its pictures could not show.
+    // And so is one this page has written to since (a picture dropped in
+    // a slot): the record's fingerprint is no longer the one it holds.
     const had = live[selected.id]
-    if (had && !hasExpiredPicture(had.fields)) return
+    if (had && !had.stale && !hasExpiredPicture(had.fields)) return
     const id = selected.id
     const target = `${selected.targetTable}/${selected.targetRecord}`
+    const fresh = freshTargets.current.has(id)
     let cancelled = false
     void (async () => {
       try {
-        const res = await fetch(`${API}?target=${encodeURIComponent(target)}`, {
-          cache: 'no-store',
-        })
+        const res = await fetch(
+          `${API}?target=${encodeURIComponent(target)}${fresh ? '&fresh=1' : ''}`,
+          { cache: 'no-store' }
+        )
         const data = (await res.json()) as {
           fields?: Record<string, unknown>
           attachments?: Record<string, AttachmentInfo[]>
           schema?: FieldInfo[]
+          shown?: string
         }
-        if (!cancelled && res.ok && data.fields) {
+        if (cancelled) return
+        if (res.ok && data.fields) {
           const fields = data.fields
           const schema = data.schema ?? []
+          const shown = typeof data.shown === 'string' ? data.shown : null
           rememberAttachments(data.attachments)
-          setLive(prev => ({ ...prev, [id]: { fields, schema } }))
+          freshTargets.current.delete(id)
+          if (shown) liveFailed.current.delete(id)
+          else liveFailed.current.add(id)
+          setLive(prev => ({ ...prev, [id]: { fields, schema, shown } }))
+        } else {
+          liveFailed.current.add(id)
         }
       } catch {
         // the snapshot stays
+        if (!cancelled) liveFailed.current.add(id)
       }
     })()
     return () => {
@@ -3423,14 +3509,33 @@ function QueueInbox({
       setLive(prev => {
         const cur = prev[id]
         if (!cur) return prev
+        // The page has just written this to the record itself: what it
+        // shows is right at once, and the record is read again for its
+        // new fingerprint (the read above).
         return {
           ...prev,
-          [id]: { ...cur, fields: { ...cur.fields, [field]: value } },
+          [id]: {
+            ...cur,
+            fields: { ...cur.fields, [field]: value },
+            stale: true,
+          },
         }
       })
     },
     []
   )
+
+  // A chat reply on the item has ended, and may have changed its record:
+  // what the page shows of it stays up while the effect above reads it
+  // again (no jump back to the snapshot for a moment), but it no longer
+  // counts as read, so a Publish waits for the new read.
+  const staleLive = useCallback((id: string) => {
+    setLive(prev => {
+      const cur = prev[id]
+      if (!cur || cur.stale) return prev
+      return { ...prev, [id]: { ...cur, stale: true } }
+    })
+  }, [])
 
   // Fable changed the record from the chat on the Mac: drop the live read
   // so the effect above fetches it again.
@@ -4005,6 +4110,26 @@ function QueueInbox({
     }
   }, [])
 
+  // A chat reply on an item has ended: the chat may have changed what the
+  // item is about (its record, its proposed changes, its flag), so the row
+  // and the record are read again, and what is decided next is decided on
+  // what the reply left. The note that said decisions were waiting goes.
+  const heldBefore = useRef(held)
+  useEffect(() => {
+    const ended = repliesEnded(heldBefore.current, held)
+    heldBefore.current = held
+    for (const id of ended) {
+      const item = itemsRef.current?.find(i => i.id === id)
+      if (!item) continue
+      staleLive(id)
+      forgetCard(item)
+      void refreshRow(item)
+      if (draftsRef.current[id]?.error === REPLY_HOLDS) {
+        setDraft(id, { error: null })
+      }
+    }
+  }, [held, staleLive, refreshRow, setDraft])
+
   /** "Bryce checks first" (queue-suggest.ts): a decision pressed by someone
    *  whose decisions are suggestions. Its own path, not act's: nothing a
    *  real decision sets off follows it (no reply or decline draft, no rule
@@ -4065,9 +4190,13 @@ function QueueInbox({
               : {}),
             reason: d.note,
             ...extra,
-            // What this page showed of a change or a rule (queue-shown.ts).
-            ...(shownNow(itemsRef.current, item)
-              ? { shown: shownNow(itemsRef.current, item) }
+            // What this page showed: a change's changes, a rule's edits,
+            // or the record of an addition it would publish
+            // (queue-shown.ts).
+            ...(shownFor(itemsRef.current, liveRef.current, item, did)
+              ? {
+                  shown: shownFor(itemsRef.current, liveRef.current, item, did),
+                }
               : {}),
           }),
         })
@@ -4107,6 +4236,11 @@ function QueueInbox({
         // changed since): the list is read again.
         const stale = status === 403 || status === 409 || status === 412
         setDraft(item.id, { busy: false, error: message })
+        // 412: the record too, with the table's field list read anew.
+        if (status === 412) {
+          freshTargets.current.add(item.id)
+          forgetLive(item.id)
+        }
         if (stale) await load()
         setToast({
           item,
@@ -4119,7 +4253,7 @@ function QueueInbox({
         })
       }
     },
-    [mode, setDraft, ordered.walk, fableFirst, reveal, load]
+    [mode, setDraft, ordered.walk, fableFirst, reveal, load, forgetLive]
   )
 
   /** Take back or dismiss a suggestion or question, ask one, or answer one
@@ -4439,6 +4573,35 @@ function QueueInbox({
       opts: { inPlace?: boolean } = {}
     ) => {
       if (!canEdit) return
+      // A chat reply for this item is still being written on this page: a
+      // decision waits for it, since the reply may change what the item is
+      // about (queue-chat-replying.ts). The page reads the item again when
+      // the reply ends.
+      if (isDecision(action) && isOpen(item) && heldRef.current.has(item.id)) {
+        // The item in focus says so under its buttons already: that note
+        // flashes. Any other (the rule pop-up, a Retry) gets it as its
+        // error.
+        if (selectedIdRef.current === item.id) setBlockedFlash(n => n + 1)
+        else setDraft(item.id, { busy: false, error: REPLY_HOLDS })
+        return
+      }
+      // An addition is published as its record stands, so Publish (or the
+      // suggestion of it) goes on this page's read of the record. With none
+      // yet (pressed in the moment after the item opened), or one this page
+      // has written over since (a picture just dropped in), it waits for
+      // the read that is on its way. Only on the item in focus, whose
+      // record is being read, and not after a read that failed: then the
+      // site is asked, and says what is wrong.
+      if (
+        wantsRecordShown(item, action) &&
+        isOpen(item) &&
+        selectedIdRef.current === item.id &&
+        !liveFailed.current.has(item.id) &&
+        !shownFor(itemsRef.current, liveRef.current, item, action)
+      ) {
+        setDraft(item.id, { busy: false, error: RECORD_NOT_READ })
+        return
+      }
       // Bryce checks first: a decision is a suggestion, on its own path.
       if (mode === 'suggest' && isDecision(action)) {
         await suggestDecision(item, action, extra)
@@ -4455,7 +4618,9 @@ function QueueInbox({
       // rule's edits, so the item that save hands back says it anew.
       // Read off the item as the page holds it now, which is what is on
       // screen, rather than the copy this call was handed.
-      let shown = shownNow(itemsRef.current, item)
+      // For an addition it publishes, that is the record as this page read
+      // it.
+      let shown = shownFor(itemsRef.current, liveRef.current, item, action)
       // The draft the page shows, made from the row when there is none yet
       // (a suggested Apply brings its choice for the wording).
       const internal =
@@ -4822,6 +4987,12 @@ function QueueInbox({
         // the list is read again so the wording he must see is on the card,
         // and there is no Retry, which would apply it unread.
         const reread = decision && status === 412
+        // And so is the record: an addition's may be what changed under
+        // the page. Its next read asks for the table's field list anew.
+        if (reread) {
+          freshTargets.current.add(item.id)
+          forgetLive(item.id)
+        }
         // It did not go out: its place is free again.
         if (wantsSpot(item)) forgetMap(item.targetRecord)
         setDraft(item.id, { busy: false, error: closed ? null : message })
@@ -6183,6 +6354,8 @@ function QueueInbox({
                 onWait={on => void setWaiting(selected, on)}
                 onSavePublic={text => savePublic(selected, text)}
                 onRowChanged={() => void refreshRow(selected)}
+                replyHolds={isOpen(selected) && held.has(selected.id)}
+                onReplying={on => onReplying(selected.id, on)}
                 chatAgent={canEdit && agentChat ? agent : null}
                 chatTeam={
                   canEdit && chatKindNow === 'team'
@@ -7613,6 +7786,8 @@ function Detail({
   onWait,
   onSavePublic,
   onRowChanged,
+  replyHolds = false,
+  onReplying,
   chatAgent,
   chatTeam,
   chatDictate,
@@ -7678,6 +7853,12 @@ function Detail({
   /** The chat moved the item into or out of Waiting on them: read the row
    *  again. */
   onRowChanged: () => void
+  /** A chat reply for this item is still being written: its decisions
+   *  wait (queue-chat-replying.ts). */
+  replyHolds?: boolean
+  /** The item's chat panel says whether a reply is under way in it (null:
+   *  it has no word on it any more). */
+  onReplying?: (on: boolean | null) => void
   /** The Mac agent, when it is up and can chat; null hides the panel. */
   chatAgent: AgentInfo | null
   /** Not the owner: the team's chat instead (queue-team-chat.ts), with
@@ -8454,6 +8635,12 @@ function Detail({
   // A chat panel on this item: the Mac's, or else the team's.
   const teamChat = chatAgent === null ? chatTeam : null
   const chatShown = chatAgent !== null || teamChat !== null
+  // With no chat panel on this item (the Mac went away, say), no panel can
+  // say its reply ended: nothing is being written here, as far as this
+  // page can tell.
+  useEffect(() => {
+    if (!chatShown) onReplying?.(null)
+  }, [chatShown, item.id, onReplying])
   const answeredWhere = chatShown
     ? 'at the bottom of the chat'
     : 'under the first one'
@@ -9322,6 +9509,7 @@ function Detail({
               }}
               onWrote={onWrote}
               onRowChanged={onRowChanged}
+              onReplying={onReplying}
               onFlag={onFlag}
               onFableChanges={list => {
                 // The same list again (every history load sends one) keeps
@@ -9432,7 +9620,8 @@ function Detail({
               <button
                 autoFocus
                 className={`${styles.button} ${styles.danger}`}
-                disabled={d.busy}
+                disabled={d.busy || replyHolds}
+                title={replyHolds ? REPLY_HOLDS : undefined}
                 onClick={() => act('delete')}
               >
                 <Icon src={ICON.trash} size={12} />
@@ -9452,6 +9641,7 @@ function Detail({
               >
                 Cancel <kbd>Esc</kbd>
               </button>
+              {replyHolds && !d.busy && blockedNote('reply', REPLY_HOLDS)}
             </div>
           </div>
         ) : d.mode === 'reject' ? (
@@ -9464,7 +9654,7 @@ function Detail({
                 <button
                   key={chip}
                   className={`${styles.chip} ${d.chip === chip ? styles.chipOn : ''}`}
-                  disabled={d.busy}
+                  disabled={d.busy || replyHolds}
                   onMouseEnter={() => setD({ focusChip: chip })}
                   onMouseLeave={() => setD({ focusChip: null })}
                   onFocus={() => setD({ focusChip: chip })}
@@ -9500,7 +9690,8 @@ function Detail({
             <div className={styles.buttons}>
               <button
                 className={`${styles.button} ${styles.danger}`}
-                disabled={d.busy}
+                disabled={d.busy || replyHolds}
+                title={replyHolds ? REPLY_HOLDS : undefined}
                 // While the reason box listens, its words go in first.
                 onClick={() =>
                   reasonRef.current
@@ -9525,6 +9716,7 @@ function Detail({
               >
                 Cancel <kbd>Esc</kbd>
               </button>
+              {replyHolds && !d.busy && blockedNote('reply', REPLY_HOLDS)}
             </div>
           </div>
         ) : (
@@ -9543,18 +9735,21 @@ function Detail({
               className={`${styles.button} ${styles.primary}`}
               disabled={
                 d.busy ||
+                replyHolds ||
                 Boolean(item.passed) ||
                 unplaced ||
                 unfilled.length > 0
               }
               title={
-                item.passed
-                  ? passedBlock(item.passed)
-                  : unplaced
-                    ? NO_PLACE
-                    : unfilled.length > 0
-                      ? fillFirst(unfilled)
-                      : undefined
+                replyHolds
+                  ? REPLY_HOLDS
+                  : item.passed
+                    ? passedBlock(item.passed)
+                    : unplaced
+                      ? NO_PLACE
+                      : unfilled.length > 0
+                        ? fillFirst(unfilled)
+                        : undefined
               }
               onClick={() =>
                 act('accept', {
@@ -9582,7 +9777,8 @@ function Detail({
             </button>
             <button
               className={`${styles.button} ${styles.danger}`}
-              disabled={d.busy}
+              disabled={d.busy || replyHolds}
+              title={replyHolds ? REPLY_HOLDS : undefined}
               onClick={() => setD({ mode: 'reject' })}
             >
               <Icon src={ICON.x} size={12} />
@@ -9590,8 +9786,12 @@ function Detail({
             </button>
             <button
               className={styles.ghost}
-              disabled={d.busy}
-              title="Out of the list for a week, then back for another look"
+              disabled={d.busy || replyHolds}
+              title={
+                replyHolds
+                  ? REPLY_HOLDS
+                  : 'Out of the list for a week, then back for another look'
+              }
               onClick={() => act('later')}
             >
               <Icon src={ICON.clock} size={12} />
@@ -9617,14 +9817,19 @@ function Detail({
             )}
             <button
               className={styles.ghost}
-              disabled={d.busy}
-              title="Gone for good, as if deleted in Airtable: no reply, nothing for Fable to learn, no Undo"
+              disabled={d.busy || replyHolds}
+              title={
+                replyHolds
+                  ? REPLY_HOLDS
+                  : 'Gone for good, as if deleted in Airtable: no reply, nothing for Fable to learn, no Undo'
+              }
               onClick={() => setD({ mode: 'delete' })}
             >
               <Icon src={ICON.trash} size={12} />
               {suggestLabel(mode, 'Delete')} <kbd>X</kbd>
             </button>
             {askButton}
+            {replyHolds && !d.busy && blockedNote('reply', REPLY_HOLDS)}
             {item.passed &&
               !d.busy &&
               blockedNote('passed', passedBlock(item.passed))}
@@ -9671,27 +9876,12 @@ function isImageList(v: unknown): v is string[] {
   )
 }
 
-// Fields nobody edits from here: Airtable's own bookkeeping by name, and
-// any column Airtable computes (formulas, lookups, counts, timestamps) by
-// type. Left out of the list (Bryce, 11 Sept 2026: "only the fields I may
-// plausibly want to edit").
-const HOUSEKEEPING =
-  /^(created|date added|last modified|created time|record id|submitter's email)$/i
+// Fields nobody edits from here (HOUSEKEEPING, COMPUTED_TYPES: Airtable's
+// own bookkeeping by name, and any column Airtable computes by type) are
+// left out of the list. The two rules are in queue-fields.ts, which the
+// site reads too when it works out what this page showed of a record.
 /** Accept and Undo set these; a fix after the decision leaves them be. */
 const LISTING_SWITCHES = new Set(['Publish?', 'Hide?'])
-const COMPUTED_TYPES = new Set([
-  'formula',
-  'rollup',
-  'lookup',
-  'multipleLookupValues',
-  'count',
-  'autoNumber',
-  'createdTime',
-  'lastModifiedTime',
-  'createdBy',
-  'lastModifiedBy',
-  'button',
-])
 
 // The icon the site's own card draws beside a field's value, so the grid
 // reads the way the card does (Bryce, 17 Sept 2026: "where we have icons

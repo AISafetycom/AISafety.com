@@ -12,6 +12,13 @@ const h = vi.hoisted(() => ({
   mode: 'suggest' as 'edit' | 'suggest' | 'view' | null,
   item: null as Record<string, unknown> | null,
   calls: [] as { fn: string; args: unknown[]; as: string | null }[],
+  // What the page sent for each check of an addition's record
+  // (requireRecordShown), and whether the record has moved since.
+  recordChecks: [] as unknown[],
+  recordMoved: false,
+  // What a read of a record for the page answers (readTarget).
+  target: null as Record<string, unknown> | null,
+  targetReads: [] as unknown[][],
 }))
 
 vi.mock('next/cache', () => ({
@@ -42,6 +49,23 @@ vi.mock('@/lib/admin/queue', async importOriginal => {
   return {
     ...real,
     getQueueItem: async () => h.item,
+    // The check of an addition's record against what the page showed: the
+    // real one reads Airtable (tested in queue.test.ts); here, when the
+    // route asks it and what it does with its answer.
+    requireRecordShown: async (item: { type?: string }, sent: unknown) => {
+      if (item.type !== 'Add') return
+      h.recordChecks.push(sent)
+      if (h.recordMoved) {
+        throw new real.QueueError(
+          'This listing’s record is not what your page showed: it changed after your page read it.',
+          412
+        )
+      }
+    },
+    readTarget: async (...args: unknown[]) => {
+      h.targetReads.push(args)
+      return h.target
+    },
     acceptItem: spy('acceptItem'),
     rejectItem: spy('rejectItem'),
     deleteItem: spy('deleteItem'),
@@ -59,7 +83,7 @@ vi.mock('@/lib/admin/queue', async importOriginal => {
   }
 })
 
-import { POST } from './route'
+import { GET, POST } from './route'
 import { ROOT_ADMINS } from '@/lib/admin/users'
 import { makePrint } from '@/lib/admin/queue-suggest'
 
@@ -97,6 +121,10 @@ const called = () => h.calls.map(c => c.fn)
 
 beforeEach(() => {
   h.calls = []
+  h.recordChecks = []
+  h.recordMoved = false
+  h.target = null
+  h.targetReads = []
   h.email = 'someone@example.com'
   h.mode = 'suggest'
   h.item = {
@@ -401,6 +429,80 @@ describe('a decision on a change or a rule is made on what the page showed', () 
     expect((await post({ action: 'wait', on: true })).status).toBe(200)
     expect((await post({ action: 'undo' })).status).toBe(200)
     expect(called()).toEqual(['acceptItem', 'waitItem', 'undoItem'])
+  })
+})
+
+describe('an addition is published on the record the page showed', () => {
+  const SHOWN = 'ef'.repeat(32)
+  beforeEach(() => {
+    h.mode = 'edit'
+  })
+
+  it('checks the record against what the page sent, before anything is written', async () => {
+    expect((await post({ action: 'accept', shown: SHOWN })).status).toBe(200)
+    expect(h.recordChecks).toEqual([SHOWN])
+    expect(called()).toEqual(['acceptItem'])
+  })
+
+  it('refuses the Publish, with nothing written, when the record moved', async () => {
+    h.recordMoved = true
+    const r = await post({ action: 'accept', shown: SHOWN })
+    expect(r.status).toBe(412)
+    expect(r.body.error).toContain('not what your page showed')
+    expect(called()).toEqual([])
+  })
+
+  it('holds for a suggestion to publish, and for no other suggestion', async () => {
+    h.mode = 'suggest'
+    h.recordMoved = true
+    expect(
+      (await post({ action: 'suggest', did: 'accept', shown: SHOWN })).status
+    ).toBe(412)
+    expect(called()).toEqual([])
+    // Rejecting, setting aside or deleting publishes nothing.
+    for (const did of ['reject', 'later', 'delete']) {
+      expect((await post({ action: 'suggest', did })).status).toBe(200)
+    }
+    expect(h.recordChecks).toEqual([SHOWN])
+  })
+
+  it('asks nothing of the other decisions on an addition, or of the rest', async () => {
+    h.recordMoved = true
+    for (const body of [
+      { action: 'reject', reason: 'x' },
+      { action: 'later' },
+      { action: 'delete' },
+      { action: 'wait', on: true },
+      { action: 'edit', edits: { Name: 'Z' }, keys: ['Name'] },
+      { action: 'undo' },
+    ]) {
+      expect((await post(body)).status).toBe(200)
+    }
+    expect(h.recordChecks).toEqual([])
+  })
+
+  it('hands the page the record’s fingerprint with each read of it', async () => {
+    const read = (query: string) =>
+      GET(new NextRequest(`http://localhost/api/admin/queue?${query}`))
+    h.target = {
+      fields: { Name: 'A listing' },
+      attachments: {},
+      schema: [{ id: 'fldN', name: 'Name', type: 'singleLineText' }],
+      shown: SHOWN,
+    }
+    const res = await read('target=tblXbN9swwldwq8f7/recLISTING0000001')
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual(h.target)
+    // After a refusal the page asks for the table's field list anew.
+    await read('target=tblXbN9swwldwq8f7/recLISTING0000001&fresh=1')
+    expect(h.targetReads).toEqual([
+      ['tblXbN9swwldwq8f7', 'recLISTING0000001', false],
+      ['tblXbN9swwldwq8f7', 'recLISTING0000001', true],
+    ])
+    h.target = null
+    expect(
+      (await read('target=tblXbN9swwldwq8f7/recLISTING0000001')).status
+    ).toBe(404)
   })
 })
 

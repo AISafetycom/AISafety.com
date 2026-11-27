@@ -25,6 +25,7 @@ import {
 import { answeredReview, type ShownReview } from '@/lib/admin/queue-asked'
 import Icon from '@/components/Icon'
 import type { AgentInfo, QueueItem } from '@/lib/admin/queue'
+import { panelReplying } from '@/lib/admin/queue-chat-replying'
 import { reviewNewerThanChat } from '@/lib/admin/queue-reopen'
 import { insertDictated, isDictationKey } from '@/lib/admin/queue-dictation'
 import {
@@ -425,6 +426,7 @@ export default function Chat({
   onSetDecline,
   onWrote,
   onRowChanged,
+  onReplying,
   onFlag,
   onFableChanges,
   focusTick,
@@ -460,6 +462,12 @@ export default function Chat({
   /** A reply moved the item into or out of Waiting on them on the Mac:
    *  read the row again. */
   onRowChanged?: () => void
+  /** Whether a reply is under way in this panel, said each time that
+   *  changes and never before the thread is read: the page holds the
+   *  item's decisions meanwhile, and reads the item again when the reply
+   *  ends (queue-chat-replying.ts). Null as the panel closes with nothing
+   *  under way: its word no longer stands. */
+  onReplying?: (on: boolean | null) => void
   /** Write a flag update onto the row, or undo it; resolves to an error
    *  to show, or null. */
   onFlag: (
@@ -1279,6 +1287,35 @@ export default function Chat({
     setQueued(rest)
     void deliverRef.current(next.text, next.files)
   }, [busy, pending, queued])
+
+  // The page is told whether a reply is under way here, so it can hold the
+  // item's decisions until it ends and read the item again then
+  // (queue-chat-replying.ts). Nothing is said before the thread is read:
+  // the panel does not know yet whether the server is still answering.
+  // Nor when the panel closes mid-reply (he moved to another item): the
+  // reply carries on, and the panel says again when he is back.
+  const replyingNow = panelReplying({
+    loaded: messages !== null,
+    busy,
+    pending,
+    queued: queued.length,
+  })
+  const onReplyingRef = useRef(onReplying)
+  onReplyingRef.current = onReplying
+  const saidReplying = useRef<boolean | null>(null)
+  useEffect(() => {
+    if (replyingNow === null) return
+    saidReplying.current = replyingNow
+    onReplyingRef.current?.(replyingNow)
+  }, [replyingNow])
+  // Closing with nothing under way, the panel takes its word back; closing
+  // mid-reply it leaves its "yes" standing.
+  useEffect(
+    () => () => {
+      if (saidReplying.current === false) onReplyingRef.current?.(null)
+    },
+    []
+  )
 
   // Messages still waiting when the panel closes – Bryce moved to another
   // item before the reply ahead of them ended – go to the Mac anyway, each

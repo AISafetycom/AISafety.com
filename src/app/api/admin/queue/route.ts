@@ -17,7 +17,10 @@
        while a search is typed)
   GET  /api/admin/queue?id=<rec>               → { item } – one row as it is now
        (the page follows a Reopen with it until the Mac is done)
-  GET  /api/admin/queue?target=<tbl>/<rec>     → { fields, attachments, schema } (live)
+  GET  /api/admin/queue?target=<tbl>/<rec>     → { fields, attachments, schema,
+       shown } (live; `shown` is the record's fingerprint, which the page
+       sends back when it publishes an addition – queue-shown.ts; &fresh=1
+       reads the table's field list anew, asked after a refusal)
   GET  /api/admin/queue?listing=<rec>          → { listing } – the listing with
        that record id as it is in Airtable now, whichever resource table
        holds it and whether or not the Queue ever did (null when none has
@@ -148,8 +151,6 @@ import {
   flagItem,
   getPageOrder,
   getQueueItem,
-  getTableSchema,
-  getTargetFields,
   laterItem,
   listDecided,
   listForListing,
@@ -157,6 +158,8 @@ import {
   QueueError,
   rejectItem,
   reopenItem,
+  readTarget,
+  requireRecordShown,
   requireShown,
   requireSuggestionSeen,
   sanitiseEdits,
@@ -254,15 +257,18 @@ export async function GET(req: NextRequest) {
     const target = req.nextUrl.searchParams.get('target')
     if (target) {
       const [table = '', record = ''] = target.split('/')
-      const [read, schema] = await Promise.all([
-        getTargetFields(table, record),
-        getTableSchema(table),
-      ])
+      const read = await readTarget(
+        table,
+        record,
+        req.nextUrl.searchParams.get('fresh') === '1'
+      )
       if (!read) return json({ error: 'That record no longer exists.' }, 404)
       return json({
         fields: read.fields,
         attachments: read.attachments,
-        schema,
+        schema: read.schema,
+        // What this read shows of the record, for a Publish to be made on.
+        shown: read.shown,
       })
     }
     const me = await currentAdmin()
@@ -397,6 +403,14 @@ async function decide(
     // the changes or edits the page showed (queue-shown.ts).
     if (DECISIONS.has(action) || action === 'suggest') {
       requireShown(item, body.shown)
+    }
+    // Publishing an addition, or suggesting it, is made on the record the
+    // page showed: what goes on the site is the record as it stands.
+    if (
+      action === 'accept' ||
+      (action === 'suggest' && body.did === 'accept')
+    ) {
+      await requireRecordShown(item, body.shown)
     }
     let notPutBack: string[] = []
     if (action === 'suggest') {

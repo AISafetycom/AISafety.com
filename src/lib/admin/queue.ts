@@ -56,7 +56,7 @@ import {
   type RuleEdit,
   type RuleMark,
 } from './queue-rule-edits'
-import { shownOf } from './queue-shown'
+import { shownOf, shownOfRecord } from './queue-shown'
 import { parseRejectDrafts } from './queue-decline'
 import { listingState, type FoundListing } from './queue-listing'
 import { isExpiredAttachment } from './attachment-url'
@@ -1353,6 +1353,46 @@ export async function getTargetFields(
   return raw ? targetRead(raw) : null
 }
 
+/** A record's fingerprint as the page shows it (queue-shown.ts): over the
+ *  fields the page's own rules keep, read with the table's field list. */
+function recordShown(
+  table: string,
+  record: string,
+  raw: RawFields,
+  schema: FieldInfo[]
+): string {
+  return shownOfRecord({
+    table,
+    record,
+    fields: raw,
+    types: new Map(schema.map(f => [f.name, f.type])),
+    never: PROTECTED_FIELDS,
+  })
+}
+
+/** What the page is handed for an item's record: its fields, its
+ *  pictures, the table's field list, and the fingerprint of all that
+ *  (`shown`), which the page sends back when it publishes an addition
+ *  (requireRecordShown). `fresh` reads the field list anew: the page asks
+ *  for that after a refusal, so a list that changed a moment ago cannot
+ *  refuse it twice. Null when the record is not there. */
+export async function readTarget(
+  table: string,
+  record: string,
+  fresh = false
+): Promise<(TargetRead & { schema: FieldInfo[]; shown: string }) | null> {
+  const [raw, schema] = await Promise.all([
+    readRecord(table, record),
+    fresh ? getTableSchema(table, 0) : getTableSchema(table),
+  ])
+  if (!raw) return null
+  return {
+    ...targetRead(raw),
+    schema,
+    shown: recordShown(table, record, raw, schema),
+  }
+}
+
 function targetRead(raw: RawFields): TargetRead {
   const out: Record<string, unknown> = {}
   const attachments: Record<string, AttachmentInfo[]> = {}
@@ -2208,6 +2248,49 @@ export function requireShown(item: QueueItem, sent: unknown): void {
     typeof sent === 'string'
       ? `${what} are not what your page showed: they changed after it read them. Here is the item as it is now. Look again, then decide.`
       : 'Your page has not said what it showed for this item. Reload the page, then decide.',
+    412
+  )
+}
+
+/** An addition is published as its record stands, so Publish is made on
+ *  the record the page showed: the page sends the fingerprint that came
+ *  with its read of the record (readTarget), and a record that reads
+ *  differently by now (a chat rewrote a field, someone edited it in
+ *  Airtable) is refused, 412, so the page reads it again. A page that
+ *  sent none had not read the record yet (or is a tab from before this
+ *  check) and is refused the same way.
+ *
+ *  The fingerprint that passed goes on the item, and from there on the
+ *  decision's History entry (`shown`), as a change's or a rule's does.
+ *
+ *  Nothing to check for an item that is not an open addition with a
+ *  record, or whose record is gone: the accept says so itself. */
+export async function requireRecordShown(
+  item: QueueItem,
+  sent: unknown
+): Promise<void> {
+  if (item.type !== 'Add') return
+  if (item.status !== 'Pending' && item.status !== 'Failed') return
+  const table = item.targetTable ?? ''
+  const record = item.targetRecord ?? ''
+  if (!TABLE_ID_RE.test(table) || !isRecordId(record)) return
+  const raw = await readRecord(table, record)
+  if (!raw) return
+  let now = recordShown(table, record, raw, await getTableSchema(table))
+  if (typeof sent === 'string' && sent !== now) {
+    // The table's field list may have changed since this server last read
+    // it (kept ten minutes): once more with it read anew, which is how the
+    // page's own re-read after a refusal is answered.
+    now = recordShown(table, record, raw, await getTableSchema(table, 0))
+  }
+  if (typeof sent === 'string' && sent === now) {
+    item.shown = now
+    return
+  }
+  throw new QueueError(
+    typeof sent === 'string'
+      ? 'This listing’s record is not what your page showed: it changed after your page read it. Here it is as it is now. Look again, then decide.'
+      : 'Your page had not read this listing’s record yet. It is reading it now: look at it, then decide.',
     412
   )
 }
