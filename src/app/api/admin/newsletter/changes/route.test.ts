@@ -124,6 +124,24 @@ describe('the newsletter page’s Fix', () => {
     })
   })
 
+  it('answers 409 in plain words for an item left to the Queue', async () => {
+    h.fail = new QueueError(
+      'This item has edits saved in the Queue, so it’s decided there: open it in the Queue.',
+      409
+    )
+    const res = await post({
+      campaign: '12',
+      key: KEY,
+      queue: ROW,
+      shown: SHOWN,
+    })
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({
+      error:
+        'This item has edits saved in the Queue, so it’s decided there: open it in the Queue.',
+    })
+  })
+
   it('still needs Queue access to apply a Broom item', async () => {
     h.queue = false
     const res = await post({

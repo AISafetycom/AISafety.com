@@ -18,7 +18,11 @@
   Fix is a Queue decision like any other, so it goes on what the page
   showed (queue-shown.ts): each Broom item comes with the fingerprint of the
   row its listed changes were read from, the page sends it back, and a row
-  that reads differently by then is refused, 412, and read again.
+  that reads differently by then is refused, 412, and read again. A row
+  that holds more than the page lists (edits saved on it in the Queue, or a
+  teammate's suggestion or question waiting on it) is not applied from
+  here at all: it is marked for the page, which turns the button off and
+  links to the item in the Queue, and Fix refuses it (newsletter-queue-only.ts).
 
   Events and Training cards are drawn by the site's own card builders
   (~/Newsletter/sitecards.py runs eventCardProps / trainingCardProps on the
@@ -55,6 +59,11 @@ import {
   type CardInfo,
 } from './newsletter'
 import {
+  queueOnlyOf,
+  queueOnlyText,
+  type QueueOnly,
+} from './newsletter-queue-only'
+import {
   acceptItem,
   deletedColumns,
   getPreviewListings,
@@ -62,11 +71,9 @@ import {
   listQueue,
   QueueError,
   requireShown,
-  sanitiseEdits,
   type PreviewListing,
   type QueueItem,
 } from './queue'
-import { withLeftOut } from './queue-left-out'
 import { goneNote } from './queue-retired'
 
 /** A line of the card the site would draw: the email's field name, its icon
@@ -101,6 +108,10 @@ export interface BroomFix {
    *  one worked out from the text above, which is those same changes
    *  flattened for reading. The page sends it back with Fix. */
   shown: string | null
+  /** Why Fix leaves this item to the Queue (it holds saved edits, or a
+   *  suggestion or question is waiting on it: newsletter-queue-only.ts);
+   *  null when Fix may apply it. */
+  queueOnly: QueueOnly | null
 }
 
 export interface ListingAlert {
@@ -213,6 +224,7 @@ function broomFix(item: QueueItem): BroomFix {
     })),
     reason: item.reasons[0] ?? null,
     shown: item.shown ?? null,
+    queueOnly: queueOnlyOf(item),
   }
 }
 
@@ -414,26 +426,23 @@ export async function fixListing(
         'That Broom item is gone or isn’t about this listing. Reload the page.',
         409
       )
-    // Before anything is written: the row's changes are still the ones the
-    // page listed (412 otherwise, and the page reads its alerts again). The
-    // history entry the Apply below writes carries the same fingerprint.
+    // Before anything is written. A row that holds more than this page
+    // lists (edits saved on it in the Queue, a suggestion or a question
+    // waiting on it) is decided there, where all of it shows: applying it
+    // from here would write or settle what nobody pressing Fix saw. 409,
+    // and the page reads its alerts again, which now say so with a link.
+    const queueOnly = queueOnlyOf(item)
+    if (queueOnly) throw new QueueError(queueOnlyText(queueOnly), 409)
+    // And the row's changes are still the ones the page listed (412
+    // otherwise, and the page reads its alerts again). The history entry
+    // the Apply below writes carries the same fingerprint.
     requireShown(item, shown)
     const keep = await alreadyChanged(item)
-    // The page's edits as the Queue saved them, and the fields left out
-    // there, which Apply does not write from here either.
-    const gone = await acceptItem(
-      item,
-      sanitiseEdits(withLeftOut(item.edits ?? {}, item.leftOut ?? [])),
-      null,
-      keep,
-      null,
-      by
-    )
+    // Broom's changes as proposed: the row has no saved edits (above).
+    const gone = await acceptItem(item, {}, null, keep, null, by)
     applied = true
     if (keep.length)
       note = `Left ${keep.join(', ')} as it is: someone changed it on the listing after Broom’s check.`
-    if (item.leftOut?.length)
-      note = `${note ? `${note} ` : ''}Left ${item.leftOut.join(', ')} as it is: you left it out in the Queue.`
     // An old flag's field whose column has since been deleted from Airtable.
     if (gone.length && item.targetTable)
       note = `${note ? `${note} ` : ''}${goneNote(item.targetTable, gone)}`

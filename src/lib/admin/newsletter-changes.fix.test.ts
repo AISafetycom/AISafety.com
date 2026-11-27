@@ -35,6 +35,7 @@ import { getQueueItem } from './queue'
 import { actingAs } from './queue-actor'
 import { GONE_KEY } from './queue-retired'
 import { shownOf } from './queue-shown'
+import { makePrint } from './queue-suggest'
 
 const QUEUE = 'tblonlKwIFJ7Aa8QN'
 const FUNDING = 'tblzMTLDZWZKqTxrq'
@@ -47,6 +48,7 @@ const F = {
   targetTable: 'fld45SUjstUZROuXl',
   targetRecord: 'fldszXtLdUijgFG4l',
   history: 'fldjRsqYJAwR6CXpA',
+  forBryce: 'fldWFnmC0u06GNC6B',
 }
 const rid = (n: string) => `rec${n.padStart(14, '0')}`
 const ID = rid('broom')
@@ -339,6 +341,136 @@ describe('fixListing on a Broom item that names a deleted column', () => {
       const res = await fixListing('draft1', FUND, null)
       expect(res.applied).toBe(false)
       expect(row[F.status]).toBe('Pending')
+    })
+  })
+
+  // A row that holds more than the panel lists is decided in the Queue,
+  // where all of it shows (newsletter-queue-only.ts).
+  describe('on a row that holds more than the page lists', () => {
+    const AT = '2026-11-28T03:00:00.000Z'
+    const listed = async () => {
+      const item = await getQueueItem(ID)
+      const [alert] = listingAlerts(
+        await mocks.draftCardGroups(),
+        item ? [item] : [],
+        {}
+      )
+      return alert.broom[0]
+    }
+    const suggestion = () =>
+      JSON.stringify({
+        kind: 'suggest',
+        by: 'Rob Grayson',
+        at: AT,
+        did: 'accept',
+        edited: [],
+        print: makePrint({
+          verdict: null,
+          changes: null,
+          table: FUNDING,
+          record: FUND,
+          edits: null,
+          reply: null,
+        }),
+      })
+    const question = (answer: string | null) =>
+      JSON.stringify({
+        kind: 'ask',
+        by: 'Rob Grayson',
+        at: AT,
+        question: 'Is this the right status?',
+        ...(answer ? { answer, answeredBy: 'Bryce', answeredAt: AT } : {}),
+      })
+    /** Fix pressed all the same (an old tab, say): refused, nothing written. */
+    const refused = async (why: string) => {
+      const before = { ...row }
+      const broom = await listed()
+      await expect(
+        fixListing('draft1', FUND, ID, undefined, 'Bryce', broom.shown)
+      ).rejects.toMatchObject({
+        status: 409,
+        message: `This item has ${why} in the Queue, so it’s decided there: open it in the Queue.`,
+      })
+      expect(writes).toEqual([])
+      expect(row).toEqual(before)
+    }
+
+    it('marks a row with nothing but Broom’s changes as Fix’s to apply', async () => {
+      expect((await listed()).queueOnly).toBeNull()
+    })
+
+    it('leaves a row with a value saved over Broom’s to the Queue', async () => {
+      row[F.edits] = JSON.stringify({
+        'Application status': 'Applications open',
+      })
+      expect((await listed()).queueOnly).toBe('edits')
+      await refused('edits saved')
+    })
+
+    it('leaves a row with another field edited in the Queue to it', async () => {
+      row[F.edits] = JSON.stringify({ Deadline: '2026-12-12' })
+      expect((await listed()).queueOnly).toBe('edits')
+      await refused('edits saved')
+    })
+
+    it('leaves a row with a proposed field left out in the Queue to it', async () => {
+      row[F.edits] = JSON.stringify({ '(left out)': ['Application status'] })
+      expect((await listed()).queueOnly).toBe('edits')
+      await refused('edits saved')
+    })
+
+    it('leaves a row a teammate’s suggestion waits on to the Queue', async () => {
+      row[F.forBryce] = suggestion()
+      expect((await listed()).queueOnly).toBe('suggestion')
+      // The suggestion is not settled from here: it is still on the row.
+      await refused('a suggestion waiting')
+    })
+
+    it('leaves a row a teammate’s question waits on to the Queue', async () => {
+      row[F.forBryce] = question(null)
+      expect((await listed()).queueOnly).toBe('question')
+      await refused('a question waiting')
+    })
+
+    it('says so whatever the page showed, before the fingerprint is looked at', async () => {
+      row[F.edits] = JSON.stringify({ Deadline: '2026-12-12' })
+      for (const sent of [undefined, 'f'.repeat(64)]) {
+        await expect(
+          fixListing('draft1', FUND, ID, undefined, 'Bryce', sent)
+        ).rejects.toMatchObject({ status: 409 })
+      }
+      expect(writes).toEqual([])
+    })
+
+    it('applies a row whose question was answered, and one that only keeps notes of an earlier try', async () => {
+      // An answered question waits on nobody; the notes an earlier Apply
+      // left (a column since deleted, a field Fable had changed) are no
+      // one's edits.
+      row[F.forBryce] = question('Yes.')
+      row[F.edits] = JSON.stringify({
+        [GONE_KEY]: [OLD],
+        '(kept by Fable)': [OLD],
+      })
+      const broom = await listed()
+      expect(broom.queueOnly).toBeNull()
+      const res = await fixListing(
+        'draft1',
+        FUND,
+        ID,
+        undefined,
+        'Bryce',
+        broom.shown
+      )
+      expect(res.applied).toBe(true)
+      expect(row[F.status]).toBe('Applied')
+      expect(writes).toEqual([
+        {
+          path: `${FUNDING}/${FUND}`,
+          fields: {
+            'Application status': 'Not currently accepting applications',
+          },
+        },
+      ])
     })
   })
 })

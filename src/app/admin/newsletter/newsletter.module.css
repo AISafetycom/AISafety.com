@@ -828,6 +828,16 @@
   color: #f5b942;
 }
 
+/* A fix left to the Queue (28 Nov 2026): the link that opens the item
+   there, as .tableNote's link. */
+.changeLink {
+  color: var(--teal-300);
+}
+
+.changeLink:hover {
+  text-decoration: underline;
+}
+
 /* The confirm dialog's ticks: one box per kind of warning, the list
    scrolling inside the dialog when it's long. */
 .dialogChecks {

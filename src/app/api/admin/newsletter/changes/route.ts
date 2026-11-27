@@ -24,6 +24,9 @@
   (or a page that sent none) gets 412 with { error }, nothing written, and
   the page reads the alerts again. The row's history entry carries that
   fingerprint and the signed-in admin's address, as any decision's does.
+  A row with edits saved in the Queue, or a suggestion or question waiting
+  on it, is decided there: 409 with { error }, nothing written
+  (newsletter-queue-only.ts).
 */
 
 import { NextRequest } from 'next/server'
