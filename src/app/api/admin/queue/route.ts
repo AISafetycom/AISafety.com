@@ -97,6 +97,17 @@
   and public) is written onto the row's History with the signed-in admin's
   name, in the same write – queue-history.ts.
 
+  What is applied is what the person saw (queue-shown.ts). Every Change and
+  Rule item carries `shown`, a fingerprint of its proposed changes or its
+  edits as the row held them when it was read. accept, reject, delete,
+  later and suggest on such an item take { shown: <the item's, as the page
+  showed it> } and are refused with 412 when the row's fingerprint is no
+  longer that one (or none was sent): the page reads the item again. The
+  fingerprint that passed is kept on the decision's History entry, where
+  the Mac checks it before it writes an applied rule. Every History entry
+  also carries the signed-in admin's address (`email`), which the page is
+  never sent.
+
   A flag written from a reply in someone's Fable chat leaves a History
   line with their name ("Fable changed the verdict in Rob's chat") unless
   the chat is an owner's own, which leaves none, as before; so does
@@ -146,6 +157,7 @@ import {
   QueueError,
   rejectItem,
   reopenItem,
+  requireShown,
   requireSuggestionSeen,
   sanitiseEdits,
   saveEdits,
@@ -157,6 +169,7 @@ import {
   withdrawItem,
 } from '@/lib/admin/queue'
 import { notOwnPageRequest } from '@/lib/admin/own-page'
+import { actingAs } from '@/lib/admin/queue-actor'
 import { parseFlag } from '@/lib/admin/queue-flag'
 import { publicChoiceOf } from '@/lib/admin/queue-rule-instant'
 import { chatKind, chatOwners } from '@/lib/admin/queue-team-chat'
@@ -337,10 +350,22 @@ export async function POST(req: NextRequest) {
   const id = typeof body.id === 'string' ? body.id : ''
   const action = typeof body.action === 'string' ? body.action : ''
   if (!ACTIONS.has(action)) return json({ error: 'unknown action' }, 400)
+  const me = await currentAdmin()
+  // Every History entry written below carries this person's address beside
+  // their name (queue-actor.ts): the Mac goes by the address.
+  return actingAs(me?.email, () => decide(id, action, body, me))
+}
+
+/** One action on one item, by the signed-in admin. */
+async function decide(
+  id: string,
+  action: string,
+  body: Record<string, unknown>,
+  me: Awaited<ReturnType<typeof currentAdmin>>
+): Promise<Response> {
   try {
     const item = await getQueueItem(id)
     if (!item) return json({ error: 'That item no longer exists.' }, 404)
-    const me = await currentAdmin()
     // The name the row's history keeps for this action.
     const by = me?.name || me?.email || null
     const checkFirst = (await queueMode()) === 'suggest'
@@ -367,6 +392,11 @@ export async function POST(req: NextRequest) {
         typeof body.suggested === 'string' ? body.suggested : null,
         parsePrint(body.suggestedPrint)
       )
+    }
+    // A decision on a change or a rule, or a suggestion of one, is made on
+    // the changes or edits the page showed (queue-shown.ts).
+    if (DECISIONS.has(action) || action === 'suggest') {
+      requireShown(item, body.shown)
     }
     let notPutBack: string[] = []
     if (action === 'suggest') {

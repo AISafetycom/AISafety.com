@@ -11,7 +11,7 @@ const h = vi.hoisted(() => ({
   email: 'someone@example.com',
   mode: 'suggest' as 'edit' | 'suggest' | 'view' | null,
   item: null as Record<string, unknown> | null,
-  calls: [] as { fn: string; args: unknown[] }[],
+  calls: [] as { fn: string; args: unknown[]; as: string | null }[],
 }))
 
 vi.mock('next/cache', () => ({
@@ -31,10 +31,12 @@ vi.mock('@/lib/admin/auth', () => ({
 vi.mock('@/lib/admin/queue-map', () => ({ mapForStrip: vi.fn() }))
 vi.mock('@/lib/admin/queue', async importOriginal => {
   const real = await importOriginal<typeof import('@/lib/admin/queue')>()
+  const { actorEmail } = await import('@/lib/admin/queue-actor')
   const spy =
     (fn: string) =>
     async (...args: unknown[]) => {
-      h.calls.push({ fn, args })
+      // Whose request it runs in: the address its History entry would carry.
+      h.calls.push({ fn, args, as: actorEmail() })
       return fn === 'undoItem' ? [] : undefined
     }
   return {
@@ -319,5 +321,98 @@ describe('a flag written from a reply in the chat', () => {
     expect(called()).toEqual(['flagItem', 'unflagItem'])
     expect(h.calls[0].args[2]).toBeUndefined()
     expect(h.calls[1].args[1]).toBeUndefined()
+  })
+})
+
+describe('a decision on a change or a rule is made on what the page showed', () => {
+  const SHOWN = 'ab'.repeat(32)
+  const changeItem = () => ({
+    id: 'recQUEUEROW000001',
+    title: 'Careers Evening: deadline',
+    type: 'Change',
+    status: 'Pending',
+    forBryce: null,
+    print: PRINT,
+    // The fingerprint of the row as the site reads it now.
+    shown: SHOWN,
+  })
+
+  beforeEach(() => {
+    h.mode = 'edit'
+    h.item = changeItem()
+  })
+
+  it('goes through when the page sends the fingerprint the row has now', async () => {
+    for (const action of ['accept', 'reject', 'later', 'delete']) {
+      expect((await post({ action, shown: SHOWN })).status).toBe(200)
+    }
+    expect(called()).toEqual([
+      'acceptItem',
+      'rejectItem',
+      'laterItem',
+      'deleteItem',
+    ])
+  })
+
+  it('is refused, with nothing written, when the row changed after the page read it', async () => {
+    for (const action of ['accept', 'reject', 'later', 'delete']) {
+      const r = await post({ action, shown: 'cd'.repeat(32) })
+      expect(r.status).toBe(412)
+      expect(r.body.error).toContain('not what your page showed')
+    }
+    expect(called()).toEqual([])
+  })
+
+  it('is refused when the page says nothing of what it showed', async () => {
+    const r = await post({ action: 'accept' })
+    expect(r.status).toBe(412)
+    expect(r.body.error).toContain('Reload the page')
+    expect((await post({ action: 'accept', shown: 7 })).status).toBe(412)
+    expect(called()).toEqual([])
+  })
+
+  it('holds for a rule, by its edits', async () => {
+    h.item = { ...changeItem(), type: 'Rule' }
+    const refused = await post({ action: 'accept', shown: 'cd'.repeat(32) })
+    expect(refused.status).toBe(412)
+    expect(refused.body.error).toContain('rule’s edits')
+    expect((await post({ action: 'accept', shown: SHOWN })).status).toBe(200)
+    expect(called()).toEqual(['acceptItem'])
+  })
+
+  it('holds for a suggestion too', async () => {
+    h.mode = 'suggest'
+    expect(
+      (await post({ action: 'suggest', did: 'accept', shown: 'cd'.repeat(32) }))
+        .status
+    ).toBe(412)
+    expect((await post({ action: 'suggest', did: 'accept' })).status).toBe(412)
+    expect(called()).toEqual([])
+    expect(
+      (await post({ action: 'suggest', did: 'accept', shown: SHOWN })).status
+    ).toBe(200)
+    expect(called()).toEqual(['suggestItem'])
+  })
+
+  it('asks nothing of an addition, or of what is not a decision', async () => {
+    h.item = { ...changeItem(), type: 'Add', shown: undefined }
+    expect((await post({ action: 'accept' })).status).toBe(200)
+    h.item = changeItem()
+    expect((await post({ action: 'wait', on: true })).status).toBe(200)
+    expect((await post({ action: 'undo' })).status).toBe(200)
+    expect(called()).toEqual(['acceptItem', 'waitItem', 'undoItem'])
+  })
+})
+
+describe('whose address a History entry carries', () => {
+  it('is the signed-in admin’s, for everything the request writes', async () => {
+    h.mode = 'edit'
+    h.email = 'Mel@Example.org'
+    await post({ action: 'wait', on: true })
+    await post({ action: 'accept' })
+    expect(h.calls.map(c => c.as)).toEqual([
+      'mel@example.org',
+      'mel@example.org',
+    ])
   })
 })

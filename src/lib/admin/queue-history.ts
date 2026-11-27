@@ -37,6 +37,27 @@
   confirmed or overrode a suggestion carries `suggested`, so its line keeps
   both names.
 
+  The team's chat server writes two kinds itself, for the writes it
+  carries out (its Airtable gateway, ~/Queue airtable_wall.py): `wait` and
+  `fable`, each with `email` beside `by`. In a `fable` entry's `fields` two
+  labels are not field names: "a comment" (the chat left a comment on the
+  record) and "a new <Table> record (rec…)" (it made a record); the line
+  words those as things added.
+
+  Two more keys ride on an entry without ever being shown:
+  - `email`, the address of whoever did it: the Mac goes by it, a name
+    being only a label. The site writes its own on every entry it adds
+    (queue-actor.ts) and never hands one to the page: historyOf leaves it
+    off the entries it returns.
+  - `shown`, on a decision about a change or a rule: the fingerprint of the
+    changes or edits the person decided on (queue-shown.ts), which the Mac
+    compares with the row before it applies a rule.
+
+  The site only ever adds to this list. withEntry writes back the entries
+  exactly as the row held them, the ones this file does not know and the
+  keys it does not read included, plus the new one: a line somebody else
+  wrote is never rewritten by a later click on the page.
+
   Dependency-free, so the page and the server share it.
 */
 
@@ -117,6 +138,9 @@ export interface HistoryEntry {
   undid?: Undid
   /** See Suggested. */
   suggested?: Suggested
+  /** A decision on a change or a rule: the fingerprint of what the person
+   *  decided on (queue-shown.ts). Kept for the Mac; never shown. */
+  shown?: string
 }
 
 // Airtable holds 100,000 characters in a long text field; this keeps the
@@ -169,7 +193,22 @@ function asEntry(x: unknown): HistoryEntry | null {
       entry.suggested = { by: clean(s.by), did: what as Suggested['did'] }
     }
   }
+  if (typeof o.shown === 'string' && /^[0-9a-f]{64}$/.test(o.shown)) {
+    entry.shown = o.shown
+  }
   return entry
+}
+
+// The list as the row held it, by the list of entries read from it, so a
+// write can put every entry back untouched. By the list's own identity:
+// nothing is added to the entries, and nothing of this reaches the page.
+const AS_HELD = new WeakMap<HistoryEntry[], unknown[]>()
+
+/** An address as an entry may carry it: lower-case, and shaped like one. */
+function cleanEmail(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  const t = v.trim().toLowerCase()
+  return /^[^\s@]{1,100}@[^\s@]{1,150}$/.test(t) ? t : null
 }
 
 /** The row's History field as entries, oldest first. Anything unreadable
@@ -185,10 +224,15 @@ export function historyOf(raw: unknown): HistoryEntry[] {
     }
   }
   if (!Array.isArray(list)) return []
-  return list.map(asEntry).filter((e): e is HistoryEntry => e !== null)
+  const out = list.map(asEntry).filter((e): e is HistoryEntry => e !== null)
+  AS_HELD.set(out, list)
+  return out
 }
 
-/** The History field's new value: what the row holds plus one entry. */
+/** The History field's new value: what the row holds plus one entry.
+ *  `history` is the list historyOf read from the row: the entries go back
+ *  as the row held them (see the top of this file). `email` is the address
+ *  of whoever did it, written on the new entry and nowhere else. */
 export function withEntry(
   history: HistoryEntry[],
   entry: {
@@ -198,11 +242,18 @@ export function withEntry(
     fields?: string[]
     undid?: Undid | null
     suggested?: Suggested | null
+    shown?: string | null
+    email?: string | null
   }
 ): string {
+  const held: unknown[] = AS_HELD.get(history) ?? history
   const next = asEntry(entry)
-  const all = next ? [...history, next] : history
-  return JSON.stringify(all.slice(-MAX_ENTRIES))
+  if (!next) return JSON.stringify(held.slice(-MAX_ENTRIES))
+  const email = cleanEmail(entry.email)
+  // The address sits beside the name, as the Mac writes its own.
+  const { at, by, ...rest } = next
+  const stored = { at, by, ...(email ? { email } : {}), ...rest }
+  return JSON.stringify([...held, stored].slice(-MAX_ENTRIES))
 }
 
 // ─── Reading it back, for the page ──────────────────────────────────────────
@@ -362,6 +413,27 @@ export function lineText(line: HistoryLine): string {
 
 const DECIDES: readonly HistoryDid[] = ['accept', 'reject', 'later', 'delete']
 
+/** What Fable did from the chat: the fields it changed, and what it added
+ *  beside them. Two entries of `fields` are not field names (the team's
+ *  chat server writes them, ~/Queue airtable_wall.py): "a comment", and "a
+ *  new <Table> record (rec…)" for a record it made. */
+function fableText(fields: string[]): string {
+  const changed: string[] = []
+  const added: string[] = []
+  for (const f of fields) {
+    const made = /^a new (.+) record \(rec[A-Za-z0-9]{14}\)$/.exec(f)
+    if (f === 'a comment') added.push(f)
+    else if (made) added.push(`a new ${made[1]} record`)
+    else changed.push(f)
+  }
+  if (changed.length === 0 && added.length === 0) {
+    return 'Fable changed the listing'
+  }
+  if (added.length === 0) return `Fable changed ${nameList(changed)}`
+  if (changed.length === 0) return `Fable added ${nameList(added)}`
+  return `Fable changed ${nameList(changed)}${changed.length > 1 ? ',' : ''} and added ${nameList(added)}`
+}
+
 /** What the chat's flag block changes, as the chat's own card calls it. */
 function flagNoun(type: HistoryRow['type']): string {
   return type === 'Add' ? 'verdict' : 'flag'
@@ -384,9 +456,7 @@ function decisionText(line: HistoryLine): string {
     case 'fix':
       return fields.length > 0 ? `Edited ${nameList(fields)}` : 'Edited'
     case 'fable':
-      return fields.length > 0
-        ? `Fable changed ${nameList(fields)}`
-        : 'Fable changed the listing'
+      return fableText(fields)
     case 'reopen':
       return 'Reopened'
     case 'delete':

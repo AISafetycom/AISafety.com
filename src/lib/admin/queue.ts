@@ -48,7 +48,15 @@ import {
   type AirtableRow,
 } from './airtable'
 import { sealToken } from './session'
+import { actorEmail } from './queue-actor'
 import { CHAT_SOURCE, chatProposed } from './queue-chat-source'
+import {
+  ruleEditsOf,
+  ruleMarkOf,
+  type RuleEdit,
+  type RuleMark,
+} from './queue-rule-edits'
+import { shownOf } from './queue-shown'
 import { parseRejectDrafts } from './queue-decline'
 import { listingState, type FoundListing } from './queue-listing'
 import { isExpiredAttachment } from './attachment-url'
@@ -287,6 +295,19 @@ export interface QueueItem {
    *  writes it only on "apply". */
   rulePublic: RulePublic | null
   rulePublicChoice: PublicChoice | null
+  /** Rule: it goes in only on the owner's own Apply (proposal
+   *  `bryce_applies`: proposed in a teammate's chat, or drafted from a
+   *  decision a teammate made). Its card is drawn from its edits, below,
+   *  never from the words written about them (queue-rule-edits.ts). */
+  ruleMark?: RuleMark | null
+  /** A marked rule: the edits the worker writes on Apply, to the rulebook
+   *  and to the public listing policy. Null when they cannot be read. */
+  ruleEdits?: RuleEdit[] | null
+  rulePublicEdits?: RuleEdit[] | null
+  /** Change, Rule: the fingerprint of the changes or edits as this read of
+   *  the row found them (queue-shown.ts). The page sends it back with a
+   *  decision, which is refused when the row no longer matches. */
+  shown?: string | null
   verdict: Verdict | null
   reasons: string[]
   rejectChips: string[]
@@ -743,6 +764,18 @@ function rowToItem(
   const f = row.fields
   const proposal = parseJson(f[F.proposal])
   const inChat = chatProposed(str(f[F.source]), proposal)
+  const kind = str(f[F.type]) ?? 'Add'
+  // What a decision on a change or a rule is made on (queue-shown.ts).
+  const shown = shownOf({
+    type: kind,
+    proposal,
+    targetTable: f[F.targetTable],
+    targetRecord: f[F.targetRecord],
+  })
+  const ruleMark =
+    kind === 'Rule' && isRecord(proposal)
+      ? ruleMarkOf(proposal.bryce_applies)
+      : null
   let fields: Record<string, unknown> | null = null
   let name: string | null = null
   let url: string | null = null
@@ -837,10 +870,16 @@ function rowToItem(
     emailLink = emailLinkOf(proposal)
     if (isRecord(proposal.fields)) {
       fields = proposal.fields
-    } else if (changes.length === 0 && !diff) {
+    } else if (kind !== 'Rule' && changes.length === 0 && !diff) {
+      // An old row: the proposal is the record's fields themselves. Never a
+      // rule, which has none: one the team's chat proposed comes without a
+      // `diff`, and all of it, the address on its mark included, would
+      // have gone to the page as fields.
       const rest: Record<string, unknown> = {}
       for (const [k, v] of Object.entries(proposal)) {
         if (
+          k !== 'chat' &&
+          k !== 'bryce_applies' &&
           k !== 'name' &&
           k !== 'url' &&
           k !== 'no_reply' &&
@@ -933,6 +972,17 @@ function rowToItem(
     ruleInstant,
     rulePublic,
     rulePublicChoice,
+    ...(ruleMark
+      ? {
+          ruleMark,
+          ruleEdits: isRecord(proposal) ? ruleEditsOf(proposal.edits) : null,
+          rulePublicEdits:
+            isRecord(proposal) && isRecord(proposal.public)
+              ? ruleEditsOf(proposal.public.edits)
+              : null,
+        }
+      : {}),
+    ...(shown ? { shown } : {}),
     verdict: str(f[F.verdict]) as Verdict | null,
     reasons: lines(f[F.reasons]),
     rejectChips: lines(f[F.rejectChips]),
@@ -2123,15 +2173,43 @@ function stamped(
       ? { by: fb.by, did: fb.kind === 'suggest' ? fb.did : 'ask' }
       : null
   return {
-    [F.history]: withEntry(item.history ?? [], {
+    [F.history]: historyWith(item, {
       at,
       by,
       did,
       ...more,
       ...(suggested ? { suggested } : {}),
+      // A decision on a change or a rule: what it was made on.
+      ...(DECISIONS.includes(did) && item.shown ? { shown: item.shown } : {}),
     }),
     ...(fb ? { [F.forBryce]: null } : {}),
   }
+}
+
+/** The row's History with one more entry, which carries the address of
+ *  whoever this request acts for (queue-actor.ts) beside their name. */
+function historyWith(
+  item: QueueItem,
+  entry: Omit<Parameters<typeof withEntry>[1], 'email'>
+): string {
+  return withEntry(item.history ?? [], { ...entry, email: actorEmail() })
+}
+
+/** A decision on a change or a rule is made on what the page showed: the
+ *  page sends the fingerprint of the item it had on screen (`shown`,
+ *  queue-shown.ts), and a row whose changes or edits read differently by
+ *  now is refused, 412, so the page reads it again. One that sent none (a
+ *  tab from before this check) is refused the same way. */
+export function requireShown(item: QueueItem, sent: unknown): void {
+  if (item.type !== 'Change' && item.type !== 'Rule') return
+  if (typeof sent === 'string' && sent === item.shown) return
+  const what = item.type === 'Rule' ? 'This rule’s edits' : 'The changes'
+  throw new QueueError(
+    typeof sent === 'string'
+      ? `${what} are not what your page showed: they changed after it read them. Here is the item as it is now. Look again, then decide.`
+      : 'Your page has not said what it showed for this item. Reload the page, then decide.',
+    412
+  )
 }
 
 function requireOpen(item: QueueItem): void {
@@ -3545,7 +3623,7 @@ export async function suggestItem(
   await patchQueueRow(item.id, {
     ...fields,
     [F.forBryce]: JSON.stringify(suggestion),
-    [F.history]: withEntry(item.history ?? [], {
+    [F.history]: historyWith(item, {
       at,
       by,
       did: 'suggest',
@@ -3579,7 +3657,7 @@ export async function withdrawItem(
   }
   const fields: Record<string, unknown> = { [F.forBryce]: null }
   if (isWaiting(fb)) {
-    fields[F.history] = withEntry(item.history ?? [], {
+    fields[F.history] = historyWith(item, {
       at: now(),
       by,
       did: 'withdraw',
@@ -3620,7 +3698,7 @@ export async function askItem(
   }
   await patchQueueRow(item.id, {
     [F.forBryce]: JSON.stringify(asked),
-    [F.history]: withEntry(item.history ?? [], { at, by, did: 'ask' }),
+    [F.history]: historyWith(item, { at, by, did: 'ask' }),
   })
 }
 
@@ -3649,7 +3727,7 @@ export async function answerItem(
   }
   await patchQueueRow(item.id, {
     [F.forBryce]: JSON.stringify(answered),
-    [F.history]: withEntry(item.history ?? [], {
+    [F.history]: historyWith(item, {
       at,
       by,
       did: 'answer',

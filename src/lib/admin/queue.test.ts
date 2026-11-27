@@ -48,6 +48,7 @@ import {
   rejectItem,
   rejectReplyOf,
   reopenItem,
+  requireShown,
   saveEdits,
   savePublicWording,
   undoItem,
@@ -55,7 +56,9 @@ import {
   waitItem,
   type QueueItem,
 } from './queue'
+import { actingAs } from './queue-actor'
 import { LEFT_OUT_KEY } from './queue-left-out'
+import { shownOf } from './queue-shown'
 import { GONE_KEY } from './queue-retired'
 
 const QUEUE = 'tblonlKwIFJ7Aa8QN'
@@ -1494,6 +1497,189 @@ describe('a change proposed in the Queue chat', () => {
     expect(comb?.source).toBe('Comb')
     expect(comb && 'chatBy' in comb).toBe(false)
     expect((await row('Email'))?.source).toBe('Email')
+  })
+})
+
+describe('what a decision on a change or a rule is made on', () => {
+  const ID = rid('shownrow')
+  const FLD = {
+    title: 'fldeRsOE3DM3R2vbX',
+    type: 'fldBc9YIDhjmu58f3',
+    source: 'flddKkVy62MAZ8M0J',
+    status: 'fldTXGYOoXcUApaI2',
+    proposal: 'fldgl9Ny2jnu8T0Da',
+    targetTable: 'fld45SUjstUZROuXl',
+    targetRecord: 'fldszXtLdUijgFG4l',
+  }
+  let fields: Record<string, unknown> = {}
+
+  beforeEach(() => {
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(async (path: string) =>
+      path.startsWith(`${QUEUE}/${ID}`)
+        ? new Response(
+            JSON.stringify({
+              id: ID,
+              createdTime: '2026-11-30T03:00:00.000Z',
+              fields,
+            }),
+            { status: 200 }
+          )
+        : new Response('not here', { status: 404 })
+    )
+  })
+
+  const read = async (row: Record<string, unknown>) => {
+    fields = { [FLD.title]: 'An item', [FLD.status]: 'Pending', ...row }
+    const got = await getQueueItem(ID)
+    if (!got) throw new Error('row gone')
+    return got
+  }
+  const changes = [{ field: 'Deadline', from: null, to: '2026-12-12' }]
+  const changeRow = (proposal: object = { kind: 'change', changes }) => ({
+    [FLD.type]: 'Change',
+    [FLD.source]: 'Broom',
+    [FLD.targetTable]: EVENTS,
+    [FLD.targetRecord]: rid('event'),
+    [FLD.proposal]: JSON.stringify(proposal),
+  })
+  const edits = [
+    {
+      file: '~/Queue/chat-lessons.md',
+      find: '## Dates\n',
+      replace: '## Dates\n- New.\n',
+    },
+  ]
+  const ruleRow = (proposal: object = { kind: 'rule', edits }) => ({
+    [FLD.type]: 'Rule',
+    [FLD.source]: 'Teach',
+    [FLD.proposal]: JSON.stringify(proposal),
+  })
+
+  it('rides on a change as the fingerprint of its changes and its listing', async () => {
+    const got = await read(changeRow())
+    expect(got.shown).toBe(
+      shownOf({
+        type: 'Change',
+        proposal: { changes },
+        targetTable: EVENTS,
+        targetRecord: rid('event'),
+      })
+    )
+    expect(got.shown).toMatch(/^[0-9a-f]{64}$/)
+    // Another value, another fingerprint.
+    const other = await read(
+      changeRow({
+        kind: 'change',
+        changes: [{ ...changes[0], to: '2026-12-13' }],
+      })
+    )
+    expect(other.shown).not.toBe(got.shown)
+  })
+
+  it('rides on a rule as the fingerprint of its edits', async () => {
+    const got = await read(ruleRow())
+    expect(got.shown).toBe(shownOf({ type: 'Rule', proposal: { edits } }))
+    // The words about the edits are not part of it.
+    const worded = await read(
+      ruleRow({
+        kind: 'rule',
+        edits,
+        summary: 'Says something else',
+        wording: 'x',
+      })
+    )
+    expect(worded.shown).toBe(got.shown)
+  })
+
+  it('is not on an addition', async () => {
+    const got = await read({
+      [FLD.type]: 'Add',
+      [FLD.source]: 'Comb',
+      [FLD.proposal]: JSON.stringify({ kind: 'add', fields: { Name: 'X' } }),
+    })
+    expect('shown' in got).toBe(false)
+  })
+
+  it('lets a decision through only on the fingerprint the row has now', async () => {
+    const got = await read(changeRow())
+    expect(() => requireShown(got, got.shown)).not.toThrow()
+    // The row changed after the page read it.
+    const now = await read(
+      changeRow({
+        kind: 'change',
+        changes: [{ ...changes[0], to: '2027-01-01' }],
+      })
+    )
+    expect(() => requireShown(now, got.shown)).toThrow(
+      expect.objectContaining({ status: 412 })
+    )
+    // A page that sent none, or something that is not one.
+    for (const none of [undefined, null, '', 7, { shown: got.shown }]) {
+      expect(() => requireShown(got, none)).toThrow(
+        expect.objectContaining({ status: 412 })
+      )
+    }
+    const rule = await read(ruleRow())
+    expect(() => requireShown(rule, rule.shown)).not.toThrow()
+    expect(() => requireShown(rule, got.shown)).toThrow(
+      expect.objectContaining({ status: 412 })
+    )
+  })
+
+  it('asks nothing of an addition', async () => {
+    const add = await read({
+      [FLD.type]: 'Add',
+      [FLD.proposal]: JSON.stringify({ kind: 'add', fields: { Name: 'X' } }),
+    })
+    expect(() => requireShown(add, undefined)).not.toThrow()
+  })
+
+  it('reads a marked rule’s edits for its card, and not the address on the mark', async () => {
+    const got = await read(
+      ruleRow({
+        kind: 'rule',
+        edits,
+        summary: 'A story about the edits',
+        public: {
+          wording: 'said',
+          edits: [
+            { file: '~/Comb/listing-policy.md', find: 'a', replace: 'b' },
+          ],
+        },
+        bryce_applies: {
+          why: 'Proposed in the Queue chat',
+          chat: 'rob@example.org',
+          name: 'Rob Grayson',
+          at: '2026-11-30T03:00:00Z',
+        },
+      })
+    )
+    expect(got.ruleMark).toEqual({ chat: true, name: 'Rob Grayson' })
+    expect(got.ruleEdits).toEqual(edits)
+    expect(got.rulePublicEdits).toEqual([
+      { file: '~/Comb/listing-policy.md', find: 'a', replace: 'b' },
+    ])
+    expect(JSON.stringify(got)).not.toContain('rob@example.org')
+  })
+
+  it('says so when a marked rule’s edits cannot be read', async () => {
+    const got = await read(
+      ruleRow({
+        kind: 'rule',
+        edits: [{ file: 'f', find: 'a' }],
+        bryce_applies: {},
+      })
+    )
+    expect(got.ruleMark).toEqual({ chat: false, name: null })
+    expect(got.ruleEdits).toBeNull()
+    expect(got.rulePublicEdits).toBeNull()
+  })
+
+  it('leaves a rule with no mark as it was', async () => {
+    const got = await read(ruleRow())
+    expect('ruleMark' in got).toBe(false)
+    expect('ruleEdits' in got).toBe(false)
   })
 })
 
@@ -2996,6 +3182,75 @@ describe('who did what, on the row’s history', () => {
     expect(entries).toEqual([
       { at: fields[DECIDED], by: 'Rob Example', did: 'accept' },
     ])
+  })
+
+  it('keeps what a decision was made on, and the address of who made it', async () => {
+    const shown = 'ab'.repeat(32)
+    await actingAs(' Bryce@Example.org', () =>
+      acceptItem(
+        item({ type: 'Rule', targetTable: null, targetRecord: null, shown }),
+        {},
+        null,
+        [],
+        null,
+        'Bryce'
+      )
+    )
+    const { fields, entries } = written()
+    expect(entries).toEqual([
+      {
+        at: fields[DECIDED],
+        by: 'Bryce',
+        email: 'bryce@example.org',
+        did: 'accept',
+        shown,
+      },
+    ])
+  })
+
+  it('keeps it on a reject, a set-aside and a delete of a change too', async () => {
+    const shown = 'cd'.repeat(32)
+    const row = () => change({ shown })
+    await actingAs('rob@example.org', async () => {
+      await rejectItem(row(), 'Out of scope', null, 'Rob Example')
+      expect(written().entries.at(-1)).toMatchObject({
+        did: 'reject',
+        email: 'rob@example.org',
+        shown,
+      })
+      await laterItem(row(), 'Rob Example')
+      expect(written().entries.at(-1)).toMatchObject({ did: 'later', shown })
+    })
+  })
+
+  it('has none on what is not a decision, though the address is there', async () => {
+    await actingAs('rob@example.org', () =>
+      waitItem(change({ shown: 'ef'.repeat(32) }), true, 'Rob Example')
+    )
+    const entry = written().entries.at(-1)
+    expect(entry).toMatchObject({ did: 'wait', email: 'rob@example.org' })
+    expect(entry && 'shown' in entry).toBe(false)
+  })
+
+  it('writes no address when nobody is signed in to the request', async () => {
+    await rejectItem(change(), 'Out of scope', null, 'Rob Example')
+    const entry = written().entries.at(-1)
+    expect(entry && 'email' in entry).toBe(false)
+  })
+
+  it('keeps two requests’ addresses apart, however they overlap', async () => {
+    const seen: unknown[] = []
+    const one = (email: string, pause: number) =>
+      actingAs(email, async () => {
+        await new Promise(r => setTimeout(r, pause))
+        await laterItem(change(), email)
+        seen.push(written().entries.at(-1))
+      })
+    await Promise.all([one('a@example.org', 15), one('b@example.org', 1)])
+    for (const e of seen as { by: string; email: string }[]) {
+      expect(e.email).toBe(e.by)
+    }
+    expect(seen).toHaveLength(2)
   })
 
   it('adds a reject after what the row already holds', async () => {

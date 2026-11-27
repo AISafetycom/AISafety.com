@@ -357,3 +357,183 @@ describe('lineText', () => {
     expect(lineText(line({ did: 'undo' }))).toBe('Undid the decision')
   })
 })
+
+describe('entries the team chat’s server wrote', () => {
+  // As its Airtable gateway writes them (~/Queue airtable_wall.py).
+  const WAIT = {
+    at: '2026-11-30T03:00:00Z',
+    by: 'Rob Grayson',
+    email: 'rob@example.org',
+    did: 'wait',
+  }
+  const FABLE = {
+    at: '2026-11-30T03:05:00Z',
+    by: 'Rob Grayson',
+    email: 'rob@example.org',
+    did: 'fable',
+    fields: ['Name', 'Link'],
+  }
+  const raw = JSON.stringify([WAIT, FABLE])
+
+  it('show as "Marked as waiting on them" and "Fable changed Name and Link"', () => {
+    const [wait, fable] = historyOf(raw)
+    expect(lineText(line({ ...wait }))).toBe('Marked as waiting on them')
+    expect(lineText(line({ ...fable }))).toBe('Fable changed Name and Link')
+    expect(wait.by).toBe('Rob Grayson')
+    expect(fable.fields).toEqual(['Name', 'Link'])
+  })
+
+  it('never hand the address to the page', () => {
+    const entries = historyOf(raw)
+    expect(JSON.stringify(entries)).not.toContain('rob@example.org')
+    for (const e of entries) expect('email' in e).toBe(false)
+    const lines = rowLines(
+      row({ history: entries, status: 'Pending', decidedAt: null })
+    )
+    expect(JSON.stringify(lines)).not.toContain('@')
+  })
+
+  it('word what Fable added beside what it changed', () => {
+    const text = (fields: string[]) =>
+      lineText(line({ did: 'fable', by: 'Rob Grayson', fields }))
+    expect(text(['a comment'])).toBe('Fable added a comment')
+    expect(text(['Name', 'a comment'])).toBe(
+      'Fable changed Name and added a comment'
+    )
+    expect(text(['Name', 'Link', 'a comment'])).toBe(
+      'Fable changed Name and Link, and added a comment'
+    )
+    expect(text(['a new Events record (recAAAAAAAAAAAAAA)'])).toBe(
+      'Fable added a new Events record'
+    )
+    expect(
+      text([
+        'Description',
+        'a comment',
+        'a new Training (recurring) record (recBBBBBBBBBBBBBB)',
+      ])
+    ).toBe(
+      'Fable changed Description and added a comment and a new Training (recurring) record'
+    )
+    // A field that only looks like a label is a field.
+    expect(text(['A comment', 'a new record'])).toBe(
+      'Fable changed A comment and a new record'
+    )
+  })
+
+  it('go back exactly as they were when the site adds a line', () => {
+    const history = historyOf(raw)
+    const written = JSON.parse(
+      withEntry(history, {
+        at: LATER,
+        by: 'Bryce',
+        did: 'accept',
+        email: 'Bryce@Example.org ',
+        shown: 'a'.repeat(64),
+      })
+    )
+    // Theirs: every key, in their order.
+    expect(written[0]).toEqual(WAIT)
+    expect(Object.keys(written[0])).toEqual(['at', 'by', 'email', 'did'])
+    expect(written[1]).toEqual(FABLE)
+    // The site's own: its address beside the name, and what it was made on.
+    expect(written[2]).toEqual({
+      at: LATER,
+      by: 'Bryce',
+      email: 'bryce@example.org',
+      did: 'accept',
+      shown: 'a'.repeat(64),
+    })
+  })
+})
+
+describe('what a later write leaves alone', () => {
+  it('keeps entries of a kind this file does not know, and keys it does not read', () => {
+    const held = [
+      { at: AT, by: 'Someone', did: 'a-kind-from-the-future', extra: { a: 1 } },
+      {
+        at: AT,
+        by: 'Bryce',
+        did: 'accept',
+        email: 'bryce@example.org',
+        note: 'kept',
+      },
+      'not an entry at all',
+    ]
+    const history = historyOf(JSON.stringify(held))
+    // Only what it knows is shown.
+    expect(history.map(e => e.did)).toEqual(['accept'])
+    const written = JSON.parse(
+      withEntry(history, { at: LATER, by: 'Rob', did: 'wait' })
+    )
+    expect(written.slice(0, 3)).toEqual(held)
+    expect(written[3]).toEqual({ at: LATER, by: 'Rob', did: 'wait' })
+  })
+
+  it('still keeps only the newest hundred', () => {
+    const held = Array.from({ length: 120 }, (_, i) => ({
+      at: AT,
+      by: `Person ${i}`,
+      did: 'fix',
+      email: `p${i}@example.org`,
+    }))
+    const written = JSON.parse(
+      withEntry(historyOf(JSON.stringify(held)), {
+        at: LATER,
+        by: 'Bryce',
+        did: 'undo',
+      })
+    )
+    expect(written).toHaveLength(100)
+    expect(written[0]).toEqual(held[21])
+    expect(written[99].did).toBe('undo')
+  })
+
+  it('writes from the entries themselves for a list it did not read', () => {
+    const history: HistoryEntry[] = [{ at: AT, by: 'Bryce', did: 'accept' }]
+    expect(
+      JSON.parse(
+        withEntry(history, {
+          at: LATER,
+          by: 'Bryce',
+          did: 'undo',
+          undid: 'accept',
+        })
+      )
+    ).toEqual([
+      { at: AT, by: 'Bryce', did: 'accept' },
+      { at: LATER, by: 'Bryce', did: 'undo', undid: 'accept' },
+    ])
+  })
+})
+
+describe('what a decision was made on', () => {
+  it('is kept on its entry, and read back', () => {
+    const shown = '0123456789abcdef'.repeat(4)
+    const written = withEntry([], { at: AT, by: 'Bryce', did: 'accept', shown })
+    expect(JSON.parse(written)[0].shown).toBe(shown)
+    expect(historyOf(written)[0].shown).toBe(shown)
+  })
+  it('is left off when it is not a fingerprint', () => {
+    for (const bad of ['', 'abc', 'G'.repeat(64), null, undefined]) {
+      const written = withEntry([], {
+        at: AT,
+        by: 'Bryce',
+        did: 'accept',
+        shown: bad,
+      })
+      expect('shown' in JSON.parse(written)[0]).toBe(false)
+    }
+  })
+  it('never writes an address that is not one', () => {
+    for (const bad of ['', 'not an address', 'a@b c', null, undefined]) {
+      const written = withEntry([], {
+        at: AT,
+        by: 'Bryce',
+        did: 'accept',
+        email: bad,
+      })
+      expect('email' in JSON.parse(written)[0]).toBe(false)
+    }
+  })
+})

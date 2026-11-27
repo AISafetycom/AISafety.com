@@ -2,6 +2,7 @@
 
 import {
   createContext,
+  Fragment,
   useCallback,
   useContext,
   useEffect,
@@ -137,6 +138,12 @@ import {
   type SuggestDid,
 } from '@/lib/admin/queue-suggest'
 import { CHAT_SOURCE, chatHeading } from '@/lib/admin/queue-chat-source'
+import {
+  editChanges,
+  shownEdit,
+  type RuleEdit,
+  type RuleMark,
+} from '@/lib/admin/queue-rule-edits'
 import type { ChatKind } from '@/lib/admin/queue-team-chat'
 import type { QueueMode } from '@/lib/admin/access'
 import { STATUS_ICONS as FUNDER_STATUS_ICONS } from '@/app/funding/card'
@@ -2064,6 +2071,12 @@ const OFFLINE_SUB = `Mac agent not reachable · ${WORKER_NOTE}`
 // queue-team-chat.ts): the plain note, with nothing said to be unreachable.
 const WORKER_SUB = 'The Mac saves the reply draft within five minutes'
 const WORKER_REJECT_SUB = 'The Mac writes the reply within five minutes'
+
+/** The fingerprint of an item's changes or edits as the page holds the item
+ *  now (queue-shown.ts): what is on screen, sent with a decision. */
+function shownNow(items: QueueItem[] | null, item: QueueItem): string | null {
+  return (items?.find(i => i.id === item.id) ?? item).shown ?? null
+}
 
 /** How the page reads the list: `sync` closes rows handled in Airtable
  *  itself first; `remake` makes these items' drafts again from the rows
@@ -4052,6 +4065,10 @@ function QueueInbox({
               : {}),
             reason: d.note,
             ...extra,
+            // What this page showed of a change or a rule (queue-shown.ts).
+            ...(shownNow(itemsRef.current, item)
+              ? { shown: shownNow(itemsRef.current, item) }
+              : {}),
           }),
         })
         status = res.status
@@ -4433,6 +4450,12 @@ function QueueInbox({
       // or refused, keep the rule open: the old words never go out in
       // their place.
       let pub = item.rulePublic
+      // What this page shows of the item's changes or edits, sent with a
+      // decision (queue-shown.ts). Saving new public wording rewrites the
+      // rule's edits, so the item that save hands back says it anew.
+      // Read off the item as the page holds it now, which is what is on
+      // screen, rather than the copy this call was handed.
+      let shown = shownNow(itemsRef.current, item)
       // The draft the page shows, made from the row when there is none yet
       // (a suggested Apply brings its choice for the wording).
       const internal =
@@ -4440,7 +4463,11 @@ function QueueInbox({
           .keepInternal ?? item.rulePublicChoice === 'internal'
       if (action === 'accept' && item.type === 'Rule' && pub) {
         const saving = publicSaves.current[item.id]
-        if (saving) pub = (await saving)?.rulePublic ?? pub
+        if (saving) {
+          const saved = await saving
+          pub = saved?.rulePublic ?? pub
+          shown = saved?.shown ?? shown
+        }
         const d = draftsRef.current[item.id]
         if (!internal && (d?.editingPublic || d?.publicText != null)) {
           setDraft(item.id, {
@@ -4589,6 +4616,10 @@ function QueueInbox({
             ...extra,
             ...(suggestion ? { suggested: suggestion.at } : {}),
             ...(seenPrint ? { suggestedPrint: seenPrint } : {}),
+            // A change or a rule: the changes or edits this page showed
+            // (queue-shown.ts). The site refuses the decision when the
+            // row no longer holds them, and the page reads it again.
+            ...(decision && shown ? { shown } : {}),
           }),
         })
         status = res.status
@@ -11107,6 +11138,35 @@ function RuleCard({
       Boolean(item.appliesTo) ||
       Boolean(item.ruleWording))
   const wording = <RuleWording item={item} />
+  // A rule that came by way of a teammate: drawn from its edits, the thing
+  // Apply writes, with the words written about them kept apart
+  // (queue-rule-edits.ts).
+  if (item.ruleMark) {
+    return (
+      <section className={styles.block}>
+        <p className={styles.note}>{ruleMarkLine(item.ruleMark)}</p>
+        <RuleEdits edits={item.ruleEdits} />
+        {!policy &&
+          (test ? (
+            <RuleTestStat test={test} />
+          ) : (
+            <p className={styles.note}>Not tested on your past decisions.</p>
+          ))}
+        <RuleNeedsYou test={test} />
+        {item.rulePublic && (
+          <PublicWording
+            wording={item.rulePublic}
+            internal={internal}
+            onInternal={onInternal}
+            disabled={disabled}
+            edit={publicEdit}
+          />
+        )}
+        <RulePublicEdits edits={item.rulePublicEdits} />
+        <RuleDescribed item={item} />
+      </section>
+    )
+  }
   return (
     <section className={styles.block}>
       {from?.listing && (
@@ -11162,6 +11222,113 @@ function RuleCard({
         </details>
       )}
     </section>
+  )
+}
+
+/** Where a marked rule came from, in a line over its edits. */
+function ruleMarkLine(mark: RuleMark): string {
+  const whose = mark.name ? `${firstName(mark.name)}’s` : 'a teammate’s'
+  return mark.chat
+    ? `Proposed in ${whose} Fable chat. This is what Apply writes, read from the rule’s own edits.`
+    : `Drafted from ${mark.name ? `a decision ${firstName(mark.name)} made` : 'a teammate’s decision'}. This is what Apply writes, read from the rule’s own edits.`
+}
+
+/** What Apply writes for a rule, read off its edits (queue-rule-edits.ts):
+ *  for each, the file, the words that go in and the words they replace.
+ *  Laid out like the wording of any rule. */
+function RuleEdits({ edits }: { edits: RuleEdit[] | null | undefined }) {
+  if (!edits) {
+    return (
+      <p className={styles.error}>
+        This rule’s edits could not be read, so there is nothing to show of what
+        Apply would write. Reject it, or ask in the chat for it to be written
+        again.
+      </p>
+    )
+  }
+  return (
+    <>
+      {edits.map((edit, i) => {
+        const shown = shownEdit(edit)
+        return (
+          <Fragment key={i}>
+            <h3 className={styles.h3}>Exact wording</h3>
+            <p className={styles.note}>In {shown.file}</p>
+            {!editChanges(edit) ? (
+              <p className={styles.note}>This edit changes nothing.</p>
+            ) : shown.in ? (
+              <blockquote className={styles.quote}>{shown.in}</blockquote>
+            ) : (
+              <p className={styles.note}>
+                Nothing is added: it only takes words out.
+              </p>
+            )}
+            {shown.out && (
+              <>
+                <h3 className={styles.h3}>Replaces</h3>
+                <blockquote className={`${styles.quote} ${styles.from}`}>
+                  {shown.out}
+                </blockquote>
+              </>
+            )}
+          </Fragment>
+        )
+      })}
+    </>
+  )
+}
+
+/** A marked rule's edits to the public listing policy, as they would be
+ *  written there (only when it is applied with that choice). */
+function RulePublicEdits({ edits }: { edits: RuleEdit[] | null | undefined }) {
+  if (!edits || edits.length === 0) return null
+  return (
+    <>
+      <p className={styles.note}>
+        On the public listing policy, Apply would write exactly this:
+      </p>
+      <RuleEdits edits={edits} />
+    </>
+  )
+}
+
+/** What the row says about a marked rule, in its own words: never what
+ *  Apply writes, so it is folded away and says whose words they are. */
+function RuleDescribed({ item }: { item: QueueItem }) {
+  if (!item.summary && !item.ruleWording && !item.ruleWas && !item.appliesTo) {
+    return null
+  }
+  return (
+    <details className={styles.findingMore}>
+      <summary>
+        {item.ruleMark?.chat
+          ? 'The chat’s own description'
+          : 'The row’s own description'}
+      </summary>
+      <div className={styles.block}>
+        <p className={styles.note}>
+          Written about the rule, not by it: Apply writes only the edits above.
+        </p>
+        {item.summary && <p className={styles.ruleMore}>{item.summary}</p>}
+        {item.appliesTo && (
+          <p className={styles.note}>Applies to {item.appliesTo}</p>
+        )}
+        {item.ruleWording && (
+          <>
+            <h3 className={styles.h3}>Described wording</h3>
+            <blockquote className={styles.quote}>{item.ruleWording}</blockquote>
+          </>
+        )}
+        {item.ruleWas && (
+          <>
+            <h3 className={styles.h3}>Described as replacing</h3>
+            <blockquote className={`${styles.quote} ${styles.from}`}>
+              {item.ruleWas}
+            </blockquote>
+          </>
+        )}
+      </div>
+    </details>
   )
 }
 
@@ -11288,10 +11455,21 @@ function RulePopUp({
           buttons out of reach. */}
       <div className={styles.rulePopBody}>
         <p className={styles.rulePopLead}>{item.title}</p>
-        {item.summary && <p className={styles.rulePopWhy}>{lead}</p>}
-        {/* The words that go into the rulebook, on the card itself, so
-            Apply never needs V first (Bryce, 19 Nov 2026). */}
-        <RuleWording item={item} />
+        {item.ruleMark ? (
+          // A rule that came by way of a teammate: what Apply writes, read
+          // off its edits, never the words written about them.
+          <>
+            <p className={styles.note}>{ruleMarkLine(item.ruleMark)}</p>
+            <RuleEdits edits={item.ruleEdits} />
+          </>
+        ) : (
+          <>
+            {item.summary && <p className={styles.rulePopWhy}>{lead}</p>}
+            {/* The words that go into the rulebook, on the card itself, so
+                Apply never needs V first (Bryce, 19 Nov 2026). */}
+            <RuleWording item={item} />
+          </>
+        )}
         {/* A listing-policy row is only its wording: no test runs on it. */}
         {!item.rulePublicPolicy &&
           (test ? (
@@ -11311,6 +11489,7 @@ function RulePopUp({
             edit={publicEdit}
           />
         )}
+        {item.ruleMark && <RulePublicEdits edits={item.rulePublicEdits} />}
         {draft.error && <p className={styles.error}>{draft.error}</p>}
       </div>
       {rejecting ? (
