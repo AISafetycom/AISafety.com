@@ -28,7 +28,8 @@
 // Replies: a message about the description or the reply (and the first
 // message of a thread) gets new wording as an `edits` block and, on an item
 // with a reply draft, a `reply` block; "slow" gets a long reply to try Stop
-// and waiting messages on; anything else a short plain answer.
+// and waiting messages on; "verdict" gets a new verdict for the item, which
+// the page writes onto the row; anything else a short plain answer.
 //
 // --mac <port> (start.sh --mac-chat) also stands in for the agent on the
 // owner's Mac, which the owner's page calls directly on 127.0.0.1: the same
@@ -256,6 +257,7 @@ function itemOf(row) {
     const fields = demo.queue?.[row]?.fields ?? {}
     return {
       title: fields[F.title] ?? 'this item',
+      type: fields[F.type] ?? 'Add',
       recordId: fields[F.targetRecord] ?? '',
       record:
         demo.records?.[fields[F.targetTable]]?.[fields[F.targetRecord]] ?? null,
@@ -284,6 +286,32 @@ function replyFor(row, message, who, asked) {
       tools: ['Reading the listing', 'Reading its page'],
       text: `Here is a long answer, one line at a time.\n\n${lines.join('\n')}`,
       pace: 140,
+    }
+  }
+  if (/\b(verdict|flag)\b/i.test(message) && item.type !== 'Rule') {
+    // As the real agent does: the new verdict rides on the message, not in
+    // its text, and the page writes it onto the row when the reply lands.
+    const add = item.type === 'Add'
+    return {
+      tools: ['Reading the listing', 'Checking its page'],
+      text: add
+        ? `I would not publish **${name}** yet: its page does not say who runs it. I have changed the verdict to Unsure.${checked}`
+        : `The change to **${name}** no longer applies: its page already shows the new value. I have changed the flag to Dismiss.${checked}`,
+      flag: add
+        ? {
+            verdict: 'Unsure',
+            reasons: [
+              'The page does not say who runs it',
+              'A canned reason from the demo, not a real check',
+            ],
+            chips: ['Not about AI safety', 'Nobody to ask'],
+          }
+        : {
+            verdict: 'Dismiss',
+            reasons: ['The page already shows the new value'],
+            chips: ['Already fixed'],
+          },
+      pace: 50,
     }
   }
   const wantsWording =
@@ -386,7 +414,9 @@ function chatFor(side) {
             note:
               'You stopped this reply' + (written ? '' : ' before it answered'),
           }
-        : {}),
+        : reply.flag
+          ? { flag: reply.flag }
+          : {}),
     }
     thread.messages.push(msg)
     save()

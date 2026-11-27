@@ -145,5 +145,8 @@ or ticking it again writes the change to the log with the old and new value.
 The stand-in's replies are canned: the first message on an item, or one
 that mentions the description, the wording or the reply, gets an `edits`
 block (and a `reply` block on an item with a reply draft); `slow` gets a
-long reply; anything else a short answer. The threads are kept in
+long reply; `verdict` gets a new verdict, which the page writes onto the
+item with a History line naming whose chat it was ("Fable changed the
+verdict in Rob's chat"; the owner's own chat leaves none); anything else a
+short answer. The threads are kept in
 `.admin-dev/queue-demo-chat.json`, and `--reset` clears them.
