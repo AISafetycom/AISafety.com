@@ -49,6 +49,7 @@ describe('the demo Airtable', () => {
       'recDEMOQUEUE00004',
       'recDEMOQUEUE00005',
       'recDEMOQUEUE00006',
+      'recDEMOQUEUE00007',
     ])
     const res = await fetch(`${base}/tblonlKwIFJ7Aa8QN/recDEMOQUEUE00001`, {
       method: 'PATCH',

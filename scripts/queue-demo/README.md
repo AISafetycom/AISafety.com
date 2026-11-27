@@ -146,6 +146,21 @@ with the "Mac" dot at the top right.
    source, and its words under "Proposed in the Queue chat · by Rob Demo".
    It is decided like any change (Rob suggests, Bryce confirms).
 
+10. A rule from a teammate's chat, on the Rules tab: "Queue chat lessons:
+    how to write dates". Its card is drawn from the rule's edits, which is
+    what Apply writes ("Exact wording", "In Queue/chat-lessons.md"), and
+    not from the words written about them: those sit under "The chat's own
+    description". Here the description speaks only of dates, while the
+    edits also add a line about times, and the card shows that line.
+
+11. What is applied is what you saw. Open the change from step 9, then
+    change its proposed value by hand in `.admin-dev/queue-demo.json` (in
+    the row `recDEMOQUEUE00006`, the `"to"` inside its
+    `fldgl9Ny2jnu8T0Da`), and press the decision. It is refused: "The
+    changes are not what your page showed", and the page reads the item
+    again with the new value on it. The next press goes. The same holds for
+    a rule's edits.
+
 /admin/users shows Rob's card with "Bryce checks first" ticked; unticking it
 or ticking it again writes the change to the log with the old and new value.
 

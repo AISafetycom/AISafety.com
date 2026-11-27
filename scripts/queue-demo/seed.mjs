@@ -88,8 +88,9 @@ const CHIPS = [
   'Too small for the site',
 ]
 
-/** A fresh demo: five items waiting (one of them a change a teammate
- *  proposed in the Fable chat) and one published earlier today. */
+/** A fresh demo: six items waiting (one of them a change a teammate
+ *  proposed in the Fable chat, one a rule from that chat) and one
+ *  published earlier today. */
 export function seed(now = Date.now()) {
   const iso = ms => new Date(ms).toISOString()
   const day = ms => iso(ms).slice(0, 10)
@@ -255,6 +256,45 @@ export function seed(now = Date.now()) {
           email: 'rob.demo@example.org',
           row: 'recDEMOQUEUE00001',
           at: iso(now - 3_600_000),
+        },
+      }),
+    }),
+    // A rule proposed in a teammate's Fable chat. It carries the mark that
+    // only the owner's own Apply puts it in (`bryce_applies`), so its card
+    // is drawn from `edits`, what Apply writes, and the words about them
+    // (`summary`, `wording`) are shown only as the chat's own description.
+    // Here the two do not quite agree, on purpose: the description speaks
+    // of dates, and the edits also add a line about times.
+    row('recDEMOQUEUE00007', 2, {
+      [F.title]: 'Queue chat lessons: how to write dates',
+      [F.type]: 'Rule',
+      [F.source]: 'Teach',
+      [F.status]: 'Pending',
+      [F.rejectChips]: [
+        'Not a lesson worth keeping',
+        'Say it another way',
+      ].join('\n'),
+      [F.proposal]: JSON.stringify({
+        kind: 'rule',
+        file: '~/Queue/chat-lessons.md',
+        title: 'How to write dates',
+        summary:
+          'Write dates in replies as 4 February 2026, never as Feb 4 or 2/4.',
+        wording: '- Write dates as 4 February 2026.',
+        edits: [
+          {
+            file: '~/Queue/chat-lessons.md',
+            find: '## Replies\n- One line, no greeting.\n',
+            replace:
+              '## Replies\n- One line, no greeting.\n- Write dates as 4 February 2026, never "Feb 4".\n- Give times with their time zone.\n',
+          },
+        ],
+        bryce_applies: {
+          why: 'Proposed in the Queue chat',
+          rows: [],
+          chat: 'rob.demo@example.org',
+          name: 'Rob Demo',
+          at: iso(now - 2 * 3_600_000),
         },
       }),
     }),
