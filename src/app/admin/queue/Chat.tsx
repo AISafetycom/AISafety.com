@@ -1,8 +1,10 @@
 'use client'
 
 import {
+  createContext,
   Fragment,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -25,6 +27,8 @@ import Icon from '@/components/Icon'
 import type { AgentInfo, QueueItem } from '@/lib/admin/queue'
 import { reviewNewerThanChat } from '@/lib/admin/queue-reopen'
 import { insertDictated, isDictationKey } from '@/lib/admin/queue-dictation'
+import { TEAM_FILES_MAX_BYTES, TEAM_OFFLINE } from '@/lib/admin/queue-team-chat'
+import { teamChatFetch } from '@/lib/admin/queue-team-chat-transport'
 import {
   markdownOf,
   parseInline,
@@ -50,6 +54,15 @@ import { useDictation } from './useDictation'
 // Files go with a message too (the clip, a paste or a drop – 20 Sept 2026,
 // Bryce: "I want to be able to attach things (e.g. images) to the Fable
 // chat"): they are saved on the Mac beside the thread and Fable opens them.
+//
+// Everyone else who works the Queue gets the same panel on the team's chat
+// (27 Nov 2026; no `agent`, a `team` instead): the same chat program, run
+// on a server the site relays to (queue-team-chat.ts). Only the call that
+// carries a request differs (`call` below): the Mac's is the fetch it
+// always was, the team's goes through the site and comes back as the same
+// kind of Response, so everything after it is one code path. The team
+// panel has no dictation (that is the Mac's), takes smaller files, and
+// says so when its server is offline.
 
 // A reply's parts: its prose, what it was doing at that point (shown only
 // while it is still answering – one line that changes; Bryce, 14 Sept 2026:
@@ -247,6 +260,18 @@ interface Event {
  *  with nothing under it). */
 const CUT_OFF =
   "Fable's reply was cut off – the Queue helper on the Mac stopped. Send your message again."
+/** The same for the team's chat, whose helper is on a server. */
+const CUT_OFF_TEAM =
+  "Fable's reply was cut off – the chat's server stopped answering. Send your message again."
+
+/** How a reply's cards read for this person: whether what they apply goes
+ *  with a suggestion Bryce confirms (queue-suggest.ts) rather than their
+ *  own Publish or Reject, and whether a suggestion of theirs is waiting on
+ *  the item, which holds everything on it still until it is taken back. */
+const CardMode = createContext<{ checkFirst: boolean; locked: boolean }>({
+  checkFirst: false,
+  locked: false,
+})
 
 const EDITS_RE = /```edits\s*\n([\s\S]*?)```/g
 const REPLY_RE = /```reply\s*\n([\s\S]*?)```/g
@@ -396,9 +421,13 @@ export default function Chat({
   onFableChanges,
   focusTick,
   dictate = false,
+  team = null,
+  checkFirst = false,
+  locked = false,
 }: {
   item: QueueItem
-  agent: AgentInfo
+  /** The agent on the owner's Mac. Null: the team's chat (`team`). */
+  agent: AgentInfo | null
   /** The page's pending edits, so an applied change shows as applied. */
   edits: Record<string, string>
   /** The reply draft as the page shows it now (null: the item has none). */
@@ -434,7 +463,23 @@ export default function Chat({
   focusTick: number
   /** The Mac can turn speech into text: Cmd+D and the mic dictate. */
   dictate?: boolean
+  /** With no `agent`: the team's chat, whether its server is online, and
+   *  a count that moves with each read of the list. */
+  team?: { online: boolean; tick: number } | null
+  /** Their decisions are suggestions Bryce confirms: what the chat puts
+   *  on the page goes with the suggestion. */
+  checkFirst?: boolean
+  /** A suggestion of theirs waits on the item: nothing on it changes until
+   *  it is taken back. */
+  locked?: boolean
 }) {
+  // The team's chat, not the Mac's.
+  const isTeam = agent === null
+  const noAnswer = isTeam
+    ? "The chat's server did not answer."
+    : 'The Mac agent did not answer.'
+  const lockedRef = useRef(locked)
+  lockedRef.current = locked
   // null while the history is loading
   const [messages, setMessages] = useState<Msg[] | null>(null)
   // The Mac is still answering a message sent earlier (page reloaded), or
@@ -609,8 +654,9 @@ export default function Chat({
       if (msg.wrote) onWrote?.()
       if (msg.waiting) onRowChanged?.()
       // A decided item keeps what went with its decision: a reply that
-      // lands after it changes nothing on the page.
-      if (decided) return
+      // lands after it changes nothing on the page. Nor does one that lands
+      // while their own suggestion holds the item (its cards say so).
+      if (decided || lockedRef.current) return
       const {
         edits: proposed,
         reply: draft,
@@ -705,18 +751,29 @@ export default function Chat({
   // Mac had saved the message just sent took it off the screen while Fable
   // answered (15 Oct 2026, "Didn't we get contacted about this?" on
   // Organization Builders Program).
-  const tokenRef = useRef(agent.token)
-  tokenRef.current = agent.token
-  const call = useCallback(
+  const tokenRef = useRef(agent?.token)
+  tokenRef.current = agent?.token
+  const port = agent?.port
+  const macCall = useCallback(
     (path: string, body: Record<string, unknown>) =>
-      fetch(`http://127.0.0.1:${agent.port}${path}`, {
+      fetch(`http://127.0.0.1:${port}${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...body, id: item.id, token: tokenRef.current }),
         cache: 'no-store',
       }),
-    [agent.port, item.id]
+    [port, item.id]
   )
+  // The team's chat: the same request, left with the site for the server's
+  // agent, and its answer read back as the same kind of Response
+  // (queue-team-chat-transport.ts). The site says who is asking, so no
+  // token goes with it.
+  const teamCall = useCallback(
+    (path: string, body: Record<string, unknown>) =>
+      teamChatFetch(path, { ...body, id: item.id }),
+    [item.id]
+  )
+  const call = isTeam ? teamCall : macCall
 
   /** A file from an earlier message, back from the Mac. */
   const fetchFile = useCallback(
@@ -774,25 +831,34 @@ export default function Chat({
 
   // The thread loads once per item. One that could not load (the Mac was
   // down, or the token had run out) tries again with the page's next token.
+  const triedRef = useRef(false)
   useEffect(() => {
     if (loadedRef.current) return
+    // The team's chat, with its server offline: one try (the page's word
+    // on it can be a minute old), then none until it is back.
+    if (isTeam && team && !team.online && triedRef.current) return
+    triedRef.current = true
     let alive = true
+    // The team's try outlives a new read of the list (which only moves
+    // `tick`): with its server offline there is no next try to report.
+    const stillWanted = () => alive || (isTeam && mountedRef.current)
     loadHistory().then(
       () => {
-        if (alive) setError(null)
+        if (stillWanted()) setError(null)
       },
       e => {
-        if (!alive) return
+        if (!stillWanted()) return
         setMessages([])
-        setError(
-          e instanceof Error ? e.message : 'The Mac agent did not answer.'
-        )
+        setError(e instanceof Error ? e.message : noAnswer)
       }
     )
     return () => {
       alive = false
     }
-  }, [loadHistory, agent.token])
+    // The team's chat has no token: it tries again with each read of the
+    // list (once a minute) while its server is online.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadHistory, agent?.token, team?.online, team?.tick])
 
   // A reply still being written on the Mac lands in the history when done.
   useEffect(() => {
@@ -906,15 +972,25 @@ export default function Chat({
   const addFiles = (list: Iterable<File>) => {
     const next = [...files]
     const problems: string[] = []
+    // The team's chat goes through the site, which takes far less at once
+    // than the Mac does: its files are counted together.
+    let total = next.reduce((n, f) => n + f.size, 0)
     for (const f of Array.from(list)) {
       if (next.length >= MAX_FILES) {
         problems.push(`Up to ${MAX_FILES} files per message.`)
         break
       }
+      if (isTeam && total + f.size > TEAM_FILES_MAX_BYTES) {
+        problems.push(
+          `${f.name || 'That file'} is too big to send here: the files in one message can add up to 2.5 MB.`
+        )
+        continue
+      }
       if (f.size > MAX_FILE_BYTES) {
         problems.push(`${f.name} is over 15 MB.`)
         continue
       }
+      total += f.size
       next.push({
         file: f,
         name: f.name || 'image.png',
@@ -1061,7 +1137,10 @@ export default function Chat({
       // The Mac is not answering yet (a restart takes a few seconds).
     }
     seenRef.current = (seenRef.current ?? 0) + 1
-    setMessages(m => [...(m ?? []), { role: 'error', text: CUT_OFF, at: '' }])
+    setMessages(m => [
+      ...(m ?? []),
+      { role: 'error', text: isTeam ? CUT_OFF_TEAM : CUT_OFF, at: '' },
+    ])
   }
 
   const deliver = async (msg: string, going: Pending[]) => {
@@ -1155,9 +1234,7 @@ export default function Chat({
       if (streaming && !ended) {
         await cutOff()
       } else {
-        setError(
-          e instanceof Error ? e.message : 'The Mac agent did not answer.'
-        )
+        setError(e instanceof Error ? e.message : noAnswer)
         setLive(null)
         setNote(null)
       }
@@ -1390,7 +1467,9 @@ export default function Chat({
   }, [busy, pending])
   const stop = async () => {
     setStopping(true)
-    let why = 'the Mac agent did not answer.'
+    let why = isTeam
+      ? "the chat's server did not answer."
+      : 'the Mac agent did not answer.'
     try {
       const res = await call('/chat/interrupt', { stop: true })
       if (res.ok) return
@@ -1415,7 +1494,9 @@ export default function Chat({
       const why =
         e instanceof Error && e.message.startsWith('HTTP')
           ? e.message
-          : 'the Mac agent did not answer.'
+          : isTeam
+            ? "the chat's server did not answer."
+            : 'the Mac agent did not answer.'
       setError(`Could not remove it – ${why}`)
     }
     await loadHistory().catch(() => {})
@@ -1431,7 +1512,7 @@ export default function Chat({
         setHeld([])
       }
     } catch {
-      setError('The Mac agent did not answer.')
+      setError(noAnswer)
     }
   }
 
@@ -1485,7 +1566,8 @@ export default function Chat({
     } else if (!dictation.finish('send')) submit()
   }
 
-  return (
+  const cardMode = useMemo(() => ({ checkFirst, locked }), [checkFirst, locked])
+  const panel = (
     <div
       className={`${styles.chat}${dragging ? ` ${styles.chatDropping}` : ''}`}
       onDragEnter={onDragEnter}
@@ -1505,6 +1587,7 @@ export default function Chat({
                     text={m.text ?? ''}
                     attachments={m.attachments}
                     fetchFile={fetchFile}
+                    careful={isTeam}
                   />
                 </div>
               ) : m.role === 'error' ? (
@@ -1571,6 +1654,7 @@ export default function Chat({
                 text={h.text}
                 attachments={h.attachments}
                 fetchFile={fetchFile}
+                careful={isTeam}
               />
               <button
                 type="button"
@@ -1587,7 +1671,11 @@ export default function Chat({
               className={`${styles.chatMsg} ${styles.chatQueued}`}
             >
               <span className={styles.chatWho}>You · waiting</span>
-              <YouText text={q.text} attachments={asSent(q.files)} />
+              <YouText
+                text={q.text}
+                attachments={asSent(q.files)}
+                careful={isTeam}
+              />
               <button
                 type="button"
                 className={styles.chatLink}
@@ -1599,6 +1687,9 @@ export default function Chat({
           ))}
           <div ref={endRef} />
         </div>
+      )}
+      {isTeam && team && !team.online && (
+        <p className={styles.chatError}>{TEAM_OFFLINE}</p>
       )}
       {error && <p className={styles.chatError}>{error}</p>}
       {pick && (
@@ -1841,6 +1932,7 @@ export default function Chat({
       </div>
     </div>
   )
+  return <CardMode.Provider value={cardMode}>{panel}</CardMode.Provider>
 }
 
 /** A message of Bryce's: a quoted passage (lines starting "> ") as a
@@ -1849,10 +1941,13 @@ function YouText({
   text,
   attachments,
   fetchFile,
+  careful = false,
 }: {
   text: string
   attachments?: Attachment[]
   fetchFile?: (file: string) => Promise<Blob>
+  /** The team's chat: see Sent. */
+  careful?: boolean
 }) {
   const lines = text.split('\n')
   const quoted: string[] = []
@@ -1875,7 +1970,7 @@ function YouText({
       {attachments && attachments.length > 0 && (
         <div className={styles.chatSent}>
           {attachments.map((a, i) => (
-            <Sent key={i} att={a} fetchFile={fetchFile} />
+            <Sent key={i} att={a} fetchFile={fetchFile} careful={careful} />
           ))}
         </div>
       )}
@@ -1889,9 +1984,15 @@ function YouText({
 function Sent({
   att,
   fetchFile,
+  careful = false,
 }: {
   att: Attachment
   fetchFile?: (file: string) => Promise<Blob>
+  /** The team's chat, where a file may be one a teammate sent: only a
+   *  plain picture, a PDF or text opens in a tab. Anything else (a picture
+   *  drawn as code can carry script, which would run signed in as this
+   *  person) is handed over as a download. */
+  careful?: boolean
 }) {
   const isImage = att.type.startsWith('image/')
   const [src, setSrc] = useState<string | null>(att.url ?? null)
@@ -1912,15 +2013,25 @@ function Sent({
       madeRef.current = null
     }
   }, [att.url, att.file, fetchFile, isImage])
+  const show = (url: string, type: string) => {
+    if (careful && !OPENS_IN_A_TAB.test(type)) {
+      const a = document.createElement('a')
+      a.href = url
+      a.download = att.name || 'file'
+      a.click()
+      return
+    }
+    window.open(url, '_blank', 'noopener')
+  }
   const open = async () => {
     if (src) {
-      window.open(src, '_blank', 'noopener')
+      show(src, att.type)
       return
     }
     if (!att.file || !fetchFile) return
     try {
       const b = await fetchFile(att.file)
-      window.open(URL.createObjectURL(b), '_blank', 'noopener')
+      show(URL.createObjectURL(b), b.type || att.type)
     } catch {
       // the Mac did not answer; nothing to open
     }
@@ -1950,6 +2061,10 @@ function Sent({
     </button>
   )
 }
+
+/** What the team's chat opens in a tab of its own (Sent). */
+const OPENS_IN_A_TAB =
+  /^(image\/(png|jpeg|gif|webp|avif|bmp)|application\/pdf|text\/plain)$/
 
 /** Pending files as the thread shows them (their own object URLs). */
 function asSent(files: Pending[]): Attachment[] {
@@ -2185,6 +2300,7 @@ function EditsCard({
   const applied = decided
     ? keys.length > 0 && went.length === keys.length
     : keys.length > 0 && keys.every(k => edits[k] === usable[k])
+  const { checkFirst } = useContext(CardMode)
   if (keys.length === 0) {
     return (
       <p className={styles.chatTool}>
@@ -2217,7 +2333,11 @@ function EditsCard({
       ) : (
         <CardFoot
           applied={applied}
-          appliedText="Applied – goes with Accept"
+          appliedText={
+            checkFirst
+              ? 'Applied – goes with your suggestion'
+              : 'Applied – goes with Accept'
+          }
           offText="Not applied"
           waitText="Applies when Fable finishes"
           applyText="Apply"
@@ -2292,6 +2412,7 @@ function DeclineCard({
   decided: Decided | null
   acts?: CardActs
 }) {
+  const { checkFirst } = useContext(CardMode)
   if (current === null && !decided) {
     return (
       <p className={styles.chatTool}>
@@ -2317,7 +2438,11 @@ function DeclineCard({
       ) : (
         <CardFoot
           applied={applied}
-          appliedText="In the box – goes with Reject"
+          appliedText={
+            checkFirst
+              ? 'In the box – goes with a suggested Reject'
+              : 'In the box – goes with Reject'
+          }
           offText="Not what the box says"
           waitText="Goes in the box when Fable finishes"
           applyText="Use it"
@@ -2569,6 +2694,21 @@ function CardFoot({
   undoText?: string
   undo?: () => void
 }) {
+  // Their own suggestion waits on the item (Bryce checks first): what it
+  // carries is fixed until they take it back, so a card neither applies
+  // nor undoes.
+  const { locked } = useContext(CardMode)
+  if (locked) {
+    return (
+      <div className={styles.chatCardFoot}>
+        <span
+          className={`${styles.chatTool}${applied ? '' : ` ${styles.chatNotApplied}`}`}
+        >
+          {applied ? appliedText : 'Take back your suggestion to use this'}
+        </span>
+      </div>
+    )
+  }
   if (applied) {
     return (
       <div className={styles.chatCardFoot}>

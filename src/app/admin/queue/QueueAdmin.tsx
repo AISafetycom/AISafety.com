@@ -136,6 +136,7 @@ import {
   type Print,
   type SuggestDid,
 } from '@/lib/admin/queue-suggest'
+import type { ChatKind } from '@/lib/admin/queue-team-chat'
 import type { QueueMode } from '@/lib/admin/access'
 import { STATUS_ICONS as FUNDER_STATUS_ICONS } from '@/app/funding/card'
 import { STATUS_ICONS as MAP_STATUS_ICONS } from '@/app/map/card'
@@ -2055,6 +2056,10 @@ async function fetchRuleStates(
 
 const WORKER_NOTE = 'the Mac saves the reply draft within five minutes'
 const OFFLINE_SUB = `Mac agent not reachable · ${WORKER_NOTE}`
+// For someone whose page has no Mac agent to reach (anyone but the owner,
+// queue-team-chat.ts): the plain note, with nothing said to be unreachable.
+const WORKER_SUB = 'The Mac saves the reply draft within five minutes'
+const WORKER_REJECT_SUB = 'The Mac writes the reply within five minutes'
 
 /** How the page reads the list: `sync` closes rows handled in Airtable
  *  itself first; `remake` makes these items' drafts again from the rows
@@ -2233,6 +2238,15 @@ function QueueInbox({
   const [agentChat, setAgentChat] = useState(false)
   // The Mac can turn speech into text: the chat's Cmd+D and mic.
   const [agentDictate, setAgentDictate] = useState(false)
+  // Which Fable chat this person gets (queue-team-chat.ts, chatKind): the
+  // one on the owner's Mac, or for everyone else the team's, the same chat
+  // program on a server that the site relays to. And whether that server's
+  // agent has been heard from in the last minute.
+  const [chatKindNow, setChatKind] = useState<ChatKind | null>(null)
+  const [teamOnline, setTeamOnline] = useState(false)
+  // Moves with each read of the list: a team chat thread that could not
+  // load tries again then.
+  const [teamTick, setTeamTick] = useState(0)
   // The chat threads on the Mac, and per row the newest reply already seen
   // in this browser (null until read), for the rows' teal bars.
   const [chatRows, setChatRows] = useState<ChatRows>({})
@@ -2511,6 +2525,8 @@ function QueueInbox({
       const data = (await res.json()) as {
         items?: QueueItem[]
         agent?: AgentInfo | null
+        chat?: ChatKind | null
+        teamChat?: { online?: boolean }
         error?: string
       }
       if (!res.ok || !data.items) {
@@ -2548,6 +2564,9 @@ function QueueInbox({
       // sends what the card shows (queue-suggest.ts).
       remakeRef.current(next, opts.remake)
       setAgent(data.agent ?? null)
+      setChatKind(data.chat ?? null)
+      setTeamOnline(data.teamChat?.online === true)
+      setTeamTick(n => n + 1)
       // The list is on screen now; the pictures, the links and the cards
       // follow in the background, each filled in as it arrives. A refresh
       // asks only for what is new to it.
@@ -3744,7 +3763,9 @@ function QueueInbox({
       const sub = res.ok
         ? res.detail || 'Draft saved in Gmail'
         : res.offline
-          ? OFFLINE_SUB
+          ? agent || chatKindNow === 'mac'
+            ? OFFLINE_SUB
+            : WORKER_SUB
           : `Reply draft failed: ${res.detail}`
       const already = res.alreadyReplied
       if (already) {
@@ -3776,7 +3797,7 @@ function QueueInbox({
         prev && prev.item.id === item.id ? { ...prev, sub } : prev
       )
     },
-    [agent]
+    [agent, chatKindNow]
   )
 
   // After a reject: the Mac agent has Fable write the reply from the reason
@@ -3806,7 +3827,9 @@ function QueueInbox({
             ? 'Reply ready · copy it and send it yourself on Discord'
             : 'Reply draft saved in Gmail')
         : res.offline
-          ? `Mac agent not reachable · the Mac writes the reply within five minutes`
+          ? agent || chatKindNow === 'mac'
+            ? `Mac agent not reachable · the Mac writes the reply within five minutes`
+            : WORKER_REJECT_SUB
           : `${discord ? 'Reply' : 'Reply draft'} failed: ${res.detail}`
       const already = res.alreadyReplied ?? null
       const reply: RejectReply | null =
@@ -3848,7 +3871,7 @@ function QueueInbox({
           : prev
       )
     },
-    [agent]
+    [agent, chatKindNow]
   )
 
   // "Update flag" from the chat (queue-flag.ts): the new verdict, reasons
@@ -5276,7 +5299,8 @@ function QueueInbox({
           }
           break
         case 'f':
-          if (canEdit && item && agentChat) {
+          // Whichever chat is on the item: the Mac's, or the team's.
+          if (canEdit && item && (agentChat || chatKindNow === 'team')) {
             e.preventDefault()
             setChatFocus(n => n + 1)
           }
@@ -5518,6 +5542,7 @@ function QueueInbox({
     setDraft,
     live,
     agentChat,
+    chatKindNow,
     items,
     select,
     searching,
@@ -6124,6 +6149,11 @@ function QueueInbox({
                 onSavePublic={text => savePublic(selected, text)}
                 onRowChanged={() => void refreshRow(selected)}
                 chatAgent={canEdit && agentChat ? agent : null}
+                chatTeam={
+                  canEdit && chatKindNow === 'team'
+                    ? { online: teamOnline, tick: teamTick }
+                    : null
+                }
                 chatDictate={agentDictate}
                 chatFocus={chatFocus}
                 askFocus={askFocus}
@@ -7549,6 +7579,7 @@ function Detail({
   onSavePublic,
   onRowChanged,
   chatAgent,
+  chatTeam,
   chatDictate,
   chatFocus,
   askFocus,
@@ -7614,6 +7645,9 @@ function Detail({
   onRowChanged: () => void
   /** The Mac agent, when it is up and can chat; null hides the panel. */
   chatAgent: AgentInfo | null
+  /** Not the owner: the team's chat instead (queue-team-chat.ts), with
+   *  whether its server is online. Null: this person has no team chat. */
+  chatTeam: { online: boolean; tick: number } | null
   /** The Mac can turn speech into text (Cmd+D in the chat). */
   chatDictate: boolean
   chatFocus: number
@@ -8378,7 +8412,10 @@ function Detail({
   // review should be at the top"). Null for a review the Mac kept no
   // pair for: that one is still the panel's head, as before.
   const answered = answeredReview(item)
-  const answeredWhere = chatAgent
+  // A chat panel on this item: the Mac's, or else the team's.
+  const teamChat = chatAgent === null ? chatTeam : null
+  const chatShown = chatAgent !== null || teamChat !== null
+  const answeredWhere = chatShown
     ? 'at the bottom of the chat'
     : 'under the first one'
   const askedBlock =
@@ -8525,7 +8562,7 @@ function Detail({
   // What Fable checked on public pages before its verdict on a requested
   // change (queue-checked.ts). A rule has none.
   const checked = item.type === 'Rule' ? [] : (item.checked ?? [])
-  const showAside = hasVerdict || checked.length > 0 || chatAgent !== null
+  const showAside = hasVerdict || checked.length > 0 || chatShown
   // Where Comb found the listing: the "Source:" line of its own Airtable
   // comment, read here as it is in Airtable (Bryce, 17 Sept 2026).
   const found =
@@ -9199,7 +9236,7 @@ function Detail({
           )}
           {/* With the Mac off there is no chat: the review with their
               answer goes under the first one instead. */}
-          {answered && !chatAgent && (
+          {answered && !chatShown && (
             <AnsweredReviewCard
               review={answered.after}
               item={item}
@@ -9207,11 +9244,17 @@ function Detail({
               onFlag={onFlag}
             />
           )}
-          {chatAgent && (
+          {chatShown && (
             <Chat
               key={item.id}
               item={item}
               agent={chatAgent}
+              team={teamChat}
+              // Bryce checks first (queue-suggest.ts): what the chat puts
+              // on the page goes with their suggestion, and while one of
+              // theirs waits on the item nothing on it changes.
+              checkFirst={mode === 'suggest'}
+              locked={locked}
               edits={d.edits}
               reply={d.reply ?? item.replyDraft}
               decline={
@@ -9225,13 +9268,14 @@ function Detail({
               }
               decided={decidedOf(item)}
               onSetEdits={edits => {
-                if (isOpen(item)) setD({ edits })
+                if (isOpen(item) && !locked) setD({ edits })
               }}
               onSetReply={text => {
-                if (isOpen(item)) setD({ reply: text })
+                if (isOpen(item) && !locked) setD({ reply: text })
               }}
               onSetDecline={text => {
-                if (isOpen(item)) setD({ decline: text, editingDecline: false })
+                if (isOpen(item) && !locked)
+                  setD({ decline: text, editingDecline: false })
               }}
               onWrote={onWrote}
               onRowChanged={onRowChanged}
@@ -9248,7 +9292,7 @@ function Detail({
                 onFable?.(list.map(c => c.field))
               }}
               focusTick={chatFocus}
-              dictate={chatDictate}
+              dictate={chatAgent !== null && chatDictate}
             />
           )}
         </aside>

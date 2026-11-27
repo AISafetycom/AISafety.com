@@ -3,7 +3,8 @@
   that writes there (canWorkQueue): 'edit', or 'suggest' ("can edit, Bryce
   checks first", queue-suggest.ts).
 
-  GET  /api/admin/queue                        → { items, agent }
+  GET  /api/admin/queue                        → { items, agent, chat,
+                                                   teamChat? }
        (the rows only, no logo lookup, so the list lands in about a second;
        the page then asks /api/admin/queue/logos for the pictures)
   GET  /api/admin/queue?sync=1                 → the same, after closing the
@@ -80,6 +81,17 @@
   `agent` is { port, token } for the local agent on the owner's Mac (null
   when QUEUE_AGENT_SECRET is not set): the page calls it after an accept so
   a Gmail reply draft lands at once instead of on the worker's next pass.
+  Only an owner gets it (QUEUE_CHAT_OWNERS, a comma list of emails, else
+  the root admins): nobody else's browser can reach his Mac, so for them
+  it would only ping their own computer.
+
+  `chat` says which Fable chat the page mounts (queue-team-chat.ts,
+  chatKind): 'mac' for an owner (the chat on his Mac, as before), 'team'
+  for everyone else who can work the Queue when QUEUE_TEAM_AGENT_SECRET is
+  set (the same chat program on a server, reached through
+  /api/admin/queue/chat), null otherwise. With 'team' comes
+  `teamChat: { online }`: whether that server's agent has asked the site
+  for work in the last minute.
 
   Every action that decides, edits or undoes something (all but edit, flag
   and public) is written onto the row's History with the signed-in admin's
@@ -138,6 +150,9 @@ import {
 } from '@/lib/admin/queue'
 import { parseFlag } from '@/lib/admin/queue-flag'
 import { publicChoiceOf } from '@/lib/admin/queue-rule-instant'
+import { chatKind, chatOwners } from '@/lib/admin/queue-team-chat'
+import { teamAgentSecret, teamRelay } from '@/lib/admin/queue-team-relay'
+import { ROOT_ADMINS } from '@/lib/admin/users'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -170,6 +185,20 @@ function failure(e: unknown): Response {
     { error: 'The queue could not do that; details are in the server log.' },
     502
   )
+}
+
+/** Whether the team chat's server has asked for work lately. A relay that
+ *  cannot be read counts as offline: the list must still load. */
+async function teamOnline(): Promise<boolean> {
+  try {
+    return await teamRelay().online()
+  } catch (e) {
+    console.warn(
+      '[admin-queue] could not read whether the team chat is online:',
+      e instanceof Error ? e.message : e
+    )
+    return false
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -219,7 +248,25 @@ export async function GET(req: NextRequest) {
       const closed = new Set(await closeHandledRows(items))
       if (closed.size) items = items.filter(i => !closed.has(i.id))
     }
-    return json({ items, agent: agentInfo(me?.email ?? '', me?.name ?? null) })
+    // Which Fable chat this person's page mounts. Only an owner's page is
+    // handed the Mac agent: anyone else's would call their own computer.
+    const email = me?.email ?? ''
+    const owners = chatOwners(
+      process.env.QUEUE_CHAT_OWNERS,
+      ROOT_ADMINS.map(u => u.email)
+    )
+    const chat = chatKind({
+      email,
+      owners,
+      canWork: await canWorkQueue(),
+      teamOn: Boolean(teamAgentSecret()),
+    })
+    return json({
+      items,
+      agent: chat === 'mac' ? agentInfo(email, me?.name ?? null) : null,
+      chat,
+      ...(chat === 'team' ? { teamChat: { online: await teamOnline() } } : {}),
+    })
   } catch (e) {
     return failure(e)
   }
