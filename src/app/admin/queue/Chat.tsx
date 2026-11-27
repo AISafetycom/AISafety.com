@@ -27,7 +27,15 @@ import Icon from '@/components/Icon'
 import type { AgentInfo, QueueItem } from '@/lib/admin/queue'
 import { reviewNewerThanChat } from '@/lib/admin/queue-reopen'
 import { insertDictated, isDictationKey } from '@/lib/admin/queue-dictation'
-import { TEAM_FILES_MAX_BYTES, TEAM_OFFLINE } from '@/lib/admin/queue-team-chat'
+import {
+  oneAtATime,
+  opensInTab,
+  ownFileLink,
+  TEAM_FILES_MAX_BYTES,
+  TEAM_OFFLINE,
+  TEAM_OPEN_MS,
+  threadPollMs,
+} from '@/lib/admin/queue-team-chat'
 import { teamChatFetch } from '@/lib/admin/queue-team-chat-transport'
 import {
   markdownOf,
@@ -837,23 +845,31 @@ export default function Chat({
     // The team's chat, with its server offline: one try (the page's word
     // on it can be a minute old), then none until it is back.
     if (isTeam && team && !team.online && triedRef.current) return
-    triedRef.current = true
     let alive = true
     // The team's try outlives a new read of the list (which only moves
     // `tick`): with its server offline there is no next try to report.
     const stillWanted = () => alive || (isTeam && mountedRef.current)
-    loadHistory().then(
-      () => {
-        if (stillWanted()) setError(null)
-      },
-      e => {
-        if (!stillWanted()) return
-        setMessages([])
-        setError(e instanceof Error ? e.message : noAnswer)
-      }
-    )
+    const go = () => {
+      triedRef.current = true
+      loadHistory().then(
+        () => {
+          if (stillWanted()) setError(null)
+        },
+        e => {
+          if (!stillWanted()) return
+          setMessages([])
+          setError(e instanceof Error ? e.message : noAnswer)
+        }
+      )
+    }
+    // The team's thread is asked for through the site, a request each: an
+    // item only passed on the way to another is not asked about at all.
+    // The Mac's is read at once, as it always was.
+    const wait = isTeam ? setTimeout(go, TEAM_OPEN_MS) : null
+    if (!isTeam) go()
     return () => {
       alive = false
+      if (wait) clearTimeout(wait)
     }
     // The team's chat has no token: it tries again with each read of the
     // list (once a minute) while its server is online.
@@ -861,11 +877,17 @@ export default function Chat({
   }, [loadHistory, agent?.token, team?.online, team?.tick])
 
   // A reply still being written on the Mac lands in the history when done.
+  // Never a second read while one is still out: through the site a read
+  // can wait half a minute for a server that is not there, and they would
+  // pile up. While the page knows the team's server is offline it looks
+  // less often.
+  const readThread = useMemo(() => oneAtATime(loadHistory), [loadHistory])
+  const teamOffline = isTeam && team !== null && !team.online
   useEffect(() => {
     if (!pending) return
-    const t = setInterval(() => void loadHistory().catch(() => {}), 3000)
+    const t = setInterval(readThread, threadPollMs(teamOffline))
     return () => clearInterval(t)
-  }, [pending, loadHistory])
+  }, [pending, readThread, teamOffline])
 
   // Only a fresh press of F focuses the box. The count lives on the page and
   // outlives this component (it remounts per item), so a mount that sees an
@@ -1988,21 +2010,30 @@ function Sent({
 }: {
   att: Attachment
   fetchFile?: (file: string) => Promise<Blob>
-  /** The team's chat, where a file may be one a teammate sent: only a
-   *  plain picture, a PDF or text opens in a tab. Anything else (a picture
-   *  drawn as code can carry script, which would run signed in as this
-   *  person) is handed over as a download. */
+  /** The team's chat, where a file may be one a teammate sent and the
+   *  thread comes from a server: only a plain picture, a PDF or text opens
+   *  in a tab, judged by the file as fetched, never by what the thread
+   *  says it is. Anything else (a picture drawn as code can carry script,
+   *  which would run signed in as this person) is handed over as a
+   *  download. And the only link ever used is one this page made itself. */
   careful?: boolean
 }) {
   const isImage = att.type.startsWith('image/')
-  const [src, setSrc] = useState<string | null>(att.url ?? null)
+  // A file just sent shows from the link this page made for it. One that
+  // came with the thread is used only on the Mac's chat, which never
+  // sends any.
+  const own = ownFileLink(att.url, careful)
+  const [src, setSrc] = useState<string | null>(own || null)
   const madeRef = useRef<string | null>(null)
+  // The file itself, once fetched.
+  const blobRef = useRef<Blob | null>(null)
   useEffect(() => {
-    if (att.url || !isImage || !att.file || !fetchFile) return
+    if (own || !isImage || !att.file || !fetchFile) return
     let alive = true
     fetchFile(att.file)
       .then(b => {
         if (!alive) return
+        blobRef.current = b
         madeRef.current = URL.createObjectURL(b)
         setSrc(madeRef.current)
       })
@@ -2011,27 +2042,43 @@ function Sent({
       alive = false
       if (madeRef.current) URL.revokeObjectURL(madeRef.current)
       madeRef.current = null
+      blobRef.current = null
     }
-  }, [att.url, att.file, fetchFile, isImage])
-  const show = (url: string, type: string) => {
-    if (careful && !OPENS_IN_A_TAB.test(type)) {
+  }, [own, att.file, fetchFile, isImage])
+  /** The team's chat: open the file by what it is. */
+  const openCarefully = async () => {
+    try {
+      const blob =
+        blobRef.current ??
+        (src?.startsWith('blob:')
+          ? await (await fetch(src)).blob()
+          : att.file && fetchFile
+            ? await fetchFile(att.file)
+            : null)
+      if (!blob) return
+      const url = src?.startsWith('blob:') ? src : URL.createObjectURL(blob)
+      if (opensInTab(blob.type)) {
+        window.open(url, '_blank', 'noopener')
+        return
+      }
       const a = document.createElement('a')
       a.href = url
       a.download = att.name || 'file'
       a.click()
-      return
+    } catch {
+      // the chat's server did not answer; nothing to open
     }
-    window.open(url, '_blank', 'noopener')
   }
   const open = async () => {
+    if (careful) return openCarefully()
     if (src) {
-      show(src, att.type)
+      window.open(src, '_blank', 'noopener')
       return
     }
     if (!att.file || !fetchFile) return
     try {
       const b = await fetchFile(att.file)
-      show(URL.createObjectURL(b), b.type || att.type)
+      window.open(URL.createObjectURL(b), '_blank', 'noopener')
     } catch {
       // the Mac did not answer; nothing to open
     }
@@ -2061,10 +2108,6 @@ function Sent({
     </button>
   )
 }
-
-/** What the team's chat opens in a tab of its own (Sent). */
-const OPENS_IN_A_TAB =
-  /^(image\/(png|jpeg|gif|webp|avif|bmp)|application\/pdf|text\/plain)$/
 
 /** Pending files as the thread shows them (their own object URLs). */
 function asSent(files: Pending[]): Attachment[] {

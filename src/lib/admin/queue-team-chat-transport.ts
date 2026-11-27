@@ -12,9 +12,14 @@ const ROUTE = '/api/admin/queue/chat'
 /** The site could not be reached for several reads in a row. */
 export const TEAM_LOST = 'The connection to the site dropped. Try again.'
 
+/** Reads of one answer are at least this far apart: a reply that comes a
+ *  few words at a time is read four times a second, not forty. */
+export const READ_GAP_MS = 250
+
 export interface TransportDeps {
   fetch?: typeof fetch
   sleep?: (ms: number) => Promise<void>
+  now?: () => number
 }
 
 function jsonResponse(body: unknown, status: number): Response {
@@ -57,6 +62,7 @@ export async function teamChatFetch(
   const f = deps.fetch ?? fetch
   const sleep =
     deps.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)))
+  const now = deps.now ?? Date.now
   const sent = await f(ROUTE, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -78,13 +84,19 @@ export async function teamChatFetch(
   let status: number | undefined
   let done = false
   let cancelled = false
+  let readAt = 0
   const ctrl = new AbortController()
 
   /** One read of what has come since the last. A dropped connection is
-   *  tried again (the read is the same read: `after` says where it is). */
+   *  tried again (the read is the same read: `after` says where it is),
+   *  and so is one the site put off because too many were asked at once. */
   const read = async (): Promise<{ texts: string[]; error?: string }> => {
+    let putOff = 0
     for (let tries = 0; ; tries++) {
       try {
+        const early = readAt + READ_GAP_MS - now()
+        if (readAt && early > 0) await sleep(early)
+        readAt = now()
         const res = await f(
           `${ROUTE}?id=${encodeURIComponent(id)}&after=${after}${status === undefined ? '' : '&started=1'}`,
           { cache: 'no-store', signal: ctrl.signal }
@@ -105,6 +117,13 @@ export async function teamChatFetch(
             texts: fresh.map(c => (typeof c.text === 'string' ? c.text : '')),
             ...(data.error ? { error: data.error } : {}),
           }
+        }
+        // Too many reads at once: wait and ask again, a few times.
+        if (res.status === 429 && putOff < 5) {
+          putOff++
+          tries--
+          await sleep(2000)
+          continue
         }
         // The site said no (signed out, the request is gone): final.
         if (res.status >= 400 && res.status < 500) {

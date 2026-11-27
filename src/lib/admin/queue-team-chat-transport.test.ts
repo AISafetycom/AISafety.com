@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { TeamPoll } from './queue-team-chat'
 import {
+  READ_GAP_MS,
   safeFileType,
   TEAM_LOST,
   teamChatFetch,
@@ -35,11 +36,15 @@ function site(polls: Step[], post: Response = json({ id: 'request-id-1' })) {
     if ('http' in step) return json(step.body ?? {}, step.http)
     return json(step)
   }) as typeof fetch
+  // A clock that only waiting moves.
+  let t = 1_000_000
   const deps = {
     fetch: f,
     sleep: async (ms: number) => {
       slept.push(ms)
+      t += ms
     },
+    now: () => t,
   }
   return {
     deps,
@@ -219,7 +224,7 @@ describe('teamChatFetch', () => {
       s.deps
     )
     expect(await res.text()).toBe('ab')
-    expect(s.slept).toEqual([1000, 2000])
+    expect(s.slept.filter(ms => ms !== READ_GAP_MS)).toEqual([1000, 2000])
     expect(s.reads().map(c => c.url.split('&after=')[1])).toEqual([
       '-1',
       '0&started=1',
@@ -252,7 +257,43 @@ describe('teamChatFetch', () => {
     const res = await teamChatFetch('/chat/history', { id: 'recA' }, s.deps)
     expect(res.ok).toBe(false)
     expect(await res.json()).toMatchObject({ error: 'someone else’s' })
+    expect(s.slept.filter(ms => ms !== READ_GAP_MS)).toEqual([])
+  })
+
+  it('leaves a quarter of a second between its reads', async () => {
+    const s = site([
+      { status: 200, chunks: [{ seq: 0, text: 'a' }], done: false },
+      { chunks: [{ seq: 1, text: 'b' }], done: false },
+      { chunks: [{ seq: 2, text: 'c' }], done: true },
+    ])
+    const res = await teamChatFetch('/chat', { id: 'recA' }, s.deps)
+    // None before the first.
     expect(s.slept).toEqual([])
+    expect(await res.text()).toBe('abc')
+    expect(s.slept).toEqual([READ_GAP_MS, READ_GAP_MS])
+  })
+
+  it('waits and asks again when the site puts a read off', async () => {
+    const busy = { http: 429, body: { error: 'Too many', code: 'rate' } }
+    const s = site([
+      { status: 200, chunks: [{ seq: 0, text: 'a' }], done: false },
+      busy,
+      busy,
+      { chunks: [{ seq: 1, text: 'b' }], done: true },
+    ])
+    const res = await teamChatFetch('/chat', { id: 'recA' }, s.deps)
+    expect(await res.text()).toBe('ab')
+    expect(s.slept.filter(ms => ms !== READ_GAP_MS)).toEqual([2000, 2000])
+  })
+
+  it('gives up on a read the site keeps putting off', async () => {
+    const busy = { http: 429, body: { error: 'Too many chat requests.' } }
+    const s = site([
+      { status: 200, chunks: [{ seq: 0, text: 'a' }], done: false },
+      ...[1, 2, 3, 4, 5, 6].map(() => busy),
+    ])
+    const res = await teamChatFetch('/chat', { id: 'recA' }, s.deps)
+    await expect(res.text()).rejects.toThrow('Too many chat requests.')
   })
 
   it('never shows a piece twice, whatever the site sends', async () => {
