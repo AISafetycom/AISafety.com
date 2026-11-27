@@ -98,6 +98,7 @@ Each page adds its own bar, and seriousness is a separate gate: on topic isn't t
 - A micro-grant for one narrow task isn't listed, such as a few thousand dollars to write one report on the funder's own project. Small grants for any in-scope work are fine, and so is a well-funded call on a single topic.
 - Fellowships where you do the work as part of a program go on /training. A grant-style one (a stipend you can live or work on, no employer) can go here.
 - Funders that are closed for now or invitation-only stay on the page, flagged as not accepting.
+- A funder that has shut down or been inactive for a long time may be removed.
 
 **/communities** – local and online groups people can join.
 - A group needs its own joinable space (e.g. a channel in someone else's server doesn't count).
@@ -151,5 +152,5 @@ An existing listing isn't a guarantee, and we review and remove listings often.
 - **Tell us if we misread you.** If we missed x-risk work on your site or picked the wrong page, show us where. Reply to our email or use the "Send us an email" button.
 - **Suggest a correction.** If you think another listing shouldn't be there, use "Suggest correction" on that page and say why.
 
-Last updated: 25 November 2026
+Last updated: 27 November 2026
 `
