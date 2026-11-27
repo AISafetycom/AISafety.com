@@ -79,11 +79,36 @@ describe('rulePublicOf', () => {
     ).toEqual({
       wording: 'New sentence.',
       was: 'Old.',
+      text: 'b',
     })
     expect(rulePublicOf({ edits, wording: 'New sentence.' })).toEqual({
       wording: 'New sentence.',
       was: null,
+      text: 'b',
     })
+  })
+
+  it('gives the edit box the words as written on the page', () => {
+    const anchor = '- Funders that are closed stay on the page.'
+    const added = '- A funder that has shut down may be removed.'
+    expect(
+      rulePublicOf({
+        edits: [
+          {
+            file: '~/Comb/listing-policy.md',
+            find: anchor,
+            replace: `${anchor}\n${added}`,
+          },
+        ],
+        wording: added,
+      })?.text
+    ).toBe(added)
+  })
+
+  it('has no edit box for a rule that changes the page in several places', () => {
+    expect(
+      rulePublicOf({ edits: [...edits, ...edits], wording: 'Two.' })?.text
+    ).toBeNull()
   })
 
   it('counts a block that changes nothing as none', () => {

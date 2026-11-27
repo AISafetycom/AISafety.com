@@ -85,6 +85,7 @@ import {
   type RuleInstant,
   type RulePublic,
 } from './queue-rule-instant'
+import { rewritePublic } from './queue-rule-public'
 import { alreadyRepliedOf, type AlreadyReplied } from './queue-already'
 import {
   askedOf,
@@ -2821,6 +2822,52 @@ export async function unflagItem(item: QueueItem): Promise<void> {
   }
   if (typeof before.title === 'string') fields[F.title] = before.title
   await patchQueueRow(item.id, fields)
+}
+
+/** His own words for the sentence a rule brings for the public listing
+ *  policy, typed on the rule's card (Bryce, 27 Nov 2026): they take the
+ *  place of the words the card showed, on the row's Proposal, so the chat,
+ *  the rule test and Apply all see them (queue-rule-public.ts). Nothing goes
+ *  on the public page until he applies the rule. `seen` is the wording the
+ *  page showed; a row that says something else by now (the chat or another
+ *  tab rewrote it) is refused with 412, so his words never replace ones he
+ *  has not read. */
+export async function savePublicWording(
+  item: QueueItem,
+  text: string,
+  seen: string | null
+): Promise<void> {
+  requireOpen(item)
+  if (item.type !== 'Rule' || !item.rulePublic) {
+    throw new QueueError(
+      'This item has no wording for the public listing policy.',
+      400
+    )
+  }
+  if (seen !== item.rulePublic.wording) {
+    throw new QueueError(
+      'The public wording changed since this page loaded it (in the chat or another tab). Your words are still in the box: save again to use them.',
+      412
+    )
+  }
+  const f = await rawQueueFields(item.id)
+  const proposal = parseJson(f[F.proposal])
+  if (!isRecord(proposal) || !isRecord(proposal.public)) {
+    throw new QueueError(
+      'This rule no longer has wording for the public listing policy. Reload the page.',
+      409
+    )
+  }
+  let block: Record<string, unknown> | null
+  try {
+    block = rewritePublic(proposal.public, text)
+  } catch (e) {
+    throw new QueueError(e instanceof Error ? e.message : String(e), 422)
+  }
+  if (!block) return
+  await patchQueueRow(item.id, {
+    [F.proposal]: JSON.stringify({ ...proposal, public: block }, null, 1),
+  })
 }
 
 /** What one save changes on the row: with `keys` (the fields the page
