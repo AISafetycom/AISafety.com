@@ -14,14 +14,18 @@ canned replies, so no server and no model are needed either.
 - `start.sh` sets those placeholders, blanks every other service the admin
   can reach (Mac agent, mail, Redis, Blob), writes the two people into
   `.admin-dev/users.json`, and starts the server. It refuses to run in a
-  checkout that has a `.env.local` or `.env`.
+  checkout that has a `.env` file of any kind (`.env`, `.env.local`,
+  `.env.development` …).
 - `fake-team-agent.mjs` stands in for the team chat's server
   (`src/lib/admin/queue-team-chat.ts`). Like the real one it only calls
   out: it asks the demo server for the requests the page has left, with a
   token sealed under the demo's placeholder secret, and posts each answer
-  back in pieces, in the real agent's own formats. `start.sh` starts it
+  back in pieces, in the real agent's own formats. As the real one must,
+  it checks the site's signature on each request, says it has a request
+  before working on it, and never runs one twice. `start.sh` starts it
   (log: `.admin-dev/fake-team-agent.log`). It refuses to run with any
-  other secret or beside a `.env` file, talks only to `localhost`, and
+  other secret or beside a `.env` file of any kind, talks only to
+  `localhost`, and
   stops by itself three minutes after the demo server has gone, or as soon
   as `.admin-dev/fake-team-agent.pid` is deleted or names a newer one.
 - `cookie.mjs` prints the line that signs a browser tab in as one of the two

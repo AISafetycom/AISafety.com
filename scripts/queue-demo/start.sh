@@ -15,10 +15,13 @@ root=$(cd "$here/../.." && pwd)
 port=${1:-3471}
 case "$port" in --*) port=3471 ;; esac
 
-if [ -f "$root/.env.local" ] || [ -f "$root/.env" ]; then
-  echo "This checkout has a .env file: the demo runs only where there is none, so no real key is ever read." >&2
-  exit 1
-fi
+# Any of them: .env, .env.local, .env.development, .env.development.local …
+for f in "$root"/.env "$root"/.env.*; do
+  if [ -e "$f" ]; then
+    echo "This checkout has a .env file ($(basename "$f")): the demo runs only where there is none, so no real key is ever read." >&2
+    exit 1
+  fi
+done
 
 mkdir -p "$root/.admin-dev"
 chat_server=1

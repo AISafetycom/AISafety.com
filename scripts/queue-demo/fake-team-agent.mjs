@@ -37,10 +37,10 @@
 // It saves no drafts and writes nothing anywhere. --no-team leaves the
 // team's side off (the page then says the chat's server is offline).
 
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import {
-  existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
   writeFileSync,
@@ -79,9 +79,9 @@ if (
     'the agent secrets must be the demo placeholders (start.sh sets them), so this can never answer for a real site'
   )
 }
+// Any of them: .env, .env.local, .env.development, .env.development.local …
 if (
-  existsSync(path.join(root, '.env.local')) ||
-  existsSync(path.join(root, '.env'))
+  readdirSync(root).some(name => name === '.env' || name.startsWith('.env.'))
 ) {
   refuse(
     'this checkout has a .env file: the demo runs only where there is none'
@@ -111,7 +111,9 @@ function token() {
   return `${body}.${seal(body, SECRET)}`
 }
 
-async function call(body) {
+/** One call to the site: {ok, status, body}. Throws only when the site
+ *  cannot be reached at all. */
+async function ask(body) {
   const res = await fetch(`${SITE}/api/admin/queue/chat/agent`, {
     method: 'POST',
     headers: {
@@ -120,27 +122,78 @@ async function call(body) {
     },
     body: JSON.stringify(body),
   })
-  if (!res.ok) {
-    const said = await res.json().catch(() => ({}))
-    throw new Error(`HTTP ${res.status}${said.error ? `: ${said.error}` : ''}`)
+  return {
+    ok: res.ok,
+    status: res.status,
+    body: await res.json().catch(() => ({})),
   }
-  return res.json()
+}
+
+async function call(body) {
+  const res = await ask(body)
+  if (!res.ok) {
+    const said = res.body.error ? `: ${res.body.error}` : ''
+    throw new Error(`HTTP ${res.status}${said}`)
+  }
+  return res.body
+}
+
+/** Whether the site made this request: its signature over the id, the
+ *  path, who asked, when, and the body's text (signRequest in
+ *  src/lib/admin/queue-team-relay.ts). Whoever can write to the site's
+ *  store but does not hold the secret can forge neither. */
+function signedBySite(r) {
+  if (typeof r.sig !== 'string' || typeof r.bodyText !== 'string') return false
+  const bodySha = createHash('sha256').update(r.bodyText, 'utf8').digest('hex')
+  const name = Buffer.from(String(r.who?.name ?? ''), 'utf8').toString(
+    'base64url'
+  )
+  const want = Buffer.from(
+    seal(
+      [r.id, r.path, r.who?.email, name, r.who?.mode, r.at, bodySha].join('\n'),
+      SECRET
+    )
+  )
+  const got = Buffer.from(r.sig)
+  return got.length === want.length && timingSafeEqual(got, want)
 }
 
 /** The pieces of one answer for the site, sent in order: the status with
  *  the first. */
 function relayOut(id) {
-  let seq = 0
   let first = true
+  let dead = false
   let chain = Promise.resolve()
+  // Every piece so far, by seq: the site says where to send again from
+  // when one went missing.
+  const sent = []
+  const post = async (chunks, more) => {
+    if (dead) return
+    const res = await ask({ op: 'chunks', id, chunks, ...more })
+    if (res.ok) return
+    if (res.body.code === 'seq_gap') {
+      // A piece was lost on the way: all of them after the last one kept.
+      const from = (res.body.last ?? -1) + 1
+      await post(
+        sent.slice(from).map((text, i) => ({ seq: from + i, text })),
+        more
+      )
+      return
+    }
+    // Finished, gone, or left quiet too long: nothing more is wanted.
+    dead = true
+    log(`${id}: the site wants no more of it – ${res.body.code ?? res.status}`)
+  }
   const send = (text, { status = 200, done = false } = {}) => {
     const head = first ? { status } : {}
     first = false
-    const chunks = text ? [{ seq: seq++, text }] : []
+    const chunks = []
+    if (text) {
+      chunks.push({ seq: sent.length, text })
+      sent.push(text)
+    }
     chain = chain
-      .then(() =>
-        call({ op: 'chunks', id, ...head, chunks, ...(done ? { done } : {}) })
-      )
+      .then(() => post(chunks, { ...head, ...(done ? { done } : {}) }))
       .catch(e => log(`a piece of ${id} was not taken – ${e.message}`))
     return chain
   }
@@ -619,6 +672,31 @@ setInterval(() => {
 
 if (macPort) startMac()
 const team = chatFor('team')
+
+// The ids already taken up: the site offers a request again until it hears
+// that an agent has it, and one must never be run twice.
+const have = new Map()
+
+/** One request from the site: checked, said to be here, then answered. */
+async function take(r) {
+  for (const [id, at] of have) if (Date.now() - at > 3_600_000) have.delete(id)
+  if (have.has(r.id)) return
+  have.set(r.id, Date.now())
+  if (!signedBySite(r)) {
+    log(`${r.id}: not signed by the site – left alone`)
+    return
+  }
+  // "I have it", before any work: an empty call. Refused (the page was
+  // already told nobody answered), and the request is not run at all.
+  const here = await ask({ op: 'chunks', id: r.id, chunks: [] })
+  if (!here.ok) {
+    log(`${r.id}: not wanted any more – ${here.body.code ?? here.status}`)
+    return
+  }
+  // The body as the site signed it, never a copy somebody else parsed.
+  const body = JSON.parse(r.bodyText)
+  await team.answer({ path: r.path, body, who: r.who }, relayOut(r.id))
+}
 log(
   teamOn
     ? `asking ${SITE} for chat requests (stop: delete ${PID_FILE})`
@@ -635,9 +713,7 @@ for (;;) {
     if (teamOn) {
       const { requests } = await call({ op: 'next', wait: 20 })
       for (const r of requests ?? []) {
-        void team
-          .answer(r, relayOut(r.id))
-          .catch(e => log(`${r.path} failed – ${e.message}`))
+        void take(r).catch(e => log(`${r.path} failed – ${e.message}`))
       }
     } else {
       // Only watching for the demo server to go: any answer will do.
