@@ -1,0 +1,267 @@
+// Made-up Queue rows and listings for the local Queue demo (README.md in
+// this folder). Nothing here is real: names, addresses and links are
+// invented, and every address is on example.org.
+//
+// Queue rows are kept by field id, as the site reads them; the listings by
+// field name, as the Queue reads a target record.
+
+export const QUEUE = 'tblonlKwIFJ7Aa8QN'
+export const EVENTS = 'tblXbN9swwldwq8f7'
+export const COMMUNITIES = 'tbluI5Dll697WiSm8'
+export const FUNDING = 'tblzMTLDZWZKqTxrq'
+
+// The Queue's field ids (src/lib/admin/queue.ts, F).
+export const F = {
+  title: 'fldeRsOE3DM3R2vbX',
+  type: 'fldBc9YIDhjmu58f3',
+  source: 'flddKkVy62MAZ8M0J',
+  status: 'fldTXGYOoXcUApaI2',
+  page: 'fldAMyLjM8CnXSRPX',
+  targetTable: 'fld45SUjstUZROuXl',
+  targetRecord: 'fldszXtLdUijgFG4l',
+  sourceLink: 'fld4jnmGibDfKUwNx',
+  sourceExcerpt: 'fld9VtbNjLpodrtA7',
+  proposal: 'fldgl9Ny2jnu8T0Da',
+  verdict: 'fld835yJytaSRAuvB',
+  reasons: 'fldvEp4bscGNzBcSJ',
+  rejectChips: 'fldw42wRz08vO5Xzq',
+  replyDraft: 'fld8lCAVyjDEVZ8VV',
+  rejectDrafts: 'fldPusDzL9nnzibyt',
+  decidedAt: 'fldtt7z4lYvAR5t94',
+  appliedAt: 'fldML8YnyaDYaAmTb',
+  history: 'fldjRsqYJAwR6CXpA',
+  forBryce: 'fldWFnmC0u06GNC6B',
+}
+
+const text = (name, id) => ({ id, name, type: 'singleLineText' })
+const long = (name, id) => ({ id, name, type: 'multilineText' })
+const date = (name, id) => ({ id, name, type: 'date' })
+const box = (name, id) => ({ id, name, type: 'checkbox' })
+const link = (name, id) => ({ id, name, type: 'url' })
+
+/** The base's tables as the meta API lists them: only the columns the
+ *  demo's listings use, so these are the only fields the Queue asks for. */
+export const SCHEMA = [
+  {
+    id: EVENTS,
+    name: 'Events',
+    primaryFieldId: 'fldDemoEvName0001',
+    fields: [
+      text('Name', 'fldDemoEvName0001'),
+      link('URL', 'fldDemoEvUrl00001'),
+      long('Description', 'fldDemoEvDesc0001'),
+      text('Host name', 'fldDemoEvHost0001'),
+      date('Start date', 'fldDemoEvStart001'),
+      date('End date', 'fldDemoEvEnd00001'),
+      box('Publish?', 'fldDemoEvPub00001'),
+      box('Hide?', 'fldDemoEvHide0001'),
+    ],
+  },
+  {
+    id: COMMUNITIES,
+    name: 'Communities',
+    primaryFieldId: 'fldDemoCoName0001',
+    fields: [
+      text('Name', 'fldDemoCoName0001'),
+      link('Link', 'fldDemoCoLink0001'),
+      long('Description', 'fldDemoCoDesc0001'),
+      box('Publish?', 'fldDemoCoPub00001'),
+      box('Hide?', 'fldDemoCoHide0001'),
+    ],
+  },
+  {
+    id: FUNDING,
+    name: 'Funding',
+    primaryFieldId: 'fldDemoFuName0001',
+    fields: [
+      text('Name', 'fldDemoFuName0001'),
+      date('Deadline', 'fldDemoFuDead0001'),
+      box('Publish?', 'fldDemoFuPub00001'),
+      box('Hide?', 'fldDemoFuHide0001'),
+    ],
+  },
+]
+
+const CHIPS = [
+  'Not about AI safety',
+  'Already listed',
+  'Too small for the site',
+]
+
+/** A fresh demo: four items waiting and one published earlier today. */
+export function seed(now = Date.now()) {
+  const iso = ms => new Date(ms).toISOString()
+  const day = ms => iso(ms).slice(0, 10)
+  const inDays = n => day(now + n * 86_400_000)
+  const row = (id, hoursAgo, fields) => [
+    id,
+    { createdTime: iso(now - hoursAgo * 3_600_000), fields },
+  ]
+  const unconference = {
+    Name: 'Demo: Harbor City AI Safety Unconference',
+    URL: 'https://example.org/unconference',
+    Description:
+      'A one-day unconference for people working on AI safety, with open sessions chosen on the day.',
+    'Host name': 'Harbor City AI Safety (demo)',
+    'Start date': inDays(20),
+    'End date': inDays(20),
+  }
+  const readingGroup = {
+    Name: 'Demo: Evals Reading Group',
+    URL: 'https://example.org/evals-reading',
+    Description: 'A weekly reading group on model evaluations.',
+    'Host name': 'Evals Circle (demo)',
+    'Start date': inDays(9),
+    'End date': inDays(9),
+  }
+  const queue = Object.fromEntries([
+    row('recDEMOQUEUE00001', 30, {
+      [F.title]: unconference.Name,
+      [F.type]: 'Add',
+      [F.source]: 'Form',
+      [F.status]: 'Pending',
+      [F.page]: '/events',
+      [F.targetTable]: EVENTS,
+      [F.targetRecord]: 'recDEMOEVENT00001',
+      [F.verdict]: 'Publish',
+      [F.reasons]:
+        '- Run by a local AI safety group\n- Dates, link and host check out',
+      [F.rejectChips]: CHIPS.join('\n'),
+      [F.replyDraft]:
+        'Hi Sam,\n\nThanks for sending this in. It is now listed at aisafety.com/events.\n\nBest,\nBryce',
+      [F.rejectDrafts]: JSON.stringify(
+        Object.fromEntries(
+          CHIPS.map(c => [
+            c,
+            `Hi Sam,\n\nThanks for sending this in. It is not one for the site this time (${c.toLowerCase()}).\n\nBest,\nBryce`,
+          ])
+        )
+      ),
+      [F.proposal]: JSON.stringify({
+        kind: 'add',
+        name: unconference.Name,
+        url: unconference.URL,
+        fields: unconference,
+        reply: { to: 'sam.demo@example.org', name: 'Sam Demo' },
+      }),
+    }),
+    row('recDEMOQUEUE00002', 20, {
+      [F.title]: 'Demo: Crypto and AI Builders',
+      [F.type]: 'Add',
+      [F.source]: 'Comb',
+      [F.status]: 'Pending',
+      [F.page]: '/communities',
+      [F.targetTable]: COMMUNITIES,
+      [F.targetRecord]: 'recDEMOCOMMUNITY1',
+      [F.verdict]: "Don't publish",
+      [F.reasons]: '- Mostly about crypto trading, not AI safety',
+      [F.rejectChips]: ['Not about AI safety', 'Inactive'].join('\n'),
+      [F.sourceExcerpt]: 'Source: a made-up community directory',
+      [F.proposal]: JSON.stringify({
+        kind: 'add',
+        name: 'Demo: Crypto and AI Builders',
+        fields: { Name: 'Demo: Crypto and AI Builders' },
+      }),
+    }),
+    row('recDEMOQUEUE00003', 10, {
+      [F.title]: 'Demo: Open Alignment Fund: deadline moved',
+      [F.type]: 'Change',
+      [F.source]: 'Broom',
+      [F.status]: 'Pending',
+      [F.page]: '/funding',
+      [F.targetTable]: FUNDING,
+      [F.targetRecord]: 'recDEMOFUNDING001',
+      [F.verdict]: 'Fix',
+      [F.reasons]: `- The fund's page now gives ${inDays(30)} as the deadline`,
+      [F.rejectChips]: ['The old date is right', 'Not the same round'].join(
+        '\n'
+      ),
+      [F.proposal]: JSON.stringify({
+        name: 'Demo: Open Alignment Fund',
+        changes: [{ field: 'Deadline', from: inDays(14), to: inDays(30) }],
+      }),
+    }),
+    row('recDEMOQUEUE00004', 5, {
+      [F.title]: readingGroup.Name,
+      [F.type]: 'Add',
+      [F.source]: 'Comb',
+      [F.status]: 'Pending',
+      [F.page]: '/events',
+      [F.targetTable]: EVENTS,
+      [F.targetRecord]: 'recDEMOEVENT00002',
+      [F.verdict]: 'Unsure',
+      [F.reasons]: '- Could be a private group; the page does not say',
+      [F.rejectChips]: CHIPS.join('\n'),
+      [F.proposal]: JSON.stringify({
+        kind: 'add',
+        name: readingGroup.Name,
+        fields: readingGroup,
+      }),
+    }),
+    row('recDEMOQUEUE00005', 8, {
+      [F.title]: 'Demo: Safety Careers Evening',
+      [F.type]: 'Add',
+      [F.source]: 'Comb',
+      [F.status]: 'Applied',
+      [F.page]: '/events',
+      [F.targetTable]: EVENTS,
+      [F.targetRecord]: 'recDEMOEVENT00003',
+      [F.verdict]: 'Publish',
+      [F.decidedAt]: iso(now - 2 * 3_600_000),
+      [F.appliedAt]: iso(now - 2 * 3_600_000),
+      [F.history]: JSON.stringify([
+        { at: iso(now - 2 * 3_600_000), by: 'Bryce Demo', did: 'accept' },
+      ]),
+      [F.proposal]: JSON.stringify({
+        kind: 'add',
+        name: 'Demo: Safety Careers Evening',
+        fields: { Name: 'Demo: Safety Careers Evening' },
+      }),
+    }),
+  ])
+  const records = {
+    [EVENTS]: {
+      recDEMOEVENT00001: unconference,
+      recDEMOEVENT00002: readingGroup,
+      recDEMOEVENT00003: {
+        Name: 'Demo: Safety Careers Evening',
+        URL: 'https://example.org/careers-evening',
+        Description: 'Short talks on AI safety careers, then questions.',
+        'Host name': 'Careers Club (demo)',
+        'Start date': inDays(5),
+        'End date': inDays(5),
+        'Publish?': true,
+      },
+    },
+    [COMMUNITIES]: {
+      recDEMOCOMMUNITY1: {
+        Name: 'Demo: Crypto and AI Builders',
+        Link: 'https://example.org/crypto-ai',
+        Description: 'A chat for people building trading bots.',
+      },
+    },
+    [FUNDING]: {
+      recDEMOFUNDING001: {
+        Name: 'Demo: Open Alignment Fund',
+        Deadline: inDays(14),
+        'Publish?': true,
+      },
+    },
+  }
+  return { queue, records }
+}
+
+/** The two people the demo signs in as: one who decides, and one whose
+ *  decisions are checked first. Neither is a real account. */
+export const DEMO_USERS = [
+  {
+    email: 'bryce.demo@example.org',
+    name: 'Bryce Demo',
+    access: { queue: 'edit', manageUsers: 'edit' },
+  },
+  {
+    email: 'rob.demo@example.org',
+    name: 'Rob Demo',
+    access: { queue: 'suggest' },
+  },
+]
