@@ -8114,7 +8114,11 @@ function Detail({
                 ))}
               </ul>
             ))}
-          {checked.length > 0 && <Checked claims={checked} />}
+          {checked.length > 0 && (
+            // Keyed by the item, so a claim opened on one item does not
+            // stay open on the next.
+            <Checked key={`checked:${item.id}`} claims={checked} />
+          )}
           {flagCheck && (
             <FieldFlags
               check={flagCheck}
@@ -10246,9 +10250,11 @@ function PublicWording({
  *  show by default"). The
  *  policy check's "Accept puts it on …" line is left out, as the card
  *  says so itself. */
-/** What Fable checked before its verdict on a requested change: a row per
- *  claim – what the request said and how it fared, what the public pages
- *  say, and where, each source a link named by its host. Words from the
+/** What Fable checked before its verdict on a requested change: one line
+ *  per claim, what the request said and how it fared. What the public
+ *  pages say, and where, folds out on a click (Bryce, 27 Nov 2026, on a
+ *  rebrand request whose two claims filled the panel: "This what fable
+ *  check section is way too big. I won't read all this."). Words from the
  *  web, so they are shown as plain text (queue-checked.ts). */
 function Checked({ claims }: { claims: CheckedClaim[] }) {
   return (
@@ -10257,28 +10263,36 @@ function Checked({ claims }: { claims: CheckedClaim[] }) {
       <ul className={styles.checkedList}>
         {claims.map((c, i) => {
           const fared = supportsWord(c.supports)
-          const label = [c.claim, fared].filter(Boolean).join(' · ')
           const names = sourceLabels(c.sources)
           return (
             <li key={i}>
-              {label && <span className={styles.checkedClaim}>{label}</span>}
-              <span>{c.found}</span>
-              {c.sources.length > 0 && (
-                <span className={styles.checkedSources}>
-                  {c.sources.map((href, j) => (
-                    <a
-                      key={href}
-                      className={styles.checkedSource}
-                      href={href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title={href}
-                    >
-                      {names[j]}
-                    </a>
-                  ))}
-                </span>
-              )}
+              <details className={styles.checkedClaim}>
+                <summary>
+                  {c.claim ?? 'Claim'}
+                  {fared && (
+                    <span className={styles.checkedFared}> · {fared}</span>
+                  )}
+                </summary>
+                <div className={styles.checkedFound}>
+                  <span>{c.found}</span>
+                  {c.sources.length > 0 && (
+                    <span className={styles.checkedSources}>
+                      {c.sources.map((href, j) => (
+                        <a
+                          key={href}
+                          className={styles.checkedSource}
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={href}
+                        >
+                          {names[j]}
+                        </a>
+                      ))}
+                    </span>
+                  )}
+                </div>
+              </details>
             </li>
           )
         })}

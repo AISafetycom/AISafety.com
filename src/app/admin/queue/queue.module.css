@@ -795,9 +795,9 @@ button.earlierMore {
 }
 
 /* What Fable checked before its verdict on a requested change (18 Nov
-   2026): under the reasons, a row per claim – what the request said and
-   how it fared, what the public pages say, then where, as links named by
-   their host. */
+   2026): under the reasons, one line per claim – what the request said
+   and how it fared. What the public pages say, and the links, fold out
+   on a click (27 Nov 2026: the open rows filled the panel). */
 .checked {
   display: grid;
   gap: 6px;
@@ -805,7 +805,7 @@ button.earlierMore {
 
 .checkedList {
   display: grid;
-  gap: 10px;
+  gap: 4px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -814,13 +814,23 @@ button.earlierMore {
   color: var(--q-text);
 }
 
-.checkedList li {
-  display: grid;
-  gap: 2px;
+.checkedClaim summary {
+  cursor: pointer;
+  color: var(--q-text);
 }
 
-.checkedClaim {
-  font-size: 12px;
+.checkedClaim summary:hover .checkedFared {
+  color: var(--q-text);
+}
+
+.checkedFared {
+  color: var(--q-muted);
+}
+
+.checkedFound {
+  display: grid;
+  gap: 2px;
+  margin: 4px 0 6px;
   color: var(--q-muted);
 }
 
