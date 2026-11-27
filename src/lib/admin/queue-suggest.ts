@@ -18,9 +18,14 @@
 
   A suggestion keeps a fingerprint of what it was made on (`print`): the
   verdict, the proposed changes, the target, the row's Edits and its Reply
-  draft. Confirm is refused (412) once any of those differ, so the person
-  confirming always sees what they confirm. The Proposal's other keys are
-  left out on purpose: the Mac's duties rewrite them all day.
+  draft. A decision is refused (412) once any of those differ, so the person
+  deciding sees the item as it is now first. The refusal says what changed
+  and carries the row's fingerprint now; the page reads the item again and
+  sends that fingerprint back with the next press, which then goes unless
+  the item changed once more (unseenParts). So a Mac duty rewriting the
+  reply draft or a picture link stops one press, never the item for good.
+  The Proposal's other keys are left out on purpose: the Mac's duties
+  rewrite them all day.
 
   Dependency-free, so the page and the server share it.
 */
@@ -117,7 +122,9 @@ function names(v: unknown): string[] {
   return out
 }
 
-function printOf(v: unknown): Print | null {
+/** A fingerprint as stored or as a page sent it back; null when it is not
+ *  one. */
+export function parsePrint(v: unknown): Print | null {
   if (!v || typeof v !== 'object') return null
   const o = v as Record<string, unknown>
   const out = {} as Print
@@ -147,7 +154,7 @@ export function forBryceOf(raw: unknown): ForBryce | null {
   const by = text(r.by, MAX_NAME)
   if (r.kind === 'suggest') {
     const did = r.did as SuggestDid
-    const print = printOf(r.print)
+    const print = parsePrint(r.print)
     if (!SUGGEST_DIDS.includes(did) || !print) return null
     const asked =
       r.asked && typeof r.asked === 'object'
@@ -207,6 +214,33 @@ export function openSuggestion(
   fb: ForBryce | null | undefined
 ): Suggestion | null {
   return fb?.kind === 'suggest' ? fb : null
+}
+
+/** The time of the suggestion waiting on an item, or null: what the page
+ *  notes on a draft it makes from the row, so a draft made before this
+ *  suggestion (or on another one) is known for what it is. */
+export function suggestionAt(fb: ForBryce | null | undefined): string | null {
+  return openSuggestion(fb)?.at ?? null
+}
+
+/** The page's drafts made on another suggestion than the one now on their
+ *  item, or on none: they hold the edits the page had before, not the ones
+ *  the suggestion was made with, so the page makes them again from the row
+ *  and a confirm sends what the card shows. A draft whose decision is on
+ *  its way is left alone, and so is one whose item the page no longer
+ *  lists. */
+export function staleDrafts(
+  drafts: Record<string, { seed: string | null; busy: boolean }>,
+  items: readonly { id: string; forBryce?: ForBryce | null }[]
+): string[] {
+  const byId = new Map(items.map(i => [i.id, i]))
+  const out: string[] = []
+  for (const [id, d] of Object.entries(drafts)) {
+    const item = byId.get(id)
+    if (!item || d.busy) continue
+    if (d.seed !== suggestionAt(item.forBryce)) out.push(id)
+  }
+  return out
 }
 
 // ─── The fingerprint ────────────────────────────────────────────────────────
@@ -283,6 +317,20 @@ export function makePrint(parts: {
 /** The parts that differ between two fingerprints, in a fixed order. */
 export function printDiff(a: Print, b: Print): (keyof Print)[] {
   return PRINT_KEYS.filter(k => a[k] !== b[k])
+}
+
+/** The parts of the row as it is now (`now`) that the person deciding has
+ *  not seen: changed since the suggestion was made (`made`), and not as
+ *  their page last read them either (`seen`, the fingerprint an earlier
+ *  refusal gave it, or null). Empty means the decision may go. */
+export function unseenParts(
+  made: Print,
+  now: Print,
+  seen: Print | null
+): (keyof Print)[] {
+  return PRINT_KEYS.filter(
+    k => now[k] !== made[k] && (seen === null || now[k] !== seen[k])
+  )
 }
 
 const PART_WORD: Record<keyof Print, string> = {
@@ -364,4 +412,13 @@ export function rejectSeed(
   const reason = s.reason ?? ''
   const chip = chips.includes(reason) ? reason : null
   return { chip, other: chip ? '' : reason, decline: s.rejectReply }
+}
+
+/** Where a confirmed Apply of a rule starts on its public listing policy
+ *  wording: as the suggester chose (true = it stays internal), or null to
+ *  leave it as the row has it. */
+export function publicSeed(fb: ForBryce | null | undefined): boolean | null {
+  const s = openSuggestion(fb)
+  if (!s || s.did !== 'accept' || !s.publicChoice) return null
+  return s.publicChoice === 'internal'
 }

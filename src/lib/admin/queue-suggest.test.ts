@@ -8,13 +8,19 @@ import {
   isWaiting,
   makePrint,
   openSuggestion,
+  parsePrint,
   partWords,
   printDiff,
+  publicSeed,
   rejectSeed,
   replyPrint,
   rowNote,
   stableJson,
+  staleDrafts,
+  suggestionAt,
   suggestWord,
+  unseenParts,
+  type ForBryce,
 } from './queue-suggest'
 
 const AT = '2026-11-30T03:00:00.000Z'
@@ -200,6 +206,109 @@ describe('words for the page', () => {
       rejectSeed(
         forBryceOf({ kind: 'suggest', at: AT, did: 'accept', print }),
         chips
+      )
+    ).toBeNull()
+  })
+})
+
+describe('a decision after the item changed', () => {
+  const made = print
+  const now = { ...print, reply: replyPrint('Listed this week') }
+
+  it('may go when nothing changed since the suggestion', () => {
+    expect(unseenParts(made, made, null)).toEqual([])
+  })
+
+  it('is stopped once by a change, then goes when the page has read it', () => {
+    expect(unseenParts(made, now, null)).toEqual(['reply'])
+    expect(unseenParts(made, now, now)).toEqual([])
+  })
+
+  it('is stopped again by a change after the page read it', () => {
+    const later = { ...now, verdict: hashOf('Reject') }
+    expect(unseenParts(made, later, now)).toEqual(['verdict'])
+  })
+
+  it('takes a part as seen when it is as the suggestion left it', () => {
+    // The page read the new reply draft; the edits are as suggested,
+    // whatever the page last read of them.
+    const seen = { ...now, edits: editsPrint({ Name: 'B' }) }
+    expect(unseenParts(made, now, seen)).toEqual([])
+  })
+
+  it('reads back only a whole fingerprint', () => {
+    expect(parsePrint(print)).toEqual(print)
+    expect(parsePrint({ ...print, reply: 3 })).toBeNull()
+    expect(parsePrint({ verdict: 'x' })).toBeNull()
+    expect(parsePrint('nope')).toBeNull()
+    expect(parsePrint(null)).toBeNull()
+  })
+})
+
+describe('the page’s drafts', () => {
+  const suggestion = (at: string, extra: Record<string, unknown> = {}) =>
+    forBryceOf({
+      kind: 'suggest',
+      by: 'Rob Grayson',
+      at,
+      did: 'accept',
+      print,
+      ...extra,
+    }) as ForBryce
+  const LATER = '2026-11-30T05:00:00.000Z'
+
+  it('notes the time of the suggestion waiting on the row', () => {
+    expect(suggestionAt(suggestion(AT))).toBe(AT)
+    expect(
+      suggestionAt(forBryceOf({ kind: 'ask', at: AT, question: 'Why?' }))
+    ).toBeNull()
+    expect(suggestionAt(null)).toBeNull()
+  })
+
+  it('are made again when a suggestion arrived, changed or went', () => {
+    const items = [
+      { id: 'a', forBryce: suggestion(AT) },
+      { id: 'b', forBryce: suggestion(LATER) },
+      { id: 'c', forBryce: null },
+      { id: 'd', forBryce: suggestion(AT) },
+    ]
+    expect(
+      staleDrafts(
+        {
+          // Made before the suggestion arrived.
+          a: { seed: null, busy: false },
+          // Made on an earlier suggestion.
+          b: { seed: AT, busy: false },
+          // Made on a suggestion that has gone since.
+          c: { seed: AT, busy: false },
+          // Made on this one: stays.
+          d: { seed: AT, busy: false },
+        },
+        items
+      )
+    ).toEqual(['a', 'b', 'c'])
+  })
+
+  it('but not while a decision is on its way, or off the list', () => {
+    expect(
+      staleDrafts(
+        { a: { seed: null, busy: true }, z: { seed: null, busy: false } },
+        [{ id: 'a', forBryce: suggestion(AT) }]
+      )
+    ).toEqual([])
+  })
+
+  it('start a confirmed Apply from the choice made for the public wording', () => {
+    expect(publicSeed(suggestion(AT, { publicChoice: 'internal' }))).toBe(true)
+    expect(publicSeed(suggestion(AT, { publicChoice: 'apply' }))).toBe(false)
+    expect(publicSeed(suggestion(AT))).toBeNull()
+    expect(
+      publicSeed(
+        suggestion(AT, {
+          did: 'reject',
+          publicChoice: 'internal',
+          reason: 'No',
+        })
       )
     ).toBeNull()
   })

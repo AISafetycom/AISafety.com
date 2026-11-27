@@ -133,6 +133,7 @@ import {
   type Undid,
 } from './queue-history'
 import {
+  CHECKER_NAME,
   editsPrint,
   firstName,
   forBryceOf,
@@ -141,9 +142,9 @@ import {
   MAX_TEXT as FOR_BRYCE_MAX_TEXT,
   openSuggestion,
   partWords,
-  printDiff,
   replyPrint,
   suggestWord,
+  unseenParts,
   type ForBryce,
   type Print,
   type Question,
@@ -420,10 +421,18 @@ type RawFields = Record<string, unknown>
 export class QueueError extends Error {
   status: number
   detail: string
-  constructor(message: string, status = 400) {
+  /** More for the page to act on, answered beside `error` (the check on a
+   *  suggestion: what the item is now, requireSuggestionSeen). */
+  extra: Record<string, unknown> | null
+  constructor(
+    message: string,
+    status = 400,
+    extra: Record<string, unknown> | null = null
+  ) {
     super(message)
     this.status = status
     this.detail = message
+    this.extra = extra
   }
 }
 
@@ -3009,15 +3018,21 @@ export async function saveEdits(
   edits: Record<string, unknown>,
   replyDraft?: string,
   keys?: string[],
-  /** Who is saving: a suggester can't change an item while their own
-   *  suggestion on it waits (queue-suggest.ts). */
+  /** Who is saving: someone whose decisions are suggestions can't change
+   *  an item while a suggestion on it waits (queue-suggest.ts). Not only
+   *  their own: a name that changed since (a new sign-in card) would
+   *  otherwise free the item, and their edit would change what is being
+   *  confirmed. */
   who: { by: string | null; checkFirst: boolean } | null = null
 ): Promise<void> {
   requireOpen(item)
   const open = openSuggestion(item.forBryce)
-  if (open && who?.checkFirst && open.by === who.by) {
+  if (open && who?.checkFirst) {
+    const what = suggestWord(open.did, item.type)
     throw new QueueError(
-      `You suggested ${suggestWord(open.did, item.type)} on this. Take it back first to change anything.`,
+      open.by === who.by
+        ? `You suggested ${what} on this. Take it back first to change anything.`
+        : `${firstName(open.by)} suggested ${what} on this, and it waits for ${CHECKER_NAME}, so it can't be changed now.`,
       409
     )
   }
@@ -3039,26 +3054,20 @@ export async function saveEdits(
   }
   // Someone with full edit changing a suggested item before deciding it:
   // the suggestion follows their own edits, so their Confirm still goes.
-  // Only when its edits and reply draft are as the suggestion left them: a
-  // change from anywhere else since still stops Confirm
-  // (requireSuggestionSeen).
-  if (
-    open &&
-    who &&
-    !who.checkFirst &&
-    item.print &&
-    open.print.edits === item.print.edits &&
-    open.print.reply === item.print.reply
-  ) {
-    const print: Print = {
-      ...open.print,
-      edits: editsPrint(Object.keys(merged).length ? merged : null),
-      reply:
-        F.replyDraft in fields
-          ? replyPrint(fields[F.replyDraft])
-          : open.print.reply,
+  // Each part only while it is as the suggestion left it: a change from
+  // anywhere else since still stops the next press once
+  // (requireSuggestionSeen), and their page sends what it has read.
+  if (open && who && !who.checkFirst && item.print) {
+    const print: Print = { ...open.print }
+    if (open.print.edits === item.print.edits) {
+      print.edits = editsPrint(Object.keys(merged).length ? merged : null)
     }
-    fields[F.forBryce] = JSON.stringify({ ...open, print })
+    if (F.replyDraft in fields && open.print.reply === item.print.reply) {
+      print.reply = replyPrint(fields[F.replyDraft])
+    }
+    if (print.edits !== open.print.edits || print.reply !== open.print.reply) {
+      fields[F.forBryce] = JSON.stringify({ ...open, print })
+    }
   }
   await patchQueueRow(item.id, fields)
 }
@@ -3354,23 +3363,31 @@ export async function undoItem(
 // ─── Bryce checks first (queue-suggest.ts) ──────────────────────────────────
 
 /** A decision by someone with full edit on an item that carries a
- *  suggestion goes only on what the suggestion was made on: the page must
- *  have shown this suggestion (`seen`, its time), and the row's verdict,
- *  proposed changes, target, Edits and Reply draft must be as they were
- *  then. Otherwise 412, and the page reads the item again so the fresh
- *  version is what they look at. */
+ *  suggestion goes only on what their page has shown: this suggestion
+ *  (`seen`, its time), on the row's verdict, proposed changes, target,
+ *  Edits and Reply draft as they were when it was made. A part that has
+ *  changed since passes once their page has read it as it is now
+ *  (`seenPrint`, the fingerprint an earlier refusal gave the page, which
+ *  then read the item again). Otherwise 412, with `recheck` = { at, print }
+ *  so the page can say it has seen the item as it is now on the next
+ *  press; a Mac duty rewriting the reply draft or a picture link so stops
+ *  one press, never the item for good. */
 export function requireSuggestionSeen(
   item: QueueItem,
-  seen: string | null
+  seen: string | null,
+  seenPrint: Print | null = null
 ): void {
   const s = openSuggestion(item.forBryce)
   if (!s) return
   const who = firstName(s.by)
   const what = suggestWord(s.did, item.type)
   if (seen !== s.at) {
+    // No fingerprint here: the next press is checked against the
+    // suggestion's own, so a change since it was made is still said.
     throw new QueueError(
       `${who} suggested ${what} on this after your page loaded it. Here it is now. Look again, then decide.`,
-      412
+      412,
+      { recheck: { at: s.at } }
     )
   }
   if (!item.print) {
@@ -3379,12 +3396,16 @@ export function requireSuggestionSeen(
       412
     )
   }
-  const moved = printDiff(s.print, item.print)
+  const moved = unseenParts(s.print, item.print, seenPrint)
   if (moved.length > 0) {
     const words = partWords(moved)
+    const Words = `${words[0].toUpperCase()}${words.slice(1)}`
     throw new QueueError(
-      `${words[0].toUpperCase()}${words.slice(1)} changed after ${who} suggested ${what}. Here is the item as it is now. Look again, then decide.`,
-      412
+      seenPrint
+        ? `${Words} changed again since your page read it. Here is the item as it is now. Look again, then decide.`
+        : `${Words} changed after ${who} suggested ${what}. Here is the item as it is now. Look again, then decide.`,
+      412,
+      { recheck: { at: s.at, print: item.print, moved } }
     )
   }
 }

@@ -67,12 +67,15 @@
                 edit: dismisses anyone's, e.g. on a row a bot closed)
        ask      body { question } – on any item, decided ones included
   and every other action works as with 'edit', except that edit is refused
-  while their own suggestion on the item waits. With full edit, accept,
+  while a suggestion on the item waits (theirs or anyone's). With full edit, accept,
   reject, delete and later on an item carrying a suggestion also take
-  { suggested: <its at, as the page showed it> } and are refused with 412
-  when the item changed since (requireSuggestionSeen); the decision clears
-  For Bryce and its History line names the suggester too. answer, body
-  { answer }, answers a question (full edit only).
+  { suggested: <its at, as the page showed it>, suggestedPrint? } and are
+  refused with 412 when the item changed since (requireSuggestionSeen). The
+  refusal carries recheck { at, print? }: the page reads the item again
+  and sends that print back as suggestedPrint, so the next press goes
+  unless the item changed once more. The decision clears For Bryce and its
+  History line names the suggester too. answer, body { answer }, answers a
+  question (full edit only).
 
   `agent` is { port, token } for the local agent on the owner's Mac (null
   when QUEUE_AGENT_SECRET is not set): the page calls it after an accept so
@@ -97,6 +100,7 @@ import {
 } from '@/lib/admin/auth'
 import {
   CHECKER_NAME,
+  parsePrint,
   SUGGEST_DIDS,
   type SuggestDid,
 } from '@/lib/admin/queue-suggest'
@@ -157,7 +161,9 @@ async function ensureAuth(write: boolean): Promise<Response | null> {
 /** A QueueError carries text written for the page; anything else is
  *  logged and answered with a plain summary, never the raw error. */
 function failure(e: unknown): Response {
-  if (e instanceof QueueError) return json({ error: e.detail }, e.status)
+  if (e instanceof QueueError) {
+    return json({ ...(e.extra ?? {}), error: e.detail }, e.status)
+  }
   const msg = e instanceof Error ? e.message : String(e)
   console.error('[admin-queue]', msg)
   return json(
@@ -272,7 +278,7 @@ export async function POST(req: NextRequest) {
           error:
             action === 'answer'
               ? `Answers come from ${CHECKER_NAME} or someone else with full Queue edit.`
-              : `${CHECKER_NAME} checks your decisions first, so this goes as a suggestion. Reload the page.`,
+              : `${CHECKER_NAME} checks your decisions first, so nothing was decided. Reload the page, then send it as a suggestion.`,
         },
         403
       )
@@ -286,7 +292,8 @@ export async function POST(req: NextRequest) {
     if (DECISIONS.has(action)) {
       requireSuggestionSeen(
         item,
-        typeof body.suggested === 'string' ? body.suggested : null
+        typeof body.suggested === 'string' ? body.suggested : null,
+        parsePrint(body.suggestedPrint)
       )
     }
     let notPutBack: string[] = []

@@ -33,6 +33,7 @@ import {
   laterItem,
   LIST_FORMULA,
   listQueue,
+  QueueError,
   rejectItem,
   requireSuggestionSeen,
   saveEdits,
@@ -41,6 +42,7 @@ import {
   type QueueItem,
   type SuggestInput,
 } from './queue'
+import type { Print } from './queue-suggest'
 
 const QUEUE = 'tblonlKwIFJ7Aa8QN'
 const EVENTS = 'tblXbN9swwldwq8f7'
@@ -277,6 +279,23 @@ describe('a suggestion', () => {
       })
     ).rejects.toMatchObject({ status: 409 })
   })
+
+  it('locks it for anyone else who can only suggest, a new name included', async () => {
+    await suggestItem(await current(), suggestion(), ROB)
+    const before = row[F.edits]
+    await expect(
+      saveEdits(await current(), { Name: 'Changed' }, undefined, ['Name'], {
+        by: 'Robert Grayson',
+        checkFirst: true,
+      })
+    ).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining(
+        'Rob suggested Publish on this, and it waits for Bryce'
+      ),
+    })
+    expect(row[F.edits]).toBe(before)
+  })
 })
 
 describe('confirming a suggestion', () => {
@@ -451,6 +470,101 @@ describe('the check before a confirm (412)', () => {
       { by: BRYCE, checkFirst: false }
     )
     expect((await refusal(at))?.status).toBe(412)
+  })
+
+  it('follows each part by itself: a reply the Mac rewrote leaves the edits free', async () => {
+    const at = await suggested()
+    // The week duty rewrites the reply draft on Monday.
+    row[F.replyDraft] = 'Thanks, it goes out in the newsletter this week.'
+    await saveEdits(
+      await current(),
+      { Name: 'AI Safety Forum, 2027' },
+      undefined,
+      ['Name'],
+      { by: BRYCE, checkFirst: false }
+    )
+    const r = await refusal(at)
+    expect(r?.status).toBe(412)
+    expect(r?.message).toMatch(/^The reply draft changed after Rob/)
+  })
+
+  // Reviews of 27 Nov 2026: a part that changed after the suggestion used to
+  // stop every press for good, with no way out but Take back.
+  describe('once the page has read the item again', () => {
+    const recheckOf = (e: unknown) =>
+      (e as QueueError).extra?.recheck as { at: string; print?: Print }
+    const refused = async (seen: string | null, seenPrint: Print | null) => {
+      try {
+        requireSuggestionSeen(await current(), seen, seenPrint)
+        return null
+      } catch (e) {
+        return e as QueueError
+      }
+    }
+
+    it('lets the next press through, and stops it again on a newer change', async () => {
+      const at = await suggested()
+      row[F.replyDraft] = 'Thanks, it goes out in the newsletter this week.'
+      const first = await refusal(at)
+      const recheck = recheckOf(first)
+      expect(recheck).toEqual({
+        at,
+        print: (await current()).print,
+        moved: ['reply'],
+      })
+      // The page sends back what it read: it goes, every time.
+      expect(await refused(at, recheck.print ?? null)).toBeNull()
+      expect(await refused(at, recheck.print ?? null)).toBeNull()
+      // Something else changes after that read: stopped once more.
+      row[F.verdict] = 'Unsure'
+      const again = await refused(at, recheck.print ?? null)
+      expect(again?.status).toBe(412)
+      expect(again?.message).toContain(
+        'Its verdict changed again since your page read it'
+      )
+      const next = recheckOf(again)
+      expect(await refused(at, next.print ?? null)).toBeNull()
+    })
+
+    it('a page that loaded before the suggestion is then told what changed', async () => {
+      const at = await suggested()
+      row[F.verdict] = 'Unsure'
+      const first = await refused(null, null)
+      // No fingerprint yet: the next press is checked against the
+      // suggestion's own, so the change since it is said.
+      expect(recheckOf(first)).toEqual({ at })
+      const second = await refused(at, null)
+      expect(second?.message).toContain(
+        'Its verdict changed after Rob suggested Publish'
+      )
+      expect(await refused(at, recheckOf(second).print ?? null)).toBeNull()
+    })
+
+    it('confirms or decides differently, clearing For Bryce', async () => {
+      const at = await suggested()
+      row[F.verdict] = 'Reject'
+      const seen = recheckOf(await refusal(at)).print ?? null
+      const item = await current()
+      requireSuggestionSeen(item, at, seen)
+      await rejectItem(item, 'Not about AI safety', null, BRYCE)
+      expect((await current()).status).toBe('Rejected')
+      expect((await current()).forBryce).toBeNull()
+      expect(last()).toMatchObject({
+        did: 'reject',
+        by: BRYCE,
+        suggested: { by: ROB, did: 'accept' },
+      })
+    })
+
+    it('a fingerprint sent back for another suggestion does not count', async () => {
+      const at = await suggested()
+      row[F.verdict] = 'Unsure'
+      const seen = recheckOf(await refusal(at)).print ?? null
+      expect(await refused('2026-12-01T00:00:00.000Z', seen)).toMatchObject({
+        status: 412,
+        message: expect.stringContaining('after your page loaded it'),
+      })
+    })
   })
 })
 

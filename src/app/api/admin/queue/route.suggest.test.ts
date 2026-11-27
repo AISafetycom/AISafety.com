@@ -74,7 +74,13 @@ async function post(body: Record<string, unknown>) {
       body: JSON.stringify({ id: 'recQUEUEROW000001', ...body }),
     })
   )
-  return { status: res.status, body: (await res.json()) as { error?: string } }
+  return {
+    status: res.status,
+    body: (await res.json()) as {
+      error?: string
+      recheck?: { at: string; print?: unknown; moved?: string[] }
+    },
+  }
 }
 const called = () => h.calls.map(c => c.fn)
 
@@ -98,6 +104,11 @@ describe('with "Bryce checks first"', () => {
       expect(r.status).toBe(403)
     }
     expect(called()).toEqual([])
+    // Saying plainly that nothing happened: an old tab must not read it as
+    // a suggestion saved.
+    expect((await post({ action: 'accept' })).body.error).toBe(
+      'Bryce checks your decisions first, so nothing was decided. Reload the page, then send it as a suggestion.'
+    )
   })
 
   it('saves a suggestion, with what the decision would take', async () => {
@@ -183,11 +194,34 @@ describe('with full edit', () => {
     expect(called()).toEqual([])
     expect((await post({ action: 'reject', suggested: AT })).status).toBe(200)
     expect(called()).toEqual(['rejectItem'])
-    // The item changed since: refused, nothing written.
+    // The item changed since: refused, nothing written, with the item's
+    // fingerprint now for the page to send back once it has read it again.
     h.calls = []
-    h.item = { ...h.item, print: { ...PRINT, verdict: 'deadbeef' } }
-    expect((await post({ action: 'accept', suggested: AT })).status).toBe(412)
+    const now = { ...PRINT, verdict: 'deadbeef' }
+    h.item = { ...h.item, print: now }
+    const changed = await post({ action: 'accept', suggested: AT })
+    expect(changed.status).toBe(412)
+    expect(changed.body.recheck).toEqual({
+      at: AT,
+      print: now,
+      moved: ['verdict'],
+    })
     expect(called()).toEqual([])
+    // Sent back: the decision goes. A malformed one counts as none.
+    expect(
+      (await post({ action: 'accept', suggested: AT, suggestedPrint: now }))
+        .status
+    ).toBe(200)
+    expect(called()).toEqual(['acceptItem'])
+    expect(
+      (
+        await post({
+          action: 'accept',
+          suggested: AT,
+          suggestedPrint: { verdict: 'deadbeef' },
+        })
+      ).status
+    ).toBe(412)
   })
 })
 

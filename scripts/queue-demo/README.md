@@ -68,7 +68,11 @@ The people (neither is a real account):
 6. To see the 412: as Rob, suggest something; then change that row in
    `.admin-dev/queue-demo.json` by hand (its `fld835yJytaSRAuvB`, the verdict,
    from "Publish" to "Unsure"); then as Bryce press A. The toast says the
-   verdict changed after Rob's suggestion and the list reads the item again.
+   verdict changed after Rob's suggestion and the page reads the item again.
+   Press A once more: it goes, because the page has now read the item as it
+   is. Change the verdict again before that second press and it is stopped
+   once more ("changed again since your page read it"). The card's Dismiss
+   takes a suggestion off an open item with nothing decided.
 
 7. Start again from the seed at any time by deleting
    `.admin-dev/queue-demo.json` (the next request writes a fresh one), or by

@@ -126,10 +126,14 @@ import {
   fromLabel,
   isWaiting,
   openSuggestion,
+  publicSeed,
   rejectSeed,
   rowNote,
+  staleDrafts,
+  suggestionAt,
   suggestWord,
   type ForBryce,
+  type Print,
   type SuggestDid,
 } from '@/lib/admin/queue-suggest'
 import type { QueueMode } from '@/lib/admin/access'
@@ -1169,20 +1173,68 @@ function editsAsText(edits: Record<string, unknown>): Record<string, string> {
 }
 
 /** The draft an item starts from: its saved edits and the fields it left
- *  out, when it is still open. */
+ *  out, when it is still open. It notes the suggestion waiting on the row
+ *  (queue-suggest.ts), so a draft made before that one is made again. */
 function draftOfRow(items: QueueItem[] | null | undefined, id: string): Draft {
   const item = items?.find(i => i.id === id)
   if (!item) return FRESH
-  if (!isOpen(item) && !setAsideUntil(item)) return FRESH
-  // A suggested Reject: the reason and decline text it came with are
-  // filled in, so R and Enter confirm it as suggested (queue-suggest.ts).
-  const seed = rejectSeed(item.forBryce, item.rejectChips)
-  if (!item.edits && !item.leftOut && !seed) return FRESH
+  const at = suggestionAt(item.forBryce)
+  if (!isOpen(item) && !setAsideUntil(item)) {
+    return at ? { ...FRESH, seed: at } : FRESH
+  }
+  // A suggestion confirms as it was made: a suggested Reject's reason and
+  // decline text are filled in, so R and Enter confirm it as suggested,
+  // and a suggested Apply keeps the choice made for a rule's public
+  // wording.
+  const reject = rejectSeed(item.forBryce, item.rejectChips)
+  const internal = publicSeed(item.forBryce)
+  if (!item.edits && !item.leftOut && !reject && internal === null && !at) {
+    return FRESH
+  }
   return {
     ...FRESH,
     edits: editsAsText(item.edits ?? {}),
     leftOut: item.leftOut ?? [],
-    ...(seed ?? {}),
+    ...(reject ?? {}),
+    ...(internal !== null ? { keepInternal: internal } : {}),
+    seed: at,
+  }
+}
+
+/** A draft made again from its row (`row`, draftOfRow) after the item
+ *  changed under it (queue-suggest.ts, staleDrafts). The edits and the
+ *  reply draft are the row's, except a field changed on this page whose
+ *  save has not gone yet (`unsaved`) and a reply still being typed or
+ *  saved (`replyUnsaved`). What the page has open stays open. For a new
+ *  suggestion (another seed) the call it was made with comes along too: a
+ *  suggested Reject's reason unless a reject is already under way here,
+ *  and a rule's public wording choice; for the same one (read again after
+ *  a refusal) the choices made on this page stay. */
+function remadeDraft(
+  was: Draft,
+  row: Draft,
+  unsaved: ReadonlySet<string>,
+  replyUnsaved: boolean
+): Draft {
+  const edits = { ...row.edits }
+  let leftOut = row.leftOut
+  for (const k of unsaved) {
+    if (k === LEFT_OUT_KEY) leftOut = was.leftOut
+    else if (k in was.edits) edits[k] = was.edits[k]
+    else delete edits[k]
+  }
+  const fresh = was.seed !== row.seed
+  const rejecting = was.mode === 'reject'
+  return {
+    ...was,
+    edits,
+    leftOut,
+    reply: was.editingReply || replyUnsaved ? was.reply : row.reply,
+    chip: fresh && !rejecting ? row.chip : was.chip,
+    other: fresh && !rejecting ? row.other : was.other,
+    decline: fresh && !rejecting ? row.decline : was.decline,
+    keepInternal: fresh ? row.keepInternal : was.keepInternal,
+    seed: row.seed,
   }
 }
 
@@ -1754,6 +1806,11 @@ interface Draft {
   /** "Bryce checks first": a note to go with a suggested Publish, Delete or
    *  Review again in a week (a suggested Reject carries its reason). */
   note: string
+  /** The time of the suggestion waiting on the row when this draft was made
+   *  from it, or null (queue-suggest.ts, suggestionAt). A draft made before
+   *  a suggestion arrived holds the edits the page had then, so the page
+   *  makes it again from the row (staleDrafts). */
+  seed: string | null
   busy: boolean
   error: string | null
 }
@@ -1775,6 +1832,7 @@ const FRESH: Draft = {
   publicText: null,
   publicError: null,
   note: '',
+  seed: null,
   busy: false,
   error: null,
 }
@@ -1998,6 +2056,11 @@ async function fetchRuleStates(
 const WORKER_NOTE = 'the Mac saves the reply draft within five minutes'
 const OFFLINE_SUB = `Mac agent not reachable · ${WORKER_NOTE}`
 
+/** How the page reads the list: `sync` closes rows handled in Airtable
+ *  itself first; `remake` makes these items' drafts again from the rows
+ *  read (after a refused decision on a suggested item, queue-suggest.ts). */
+type LoadOpts = { sync?: boolean; remake?: string[] }
+
 type Decision = 'accept' | 'reject' | 'later' | 'delete'
 type Action = Decision | 'undo' | 'reopen'
 
@@ -2009,15 +2072,12 @@ function isDecision(a: Action): a is Decision {
  *  every decision as a suggestion (queue-suggest.ts). */
 const ModeContext = createContext<QueueMode>('view')
 
-/** The suggestion still waiting on an item that the person looking made:
- *  the item is theirs to take back, not to change, until someone acts. */
-function mineWaiting(
-  item: QueueItem,
-  mode: QueueMode,
-  me: string | null
-): boolean {
-  const fb = item.forBryce
-  return mode === 'suggest' && fb?.kind === 'suggest' && fb.by === me
+/** A suggestion waits on the item and the person looking can only
+ *  suggest: nothing on it is theirs to change until someone acts. Their
+ *  own takes Take back; anyone else's (or their own under a name that has
+ *  changed since) only waits, as the site refuses their edits to it too. */
+function suggestionLocks(item: QueueItem, mode: QueueMode): boolean {
+  return mode === 'suggest' && item.forBryce?.kind === 'suggest'
 }
 
 /** A decision's button words for someone whose decisions are suggestions:
@@ -2074,6 +2134,18 @@ function QueueInbox({
   const [loadError, setLoadError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
+  // "Bryce checks first" (queue-suggest.ts). The fingerprint a refused
+  // decision gave the page, by item: the item as the page then read it
+  // again, sent back with the next press on it (requireSuggestionSeen).
+  const seenPrints = useRef<Record<string, { at: string; print: Print }>>({})
+  // Reply drafts typed on this page whose save has not landed yet.
+  const replyUnsaved = useRef(new Set<string>())
+  // Makes the page's drafts again from a list just read: the ones made on
+  // another suggestion than the one now on their row, and `forced` (set
+  // below, beside the drafts' own refs).
+  const remakeRef = useRef<(list: QueueItem[], forced?: string[]) => void>(
+    () => {}
+  )
   const [toast, setToast] = useState<Toast | null>(null)
   // True for the last moments of a toast, while it slides back down.
   const [toastLeaving, setToastLeaving] = useState(false)
@@ -2159,6 +2231,12 @@ function QueueInbox({
   const [chatSeen, setChatSeen] = useState<Record<string, string> | null>(null)
   // Bumped by the F key so the chat box takes focus.
   const [chatFocus, setChatFocus] = useState(0)
+  // Bumped by Z: the answer box of a question in From Rob takes the focus
+  // (queue-suggest.ts).
+  const [askFocus, setAskFocus] = useState(0)
+  // The item whose Ask box is open (someone whose decisions are
+  // suggestions): the Ask button or Z opens it.
+  const [askingFor, setAskingFor] = useState<string | null>(null)
   const [placeFocus, setPlaceFocus] = useState(0)
   const [fieldFocus, setFieldFocus] = useState(0)
   // A /map addition's suggested spot on the map, by item, as its map strip
@@ -2414,7 +2492,7 @@ function QueueInbox({
    *  was deleted, published or hidden in Airtable itself (a moment slower,
    *  so the first read skips it). Once a list is on screen, a read that
    *  fails leaves it be. */
-  const load = useCallback(async (opts: { sync?: boolean } = {}) => {
+  const load = useCallback(async (opts: LoadOpts = {}) => {
     const seq = ++loadSeq.current
     if (opts.sync) lastRefreshRef.current = Date.now()
     setLoadError(null)
@@ -2457,6 +2535,10 @@ function QueueInbox({
         if (keptRef.current.has(i.id) && !listed.has(i.id)) next.push(i)
       }
       setItems(next)
+      // A draft made before a suggestion arrived (or on another one) holds
+      // the edits the page had then: made again from the row, so a confirm
+      // sends what the card shows (queue-suggest.ts).
+      remakeRef.current(next, opts.remake)
       setAgent(data.agent ?? null)
       // The list is on screen now; the pictures, the links and the cards
       // follow in the background, each filled in as it arrives. A refresh
@@ -3434,6 +3516,7 @@ function QueueInbox({
       if (patch.reply !== undefined && row?.replyDraft !== null) {
         // Back to "as it came" means the row's own draft is saved again.
         body.replyDraft = merged.reply ?? row?.replyDraft ?? ''
+        replyUnsaved.current.add(id)
       }
       clearTimeout(saveTimers.current[id])
       saveTimers.current[id] = setTimeout(() => {
@@ -3460,6 +3543,28 @@ function QueueInbox({
         })
           .then(async res => {
             if (res.ok) {
+              const replied = 'replyDraft' in body
+              if (replied) replyUnsaved.current.delete(id)
+              // This page's own edits are seen ones: a fingerprint a refusal
+              // gave it follows them, so the next press still goes
+              // (queue-suggest.ts).
+              const ack = seenPrints.current[id]
+              if (ack) {
+                const data = (await res.json().catch(() => ({}))) as {
+                  item?: QueueItem
+                }
+                const now = data.item?.print
+                if (now) {
+                  seenPrints.current[id] = {
+                    ...ack,
+                    print: {
+                      ...ack.print,
+                      edits: now.edits,
+                      ...(replied ? { reply: now.reply } : {}),
+                    },
+                  }
+                }
+              }
               setDrafts(prev =>
                 prev[id]?.error?.startsWith('The edits were not saved')
                   ? { ...prev, [id]: { ...prev[id], error: null } }
@@ -3477,6 +3582,27 @@ function QueueInbox({
     },
     []
   )
+
+  remakeRef.current = (list, forced = []) => {
+    const ids = new Set([...staleDrafts(draftsRef.current, list), ...forced])
+    if (ids.size === 0) return
+    const remake = (all: Record<string, Draft>): Record<string, Draft> => {
+      const out = { ...all }
+      for (const id of ids) {
+        const was = all[id]
+        if (!was || was.busy || !list.some(i => i.id === id)) continue
+        out[id] = remadeDraft(
+          was,
+          draftOfRow(list, id),
+          touchedKeys.current[id] ?? new Set(),
+          replyUnsaved.current.has(id)
+        )
+      }
+      return out
+    }
+    draftsRef.current = remake(draftsRef.current)
+    setDrafts(prev => remake(prev))
+  }
 
   const select = useCallback((id: string) => {
     setSelectedId(id)
@@ -3825,6 +3951,7 @@ function QueueInbox({
       setItems(prev =>
         prev ? prev.map(i => (i.id === fresh.id ? fresh : i)) : prev
       )
+      remakeRef.current([fresh])
     } catch {
       // the next refresh of the list has it
     }
@@ -3971,13 +4098,16 @@ function QueueInbox({
           prev ? prev.map(x => (x.id === updated.id ? updated : x)) : prev
         )
         // Their own suggestion taken back: the item starts again from the
-        // edits on its row.
+        // edits on its row. A suggestion dismissed: the draft made on it is
+        // made again from the row.
         if (action === 'withdraw' && mode === 'suggest') {
           setDrafts(prev => {
             const rest = { ...prev }
             delete rest[item.id]
             return rest
           })
+        } else {
+          remakeRef.current([updated])
         }
         return null
       } catch {
@@ -4268,8 +4398,11 @@ function QueueInbox({
       // or refused, keep the rule open: the old words never go out in
       // their place.
       let pub = item.rulePublic
+      // The draft the page shows, made from the row when there is none yet
+      // (a suggested Apply brings its choice for the wording).
       const internal =
-        drafts[item.id]?.keepInternal ?? item.rulePublicChoice === 'internal'
+        (draftsRef.current[item.id] ?? draftOfRow(itemsRef.current, item.id))
+          .keepInternal ?? item.rulePublicChoice === 'internal'
       if (action === 'accept' && item.type === 'Rule' && pub) {
         const saving = publicSaves.current[item.id]
         if (saving) pub = (await saving)?.rulePublic ?? pub
@@ -4400,9 +4533,15 @@ function QueueInbox({
       }
       // Deciding an item someone suggested a decision on confirms or
       // overrides it: the site checks the suggestion is the one this page
-      // shows, and that the item is as it was then (queue-suggest.ts).
+      // shows, on the item as it was then or as this page last read it
+      // after a refusal (queue-suggest.ts).
       const suggestion = decision ? openSuggestion(item.forBryce) : null
+      const seenPrint =
+        suggestion && seenPrints.current[item.id]?.at === suggestion.at
+          ? seenPrints.current[item.id].print
+          : null
       let status = 0
+      let recheck: { at?: string; print?: Print } | null = null
       try {
         const res = await fetch(API, {
           method: 'POST',
@@ -4414,6 +4553,7 @@ function QueueInbox({
             ...publicWording,
             ...extra,
             ...(suggestion ? { suggested: suggestion.at } : {}),
+            ...(seenPrint ? { suggestedPrint: seenPrint } : {}),
           }),
         })
         status = res.status
@@ -4421,8 +4561,10 @@ function QueueInbox({
           item?: QueueItem
           error?: string
           notPutBack?: string[]
+          recheck?: { at?: string; print?: Print }
         }
         if (!res.ok || !data.item) {
+          recheck = data.recheck ?? null
           throw new Error(data.error ?? `HTTP ${res.status}`)
         }
         // A read of the list that began before this landed would show the
@@ -4452,6 +4594,8 @@ function QueueInbox({
           delete next[item.id]
           return next
         })
+        delete seenPrints.current[item.id]
+        replyUnsaved.current.delete(item.id)
         // A form item with nobody to reply to: its email in Gmail is read
         // once he has dealt with the item in any way, and unread again
         // after an Undo (Bryce, 18 Nov 2026). The Mac re-reads the row and
@@ -4615,9 +4759,24 @@ function QueueInbox({
         // It did not go out: its place is free again.
         if (wantsSpot(item)) forgetMap(item.targetRecord)
         setDraft(item.id, { busy: false, error: closed ? null : message })
-        if (closed || reread) await load()
+        // Or the item changed since someone suggested a decision on it
+        // (queue-suggest.ts). The page reads it again and makes its draft
+        // again from the row, so what it shows is what the next press
+        // sends, and that press says it has seen the item as it is now.
+        if (reread && recheck?.at && recheck.print) {
+          seenPrints.current[item.id] = {
+            at: recheck.at,
+            print: recheck.print,
+          }
+        }
+        // Not on its way any more, before the list is read again: a read
+        // keeps the page's own version of an item whose decision is on its
+        // way, so the fresh row would not show.
+        if (decision) forget()
+        if (closed || reread) {
+          await load(recheck ? { remake: [item.id] } : {})
+        }
         if (decision) {
-          forget()
           undoAfterRef.current.delete(item.id)
           setCheer(c => (c?.id === item.id ? null : c))
           // A failure takes the toast whatever it shows, and keeps it up
@@ -4922,12 +5081,12 @@ function QueueInbox({
       ) {
         return
       }
-      // Their own suggestion waits on the item: the keys that decide or
-      // change it wait until it is taken back (queue-suggest.ts).
+      // A suggestion waits on the item: the keys that decide or change it
+      // wait until it is decided or taken back (queue-suggest.ts).
       if (
         item &&
         isOpen(item) &&
-        mineWaiting(item, mode, me) &&
+        suggestionLocks(item, mode) &&
         ['a', 'r', 'x', 'w', 'c', 'Enter'].includes(e.key)
       ) {
         return
@@ -5114,6 +5273,19 @@ function QueueInbox({
             setChatFocus(n => n + 1)
           }
           break
+        case 'z': {
+          // A question in From Rob: write the answer. With "Bryce checks
+          // first": ask Bryce about the item (queue-suggest.ts).
+          const fb = item?.forBryce ?? null
+          if (item && mode === 'edit' && fb?.kind === 'ask' && !fb.answer) {
+            e.preventDefault()
+            setAskFocus(n => n + 1)
+          } else if (item && mode === 'suggest' && !isWaiting(fb)) {
+            e.preventDefault()
+            setAskingFor(item.id)
+          }
+          break
+        }
         case 'c': {
           // Use the fields Fable would change, all at once (Bryce, 16 Nov
           // 2026). They go into the edits, like anything typed by hand.
@@ -5946,6 +6118,9 @@ function QueueInbox({
                 chatAgent={canEdit && agentChat ? agent : null}
                 chatDictate={agentDictate}
                 chatFocus={chatFocus}
+                askFocus={askFocus}
+                askingFor={askingFor}
+                onAskingFor={setAskingFor}
                 placeFocus={placeFocus}
                 fieldFocus={fieldFocus}
                 spot={spots[selected.id] ?? null}
@@ -5956,8 +6131,9 @@ function QueueInbox({
                 readOnly={
                   !canEdit ||
                   !(isOpen(selected) || Boolean(setAsideUntil(selected))) ||
-                  // Their own suggestion waits on it: take it back first.
-                  mineWaiting(selected, mode, me)
+                  // A suggestion waits on it: nothing changes until it is
+                  // decided or taken back.
+                  suggestionLocks(selected, mode)
                 }
                 onForBryce={(action, extra) =>
                   forBryceAct(selected, action, extra)
@@ -6265,6 +6441,28 @@ function QueueInbox({
                 <kbd>F</kbd>
               </dt>
               <dd>talk to Fable about the item, or tell it what to change</dd>
+              {mode === 'edit' && (
+                <>
+                  <dt>
+                    <kbd>Z</kbd>
+                  </dt>
+                  <dd>
+                    on a question waiting for an answer, write the answer;{' '}
+                    <kbd>⌘</kbd> <kbd>Enter</kbd> sends it
+                  </dd>
+                </>
+              )}
+              {mode === 'suggest' && (
+                <>
+                  <dt>
+                    <kbd>Z</kbd>
+                  </dt>
+                  <dd>
+                    ask {CHECKER_NAME} about the item; <kbd>⌘</kbd>{' '}
+                    <kbd>Enter</kbd> sends it, and the answer comes back here
+                  </dd>
+                </>
+              )}
               <dt>
                 <kbd>C</kbd>
               </dt>
@@ -7084,6 +7282,7 @@ function ForBryceCard({
   asking,
   onAsking,
   onForBryce,
+  focusTick,
 }: {
   item: QueueItem
   /** The Ask box is open. */
@@ -7093,12 +7292,21 @@ function ForBryceCard({
     action: 'withdraw' | 'ask' | 'answer',
     extra?: Record<string, unknown>
   ) => Promise<string | null>
+  /** Bumped by Z: the answer box takes the focus. */
+  focusTick: number
 }) {
   const mode = useContext(ModeContext)
   const me = useContext(MeContext)
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const answerRef = useRef<HTMLTextAreaElement>(null)
+  const seenTick = useRef(focusTick)
+  useEffect(() => {
+    if (focusTick === seenTick.current) return
+    seenTick.current = focusTick
+    answerRef.current?.focus()
+  }, [focusTick])
   const fb = item.forBryce ?? null
   const send = async (
     action: 'withdraw' | 'ask' | 'answer',
@@ -7118,6 +7326,7 @@ function ForBryceCard({
   const box = (label: string, button: string, action: 'ask' | 'answer') => (
     <>
       <textarea
+        ref={action === 'answer' ? answerRef : undefined}
         className={styles.input}
         rows={3}
         value={text}
@@ -7211,6 +7420,13 @@ function ForBryceCard({
               : ''}
           </p>
         )}
+        {fb.did === 'accept' && fb.publicChoice && item.rulePublic && (
+          <p className={styles.note}>
+            {fb.publicChoice === 'internal'
+              ? `${who} chose to keep the wording internal, so the public listing policy stays as it is`
+              : `${who} chose to put the wording on the public listing policy`}
+          </p>
+        )}
         {fb.asked && (
           <p className={styles.note}>
             {who} asked first &ldquo;{fb.asked.question}&rdquo;
@@ -7278,13 +7494,15 @@ function ForBryceCard({
     )
   }
   // Take back while it waits (its author), Got it once answered (its
-  // author), Dismiss on a row closed meanwhile (anyone with full edit).
+  // author). Dismiss for anyone with full edit: on a row closed meanwhile,
+  // and on an open one's suggestion, which then leaves the item open as it
+  // is, so it can always be dealt with.
   const button =
     mode === 'suggest' && mine
       ? isWaiting(fb)
         ? 'Take back'
         : 'Got it'
-      : mode === 'edit' && closed && isWaiting(fb)
+      : mode === 'edit' && isWaiting(fb) && (closed || fb.kind === 'suggest')
         ? 'Dismiss'
         : null
   return (
@@ -7295,6 +7513,11 @@ function ForBryceCard({
           <button
             className={styles.ghost}
             disabled={busy}
+            title={
+              button === 'Dismiss' && !closed
+                ? `Takes ${firstName(fb.by)}'s suggestion off the item, with nothing decided. The item stays open as it is.`
+                : undefined
+            }
             onClick={() => void send('withdraw')}
           >
             {busy ? 'Sending…' : button}
@@ -7320,6 +7543,9 @@ function Detail({
   chatAgent,
   chatDictate,
   chatFocus,
+  askFocus,
+  askingFor,
+  onAskingFor: setAskingFor,
   placeFocus,
   fieldFocus,
   spot,
@@ -7383,6 +7609,12 @@ function Detail({
   /** The Mac can turn speech into text (Cmd+D in the chat). */
   chatDictate: boolean
   chatFocus: number
+  /** Bumped by Z: the answer box of a question waiting on the item takes
+   *  the focus (queue-suggest.ts). */
+  askFocus: number
+  /** The item whose Ask box is open, and a way to open or close it. */
+  askingFor: string | null
+  onAskingFor: (id: string | null) => void
   /** Bumped by P: open the Position list on an addition. */
   placeFocus: number
   /** Bumped by E: open the field list on a change. */
@@ -7411,9 +7643,9 @@ function Detail({
   // back, not to change.
   const mode = useContext(ModeContext)
   const me = useContext(MeContext)
-  const locked = isOpen(item) && mineWaiting(item, mode, me)
+  const locked = isOpen(item) && suggestionLocks(item, mode)
   const lockedFb = locked ? openSuggestion(item.forBryce) : null
-  const [askingFor, setAskingFor] = useState<string | null>(null)
+  const lockedMine = lockedFb !== null && lockedFb.by === me
   const canAsk = mode === 'suggest' && !isWaiting(item.forBryce)
   const askButton = canAsk ? (
     <button
@@ -8415,6 +8647,7 @@ function Detail({
           asking={askingFor === item.id}
           onAsking={on => setAskingFor(on ? item.id : null)}
           onForBryce={onForBryce}
+          focusTick={askFocus}
         />
         {askedBlock}
         {item.passed && isOpen(item) && (
@@ -9044,6 +9277,10 @@ function Detail({
               )
             )}
           </div>
+        ) : lockedFb && !lockedMine ? (
+          <p className={styles.note}>
+            {`${firstName(lockedFb.by)} suggested ${suggestWord(lockedFb.did, item.type)} · waiting for ${CHECKER_NAME}. It can’t be changed until ${CHECKER_NAME} decides it.`}
+          </p>
         ) : lockedFb ? (
           <div className={styles.buttons}>
             <span className={styles.note}>
