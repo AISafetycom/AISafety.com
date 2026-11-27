@@ -24,8 +24,22 @@
   closed, a listing approved in Airtable itself and a decision from before
   18 Nov 2026 have no entry, so they show without a name.
 
+  With the 'suggest' grant (queue-suggest.ts, 27 Nov 2026) four more kinds
+  are kept: `suggest` (a suggested decision, waiting for someone with full
+  edit), `withdraw` (taken back by its author, or dismissed), `ask` (a
+  question for someone with full edit) and `answer`. A decision that
+  confirmed or overrode a suggestion carries `suggested`, so its line keeps
+  both names.
+
   Dependency-free, so the page and the server share it.
 */
+
+import {
+  firstName,
+  suggestWord,
+  SUGGEST_DIDS,
+  type SuggestDid,
+} from './queue-suggest'
 
 export type HistoryDid =
   | 'accept'
@@ -41,6 +55,11 @@ export type HistoryDid =
   | 'unwait'
   // Written by the Mac: Fable changed the listing from the item's chat.
   | 'fable'
+  // "Bryce checks first" (queue-suggest.ts).
+  | 'suggest'
+  | 'withdraw'
+  | 'ask'
+  | 'answer'
 
 const DID: readonly string[] = [
   'accept',
@@ -53,7 +72,20 @@ const DID: readonly string[] = [
   'wait',
   'unwait',
   'fable',
+  'suggest',
+  'withdraw',
+  'ask',
+  'answer',
 ]
+
+/** Whose suggestion or question an entry is about, and what it was: on a
+ *  `suggest` line, what was suggested; on a decision, the suggestion it
+ *  confirmed or overrode; on `withdraw` and `answer`, what was taken back
+ *  or answered (`ask` for a question). */
+export interface Suggested {
+  by: string | null
+  did: SuggestDid | 'ask'
+}
 
 /** What an Undo took back. */
 export type Undid = 'accept' | 'reject' | 'later'
@@ -71,6 +103,8 @@ export interface HistoryEntry {
   fields?: string[]
   /** undo: what it took back. */
   undid?: Undid
+  /** See Suggested. */
+  suggested?: Suggested
 }
 
 // Airtable holds 100,000 characters in a long text field; this keeps the
@@ -112,6 +146,17 @@ function asEntry(x: unknown): HistoryEntry | null {
   if (did === 'undo' && undid && UNDID.includes(undid)) {
     entry.undid = undid as Undid
   }
+  const sug = o.suggested
+  if (sug && typeof sug === 'object') {
+    const s = sug as Record<string, unknown>
+    const what = clean(s.did)
+    if (
+      what &&
+      (what === 'ask' || (SUGGEST_DIDS as readonly string[]).includes(what))
+    ) {
+      entry.suggested = { by: clean(s.by), did: what as Suggested['did'] }
+    }
+  }
   return entry
 }
 
@@ -140,6 +185,7 @@ export function withEntry(
     did: HistoryDid
     fields?: string[]
     undid?: Undid | null
+    suggested?: Suggested | null
   }
 ): string {
   const next = asEntry(entry)
@@ -274,8 +320,32 @@ export function nameList(names: string[]): string {
   return `${names[0]}, ${names[1]}, and ${names.length - 2} more`
 }
 
+/** Lines that name their own author in the sentence ("Rob suggested
+ *  Publish"), so the page shows no "by" after them. */
+export function namesItself(line: HistoryEntry): boolean {
+  return line.did === 'suggest' || line.did === 'ask'
+}
+
+/** What a suggestion asked for, in a line's words. */
+function suggestedWord(s: Suggested, type: HistoryRow['type']): string {
+  return s.did === 'ask' ? 'question' : suggestWord(s.did, type)
+}
+
 /** What a line says happened, in the words the page uses for a decision. */
 export function lineText(line: HistoryLine): string {
+  const base = decisionText(line)
+  const s = line.suggested
+  if (!s || !DECIDES.includes(line.did)) return base
+  // A decision on a suggestion: the suggester's name stays with it.
+  if (s.did === 'ask') return `${base} · ${firstName(s.by)} had asked`
+  return s.did === line.did
+    ? `${base} · suggested by ${firstName(s.by)}`
+    : `${base} · ${firstName(s.by)} suggested ${suggestWord(s.did, line.type)}`
+}
+
+const DECIDES: readonly HistoryDid[] = ['accept', 'reject', 'later', 'delete']
+
+function decisionText(line: HistoryLine): string {
   const fields = line.fields ?? []
   switch (line.did) {
     case 'accept':
@@ -312,5 +382,24 @@ export function lineText(line: HistoryLine): string {
         return 'Undid the change'
       }
       return 'Undid the decision'
+    case 'suggest':
+      return line.suggested && line.suggested.did !== 'ask'
+        ? `${firstName(line.by)} suggested ${suggestWord(line.suggested.did, line.type)}`
+        : `${firstName(line.by)} made a suggestion`
+    case 'ask':
+      return `${firstName(line.by)} asked a question`
+    case 'answer':
+      return line.suggested
+        ? `Answered ${firstName(line.suggested.by)}'s question`
+        : 'Answered the question'
+    case 'withdraw': {
+      const s = line.suggested
+      if (!s) return 'Took back a suggestion'
+      const what = suggestedWord(s, line.type)
+      const word = s.did === 'ask' ? 'question' : `suggestion (${what})`
+      return s.by && line.by && s.by !== line.by
+        ? `Dismissed ${firstName(s.by)}'s ${word}`
+        : `Took back the ${word}`
+    }
   }
 }

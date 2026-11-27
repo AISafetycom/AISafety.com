@@ -1,6 +1,7 @@
 /*
-  Queue API. GET needs the queue area (canViewQueue); POST needs its edit
-  grant (canReviewQueue).
+  Queue API. GET needs the queue area (canViewQueue); POST needs a grant
+  that writes there (canWorkQueue): 'edit', or 'suggest' ("can edit, Bryce
+  checks first", queue-suggest.ts).
 
   GET  /api/admin/queue                        → { items, agent }
        (the rows only, no logo lookup, so the list lands in about a second;
@@ -55,6 +56,24 @@
        place of the ones the page showed (seen) – savePublicWording,
        queue-rule-public.ts; nothing reaches the public page until Apply.
 
+  Bryce checks first (queue-suggest.ts). With the 'suggest' grant, accept,
+  reject, delete and later are refused (403); the page sends them as
+       suggest  body { did: accept | reject | delete | later, edits?,
+                replyDraft?, keep?, public?, publicSeen?, reason?,
+                rejectReply? } – runs the decision's own checks, keeps the
+                edits and reply draft on the row, and saves the suggestion
+                on For Bryce; nothing is decided
+       withdraw takes back their own suggestion or question (with full
+                edit: dismisses anyone's, e.g. on a row a bot closed)
+       ask      body { question } – on any item, decided ones included
+  and every other action works as with 'edit', except that edit is refused
+  while their own suggestion on the item waits. With full edit, accept,
+  reject, delete and later on an item carrying a suggestion also take
+  { suggested: <its at, as the page showed it> } and are refused with 412
+  when the item changed since (requireSuggestionSeen); the decision clears
+  For Bryce and its History line names the suggester too. answer, body
+  { answer }, answers a question (full edit only).
+
   `agent` is { port, token } for the local agent on the owner's Mac (null
   when QUEUE_AGENT_SECRET is not set): the page calls it after an accept so
   a Gmail reply draft lands at once instead of on the worker's next pass.
@@ -70,11 +89,23 @@
 */
 
 import { NextRequest } from 'next/server'
-import { canReviewQueue, canViewQueue, currentAdmin } from '@/lib/admin/auth'
+import {
+  canViewQueue,
+  canWorkQueue,
+  currentAdmin,
+  queueMode,
+} from '@/lib/admin/auth'
+import {
+  CHECKER_NAME,
+  SUGGEST_DIDS,
+  type SuggestDid,
+} from '@/lib/admin/queue-suggest'
 import { mapForStrip } from '@/lib/admin/queue-map'
 import {
   acceptItem,
   agentInfo,
+  answerItem,
+  askItem,
   closeHandledRows,
   deleteItem,
   findListing,
@@ -91,12 +122,15 @@ import {
   QueueError,
   rejectItem,
   reopenItem,
+  requireSuggestionSeen,
   sanitiseEdits,
   saveEdits,
   savePublicWording,
+  suggestItem,
   undoItem,
   unflagItem,
   waitItem,
+  withdrawItem,
 } from '@/lib/admin/queue'
 import { parseFlag } from '@/lib/admin/queue-flag'
 import { publicChoiceOf } from '@/lib/admin/queue-rule-instant'
@@ -115,7 +149,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 async function ensureAuth(write: boolean): Promise<Response | null> {
-  const allowed = write ? await canReviewQueue() : await canViewQueue()
+  const allowed = write ? await canWorkQueue() : await canViewQueue()
   if (!allowed) return json({ error: 'unauthorized' }, 401)
   return null
 }
@@ -174,7 +208,7 @@ export async function GET(req: NextRequest) {
     let items = await listQueue()
     if (
       req.nextUrl.searchParams.get('sync') === '1' &&
-      (await canReviewQueue())
+      (await canWorkQueue())
     ) {
       const closed = new Set(await closeHandledRows(items))
       if (closed.size) items = items.filter(i => !closed.has(i.id))
@@ -197,7 +231,18 @@ const ACTIONS = new Set([
   'delete',
   'wait',
   'public',
+  'suggest',
+  'withdraw',
+  'ask',
+  'answer',
 ])
+
+/** The actions that decide an item. With the 'suggest' grant they arrive as
+ *  'suggest' instead; sent as themselves (an old tab), they are refused. */
+const DECISIONS = new Set(['accept', 'reject', 'delete', 'later'])
+
+const strings = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((k): k is string => typeof k === 'string') : []
 
 export async function POST(req: NextRequest) {
   const auth = await ensureAuth(true)
@@ -220,8 +265,73 @@ export async function POST(req: NextRequest) {
     const me = await currentAdmin()
     // The name the row's history keeps for this action.
     const by = me?.name || me?.email || null
+    const checkFirst = (await queueMode()) === 'suggest'
+    if (checkFirst && (DECISIONS.has(action) || action === 'answer')) {
+      return json(
+        {
+          error:
+            action === 'answer'
+              ? `Answers come from ${CHECKER_NAME} or someone else with full Queue edit.`
+              : `${CHECKER_NAME} checks your decisions first, so this goes as a suggestion. Reload the page.`,
+        },
+        403
+      )
+    }
+    if (!checkFirst && action === 'suggest') {
+      return json(
+        { error: 'You can decide this yourself: no suggestion needed.' },
+        400
+      )
+    }
+    if (DECISIONS.has(action)) {
+      requireSuggestionSeen(
+        item,
+        typeof body.suggested === 'string' ? body.suggested : null
+      )
+    }
     let notPutBack: string[] = []
-    if (action === 'accept') {
+    if (action === 'suggest') {
+      const did = body.did as SuggestDid
+      if (!SUGGEST_DIDS.includes(did)) {
+        return json({ error: 'Suggest what?' }, 400)
+      }
+      const choice = publicChoiceOf(body.public)
+      await suggestItem(
+        item,
+        {
+          did,
+          edits: body.edits === undefined ? null : sanitiseEdits(body.edits),
+          replyDraft:
+            typeof body.replyDraft === 'string' ? body.replyDraft : null,
+          keep: strings(body.keep),
+          publicWording: choice
+            ? {
+                choice,
+                seen:
+                  typeof body.publicSeen === 'string' ? body.publicSeen : null,
+              }
+            : null,
+          reason: typeof body.reason === 'string' ? body.reason : '',
+          rejectReply:
+            typeof body.rejectReply === 'string' ? body.rejectReply : null,
+        },
+        by
+      )
+    } else if (action === 'withdraw') {
+      await withdrawItem(item, by, !checkFirst)
+    } else if (action === 'ask') {
+      await askItem(
+        item,
+        typeof body.question === 'string' ? body.question : '',
+        by
+      )
+    } else if (action === 'answer') {
+      await answerItem(
+        item,
+        typeof body.answer === 'string' ? body.answer : '',
+        by
+      )
+    } else if (action === 'accept') {
       const choice = publicChoiceOf(body.public)
       await acceptItem(
         item,
@@ -256,7 +366,8 @@ export async function POST(req: NextRequest) {
         typeof body.replyDraft === 'string' ? body.replyDraft : undefined,
         Array.isArray(body.keys)
           ? body.keys.filter((k): k is string => typeof k === 'string')
-          : undefined
+          : undefined,
+        { by, checkFirst }
       )
       return json({ item: await getQueueItem(id) })
     } else if (action === 'fix') {
