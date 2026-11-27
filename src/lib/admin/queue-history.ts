@@ -24,6 +24,12 @@
   closed, a listing approved in Airtable itself and a decision from before
   18 Nov 2026 have no entry, so they show without a name.
 
+  A verdict the page writes from a reply in someone's Fable chat (the
+  chat's `flag` block, queue-flag.ts) is kept too when the chat is not the
+  owner's own (27 Nov 2026, with the team's chat): `flag`, and `unflag`
+  when they put the earlier one back, each with their name. The owner's
+  own chat leaves no line, as before.
+
   With the 'suggest' grant (queue-suggest.ts, 27 Nov 2026) four more kinds
   are kept: `suggest` (a suggested decision, waiting for someone with full
   edit), `withdraw` (taken back by its author, or dismissed), `ask` (a
@@ -60,6 +66,10 @@ export type HistoryDid =
   | 'withdraw'
   | 'ask'
   | 'answer'
+  // A teammate's Fable chat changed the item's verdict and reasons, or
+  // they put the earlier ones back (queue-flag.ts).
+  | 'flag'
+  | 'unflag'
 
 const DID: readonly string[] = [
   'accept',
@@ -76,6 +86,8 @@ const DID: readonly string[] = [
   'withdraw',
   'ask',
   'answer',
+  'flag',
+  'unflag',
 ]
 
 /** Whose suggestion or question an entry is about, and what it was: on a
@@ -323,7 +335,12 @@ export function nameList(names: string[]): string {
 /** Lines that name their own author in the sentence ("Rob suggested
  *  Publish"), so the page shows no "by" after them. */
 export function namesItself(line: HistoryEntry): boolean {
-  return line.did === 'suggest' || line.did === 'ask'
+  return (
+    line.did === 'suggest' ||
+    line.did === 'ask' ||
+    line.did === 'flag' ||
+    line.did === 'unflag'
+  )
 }
 
 /** What a suggestion asked for, in a line's words. */
@@ -344,6 +361,11 @@ export function lineText(line: HistoryLine): string {
 }
 
 const DECIDES: readonly HistoryDid[] = ['accept', 'reject', 'later', 'delete']
+
+/** What the chat's flag block changes, as the chat's own card calls it. */
+function flagNoun(type: HistoryRow['type']): string {
+  return type === 'Add' ? 'verdict' : 'flag'
+}
 
 function decisionText(line: HistoryLine): string {
   const fields = line.fields ?? []
@@ -388,6 +410,10 @@ function decisionText(line: HistoryLine): string {
         : `${firstName(line.by)} made a suggestion`
     case 'ask':
       return `${firstName(line.by)} asked a question`
+    case 'flag':
+      return `Fable changed the ${flagNoun(line.type)} in ${firstName(line.by)}'s chat`
+    case 'unflag':
+      return `${firstName(line.by)} put the earlier ${flagNoun(line.type)} back`
     case 'answer':
       return line.suggested
         ? `Answered ${firstName(line.suggested.by)}'s question`

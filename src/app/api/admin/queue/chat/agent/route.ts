@@ -4,23 +4,39 @@
   here: first for the requests people's pages have left, then with each
   answer in pieces. No admin session: every call carries
   `Authorization: Bearer <token>`, sealed with QUEUE_TEAM_AGENT_SECRET
-  (checkAgentToken; a token lives two minutes at most). Without the secret
-  on the site every call answers 503.
+  (checkAgentToken; a token is taken only in the two minutes before it
+  ends). Without the secret on the site, or with one shorter than 32
+  characters, every call answers 503.
 
   POST /api/admin/queue/chat/agent
-       { op: 'next', wait }  → { requests: [{ id, path, body, who, at }] }
-            The waiting requests, each handed out once. With none, waits up
-            to `wait` seconds (20 at most) for one. Every call marks the
-            agent as seen: the page calls the chat's server online while
-            the last call is under a minute old.
+       { op: 'next', wait }
+            → { requests: [{ id, path, who, at, bodyText, sig, body? }] }
+            The requests waiting for an agent. With none, waits up to
+            `wait` seconds (20 at most) for one. `bodyText` is the page's
+            body as text and `sig` the site's signature over the request
+            (signRequest, with a test vector): the agent checks it and
+            reads `bodyText`. `body`, the same thing parsed, comes only
+            with a `bodyText` of up to 1.5 MB. A request is offered again,
+            to a later call, every 10 seconds until the agent's first
+            `chunks` call for it, so the agent says it has one at once (an
+            empty `chunks: []` will do) and ignores an id it already has.
+            One answer is 4 MB at most. Every call marks the agent as
+            seen: the page calls the chat's server online while the last
+            call is under a minute old.
        { op: 'chunks', id, status?, chunks: [{ seq, text }], done? }
             → { ok: true }
             The next pieces of the agent's HTTP answer to request `id`:
             `text` is the answer's own bytes, in order, and `status` (with
             the first call) its HTTP status. A seq at or below the last one
-            kept is taken as a call sent twice and dropped. One call is at
-            most 1 MB. Refused for an id that is unknown (404) or finished
-            (409).
+            kept is taken as a call sent twice and dropped. One that skips
+            ahead is refused, 409 { error, code: 'seq_gap', last }, and
+            the agent sends again from last + 1 (the first seq is 0 or 1).
+            One call is at most 1 MB. Also refused: an id that is unknown
+            (404, code 'unknown') or finished (409, code 'finished'), one
+            the agent left silent for 90 seconds (409, code 'stalled'),
+            and a first call that comes more than 29 seconds after the
+            page asked (409, code 'expired': the page has been told nobody
+            answered, so the agent must not run that request).
 
   Nothing here logs a body or a piece of an answer.
 */
@@ -32,6 +48,7 @@ import {
   CHUNKS_MAX_BYTES,
   NEXT_MAX_WAIT_S,
   RelayError,
+  relayErrorText,
   teamAgentSecret,
   teamRelay,
 } from '@/lib/admin/queue-team-relay'
@@ -105,11 +122,12 @@ export async function POST(req: NextRequest) {
     }
     return json({ error: 'unknown op' }, 400)
   } catch (e) {
-    if (e instanceof RelayError) return json({ error: e.message }, e.status)
-    console.error(
-      '[queue-team-chat]',
-      e instanceof Error ? e.message : 'the relay failed'
-    )
+    if (e instanceof RelayError) {
+      return json({ ...e.extra, error: e.message }, e.status)
+    }
+    // Never the error as it is: the store's client quotes what it was
+    // storing, which here is a request or a piece of a reply.
+    console.error('[queue-team-chat]', relayErrorText(e))
     return json({ error: 'The relay could not do that.' }, 502)
   }
 }

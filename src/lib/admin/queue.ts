@@ -2875,7 +2875,11 @@ async function rawQueueFields(id: string): Promise<RawFields> {
  *  written to the listing. */
 export async function flagItem(
   item: QueueItem,
-  flag: FlagUpdate
+  flag: FlagUpdate,
+  /** Whose chat the flag came from, when it is not the owner's own: kept
+   *  on the row's History (queue-history.ts, `flag`). Left out, no line is
+   *  written, as it always was for the owner. */
+  inChatOf?: string | null
 ): Promise<void> {
   requireOpen(item)
   const f = await rawQueueFields(item.id)
@@ -2911,11 +2915,18 @@ export async function flagItem(
   }
   next[FLAG_BEFORE_KEY] = before
   fields[F.proposal] = JSON.stringify(next, null, 1)
-  await patchQueueRow(item.id, fields)
+  await patchQueueRow(item.id, {
+    ...fields,
+    ...(inChatOf === undefined ? {} : stamped(item, inChatOf, 'flag', now())),
+  })
 }
 
 /** Undo for "Update flag": the row says again what it said before. */
-export async function unflagItem(item: QueueItem): Promise<void> {
+export async function unflagItem(
+  item: QueueItem,
+  /** Who put the earlier flag back, when it is not the owner: see flagItem. */
+  by?: string | null
+): Promise<void> {
   requireOpen(item)
   const f = await rawQueueFields(item.id)
   const proposal = parseJson(f[F.proposal])
@@ -2936,7 +2947,10 @@ export async function unflagItem(item: QueueItem): Promise<void> {
     [F.proposal]: JSON.stringify(next, null, 1),
   }
   if (typeof before.title === 'string') fields[F.title] = before.title
-  await patchQueueRow(item.id, fields)
+  await patchQueueRow(item.id, {
+    ...fields,
+    ...(by === undefined ? {} : stamped(item, by, 'unflag', now())),
+  })
 }
 
 /** His own words for the sentence a rule brings for the public listing

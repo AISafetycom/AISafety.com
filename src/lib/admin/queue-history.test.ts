@@ -5,6 +5,7 @@ import {
   lineText,
   listingLines,
   nameList,
+  namesItself,
   rowLines,
   standing,
   withEntry,
@@ -302,6 +303,43 @@ describe('lineText', () => {
       'Fable changed Logo and Name'
     )
     expect(lineText(line({ did: 'fable' }))).toBe('Fable changed the listing')
+  })
+  it('says whose chat changed a verdict, and who put it back', () => {
+    expect(lineText(line({ did: 'flag', by: 'Rob Grayson' }))).toBe(
+      'Fable changed the verdict in Rob’s chat'.replace('’', "'")
+    )
+    expect(
+      lineText(line({ did: 'flag', by: 'Rob Grayson', type: 'Change' }))
+    ).toBe("Fable changed the flag in Rob's chat")
+    expect(lineText(line({ did: 'unflag', by: 'Rob Grayson' }))).toBe(
+      'Rob put the earlier verdict back'
+    )
+    expect(lineText(line({ did: 'flag', by: null }))).toBe(
+      "Fable changed the verdict in Someone's chat"
+    )
+    // The sentence names them, so the page adds no "by" after it.
+    expect(namesItself(line({ did: 'flag' }))).toBe(true)
+    expect(namesItself(line({ did: 'unflag' }))).toBe(true)
+    // And both are kept when the field is read back.
+    expect(
+      historyOf(
+        JSON.stringify([
+          { at: AT, by: 'Rob Grayson', did: 'flag' },
+          { at: LATER, by: 'Rob Grayson', did: 'unflag' },
+        ])
+      ).map(e => e.did)
+    ).toEqual(['flag', 'unflag'])
+    // Neither is a decision: the row's own decision still stands.
+    expect(
+      standing(
+        row({
+          history: [
+            { at: AT, by: 'Bryce', did: 'accept' },
+            { at: LATER, by: 'Rob Grayson', did: 'flag' },
+          ],
+        })
+      )?.by
+    ).toBe('Bryce')
   })
   it('says what an undo took back', () => {
     expect(lineText(line({ did: 'undo', undid: 'accept' }))).toBe(

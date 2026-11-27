@@ -1530,6 +1530,52 @@ describe('flagItem / unflagItem', () => {
     expect((await current()).flagWas).toBe(null)
   })
 
+  it('leaves no History line for the owner’s own chat, as before', async () => {
+    const flag = {
+      verdict: 'Unsure' as const,
+      reasons: ['The domain expired.'],
+      chips: null,
+      title: null,
+      changes: null,
+    }
+    await flagItem(await current(), flag)
+    expect((await current()).history ?? []).toEqual([])
+    await unflagItem(await current())
+    expect((await current()).history ?? []).toEqual([])
+  })
+
+  it('names whose chat changed the flag when it is a teammate’s', async () => {
+    await flagItem(
+      await current(),
+      {
+        verdict: 'Unsure',
+        reasons: ['The domain expired.'],
+        chips: null,
+        title: null,
+        changes: null,
+      },
+      'Rob Grayson'
+    )
+    const flagged = await current()
+    expect(flagged.verdict).toBe('Unsure')
+    expect(flagged.history).toEqual([
+      { at: expect.any(String), by: 'Rob Grayson', did: 'flag' },
+    ])
+    // The same write: the flag and its line land together.
+    const patches = mocks.airtableRequest.mock.calls.filter(
+      ([, init]) => (init as RequestInit | undefined)?.method === 'PATCH'
+    )
+    expect(patches).toHaveLength(1)
+
+    await unflagItem(flagged, 'Rob Grayson')
+    const back = await current()
+    expect(back.verdict).toBe('Dismiss')
+    expect((back.history ?? []).map(e => [e.by, e.did])).toEqual([
+      ['Rob Grayson', 'flag'],
+      ['Rob Grayson', 'unflag'],
+    ])
+  })
+
   it('clears the reject buttons when Fable gave none, keeps the rest', async () => {
     await flagItem(await current(), {
       verdict: 'Fix',

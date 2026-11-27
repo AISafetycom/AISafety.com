@@ -8,6 +8,7 @@ import { NextRequest } from 'next/server'
 // The check itself (requireSuggestionSeen) is the real one.
 
 const h = vi.hoisted(() => ({
+  email: 'someone@example.com',
   mode: 'suggest' as 'edit' | 'suggest' | 'view' | null,
   item: null as Record<string, unknown> | null,
   calls: [] as { fn: string; args: unknown[] }[],
@@ -24,7 +25,7 @@ vi.mock('@/lib/admin/auth', () => ({
   canWorkQueue: async () => h.mode === 'edit' || h.mode === 'suggest',
   currentAdmin: async () => ({
     name: h.mode === 'suggest' ? 'Rob Grayson' : 'Bryce',
-    email: 'someone@example.com',
+    email: h.email,
   }),
 }))
 vi.mock('@/lib/admin/queue-map', () => ({ mapForStrip: vi.fn() }))
@@ -51,10 +52,13 @@ vi.mock('@/lib/admin/queue', async importOriginal => {
     withdrawItem: spy('withdrawItem'),
     askItem: spy('askItem'),
     answerItem: spy('answerItem'),
+    flagItem: spy('flagItem'),
+    unflagItem: spy('unflagItem'),
   }
 })
 
 import { POST } from './route'
+import { ROOT_ADMINS } from '@/lib/admin/users'
 import { makePrint } from '@/lib/admin/queue-suggest'
 
 const PRINT = makePrint({
@@ -67,10 +71,15 @@ const PRINT = makePrint({
 })
 const AT = '2026-11-30T03:00:00.000Z'
 
-async function post(body: Record<string, unknown>) {
+async function post(
+  body: Record<string, unknown>,
+  // As the page sends it.
+  headers: Record<string, string> = { 'Content-Type': 'application/json' }
+) {
   const res = await POST(
     new NextRequest('http://localhost/api/admin/queue', {
       method: 'POST',
+      headers,
       body: JSON.stringify({ id: 'recQUEUEROW000001', ...body }),
     })
   )
@@ -86,6 +95,7 @@ const called = () => h.calls.map(c => c.fn)
 
 beforeEach(() => {
   h.calls = []
+  h.email = 'someone@example.com'
   h.mode = 'suggest'
   h.item = {
     id: 'recQUEUEROW000001',
@@ -232,5 +242,82 @@ describe('view only', () => {
       expect((await post({ action })).status).toBe(401)
     }
     expect(called()).toEqual([])
+  })
+})
+
+describe('where a write may come from', () => {
+  it('takes the page’s own JSON, and refuses a form or plain text', async () => {
+    h.mode = 'edit'
+    expect((await post({ action: 'wait', on: true })).status).toBe(200)
+    for (const type of [
+      'text/plain',
+      'application/x-www-form-urlencoded',
+      'multipart/form-data; boundary=x',
+    ]) {
+      const r = await post({ action: 'accept' }, { 'Content-Type': type })
+      expect(r.status).toBe(403)
+    }
+    expect((await post({ action: 'accept' }, {})).status).toBe(403)
+    // Only the first got through.
+    expect(called()).toEqual(['waitItem'])
+  })
+
+  it('refuses another site, and another host under the same domain', async () => {
+    h.mode = 'edit'
+    const json = { 'Content-Type': 'application/json' }
+    const elsewhere: Record<string, string>[] = [
+      { 'Sec-Fetch-Site': 'cross-site' },
+      { 'Sec-Fetch-Site': 'same-site' },
+      { Origin: 'https://evil.example' },
+      { Origin: 'http://preview.localhost' },
+    ]
+    for (const headers of elsewhere) {
+      const r = await post({ action: 'accept' }, { ...json, ...headers })
+      expect(r.status).toBe(403)
+    }
+    expect(called()).toEqual([])
+    expect(
+      (
+        await post(
+          { action: 'wait', on: true },
+          {
+            ...json,
+            'Sec-Fetch-Site': 'same-origin',
+            Origin: 'http://localhost',
+          }
+        )
+      ).status
+    ).toBe(200)
+  })
+})
+
+describe('a flag written from a reply in the chat', () => {
+  const flag = { verdict: 'Unsure', reasons: ['The page is gone.'] }
+
+  it('is named on the item’s history when the chat is a teammate’s', async () => {
+    expect((await post({ action: 'flag', flag })).status).toBe(200)
+    expect(called()).toEqual(['flagItem'])
+    expect(h.calls[0].args[1]).toMatchObject(flag)
+    // Whose chat: the name the History line carries.
+    expect(h.calls[0].args[2]).toBe('Rob Grayson')
+    await post({ action: 'flag', undo: true })
+    expect(h.calls[1]).toMatchObject({ fn: 'unflagItem' })
+    expect(h.calls[1].args[1]).toBe('Rob Grayson')
+  })
+
+  it('is named for a teammate who decides for themselves too', async () => {
+    h.mode = 'edit'
+    await post({ action: 'flag', flag })
+    expect(h.calls[0].args[2]).toBe('Bryce')
+  })
+
+  it('leaves no line for the owner’s own chat, as before', async () => {
+    h.mode = 'edit'
+    h.email = ROOT_ADMINS[0].email
+    await post({ action: 'flag', flag })
+    await post({ action: 'flag', undo: true })
+    expect(called()).toEqual(['flagItem', 'unflagItem'])
+    expect(h.calls[0].args[2]).toBeUndefined()
+    expect(h.calls[1].args[1]).toBeUndefined()
   })
 })

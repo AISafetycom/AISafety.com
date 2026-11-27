@@ -4,8 +4,8 @@
 // The owner's chat panel talks straight to the agent on his Mac
 // (~/Queue/agent.py on 127.0.0.1), which nobody else's browser can reach.
 // Everyone else who works the Queue gets the same chat program, run on a
-// server that accepts no inbound connections (27 November 2026, for a new
-// teammate working from another country). So the site relays:
+// server that accepts no inbound connections (27 November 2026). So the
+// site relays:
 //
 //   browser ──POST {path, body}──▶ /api/admin/queue/chat        (this person's
 //   browser ◀──long-poll chunks── /api/admin/queue/chat?id=…     admin session)
@@ -14,7 +14,8 @@
 //
 // The server's agent only ever calls out: it asks the site for waiting
 // requests, runs each as the Mac agent would, and posts the reply's bytes
-// back in pieces. The page turns those pieces back into the same kind of
+// back in pieces. Each request is signed by the site, so the agent can
+// tell one the site made from one somebody put into the store. The page turns those pieces back into the same kind of
 // Response the Mac returns (queue-team-chat-transport.ts), so everything
 // after the fetch in Chat.tsx is the same code for both chats. The relay
 // itself is queue-team-relay.ts.
@@ -100,6 +101,37 @@ export interface TeamWho {
   mode: 'edit' | 'suggest'
 }
 
+/** A person's name as the agent may be given it. The name comes from their
+ *  Google profile, which they write themselves, and it ends up among the
+ *  words the chat's model reads: so only letters, spaces and . ' - are
+ *  kept, 40 characters at most (whole ones: the agent signs for the name
+ *  byte for byte). With nothing left, the part of their email before the
+ *  @, cleaned the same way. */
+export function cleanName(name: string | null | undefined, email: string) {
+  const tidy = (text: string) =>
+    Array.from(
+      text
+        .normalize('NFC')
+        .replace(/[^\p{L}\p{M} .'-]/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+    )
+      .slice(0, 40)
+      .join('')
+      .trim()
+  // Until someone's first sign-in their "name" is their address.
+  const given = name && !name.includes('@') ? name : ''
+  return tidy(given) || tidy(email.split('@')[0] ?? '') || 'Someone'
+}
+
+/** `who` for a request, from what the session says. */
+export function teamWho(
+  me: { email: string; name: string | null | undefined },
+  mode: 'edit' | 'suggest'
+): TeamWho {
+  return { email: me.email, name: cleanName(me.name, me.email), mode }
+}
+
 export function byteLength(text: string): number {
   return new TextEncoder().encode(text).length
 }
@@ -112,7 +144,7 @@ export function teamBody(
   path: TeamChatPath,
   raw: unknown
 ):
-  | { ok: true; body: Record<string, unknown>; bytes: number }
+  | { ok: true; body: Record<string, unknown>; text: string; bytes: number }
   | { ok: false; status: number; error: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return { ok: false, status: 400, error: 'The request has no body.' }
@@ -120,14 +152,17 @@ export function teamBody(
   const body: Record<string, unknown> = { ...(raw as Record<string, unknown>) }
   delete body.token
   delete body.who
-  const bytes = byteLength(JSON.stringify(body))
+  // The body as text: what the request's signature covers, and what the
+  // agent reads (queue-team-relay.ts, signRequest).
+  const text = JSON.stringify(body)
+  const bytes = byteLength(text)
   if (bytes > TEAM_BODY_MAX_BYTES) {
     return { ok: false, status: 413, error: TEAM_TOO_BIG }
   }
   if (path !== '/chat' && bytes > TEAM_SMALL_BODY_MAX_BYTES) {
     return { ok: false, status: 413, error: 'That request is too big.' }
   }
-  return { ok: true, body, bytes }
+  return { ok: true, body, text, bytes }
 }
 
 // ─── Words the page shows ───────────────────────────────────────────────────
@@ -149,6 +184,30 @@ export const TEAM_OFFLINE =
 
 export const TEAM_BUSY = 'Too many chat requests at once. Wait a minute.'
 
+/** Past the bytes one person may send in a minute. */
+export const TEAM_TOO_MUCH =
+  'That is a lot of files for one minute. Wait a minute, then send again.'
+
+// ─── How much one person may ask of the relay in a minute ───────────────────
+
+/** Messages sent (`/chat`). */
+export const TEAM_SENDS_PER_MINUTE = 30
+/** Everything else the panel asks: a thread, a file, Stop, Start over. An
+ *  item's thread is read when it opens and every few seconds while a reply
+ *  is being written, and each picture in a thread is one request. */
+export const TEAM_READS_PER_MINUTE = 240
+/** Reads of an answer on its way back: a reply streamed over a minute is a
+ *  few hundred of them. */
+export const TEAM_POLLS_PER_MINUTE = 600
+/** The bytes of the bodies they send. */
+export const TEAM_BYTES_PER_MINUTE = 30 * 1024 * 1024
+
+export type TeamBudget = 'send' | 'read' | 'poll'
+
+export function budgetOf(path: TeamChatPath): TeamBudget {
+  return path === '/chat' ? 'send' : 'read'
+}
+
 // ─── The pieces of a reply ──────────────────────────────────────────────────
 
 /** One piece of the agent's HTTP response body, in order. */
@@ -164,4 +223,55 @@ export interface TeamPoll {
   chunks: TeamChunk[]
   done: boolean
   error?: string
+}
+
+// ─── How the panel paces itself ─────────────────────────────────────────────
+
+/** How long an item must stay open before the team's chat asks for its
+ *  thread: one only passed on the way to another is not asked about. */
+export const TEAM_OPEN_MS = 400
+
+/** How often the panel reads a thread again while a reply is being written
+ *  somewhere it is not listening: every 3 seconds, as the Mac's chat always
+ *  has, and every 15 while the page knows the team's server is offline. */
+export function threadPollMs(teamOffline: boolean): number {
+  return teamOffline ? 15_000 : 3_000
+}
+
+/** `run`, but never again while the last one is still out. Through the
+ *  relay a read of the thread can wait half a minute for a server that is
+ *  not there: without this, a timer would stack one on another. */
+export function oneAtATime(run: () => Promise<unknown>): () => void {
+  let out = false
+  return () => {
+    if (out) return
+    out = true
+    void run()
+      .catch(() => {})
+      .finally(() => {
+        out = false
+      })
+  }
+}
+
+// ─── Files in the team panel ────────────────────────────────────────────────
+
+/** Whether the team's chat opens a file of this type in a tab of its own.
+ *  `type` is the fetched file's own, never what the thread says of it. A
+ *  plain picture, a PDF or text does; a picture drawn as code
+ *  (image/svg+xml) can carry script, which would run signed in as the
+ *  person looking, so it and everything else is handed over as a download. */
+export function opensInTab(type: string): boolean {
+  return /^(image\/(png|jpeg|gif|webp|avif|bmp)|application\/pdf|text\/plain)$/.test(
+    type.split(';')[0].trim().toLowerCase()
+  )
+}
+
+/** The link an attachment may be shown from. A file just sent has one this
+ *  page made itself (`blob:`). In the team's chat (`careful`) nothing else
+ *  is ever used: a thread comes from a server, and a link in it could
+ *  point anywhere. The Mac's chat, which sends none, is left as it was. */
+export function ownFileLink(url: string | undefined, careful: boolean): string {
+  if (!url) return ''
+  return !careful || url.startsWith('blob:') ? url : ''
 }

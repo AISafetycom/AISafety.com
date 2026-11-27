@@ -54,7 +54,10 @@ const ROB = 'rob.demo@example.org'
 
 beforeEach(() => {
   vi.stubEnv('QUEUE_AGENT_SECRET', 'test-agent-secret')
-  vi.stubEnv('QUEUE_TEAM_AGENT_SECRET', 'test-team-agent-secret')
+  vi.stubEnv(
+    'QUEUE_TEAM_AGENT_SECRET',
+    'test-team-agent-secret-0123456789abcdef'
+  )
   vi.stubEnv('QUEUE_CHAT_OWNERS', '')
   h.email = ROB
   h.work = true
@@ -111,6 +114,11 @@ describe('which chat the page mounts', () => {
     const got = await list()
     expect(got).toMatchObject({ chat: null, agent: null })
     expect(got.teamChat).toBeUndefined()
+  })
+  it('has no team chat with a secret too short to be safe', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.stubEnv('QUEUE_TEAM_AGENT_SECRET', 'only-twenty-two-chars!')
+    expect(await list()).toMatchObject({ chat: null, agent: null })
   })
   it('follows QUEUE_CHAT_OWNERS when it is set', async () => {
     vi.stubEnv('QUEUE_CHAT_OWNERS', ` ${ROB.toUpperCase()} , other@example.org`)

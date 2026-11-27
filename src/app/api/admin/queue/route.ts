@@ -97,6 +97,14 @@
   and public) is written onto the row's History with the signed-in admin's
   name, in the same write – queue-history.ts.
 
+  A flag written from a reply in someone's Fable chat leaves a History
+  line with their name ("Fable changed the verdict in Rob's chat") unless
+  the chat is an owner's own, which leaves none, as before; so does
+  putting the earlier one back.
+
+  A POST must come from the admin's own page (own-page.ts): JSON, and
+  neither from another site nor from another host under the same domain.
+
   Every accept writes to the live base, so the route re-reads the row first
   and refuses anything already decided (409). No fresh-session requirement:
   an accept is no more dangerous than a map-editor save, and the point of
@@ -148,10 +156,15 @@ import {
   waitItem,
   withdrawItem,
 } from '@/lib/admin/queue'
+import { notOwnPageRequest } from '@/lib/admin/own-page'
 import { parseFlag } from '@/lib/admin/queue-flag'
 import { publicChoiceOf } from '@/lib/admin/queue-rule-instant'
 import { chatKind, chatOwners } from '@/lib/admin/queue-team-chat'
-import { teamAgentSecret, teamRelay } from '@/lib/admin/queue-team-relay'
+import {
+  relayErrorText,
+  teamAgentSecret,
+  teamRelay,
+} from '@/lib/admin/queue-team-relay'
 import { ROOT_ADMINS } from '@/lib/admin/users'
 
 export const runtime = 'nodejs'
@@ -195,7 +208,7 @@ async function teamOnline(): Promise<boolean> {
   } catch (e) {
     console.warn(
       '[admin-queue] could not read whether the team chat is online:',
-      e instanceof Error ? e.message : e
+      relayErrorText(e)
     )
     return false
   }
@@ -251,13 +264,9 @@ export async function GET(req: NextRequest) {
     // Which Fable chat this person's page mounts. Only an owner's page is
     // handed the Mac agent: anyone else's would call their own computer.
     const email = me?.email ?? ''
-    const owners = chatOwners(
-      process.env.QUEUE_CHAT_OWNERS,
-      ROOT_ADMINS.map(u => u.email)
-    )
     const chat = chatKind({
       email,
-      owners,
+      owners: owners(),
       canWork: await canWorkQueue(),
       teamOn: Boolean(teamAgentSecret()),
     })
@@ -297,7 +306,23 @@ const DECISIONS = new Set(['accept', 'reject', 'delete', 'later'])
 const strings = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((k): k is string => typeof k === 'string') : []
 
+/** The people whose Fable chat is the one on the owner's Mac. */
+function owners(): Set<string> {
+  return chatOwners(
+    process.env.QUEUE_CHAT_OWNERS,
+    ROOT_ADMINS.map(u => u.email)
+  )
+}
+
 export async function POST(req: NextRequest) {
+  // The session rides on a cookie, which a browser also sends with a form
+  // on another site: only the Queue page's own JSON writes are taken.
+  if (notOwnPageRequest(req, { json: true })) {
+    return json(
+      { error: 'That request did not come from the Queue page.' },
+      403
+    )
+  }
   const auth = await ensureAuth(true)
   if (auth) return auth
   let body: Record<string, unknown> = {}
@@ -444,12 +469,17 @@ export async function POST(req: NextRequest) {
     } else if (action === 'reopen') {
       await reopenItem(item, by)
     } else if (action === 'flag') {
+      // From a teammate's chat it is on the item's History with their
+      // name; from an owner's own chat it leaves no line, as before.
+      const named = owners().has((me?.email ?? '').toLowerCase())
+        ? undefined
+        : by
       if (body.undo === true) {
-        await unflagItem(item)
+        await unflagItem(item, named)
       } else {
         const parsed = parseFlag(body.flag, item.type)
         if ('error' in parsed) return json({ error: parsed.error }, 400)
-        await flagItem(item, parsed.flag)
+        await flagItem(item, parsed.flag, named)
       }
     } else {
       notPutBack = await undoItem(item, by)
