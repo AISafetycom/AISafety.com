@@ -222,7 +222,8 @@ export function seed(now = Date.now()) {
     }),
     // A change to a published listing, proposed in the team's Fable chat
     // (~/Queue/propose_change.py writes this shape: Source "Queue chat",
-    // the proposal's `chat` naming who asked and from which item).
+    // the proposal's `chat` naming who asked and from which item, and the
+    // excerpt the reasons alone, with no name or address in it).
     row('recDEMOQUEUE00006', 1, {
       [F.title]: 'Demo: Safety Careers Evening: description',
       [F.type]: 'Change',
@@ -236,8 +237,7 @@ export function seed(now = Date.now()) {
       [F.rejectChips]: ['The description is right', 'Not the same event'].join(
         '\n'
       ),
-      [F.sourceExcerpt]:
-        "Proposed from the Queue chat by Rob Demo (rob.demo@example.org), while on the item recDEMOQUEUE00001. The host's page now says the talks start at 6 pm.",
+      [F.sourceExcerpt]: "The host's page now says the talks start at 6 pm.",
       [F.proposal]: JSON.stringify({
         kind: 'change',
         table: EVENTS,

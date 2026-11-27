@@ -72,4 +72,25 @@ describe('the demo Airtable', () => {
     await fetch('https://example.org/elsewhere')
     expect(passed).toEqual(['https://example.org/elsewhere'])
   })
+
+  it('seeds the chat-proposed change as the server files one: who asked only in the proposal', async () => {
+    vi.stubEnv('AIRTABLE_TOKEN', 'demo-placeholder-token')
+    await import('./fake-airtable.mjs')
+    const base = 'https://api.airtable.com/v0/appQUEUEDEMO00000'
+    const row = await (
+      await fetch(`${base}/tblonlKwIFJ7Aa8QN/recDEMOQUEUE00006`)
+    ).json()
+    // The excerpt (and the reasons) are the reasons alone: no name, no
+    // address, no "Proposed from the Queue chat" lead.
+    const excerpt = row.fields.fld9VtbNjLpodrtA7
+    expect(excerpt).toBe("The host's page now says the talks start at 6 pm.")
+    for (const [id, value] of Object.entries(row.fields)) {
+      if (id === 'fldgl9Ny2jnu8T0Da') continue
+      expect(String(value)).not.toMatch(/Rob Demo|@example\.org|Proposed from/)
+    }
+    expect(JSON.parse(row.fields.fldgl9Ny2jnu8T0Da).chat).toMatchObject({
+      by: 'Rob Demo',
+      email: 'rob.demo@example.org',
+    })
+  })
 })

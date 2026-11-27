@@ -298,8 +298,7 @@ describe('a change proposed in the Queue chat', () => {
     type: 'Change',
     source: 'Queue chat',
     chatBy: 'Rob Grayson',
-    sourceExcerpt:
-      'Proposed from the Queue chat by Rob Grayson (rob@example.org). The page now gives 12 December.',
+    sourceExcerpt: 'The page now gives 12 December.',
   })
   it('is found by its words, labelled as the chat’s', () => {
     expect(hit(proposed, 'december')?.excerpt?.label).toBe('Queue chat')

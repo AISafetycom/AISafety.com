@@ -1464,8 +1464,7 @@ describe('a change proposed in the Queue chat', () => {
       fldTXGYOoXcUApaI2: 'Pending',
       fld45SUjstUZROuXl: 'tblXbN9swwldwq8f7',
       fldszXtLdUijgFG4l: rid('event'),
-      fld9VtbNjLpodrtA7:
-        'Proposed from the Queue chat by Rob Grayson (rob@example.org).',
+      fld9VtbNjLpodrtA7: 'The page now gives 12 December.',
       fldgl9Ny2jnu8T0Da: JSON.stringify(proposal(chat)),
     }
     return getQueueItem(ID)
@@ -1475,8 +1474,9 @@ describe('a change proposed in the Queue chat', () => {
     const item = await row('Queue chat', MARK)
     expect(item?.source).toBe('Queue chat')
     expect(item?.chatBy).toBe('Rob Grayson')
-    // Its words are kept as the row has them, for the page to show.
-    expect(item?.sourceExcerpt).toContain('Proposed from the Queue chat')
+    // Its words are kept as the row has them, for the page to show: the
+    // reasons alone, since who asked is in the proposal's `chat`.
+    expect(item?.sourceExcerpt).toBe('The page now gives 12 December.')
   })
 
   it('reads the same while the Mac files it under Comb', async () => {
