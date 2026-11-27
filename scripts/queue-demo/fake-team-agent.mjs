@@ -264,7 +264,13 @@ function itemOf(row) {
       replyDraft: fields[F.replyDraft] ?? '',
     }
   } catch {
-    return { title: 'this item', recordId: '', record: null, replyDraft: '' }
+    return {
+      title: 'this item',
+      type: 'Add',
+      recordId: '',
+      record: null,
+      replyDraft: '',
+    }
   }
 }
 
