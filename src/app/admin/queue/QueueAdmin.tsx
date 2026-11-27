@@ -8710,8 +8710,12 @@ function Detail({
 
         {returnBlock}
 
+        {/* Keyed by the item so its state starts afresh on another one.
+            The field picker further down is keyed the same way and sits
+            beside this card, so each says what it is: two children of one
+            parent must not share a key. */}
         <ForBryceCard
-          key={item.id}
+          key={`for-bryce:${item.id}`}
           item={item}
           asking={askingFor === item.id}
           onAsking={on => setAskingFor(on ? item.id : null)}
@@ -9083,7 +9087,7 @@ function Detail({
         {/* A correction no listing matched has no fields to pick from. */}
         {item.type === 'Change' && Boolean(item.targetRecord) && (
           <FieldPicker
-            key={item.id}
+            key={`field-picker:${item.id}`}
             fields={pickable}
             canEdit={!revising || canFix}
             focusTick={fieldFocus}
