@@ -279,7 +279,7 @@ export async function POST(req: NextRequest) {
     }
     if (!checkFirst && action === 'suggest') {
       return json(
-        { error: 'You can decide this yourself: no suggestion needed.' },
+        { error: 'You can decide this yourself, with no suggestion.' },
         400
       )
     }

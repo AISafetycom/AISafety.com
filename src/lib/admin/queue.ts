@@ -3369,7 +3369,7 @@ export function requireSuggestionSeen(
   const what = suggestWord(s.did, item.type)
   if (seen !== s.at) {
     throw new QueueError(
-      `${who} suggested ${what} on this after your page loaded it. Here it is now: look again, then decide.`,
+      `${who} suggested ${what} on this after your page loaded it. Here it is now. Look again, then decide.`,
       412
     )
   }
@@ -3383,7 +3383,7 @@ export function requireSuggestionSeen(
   if (moved.length > 0) {
     const words = partWords(moved)
     throw new QueueError(
-      `${words[0].toUpperCase()}${words.slice(1)} changed after ${who} suggested ${what}. Here is the item as it is now: look again, then decide.`,
+      `${words[0].toUpperCase()}${words.slice(1)} changed after ${who} suggested ${what}. Here is the item as it is now. Look again, then decide.`,
       412
     )
   }

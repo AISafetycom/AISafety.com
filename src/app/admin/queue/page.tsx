@@ -1,7 +1,7 @@
 import {
   canEditMap,
-  canReviewQueue,
   currentAdmin,
+  queueMode,
   requireAccess,
 } from '@/lib/admin/auth'
 import QueueAdmin from './QueueAdmin'
@@ -15,13 +15,14 @@ export default async function QueueAdminPage() {
   // Checked here, not only in the layout: see requireAccess.
   await requireAccess('queue')
   // View-only sessions get the same page without the deciding parts; the
-  // API refuses their writes regardless.
+  // API refuses their writes regardless. A 'suggest' grant ("Bryce checks
+  // first") gets every part, with its decisions sent as suggestions.
   // The name this person's decisions are kept under (queue-history.ts), so
   // the page can tell their own from someone else's.
   const me = await currentAdmin()
   return (
     <QueueAdmin
-      canEdit={await canReviewQueue()}
+      mode={(await queueMode()) ?? 'view'}
       canMoveMap={await canEditMap()}
       me={me?.name || me?.email || null}
     />
