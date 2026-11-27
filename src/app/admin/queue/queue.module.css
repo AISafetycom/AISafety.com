@@ -2609,6 +2609,33 @@ select.input {
   gap: 8px;
 }
 
+/* The public wording opens for typing on a click (27 Nov 2026): the reply
+   draft's pencil, and its side line darkens on hover. */
+.quoteEditable {
+  position: relative;
+  padding-right: 44px;
+  cursor: text;
+}
+
+.quoteEditable:hover,
+.quoteEditable:focus-visible {
+  border-left-color: var(--q-text-2);
+  background: var(--q-panel-2);
+  outline: none;
+}
+
+/* Its box as tall as the words were, so the buttons below stay put when it
+   opens and closes: a click on Apply lands where it was aimed. */
+.publicInput {
+  padding: 9px 13px;
+  line-height: 1.5;
+}
+
+.quoteEditable:hover .draftHint,
+.quoteEditable:focus-visible .draftHint {
+  opacity: 1;
+}
+
 /* The verdict mark: a filled circle in the accent (or the danger colour
    for a rejection), so the outcome reads before the words do. */
 .toastMark {

@@ -49,6 +49,7 @@ import {
   rejectReplyOf,
   reopenItem,
   saveEdits,
+  savePublicWording,
   undoItem,
   unflagItem,
   waitItem,
@@ -1582,6 +1583,132 @@ describe('flagItem / unflagItem', () => {
 // Bringing a declined addition back (Bryce, 20 Oct 2026: AI Safety
 // Essentials Fellowship, declined 13 Oct; the Mac had deleted its record
 // a day later and marked the row Applied).
+describe('savePublicWording', () => {
+  const ID = rid('rule')
+  const FLD = {
+    title: 'fldeRsOE3DM3R2vbX',
+    type: 'fldBc9YIDhjmu58f3',
+    status: 'fldTXGYOoXcUApaI2',
+    proposal: 'fldgl9Ny2jnu8T0Da',
+    edits: 'fldzCgKQbopgcbrwq',
+  }
+  const FILE = '~/Comb/listing-policy.md'
+  const ANCHOR = '- Funders that are closed for now stay on the page.'
+  const WAS_SHOWN = '- A funder that has been inactive may be removed.'
+  const MINE = '- A funder with no round for a year is removed.'
+  const proposal = {
+    kind: 'rule',
+    file: '~/Broom/funding/sweep.py',
+    title: 'A funder with no round for a year is hidden',
+    summary: 'Hide funders with no round for a year.',
+    wording: 'Hide it.',
+    edits: [{ file: '~/Broom/review-rules.md', find: 'a', replace: 'b' }],
+    policy: true,
+    public: {
+      edits: [{ file: FILE, find: ANCHOR, replace: `${ANCHOR}\n${WAS_SHOWN}` }],
+      wording: WAS_SHOWN,
+      was: null,
+      diff: '--- a/Comb/listing-policy.md',
+    },
+  }
+  let row: Record<string, unknown>
+  let patches: number
+
+  beforeEach(() => {
+    patches = 0
+    row = {
+      [FLD.title]: 'Broom review: /funding: a funder with no round is hidden',
+      [FLD.type]: 'Rule',
+      [FLD.status]: 'Pending',
+      [FLD.proposal]: JSON.stringify(proposal),
+    }
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(
+      async (path: string, init?: RequestInit) => {
+        if (!path.startsWith(`${QUEUE}/${ID}`)) {
+          return new Response('not here', { status: 404 })
+        }
+        if (init?.method === 'PATCH') {
+          patches++
+          const body = JSON.parse(String(init.body)) as {
+            fields: Record<string, unknown>
+          }
+          for (const [k, v] of Object.entries(body.fields)) {
+            if (v === null) delete row[k]
+            else row[k] = v
+          }
+        }
+        return new Response(
+          JSON.stringify({
+            id: ID,
+            createdTime: '2026-11-27T00:00:00.000Z',
+            fields: row,
+          }),
+          { status: 200 }
+        )
+      }
+    )
+  })
+
+  const current = async () => {
+    const i = await getQueueItem(ID)
+    if (!i) throw new Error('row gone')
+    return i
+  }
+
+  it('puts his words on the rule, after the same anchor, and Apply takes them', async () => {
+    const before = await current()
+    expect(before.rulePublic?.text).toBe(WAS_SHOWN)
+    await savePublicWording(before, MINE, WAS_SHOWN)
+    const saved = JSON.parse(String(row[FLD.proposal])) as Record<
+      string,
+      unknown
+    >
+    expect(saved.public).toEqual({
+      edits: [{ file: FILE, find: ANCHOR, replace: `${ANCHOR}\n${MINE}` }],
+      wording: MINE,
+      was: null,
+    })
+    // The rule itself, and the row's status, are as they were.
+    expect(saved.edits).toEqual(proposal.edits)
+    expect(saved.summary).toBe(proposal.summary)
+    expect(row[FLD.status]).toBe('Pending')
+    const after = await current()
+    expect(after.rulePublic).toEqual({ wording: MINE, was: null, text: MINE })
+    // The words the card now shows are the ones Apply checks against.
+    await acceptItem(after, {}, null, [], { choice: 'apply', seen: MINE })
+    expect(row[FLD.status]).toBe('Accepted')
+    expect(JSON.parse(String(row[FLD.edits]))).toEqual({ '(public)': 'apply' })
+  })
+
+  it('refuses words that meet a newer wording on the row (412), writing nothing', async () => {
+    await expect(
+      savePublicWording(await current(), MINE, '- What an older page showed.')
+    ).rejects.toMatchObject({ status: 412 })
+    expect(patches).toBe(0)
+  })
+
+  it('refuses words the public page cannot take (422), writing nothing', async () => {
+    await expect(
+      savePublicWording(await current(), '- Use `code`.', WAS_SHOWN)
+    ).rejects.toMatchObject({ status: 422 })
+    expect(patches).toBe(0)
+  })
+
+  it('writes nothing when the words are the same', async () => {
+    await savePublicWording(await current(), WAS_SHOWN, WAS_SHOWN)
+    expect(patches).toBe(0)
+  })
+
+  it('leaves a decided rule alone (409)', async () => {
+    row[FLD.status] = 'Accepted'
+    await expect(
+      savePublicWording(await current(), MINE, WAS_SHOWN)
+    ).rejects.toMatchObject({ status: 409 })
+    expect(patches).toBe(0)
+  })
+})
+
 describe('reopenItem', () => {
   const ID = rid('fellowship')
   const FLD = {

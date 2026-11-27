@@ -31,7 +31,7 @@
        map strip on a /map addition – queue-map.ts
   POST /api/admin/queue  body { id, action, edits?, reason?, replyDraft? } → { item }
        action: accept | reject | edit | later | undo | flag | reopen | fix
-       | delete | wait
+       | delete | wait | public
        (later sets the item aside for a week, Fable reviews it again then;
        wait, body { on }, puts it in Waiting on them for a question he asked
        them outside email, or with on: false takes it out – waitItem;
@@ -50,15 +50,18 @@
        Accepting a rule that brings wording for the public listing policy
        also takes { public: 'apply' | 'internal', publicSeen: <the wording
        the page showed> } – queue-rule-instant.ts; without them, or with
-       wording that has changed since, the accept is refused.
+       wording that has changed since, the accept is refused. public, body
+       { text, seen }, puts his own words for that sentence on the rule in
+       place of the ones the page showed (seen) – savePublicWording,
+       queue-rule-public.ts; nothing reaches the public page until Apply.
 
   `agent` is { port, token } for the local agent on the owner's Mac (null
   when QUEUE_AGENT_SECRET is not set): the page calls it after an accept so
   a Gmail reply draft lands at once instead of on the worker's next pass.
 
-  Every action that decides, edits or undoes something (all but edit and
-  flag) is written onto the row's History with the signed-in admin's name,
-  in the same write – queue-history.ts.
+  Every action that decides, edits or undoes something (all but edit, flag
+  and public) is written onto the row's History with the signed-in admin's
+  name, in the same write – queue-history.ts.
 
   Every accept writes to the live base, so the route re-reads the row first
   and refuses anything already decided (409). No fresh-session requirement:
@@ -90,6 +93,7 @@ import {
   reopenItem,
   sanitiseEdits,
   saveEdits,
+  savePublicWording,
   undoItem,
   unflagItem,
   waitItem,
@@ -192,6 +196,7 @@ const ACTIONS = new Set([
   'fix',
   'delete',
   'wait',
+  'public',
 ])
 
 export async function POST(req: NextRequest) {
@@ -260,6 +265,15 @@ export async function POST(req: NextRequest) {
       await laterItem(item, by)
     } else if (action === 'wait') {
       await waitItem(item, body.on !== false, by)
+    } else if (action === 'public') {
+      if (typeof body.text !== 'string') {
+        return json({ error: 'No wording was sent.' }, 400)
+      }
+      await savePublicWording(
+        item,
+        body.text,
+        typeof body.seen === 'string' ? body.seen : null
+      )
     } else if (action === 'delete') {
       await deleteItem(item, by)
     } else if (action === 'reopen') {

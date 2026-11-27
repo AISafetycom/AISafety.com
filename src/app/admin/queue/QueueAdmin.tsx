@@ -1689,6 +1689,13 @@ interface Draft {
    *  rule applies and the public page stays as it is, false = the wording
    *  goes on it (null = as saved on the row, which starts as "goes on"). */
   keepInternal: boolean | null
+  /** That wording's box is open for typing (Bryce, 27 Nov 2026). */
+  editingPublic: boolean
+  /** His words for it that are not on the row yet: being saved, or refused
+   *  (publicError says why). null = the row's words. Apply waits for a
+   *  save, and never goes while one is refused. */
+  publicText: string | null
+  publicError: string | null
   busy: boolean
   error: string | null
 }
@@ -1706,6 +1713,9 @@ const FRESH: Draft = {
   editingDecline: false,
   focusChip: null,
   keepInternal: null,
+  editingPublic: false,
+  publicText: null,
+  publicError: null,
   busy: false,
   error: null,
 }
@@ -3675,6 +3685,84 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
     }
   }, [])
 
+  // The rule's public wording as he retyped it, on its way to the row: Apply
+  // waits for it, so the words that go public are the ones on the card.
+  const publicSaves = useRef<Record<string, Promise<QueueItem | null>>>({})
+
+  /** His own words for a rule's sentence on the public listing policy,
+   *  saved on the row as the box closes (savePublicWording). Refused words
+   *  stay in the open box with the reason under it; words that met a newer
+   *  wording (the chat rewrote it) stay too, and the card reads the row
+   *  again so he sees what changed before he saves them over it. */
+  const savePublic = useCallback(
+    (item: QueueItem, text: string) => {
+      const pub = item.rulePublic
+      if (!canEdit || !pub || pub.text === null) return
+      if (text === pub.text) {
+        setDraft(item.id, {
+          editingPublic: false,
+          publicText: null,
+          publicError: null,
+        })
+        return
+      }
+      setDraft(item.id, {
+        editingPublic: false,
+        publicText: text,
+        publicError: null,
+      })
+      const refused = (why: string) =>
+        setDraft(item.id, { editingPublic: true, publicError: why })
+      const send = async (): Promise<QueueItem | null> => {
+        try {
+          const res = await fetch(API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: item.id,
+              action: 'public',
+              text,
+              seen: pub.wording,
+            }),
+          })
+          const data = (await res.json()) as {
+            item?: QueueItem
+            error?: string
+          }
+          if (!res.ok || !data.item) {
+            refused(data.error ?? `HTTP ${res.status}`)
+            if (res.status === 412 || res.status === 409) {
+              await refreshRow(item)
+            }
+            return null
+          }
+          // A read of the list that began before this landed is stale now.
+          loadSeq.current++
+          const updated = {
+            ...data.item,
+            logo: data.item.logo ?? item.logo,
+            url: data.item.url ?? item.url,
+          }
+          setItems(prev =>
+            prev ? prev.map(i => (i.id === updated.id ? updated : i)) : prev
+          )
+          setDraft(item.id, { publicText: null, publicError: null })
+          return updated
+        } catch {
+          refused('No answer from the site; the public wording is as it was.')
+          return null
+        }
+      }
+      const run = send().finally(() => {
+        if (publicSaves.current[item.id] === run) {
+          delete publicSaves.current[item.id]
+        }
+      })
+      publicSaves.current[item.id] = run
+    },
+    [canEdit, setDraft, refreshRow]
+  )
+
   /** A field fixed on an addition already published, from Done today: it
    *  goes straight onto the live listing (fixItem). Resolves to an error to
    *  show, or null. */
@@ -3868,18 +3956,34 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
     ) => {
       if (!canEdit) return
       setDraft(item.id, { busy: true, error: null })
+      // A rule whose public wording he has just retyped: Apply waits for
+      // that save and goes with the words as saved. Words still in the box,
+      // or refused, keep the rule open: the old words never go out in
+      // their place.
+      let pub = item.rulePublic
+      const internal =
+        drafts[item.id]?.keepInternal ?? item.rulePublicChoice === 'internal'
+      if (action === 'accept' && item.type === 'Rule' && pub) {
+        const saving = publicSaves.current[item.id]
+        if (saving) pub = (await saving)?.rulePublic ?? pub
+        const d = draftsRef.current[item.id]
+        if (!internal && (d?.editingPublic || d?.publicText != null)) {
+          setDraft(item.id, {
+            busy: false,
+            error:
+              'Not applied: your new public wording is not saved yet. Save it in its box, or press Esc there to keep the saved words.',
+          })
+          return
+        }
+      }
       // A rule that brings wording for the public listing policy: what he
       // chose for it, and the wording this page showed him. The site refuses
       // the accept when that wording has changed since (queue-rule-instant).
       const publicWording =
-        action === 'accept' && item.type === 'Rule' && item.rulePublic
+        action === 'accept' && item.type === 'Rule' && pub
           ? {
-              public:
-                (drafts[item.id]?.keepInternal ??
-                item.rulePublicChoice === 'internal')
-                  ? 'internal'
-                  : 'apply',
-              publicSeen: item.rulePublic.wording,
+              public: internal ? 'internal' : 'apply',
+              publicSeen: pub.wording,
             }
           : {}
       // The reply draft as it reads on the page goes with the accept, so
@@ -5505,6 +5609,7 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
                 setD={patch => setDraft(selected.id, patch)}
                 act={(action, extra) => void act(selected, action, extra)}
                 onWait={on => void setWaiting(selected, on)}
+                onSavePublic={text => savePublic(selected, text)}
                 onRowChanged={() => void refreshRow(selected)}
                 chatAgent={canEdit && agentChat ? agent : null}
                 chatDictate={agentDictate}
@@ -5702,6 +5807,15 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
           lift={toastHeight ? toastHeight + 12 : 0}
           onRejecting={on => setPopRejecting(on ? popUp.id : null)}
           onInternal={keepInternal => setDraft(popUp.id, { keepInternal })}
+          publicEdit={
+            canEdit
+              ? publicEditOf(
+                  draft(popUp.id),
+                  patch => setDraft(popUp.id, patch),
+                  text => savePublic(popUp, text)
+                )
+              : null
+          }
           onApply={() => void act(popUp, 'accept', {}, { inPlace: true })}
           onReject={reason =>
             void act(popUp, 'reject', { reason }, { inPlace: true })
@@ -6577,6 +6691,7 @@ function Detail({
   setD,
   act,
   onWait,
+  onSavePublic,
   onRowChanged,
   chatAgent,
   chatDictate,
@@ -6626,6 +6741,9 @@ function Detail({
   act: (action: Action, extra?: Record<string, unknown>) => void
   /** "Waiting on them" on (asked outside email) or off. */
   onWait: (on: boolean) => void
+  /** A rule's public wording as he retyped it, to save on the row; none
+   *  where it can't be edited. */
+  onSavePublic?: (text: string) => void
   /** The chat moved the item into or out of Waiting on them: read the row
    *  again. */
   onRowChanged: () => void
@@ -8020,6 +8138,11 @@ function Detail({
             internal={d.keepInternal ?? item.rulePublicChoice === 'internal'}
             onInternal={keepInternal => setD({ keepInternal })}
             disabled={d.busy || !isOpen(item)}
+            publicEdit={
+              onSavePublic && !readOnly && isOpen(item)
+                ? publicEditOf(d, setD, onSavePublic)
+                : null
+            }
           />
         )}
 
@@ -9925,12 +10048,14 @@ function RuleCard({
   internal,
   onInternal,
   disabled,
+  publicEdit,
 }: {
   item: QueueItem
   /** The wording for the public listing policy stays off the page. */
   internal: boolean
   onInternal: (internal: boolean) => void
   disabled: boolean
+  publicEdit: PublicEdit | null
 }) {
   const { lead, rest } = leadSentence(
     item.summary ?? 'No summary was written for this rule.'
@@ -9984,6 +10109,7 @@ function RuleCard({
           internal={internal}
           onInternal={onInternal}
           disabled={disabled}
+          edit={publicEdit}
         />
       )}
       {hasDetails && (
@@ -10080,6 +10206,7 @@ function RulePopUp({
   lift,
   onRejecting,
   onInternal,
+  publicEdit,
   onApply,
   onReject,
   onOpen,
@@ -10093,6 +10220,7 @@ function RulePopUp({
   lift: number
   onRejecting: (on: boolean) => void
   onInternal: (internal: boolean) => void
+  publicEdit: PublicEdit | null
   onApply: () => void
   onReject: (reason: string) => void
   onOpen: () => void
@@ -10151,6 +10279,7 @@ function RulePopUp({
             }
             onInternal={onInternal}
             disabled={draft.busy}
+            edit={publicEdit}
           />
         )}
         {draft.error && <p className={styles.error}>{draft.error}</p>}
@@ -10199,31 +10328,128 @@ function RulePopUp({
   )
 }
 
+/** The box for retyping a rule's public wording, as the card passes it to
+ *  PublicWording. Null where the words can't be edited (a decided rule, a
+ *  view-only admin). */
+interface PublicEdit {
+  editing: boolean
+  /** His words not on the row yet: being saved, or refused. */
+  text: string | null
+  error: string | null
+  onEdit: () => void
+  onSave: (text: string) => void
+  onCancel: () => void
+}
+
+/** The box for a rule's public wording, wired to the item's draft. */
+function publicEditOf(
+  d: Draft,
+  setD: (patch: Partial<Draft>) => void,
+  onSave: (text: string) => void
+): PublicEdit {
+  return {
+    editing: d.editingPublic,
+    text: d.publicText,
+    error: d.publicError,
+    onEdit: () => setD({ editingPublic: true, publicError: null }),
+    onSave,
+    onCancel: () =>
+      setD({ editingPublic: false, publicText: null, publicError: null }),
+  }
+}
+
 /** The sentence a rule brings for aisafety.com/listing-policy, shown in
  *  full wherever the rule can be applied (its card and the pop-up): one
  *  Apply covers the rule and these words, so they are never behind a fold.
- *  The tick keeps the rule and leaves the public page as it is. */
+ *  A click opens them for typing, as written on the page, and closing the
+ *  box saves them on the rule (Bryce, 27 Nov 2026: "make the listing policy
+ *  section editable by me"). The tick keeps the rule and leaves the public
+ *  page as it is. */
 function PublicWording({
   wording,
   internal,
   onInternal,
   disabled,
+  edit,
 }: {
   wording: RulePublic
   internal: boolean
   onInternal: (internal: boolean) => void
   disabled: boolean
+  edit: PublicEdit | null
 }) {
+  // Esc puts the saved words back: the blur that follows must not save
+  // what was typed.
+  const cancelled = useRef(false)
+  const saving = Boolean(edit && edit.text !== null && !edit.editing)
+  const shown = saving && edit?.text != null ? edit.text : wording.wording
+  // A rule that changes the page in several places, or only takes words
+  // out, is changed in the chat instead (publicBoxText).
+  const canType = Boolean(edit) && !internal && wording.text !== null
   return (
     <div className={styles.rulePublic}>
       <h3 className={styles.h3}>
         {internal
           ? 'Stays off the public listing policy'
           : 'Also goes on the public listing policy'}
+        {saving && <em className={styles.edited}>saving</em>}
       </h3>
-      <blockquote className={`${styles.quote} ${internal ? styles.from : ''}`}>
-        {wording.wording}
-      </blockquote>
+      {edit?.editing && canType ? (
+        <textarea
+          ref={fitToText}
+          onInput={e => fitToText(e.currentTarget)}
+          className={`${styles.input} ${styles.publicInput}`}
+          aria-label="Wording for the public listing policy"
+          rows={(edit.text ?? wording.text ?? '').split('\n').length}
+          autoFocus
+          defaultValue={edit.text ?? wording.text ?? ''}
+          onKeyDown={e => {
+            if (e.key === 'Escape') {
+              // Not the page's Esc, which would blur the box (a save) or
+              // close the pop-up.
+              e.preventDefault()
+              e.stopPropagation()
+              cancelled.current = true
+              edit.onCancel()
+            } else if (isDoneKey(e)) {
+              e.preventDefault()
+              e.currentTarget.blur()
+            }
+          }}
+          onFocus={() => {
+            cancelled.current = false
+          }}
+          onBlur={e => {
+            if (!cancelled.current) edit.onSave(e.target.value)
+          }}
+        />
+      ) : canType && !disabled && !saving ? (
+        <blockquote
+          className={`${styles.quote} ${styles.quoteEditable}`}
+          role="button"
+          tabIndex={0}
+          title="Click to edit"
+          onClick={edit?.onEdit}
+          onKeyDown={e => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              edit?.onEdit()
+            }
+          }}
+        >
+          {shown}
+          <span className={styles.draftHint}>
+            <Icon src={ICON.pencil} size={12} />
+          </span>
+        </blockquote>
+      ) : (
+        <blockquote
+          className={`${styles.quote} ${internal ? styles.from : ''}`}
+        >
+          {shown}
+        </blockquote>
+      )}
+      {edit?.error && <p className={styles.error}>{edit.error}</p>}
       {wording.was && !internal && (
         <>
           <h3 className={styles.h3}>Replaces</h3>

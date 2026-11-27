@@ -19,7 +19,10 @@
 // public listing policy in the same proposal (`public`), so one Apply covers
 // both. The page records what he chose for that sentence under PUBLIC_KEY in
 // the row's saved edits, and the Mac writes the sentence only when it reads
-// "apply" there: public wording is never written unseen.
+// "apply" there: public wording is never written unseen. He can retype the
+// sentence on the card before he applies it (queue-rule-public.ts).
+
+import { policyEditsOf, publicBoxText } from './queue-rule-public'
 
 /** Where an instantly drafted rule came from. */
 export interface RuleInstant {
@@ -37,6 +40,10 @@ export interface RuleInstant {
 export interface RulePublic {
   wording: string
   was: string | null
+  /** What the card's edit box starts with: the words as they will be
+   *  written on the page. Null when the card can't edit them
+   *  (queue-rule-public.ts publicBoxText). */
+  text: string | null
 }
 
 /** The key in a Rule row's saved edits (JSON) that holds his choice on the
@@ -80,7 +87,12 @@ export function rulePublicOf(v: unknown): RulePublic | null {
   if (!isRecord(v)) return null
   const wording = text(v.wording)
   if (!wording || !Array.isArray(v.edits) || v.edits.length === 0) return null
-  return { wording, was: text(v.was) }
+  const edits = policyEditsOf(v.edits)
+  return {
+    wording,
+    was: text(v.was),
+    text: edits ? publicBoxText(edits, wording) : null,
+  }
 }
 
 /** His saved choice on the public wording, or null when none was recorded. */
