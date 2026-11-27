@@ -88,7 +88,8 @@ const CHIPS = [
   'Too small for the site',
 ]
 
-/** A fresh demo: four items waiting and one published earlier today. */
+/** A fresh demo: five items waiting (one of them a change a teammate
+ *  proposed in the Fable chat) and one published earlier today. */
 export function seed(now = Date.now()) {
   const iso = ms => new Date(ms).toISOString()
   const day = ms => iso(ms).slice(0, 10)
@@ -216,6 +217,45 @@ export function seed(now = Date.now()) {
         kind: 'add',
         name: 'Demo: Safety Careers Evening',
         fields: { Name: 'Demo: Safety Careers Evening' },
+      }),
+    }),
+    // A change to a published listing, proposed in the team's Fable chat
+    // (~/Queue/propose_change.py writes this shape: Source "Queue chat",
+    // the proposal's `chat` naming who asked and from which item).
+    row('recDEMOQUEUE00006', 1, {
+      [F.title]: 'Demo: Safety Careers Evening: description',
+      [F.type]: 'Change',
+      [F.source]: 'Queue chat',
+      [F.status]: 'Pending',
+      [F.page]: '/events',
+      [F.targetTable]: EVENTS,
+      [F.targetRecord]: 'recDEMOEVENT00003',
+      [F.verdict]: 'Fix',
+      [F.reasons]: "- The host's page now says the talks start at 6 pm",
+      [F.rejectChips]: ['The description is right', 'Not the same event'].join(
+        '\n'
+      ),
+      [F.sourceExcerpt]:
+        "Proposed from the Queue chat by Rob Demo (rob.demo@example.org), while on the item recDEMOQUEUE00001. The host's page now says the talks start at 6 pm.",
+      [F.proposal]: JSON.stringify({
+        kind: 'change',
+        table: EVENTS,
+        record: 'recDEMOEVENT00003',
+        page: '/events',
+        name: 'Demo: Safety Careers Evening',
+        changes: [
+          {
+            field: 'Description',
+            from: 'Short talks on AI safety careers, then questions.',
+            to: 'Short talks on AI safety careers from 6 pm, then questions.',
+          },
+        ],
+        chat: {
+          by: 'Rob Demo',
+          email: 'rob.demo@example.org',
+          row: 'recDEMOQUEUE00001',
+          at: iso(now - 3_600_000),
+        },
       }),
     }),
   ])

@@ -1418,6 +1418,85 @@ describe('waitItem', () => {
   })
 })
 
+describe('a change proposed in the Queue chat', () => {
+  const ID = rid('chatrow')
+  const proposal = (chat?: unknown) => ({
+    kind: 'change',
+    table: 'tblXbN9swwldwq8f7',
+    record: rid('event'),
+    page: '/events',
+    name: 'Careers Evening',
+    changes: [{ field: 'Deadline', from: null, to: '2026-12-12' }],
+    ...(chat === undefined ? {} : { chat }),
+  })
+  const MARK = {
+    by: 'Rob Grayson',
+    email: 'rob@example.org',
+    row: rid('other'),
+    at: '2026-11-30T03:00:00Z',
+  }
+  let fields: Record<string, unknown> = {}
+
+  beforeEach(() => {
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(async (path: string) =>
+      path.startsWith(`${QUEUE}/${ID}`)
+        ? new Response(
+            JSON.stringify({
+              id: ID,
+              createdTime: '2026-11-30T03:00:00.000Z',
+              fields,
+            }),
+            { status: 200 }
+          )
+        : new Response('not here', { status: 404 })
+    )
+  })
+
+  const row = (source: string, chat?: unknown) => {
+    fields = {
+      fldeRsOE3DM3R2vbX: 'Careers Evening: deadline',
+      fldBc9YIDhjmu58f3: 'Change',
+      flddKkVy62MAZ8M0J: source,
+      fldTXGYOoXcUApaI2: 'Pending',
+      fld45SUjstUZROuXl: 'tblXbN9swwldwq8f7',
+      fldszXtLdUijgFG4l: rid('event'),
+      fld9VtbNjLpodrtA7:
+        'Proposed from the Queue chat by Rob Grayson (rob@example.org).',
+      fldgl9Ny2jnu8T0Da: JSON.stringify(proposal(chat)),
+    }
+    return getQueueItem(ID)
+  }
+
+  it('reads as Queue chat, with who asked', async () => {
+    const item = await row('Queue chat', MARK)
+    expect(item?.source).toBe('Queue chat')
+    expect(item?.chatBy).toBe('Rob Grayson')
+    // Its words are kept as the row has them, for the page to show.
+    expect(item?.sourceExcerpt).toContain('Proposed from the Queue chat')
+  })
+
+  it('reads the same while the Mac files it under Comb', async () => {
+    const item = await row('Comb', MARK)
+    expect(item?.source).toBe('Queue chat')
+    expect(item?.chatBy).toBe('Rob Grayson')
+  })
+
+  it('names nobody when the row does not', async () => {
+    expect((await row('Queue chat'))?.chatBy).toBeNull()
+    const item = await row('Queue chat', { email: 'rob@example.org' })
+    expect(item?.source).toBe('Queue chat')
+    expect(item?.chatBy).toBeNull()
+  })
+
+  it('leaves every other row as it was', async () => {
+    const comb = await row('Comb')
+    expect(comb?.source).toBe('Comb')
+    expect(comb && 'chatBy' in comb).toBe(false)
+    expect((await row('Email'))?.source).toBe('Email')
+  })
+})
+
 describe('flagItem / unflagItem', () => {
   const ID = rid('bruin')
   const FLD = {

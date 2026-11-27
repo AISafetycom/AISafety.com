@@ -136,6 +136,7 @@ import {
   type Print,
   type SuggestDid,
 } from '@/lib/admin/queue-suggest'
+import { CHAT_SOURCE, chatHeading } from '@/lib/admin/queue-chat-source'
 import type { ChatKind } from '@/lib/admin/queue-team-chat'
 import type { QueueMode } from '@/lib/admin/access'
 import { STATUS_ICONS as FUNDER_STATUS_ICONS } from '@/app/funding/card'
@@ -500,6 +501,9 @@ const SECTION_ICON: Record<Section, string> = {
 function sourceIcon(item: QueueItem): string {
   if (item.type === 'Rule' || item.source === 'Teach') return ICON.rule
   switch (item.source) {
+    // Proposed in the Fable chat: the chat's own icon.
+    case CHAT_SOURCE:
+      return ICON.stars
     case 'Email':
       return ICON.mail
     case 'Discord':
@@ -8046,7 +8050,11 @@ function Detail({
   const excerptBlock = excerpt ? (
     <section className={styles.block}>
       <h3 className={styles.h3}>
-        {item.source === 'Broom' ? 'What Broom found' : 'What they wrote'}
+        {item.source === 'Broom'
+          ? 'What Broom found'
+          : item.source === CHAT_SOURCE
+            ? chatHeading(item.chatBy)
+            : 'What they wrote'}
       </h3>
       {item.source === 'Broom' ? (
         <div className={styles.finding}>

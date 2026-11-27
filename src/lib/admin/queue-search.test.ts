@@ -292,3 +292,24 @@ describe('textsOf', () => {
     ])
   })
 })
+
+describe('a change proposed in the Queue chat', () => {
+  const proposed = item({
+    type: 'Change',
+    source: 'Queue chat',
+    chatBy: 'Rob Grayson',
+    sourceExcerpt:
+      'Proposed from the Queue chat by Rob Grayson (rob@example.org). The page now gives 12 December.',
+  })
+  it('is found by its words, labelled as the chat’s', () => {
+    expect(hit(proposed, 'december')?.excerpt?.label).toBe('Queue chat')
+  })
+  it('is found by who proposed it', () => {
+    expect(hit(proposed, 'grayson')).not.toBeNull()
+    expect(
+      hit(item({ source: 'Queue chat', chatBy: 'Rob Grayson' }), 'gray')
+    ).not.toBeNull()
+    // And an item nobody proposed in the chat has no such part.
+    expect(hit(item({}), 'grayson')).toBeNull()
+  })
+})

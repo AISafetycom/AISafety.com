@@ -139,6 +139,13 @@ with the "Mac" dot at the top right.
      calls `127.0.0.1:8795` itself, and nothing of his goes through the
      site's relay; his cards read "Applied – goes with Accept".
 
+9. A change proposed in the chat. The team's chat never changes a
+   published listing itself: it files the change as an item of its own.
+   "Demo: Safety Careers Evening: description" is one, in the Requests
+   section on the Changes tab, with the chat's icon, "Queue chat" as its
+   source, and its words under "Proposed in the Queue chat · by Rob Demo".
+   It is decided like any change (Rob suggests, Bryce confirms).
+
 /admin/users shows Rob's card with "Bryce checks first" ticked; unticking it
 or ticking it again writes the change to the log with the old and new value.
 

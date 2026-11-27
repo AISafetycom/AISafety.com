@@ -107,21 +107,25 @@ export interface TeamWho {
  *  kept, 40 characters at most (whole ones: the agent signs for the name
  *  byte for byte). With nothing left, the part of their email before the
  *  @, cleaned the same way. */
-export function cleanName(name: string | null | undefined, email: string) {
-  const tidy = (text: string) =>
-    Array.from(
-      text
-        .normalize('NFC')
-        .replace(/[^\p{L}\p{M} .'-]/gu, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-    )
-      .slice(0, 40)
-      .join('')
+/** A name cut down to what a name may hold: letters of any script, spaces
+ *  and . ' -, 40 whole characters at most. Empty when nothing is left. */
+export function tidyName(text: string): string {
+  return Array.from(
+    text
+      .normalize('NFC')
+      .replace(/[^\p{L}\p{M} .'-]/gu, ' ')
+      .replace(/\s+/g, ' ')
       .trim()
+  )
+    .slice(0, 40)
+    .join('')
+    .trim()
+}
+
+export function cleanName(name: string | null | undefined, email: string) {
   // Until someone's first sign-in their "name" is their address.
   const given = name && !name.includes('@') ? name : ''
-  return tidy(given) || tidy(email.split('@')[0] ?? '') || 'Someone'
+  return tidyName(given) || tidyName(email.split('@')[0] ?? '') || 'Someone'
 }
 
 /** `who` for a request, from what the session says. */

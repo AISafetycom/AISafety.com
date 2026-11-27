@@ -48,6 +48,7 @@ import {
   type AirtableRow,
 } from './airtable'
 import { sealToken } from './session'
+import { CHAT_SOURCE, chatProposed } from './queue-chat-source'
 import { parseRejectDrafts } from './queue-decline'
 import { listingState, type FoundListing } from './queue-listing'
 import { isExpiredAttachment } from './attachment-url'
@@ -211,6 +212,8 @@ export type QueueSource =
   | 'Comb'
   | 'Form'
   | 'Teach'
+  // A change proposed in the team's Fable chat (queue-chat-source.ts).
+  | 'Queue chat'
 export type QueueStatus =
   | 'Pending'
   | 'Revising'
@@ -246,6 +249,9 @@ export interface QueueItem {
    *  should open the original email with the form"). */
   emailLink?: string | null
   sourceExcerpt: string | null
+  /** Source "Queue chat": the teammate who asked the chat, when the row
+   *  names one (the proposal's `chat.by`, written by the Mac). */
+  chatBy?: string | null
   /** The record's logo as the site shows it (from the site's own listing
    *  catalog for published records, else the Add snapshot), for the list. */
   logo: string | null
@@ -736,6 +742,7 @@ function rowToItem(
 ): QueueItem {
   const f = row.fields
   const proposal = parseJson(f[F.proposal])
+  const inChat = chatProposed(str(f[F.source]), proposal)
   let fields: Record<string, unknown> | null = null
   let name: string | null = null
   let url: string | null = null
@@ -894,7 +901,12 @@ function rowToItem(
     createdAt: row.createdTime,
     title: str(f[F.title]) ?? name ?? '(untitled)',
     type: (str(f[F.type]) as QueueType | null) ?? 'Add',
-    source: (str(f[F.source]) as QueueSource | null) ?? 'Comb',
+    // A change proposed in the team's chat reads as that whatever its
+    // Source says: until the field has the choice, the Mac files it under
+    // Comb and marks the proposal (queue-chat-source.ts).
+    source: inChat
+      ? CHAT_SOURCE
+      : ((str(f[F.source]) as QueueSource | null) ?? 'Comb'),
     status: (str(f[F.status]) as QueueStatus | null) ?? 'Pending',
     page: str(f[F.page]),
     targetTable: str(f[F.targetTable]),
@@ -903,6 +915,7 @@ function rowToItem(
     sourceLink: str(f[F.sourceLink]),
     emailLink,
     sourceExcerpt: str(f[F.sourceExcerpt]),
+    ...(inChat ? { chatBy: inChat.by } : {}),
     logo:
       (str(f[F.targetRecord]) && logos.get(str(f[F.targetRecord]) ?? '')) ||
       snapshotLogo(fields),
