@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   HOME_DISCORD_SERVER,
+  addressIn,
   discordServer,
+  formSearchHref,
   savedWords,
   sourceView,
+  workMailbox,
 } from './queue-source'
 
 const GMAIL = 'https://mail.google.com/mail/?authuser=x@example.com#all/1a2b'
@@ -163,5 +166,55 @@ describe('savedWords', () => {
     expect(savedWords('dm').linkLabel).toBeNull()
     expect(savedWords('slack').linkLabel).toBe('Open in Slack')
     expect(savedWords('form').linkLabel).toBe('Open the record in Airtable')
+  })
+})
+
+describe('a form, for a teammate with a work mailbox', () => {
+  it('opens their own copy of the form email in their Gmail', () => {
+    const view = sourceView({
+      ...base,
+      source: 'Form',
+      href: GMAIL,
+      airtableLink: AIRTABLE,
+      mailbox: 'rob@aisafety.com',
+      formWords: 'sam@example.org',
+    })
+    expect(view).toEqual({
+      kind: 'link',
+      href: formSearchHref('rob@aisafety.com', 'sam@example.org'),
+    })
+    const href = formSearchHref('rob@aisafety.com', 'sam@example.org')
+    expect(href).toContain('authuser=rob%40aisafety.com')
+    expect(decodeURIComponent(href.split('#search/')[1])).toBe(
+      'from:noreply@airtable.com sam@example.org'
+    )
+  })
+
+  it('searches by the listing name when there is no address', () => {
+    const href = formSearchHref('rob@aisafety.com', 'Evals "Circle"')
+    expect(decodeURIComponent(href.split('#search/')[1])).toBe(
+      'from:noreply@airtable.com "Evals Circle"'
+    )
+  })
+
+  it('keeps the saved view without a work mailbox', () => {
+    expect(
+      sourceView({
+        ...base,
+        source: 'Form',
+        href: GMAIL,
+        airtableLink: AIRTABLE,
+        mailbox: null,
+        formWords: 'sam@example.org',
+      })
+    ).toMatchObject({ kind: 'saved', place: 'form' })
+  })
+
+  it('knows a work mailbox and a reply address when it sees one', () => {
+    expect(workMailbox('Rob@AISafety.com')).toBe('rob@aisafety.com')
+    expect(workMailbox('robert.samuel.grayson@gmail.com')).toBeNull()
+    expect(workMailbox(null)).toBeNull()
+    expect(addressIn('Sam Demo <sam@example.org>')).toBe('sam@example.org')
+    expect(addressIn('nobody')).toBeNull()
   })
 })

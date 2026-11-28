@@ -60,6 +60,29 @@ export function discordServer(url: string): string | null {
   return m ? m[1] : null
 }
 
+/** A teammate's own work mailbox: their sign-in, when it is an
+ *  @aisafety.com address (Google Workspace, so Gmail), else null. Every
+ *  Airtable form's notification goes to it too (Bryce, 28 Nov 2026: "when
+ *  it's him that's pressing Q, it would open his Gmail link"). */
+export function workMailbox(email: string | null | undefined): string | null {
+  const e = (email ?? '').trim().toLowerCase()
+  return /^[^@\s]+@aisafety\.com$/.test(e) ? e : null
+}
+
+/** A Gmail search in `mailbox` for a form's notification email: from
+ *  Airtable, with the submitter's address (or the listing's name) in it. */
+export function formSearchHref(mailbox: string, words: string): string {
+  const term = words.includes('@') ? words : `"${words.replace(/"/g, '')}"`
+  const query = `from:noreply@airtable.com ${term}`
+  return `https://mail.google.com/mail/?authuser=${encodeURIComponent(mailbox)}#search/${encodeURIComponent(query)}`
+}
+
+/** The address in a reply line such as "Sam Demo <sam@example.org>". */
+export function addressIn(line: string | null | undefined): string | null {
+  const m = /[^\s<>]+@[^\s<>]+\.[^\s<>]+/.exec(line ?? '')
+  return m ? m[0] : null
+}
+
 export function sourceView(args: {
   /** What Q opens for the owner (the page's sourceHref), or null. */
   href: string | null
@@ -75,6 +98,12 @@ export function sourceView(args: {
   /** The row's own link when it is the form's record in Airtable, which
    *  every teammate with the Queue can open. */
   airtableLink: string | null
+  /** The viewer's own work mailbox (workMailbox), which gets every form's
+   *  notification email, or null. */
+  mailbox?: string | null
+  /** What finds a form's notification in that mailbox: the submitter's
+   *  address, else the listing's name. */
+  formWords?: string | null
 }): SourceView | null {
   const { href, owner, source } = args
   if (!href) return null
@@ -84,6 +113,13 @@ export function sourceView(args: {
   const host = hostOf(href)
   if (onHost(host, 'mail.google.com')) {
     if (source === 'Form') {
+      // Their own copy of the form's email, in their own Gmail.
+      if (args.mailbox && args.formWords) {
+        return {
+          kind: 'link',
+          href: formSearchHref(args.mailbox, args.formWords),
+        }
+      }
       return { kind: 'saved', place: 'form', text, href: args.airtableLink }
     }
     const place = source === 'Comb' ? 'newsletter' : 'email'

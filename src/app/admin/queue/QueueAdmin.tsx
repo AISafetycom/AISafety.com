@@ -214,6 +214,7 @@ import {
   type PictureSide,
 } from '@/lib/admin/queue-picture'
 import {
+  addressIn,
   sourceView,
   savedWords,
   type SourceView,
@@ -705,8 +706,14 @@ function sourceHref(item: QueueItem): string | null {
  *  opens the source link as before; a teammate is shown the saved copy of a
  *  source only the owner can open (his Gmail, a message to him) or may not
  *  be able to (a Slack or Discord they're not in). */
-function viewOf(item: QueueItem, owner: boolean): SourceView | null {
+function viewOf(
+  item: QueueItem,
+  owner: boolean,
+  mailbox: string | null
+): SourceView | null {
   return sourceView({
+    mailbox,
+    formWords: addressIn(item.replyTo) ?? item.title,
     href: sourceHref(item),
     owner,
     source: item.source,
@@ -2357,6 +2364,9 @@ function QueueInbox({
   // The item whose saved source is shown: Q for someone who isn't the
   // owner, on a source only the owner can open (queue-source.ts).
   const [sourceOpen, setSourceOpen] = useState<string | null>(null)
+  // A teammate's own @aisafety.com mailbox, from the API: Q on a form item
+  // opens their own copy of its email there (queue-source.ts).
+  const [mailbox, setMailbox] = useState<string | null>(null)
   const [placeFocus, setPlaceFocus] = useState(0)
   const [fieldFocus, setFieldFocus] = useState(0)
   // A /map addition's suggested spot on the map, by item, as its map strip
@@ -2642,6 +2652,7 @@ function QueueInbox({
         agent?: AgentInfo | null
         chat?: ChatKind | null
         teamChat?: { online?: boolean }
+        mailbox?: string | null
         error?: string
       }
       if (!res.ok || !data.items) {
@@ -2680,6 +2691,7 @@ function QueueInbox({
       remakeRef.current(next, opts.remake)
       setAgent(data.agent ?? null)
       setChatKind(data.chat ?? null)
+      setMailbox(data.mailbox ?? null)
       setTeamOnline(data.teamChat?.online === true)
       setTeamTick(n => n + 1)
       // The list is on screen now; the pictures, the links and the cards
@@ -5764,7 +5776,9 @@ function QueueInbox({
           // owner, a source only he can open shows its saved copy on the
           // item instead (Bryce, 28 Nov 2026, on Rob: "is that going to
           // work for him?"); Q again hides it.
-          const view = item ? viewOf(item, chatKindNow === 'mac') : null
+          const view = item
+            ? viewOf(item, chatKindNow === 'mac', mailbox)
+            : null
           if (view?.kind === 'link') {
             e.preventDefault()
             window.open(view.href, '_blank', 'noopener')
@@ -5849,6 +5863,7 @@ function QueueInbox({
     live,
     agentChat,
     chatKindNow,
+    mailbox,
     items,
     select,
     searching,
@@ -6464,7 +6479,7 @@ function QueueInbox({
                     : null
                 }
                 chatDictate={agentDictate}
-                source={viewOf(selected, chatKindNow === 'mac')}
+                source={viewOf(selected, chatKindNow === 'mac', mailbox)}
                 sourceShown={sourceOpen === selected.id}
                 onSourceShown={on => setSourceOpen(on ? selected.id : null)}
                 chatFocus={chatFocus}
@@ -8937,6 +8952,13 @@ function Detail({
   const savedSays = saved ? savedWords(saved.place) : null
   const privateLink = (url: string | null | undefined) =>
     Boolean(saved && url && !onHost(url, 'airtable.com') && url !== saved.href)
+  // Where Q takes this person when it isn't the owner's own link: a
+  // teammate's own copy of a form's email, in their Gmail. The head's link
+  // to that email goes there too.
+  const ownHref =
+    source?.kind === 'link' && source.href !== sourceHref(item)
+      ? source.href
+      : null
   const savedBlock =
     saved && savedSays && sourceShown ? (
       <section className={styles.block} data-saved-source>
@@ -9061,7 +9083,7 @@ function Detail({
                 !privateLink(item.emailLink) &&
                 sourceHref(item) === item.emailLink && (
                   <a
-                    href={item.emailLink}
+                    href={ownHref ?? item.emailLink}
                     target="_blank"
                     rel="noreferrer"
                     className={styles.withIcon}
@@ -9073,7 +9095,11 @@ function Detail({
                 )}
               {item.sourceLink && !privateLink(item.sourceLink) && (
                 <a
-                  href={item.sourceLink}
+                  href={
+                    ownHref && sourceHref(item) === item.sourceLink
+                      ? ownHref
+                      : item.sourceLink
+                  }
                   target="_blank"
                   rel="noreferrer"
                   className={styles.withIcon}
