@@ -3,7 +3,7 @@
 ## Quick start
 
 ```bash
-nvm use          # Node 20, from .nvmrc
+nvm use          # Node 24, from .nvmrc
 npm install
 npm run dev      # http://localhost:3000
 ```
