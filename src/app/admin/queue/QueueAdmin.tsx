@@ -213,6 +213,12 @@ import {
   touchesPicture,
   type PictureSide,
 } from '@/lib/admin/queue-picture'
+import {
+  addressIn,
+  sourceView,
+  savedWords,
+  type SourceView,
+} from '@/lib/admin/queue-source'
 import styles from './queue.module.css'
 import { Collapse } from '../Collapse'
 import { useClosing } from '../motion'
@@ -694,6 +700,32 @@ function sourceHref(item: QueueItem): string | null {
   const link = item.sourceLink
   if (link && hostOf(link) && !onHost(link, 'airtable.com')) return link
   return item.emailLink ?? null
+}
+
+/** What Q does on this item for this person (queue-source.ts): the owner
+ *  opens the source link as before; a teammate is shown the saved copy of a
+ *  source only the owner can open (his Gmail, a message to him) or may not
+ *  be able to (a Slack or Discord they're not in). */
+function viewOf(
+  item: QueueItem,
+  owner: boolean,
+  mailbox: string | null
+): SourceView | null {
+  return sourceView({
+    mailbox,
+    formWords: addressIn(item.replyTo) ?? item.title,
+    href: sourceHref(item),
+    owner,
+    source: item.source,
+    sourceText: item.sourceText ?? null,
+    said: item.source === 'Comb' ? null : item.sourceExcerpt,
+    airtableLink:
+      item.source === 'Form' &&
+      item.sourceLink &&
+      onHost(item.sourceLink, 'airtable.com')
+        ? item.sourceLink
+        : null,
+  })
 }
 
 function ago(iso: string | null): string {
@@ -2329,6 +2361,12 @@ function QueueInbox({
   // The item whose Ask box is open (someone whose decisions are
   // suggestions): the Ask button or Z opens it.
   const [askingFor, setAskingFor] = useState<string | null>(null)
+  // The item whose saved source is shown: Q for someone who isn't the
+  // owner, on a source only the owner can open (queue-source.ts).
+  const [sourceOpen, setSourceOpen] = useState<string | null>(null)
+  // A teammate's own @aisafety.com mailbox, from the API: Q on a form item
+  // opens their own copy of its email there (queue-source.ts).
+  const [mailbox, setMailbox] = useState<string | null>(null)
   const [placeFocus, setPlaceFocus] = useState(0)
   const [fieldFocus, setFieldFocus] = useState(0)
   // A /map addition's suggested spot on the map, by item, as its map strip
@@ -2614,6 +2652,7 @@ function QueueInbox({
         agent?: AgentInfo | null
         chat?: ChatKind | null
         teamChat?: { online?: boolean }
+        mailbox?: string | null
         error?: string
       }
       if (!res.ok || !data.items) {
@@ -2652,6 +2691,7 @@ function QueueInbox({
       remakeRef.current(next, opts.remake)
       setAgent(data.agent ?? null)
       setChatKind(data.chat ?? null)
+      setMailbox(data.mailbox ?? null)
       setTeamOnline(data.teamChat?.online === true)
       setTeamTick(n => n + 1)
       // The list is on screen now; the pictures, the links and the cards
@@ -5732,11 +5772,20 @@ function QueueInbox({
         }
         case 'q': {
           // Where the item came from, in a new tab (Bryce, 29 Oct 2026;
-          // until then Q opened the listing in Airtable).
-          const href = item ? sourceHref(item) : null
-          if (href) {
+          // until then Q opened the listing in Airtable). For anyone but the
+          // owner, a source only he can open shows its saved copy on the
+          // item instead (Bryce, 28 Nov 2026, on Rob: "is that going to
+          // work for him?"); Q again hides it.
+          const view = item
+            ? viewOf(item, chatKindNow === 'mac', mailbox)
+            : null
+          if (view?.kind === 'link') {
             e.preventDefault()
-            window.open(href, '_blank', 'noopener')
+            window.open(view.href, '_blank', 'noopener')
+          } else if (item && view?.kind === 'saved') {
+            e.preventDefault()
+            const id = item.id
+            setSourceOpen(open => (open === id ? null : id))
           }
           break
         }
@@ -5814,6 +5863,7 @@ function QueueInbox({
     live,
     agentChat,
     chatKindNow,
+    mailbox,
     items,
     select,
     searching,
@@ -6429,6 +6479,9 @@ function QueueInbox({
                     : null
                 }
                 chatDictate={agentDictate}
+                source={viewOf(selected, chatKindNow === 'mac', mailbox)}
+                sourceShown={sourceOpen === selected.id}
+                onSourceShown={on => setSourceOpen(on ? selected.id : null)}
                 chatFocus={chatFocus}
                 askFocus={askFocus}
                 askingFor={askingFor}
@@ -7858,6 +7911,9 @@ function Detail({
   chatAgent,
   chatTeam,
   chatDictate,
+  source,
+  sourceShown,
+  onSourceShown,
   chatFocus,
   askFocus,
   askingFor,
@@ -7936,6 +7992,11 @@ function Detail({
   chatTeam: { online: boolean; tick: number } | null
   /** The Mac can turn speech into text (Cmd+D in the chat). */
   chatDictate: boolean
+  /** What Q does here for this person (queue-source.ts); a saved copy
+   *  shows on the item while `sourceShown`. */
+  source: SourceView | null
+  sourceShown: boolean
+  onSourceShown: (on: boolean) => void
   chatFocus: number
   /** Bumped by Z: the answer box of a question waiting on the item takes
    *  the focus (queue-suggest.ts). */
@@ -8880,11 +8941,55 @@ function Detail({
       >
         {found}
       </a>
-      <kbd>Q</kbd>
+      {source?.kind !== 'saved' && <kbd>Q</kbd>}
     </>
   ) : (
     found
   )
+  // A saved copy in place of a source this person can't open: a button in
+  // the head, and the copy itself under it (queue-source.ts).
+  const saved = source?.kind === 'saved' ? source : null
+  const savedSays = saved ? savedWords(saved.place) : null
+  const privateLink = (url: string | null | undefined) =>
+    Boolean(saved && url && !onHost(url, 'airtable.com') && url !== saved.href)
+  // Where Q takes this person when it isn't the owner's own link: a
+  // teammate's own copy of a form's email, in their Gmail. The head's link
+  // to that email goes there too.
+  const ownHref =
+    source?.kind === 'link' && source.href !== sourceHref(item)
+      ? source.href
+      : null
+  const savedBlock =
+    saved && savedSays && sourceShown ? (
+      <section className={styles.block} data-saved-source>
+        <h3 className={styles.h3}>{savedSays.heading}</h3>
+        <p className={styles.note}>
+          {saved.text
+            ? savedSays.note
+            : saved.place === 'form'
+              ? savedSays.note
+              : 'No copy was saved. Use Ask Bryce if you need to see it.'}
+        </p>
+        {saved.text && (
+          <blockquote className={`${styles.quote} ${styles.savedText}`}>
+            {saved.text}
+          </blockquote>
+        )}
+        {saved.href && savedSays.linkLabel && (
+          <p className={styles.note}>
+            <a
+              className={styles.withIcon}
+              href={saved.href}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <Icon src={linkIcon(saved.href)} size={12} />
+              {savedSays.linkLabel}
+            </a>
+          </p>
+        )}
+      </section>
+    ) : null
 
   const nav = navPage(item)
 
@@ -8952,11 +9057,33 @@ function Detail({
                   turned into a new listing), the button below opens it, so
                   this one is left out rather than shown twice (Bryce,
                   18 Nov 2026: "There are two buttons here"). */}
+              {saved && savedSays && (
+                <button
+                  type="button"
+                  className={`${styles.linkButton} ${styles.withIcon}`}
+                  aria-expanded={sourceShown}
+                  onClick={() => onSourceShown(!sourceShown)}
+                >
+                  <Icon
+                    src={
+                      saved.place === 'dm' || saved.place === 'discord'
+                        ? ICON.discord
+                        : saved.place === 'slack'
+                          ? ICON.external
+                          : ICON.mail
+                    }
+                    size={12}
+                  />
+                  {savedSays.heading}
+                  <kbd>Q</kbd>
+                </button>
+              )}
               {item.emailLink &&
                 item.emailLink !== item.sourceLink &&
+                !privateLink(item.emailLink) &&
                 sourceHref(item) === item.emailLink && (
                   <a
-                    href={item.emailLink}
+                    href={ownHref ?? item.emailLink}
                     target="_blank"
                     rel="noreferrer"
                     className={styles.withIcon}
@@ -8966,9 +9093,13 @@ function Detail({
                     <kbd>Q</kbd>
                   </a>
                 )}
-              {item.sourceLink && (
+              {item.sourceLink && !privateLink(item.sourceLink) && (
                 <a
-                  href={item.sourceLink}
+                  href={
+                    ownHref && sourceHref(item) === item.sourceLink
+                      ? ownHref
+                      : item.sourceLink
+                  }
                   target="_blank"
                   rel="noreferrer"
                   className={styles.withIcon}
@@ -8977,7 +9108,9 @@ function Detail({
                   {linkLabel(item.sourceLink)}
                   {/* Q opens the email or Discord message, never Airtable;
                       a Comb find's Q is its Source link instead. */}
-                  {sourceHref(item) === item.sourceLink && <kbd>Q</kbd>}
+                  {!saved && sourceHref(item) === item.sourceLink && (
+                    <kbd>Q</kbd>
+                  )}
                 </a>
               )}
             </div>
@@ -8997,6 +9130,7 @@ function Detail({
         </div>
 
         {returnBlock}
+        {savedBlock}
 
         {/* Keyed by the item so its state starts afresh on another one.
             The field picker further down is keyed the same way and sits

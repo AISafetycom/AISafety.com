@@ -46,6 +46,7 @@ async function list() {
     chat: string | null
     agent: { port: number; token: string } | null
     teamChat?: { online: boolean }
+    mailbox?: string | null
   }
 }
 
@@ -87,8 +88,18 @@ describe('which chat the page mounts', () => {
       items: [],
       agent: null,
       chat: 'team',
+      mailbox: null,
       teamChat: { online: true },
     })
+  })
+  it('hands a teammate their own @aisafety.com mailbox, never the owner', async () => {
+    h.email = 'Rob@AISafety.com'
+    expect(await list()).toMatchObject({
+      chat: 'team',
+      mailbox: 'rob@aisafety.com',
+    })
+    h.email = OWNER
+    expect((await list()).mailbox ?? null).toBeNull()
   })
   it('says when the team chat’s server has not been heard from', async () => {
     h.online = false

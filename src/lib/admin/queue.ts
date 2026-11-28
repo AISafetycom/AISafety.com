@@ -175,6 +175,10 @@ const F = {
   issueRow: 'fld5zaEwhergaWYbF',
   sourceLink: 'fld4jnmGibDfKUwNx',
   sourceExcerpt: 'fld9VtbNjLpodrtA7',
+  // A saved copy of what the item came from (the email thread, the Slack or
+  // Discord post, the newsletter), written by the Mac and Comb: what Q shows
+  // a teammate who can't open the Source link (queue-source.ts).
+  sourceText: 'fldBnX1ohCmWuZFc0',
   proposal: 'fldgl9Ny2jnu8T0Da',
   verdict: 'fld835yJytaSRAuvB',
   reasons: 'fldvEp4bscGNzBcSJ',
@@ -261,6 +265,9 @@ export interface QueueItem {
    *  should open the original email with the form"). */
   emailLink?: string | null
   sourceExcerpt: string | null
+  /** A saved copy of what the item came from (Source text), for a
+   *  teammate who can't open the Source link (queue-source.ts). */
+  sourceText?: string | null
   /** Source "Queue chat": the teammate who asked the chat, when the row
    *  names one (the proposal's `chat.by`, written by the Mac). */
   chatBy?: string | null
@@ -972,6 +979,7 @@ function rowToItem(
     sourceLink: str(f[F.sourceLink]),
     emailLink,
     sourceExcerpt: str(f[F.sourceExcerpt]),
+    sourceText: str(f[F.sourceText]),
     ...(inChat ? { chatBy: inChat.by } : {}),
     logo:
       (str(f[F.targetRecord]) && logos.get(str(f[F.targetRecord]) ?? '')) ||

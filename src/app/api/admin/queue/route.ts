@@ -176,6 +176,7 @@ import { actingAs } from '@/lib/admin/queue-actor'
 import { parseFlag } from '@/lib/admin/queue-flag'
 import { publicChoiceOf } from '@/lib/admin/queue-rule-instant'
 import { chatKind, chatOwners } from '@/lib/admin/queue-team-chat'
+import { workMailbox } from '@/lib/admin/queue-source'
 import {
   relayErrorText,
   teamAgentSecret,
@@ -293,6 +294,9 @@ export async function GET(req: NextRequest) {
       items,
       agent: chat === 'mac' ? agentInfo(email, me?.name ?? null) : null,
       chat,
+      // A teammate's own @aisafety.com mailbox, which gets every form's
+      // email: Q opens their copy there (queue-source.ts).
+      mailbox: chat === 'mac' ? null : workMailbox(email),
       ...(chat === 'team' ? { teamChat: { online: await teamOnline() } } : {}),
     })
   } catch (e) {
