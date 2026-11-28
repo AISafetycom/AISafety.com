@@ -9307,6 +9307,12 @@ function Detail({
                                   : show(c.to)
                               )}
                               edited={c.field in shownEdits}
+                              mark={
+                                <EditedByFable
+                                  change={c}
+                                  source={item.source}
+                                />
+                              }
                               canEdit={
                                 canChange ||
                                 (canFix && !LISTING_SWITCHES.has(c.field))
@@ -10127,6 +10133,33 @@ function isBlank(v: unknown): boolean {
     v === '' ||
     v === false ||
     (Array.isArray(v) && v.length === 0)
+  )
+}
+
+/** The mark on a proposed field whose value Fable's review changed from
+ *  what the flag asked for (Bryce, 28 Nov 2026, on Concordia AI, where
+ *  Broom asked for three categories and Fable kept two: "put edited by
+ *  Fable next to the field that Fable edited"); hovering it shows what the
+ *  flag asked for. */
+function EditedByFable({
+  change,
+  source,
+}: {
+  change: ProposedChange
+  source: string
+}) {
+  if (change.asked === undefined) return null
+  return (
+    <em
+      className={styles.byFable}
+      title={`${source} asked for: ${
+        touchesPicture(change)
+          ? 'another picture'
+          : friendly(show(change.asked))
+      }`}
+    >
+      edited by Fable
+    </em>
   )
 }
 
@@ -11101,6 +11134,7 @@ function EditableValue({
   body,
   icon,
   edited,
+  mark,
   canEdit,
   muted,
   onEdit,
@@ -11112,10 +11146,14 @@ function EditableValue({
   /** The site's icon for the field, drawn before the value. */
   icon?: React.ReactNode
   edited: boolean
+  /** Shown in the place of "edited" when the value is not his edit (the
+   *  "edited by Fable" mark on a Broom field Fable's review changed). */
+  mark?: React.ReactNode
   canEdit: boolean
   muted?: boolean
   onEdit: () => void
 }) {
+  const marked = edited ? <em className={styles.edited}>edited</em> : mark
   const shown = href ? (
     <a href={href} target="_blank" rel="noreferrer">
       {text}
@@ -11128,7 +11166,7 @@ function EditableValue({
       <>
         {icon}
         {shown}
-        {edited && <em className={styles.edited}>edited</em>}
+        {marked}
       </>
     )
   return (
@@ -11152,7 +11190,7 @@ function EditableValue({
       <span className={styles.editText}>
         {icon}
         {shown}
-        {edited && <em className={styles.edited}>edited</em>}
+        {marked}
         <span className={styles.editHint}>
           <Icon src={ICON.pencil} size={12} />
         </span>

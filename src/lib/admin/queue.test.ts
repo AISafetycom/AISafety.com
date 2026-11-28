@@ -3597,3 +3597,60 @@ describe('the token the page shows the Mac agent', () => {
     }
   })
 })
+
+describe("Broom's own value on a field Fable's review changed", () => {
+  const ID = rid('concordia')
+  const PROPOSAL = 'fldgl9Ny2jnu8T0Da'
+  const change = (c: Record<string, unknown>) => ({
+    table: 'tblvzbGL9q9dOO9Nc',
+    record: rid('org'),
+    from: ['Governance'],
+    ...c,
+  })
+  const read = async (changes: Record<string, unknown>[]) => {
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: ID,
+            createdTime: '2026-11-27T00:00:00.000Z',
+            fields: {
+              fldeRsOE3DM3R2vbX: 'Concordia AI: Category is thin',
+              fldBc9YIDhjmu58f3: 'Change',
+              fldTXGYOoXcUApaI2: 'Pending',
+              [PROPOSAL]: JSON.stringify({
+                kind: 'change',
+                page: '/map',
+                changes,
+              }),
+            },
+          }),
+          { status: 200 }
+        )
+    )
+    const i = await getQueueItem(ID)
+    if (!i) throw new Error('row gone')
+    return i.changes
+  }
+
+  it('keeps what Broom asked for when the review set something else', async () => {
+    const [c] = await read([
+      change({
+        field: 'Category',
+        to: ['Governance', 'Empirical research'],
+        asked: ['Governance', 'Empirical research', 'Newsletter'],
+      }),
+    ])
+    expect(c.asked).toEqual(['Governance', 'Empirical research', 'Newsletter'])
+  })
+
+  it('has none when the value is what Broom asked for, or Broom named none', async () => {
+    const out = await read([
+      change({ field: 'Name', to: 'B', asked: 'B' }),
+      change({ field: 'Link', to: 'https://b.org' }),
+      change({ field: 'Category', to: ['Governance'], asked: [] }),
+    ])
+    expect(out.map(c => 'asked' in c)).toEqual([false, false, false])
+  })
+})

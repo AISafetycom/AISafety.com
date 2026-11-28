@@ -236,6 +236,10 @@ export interface ProposedChange {
   field: string
   from: unknown
   to: unknown
+  /** Broom: the value Broom's flag asked for, when Fable's review set a
+   *  different one (the Mac's `broom_item`). The page marks the field
+   *  "edited by Fable" (Bryce, 28 Nov 2026, Concordia AI). */
+  asked?: unknown
 }
 
 export interface QueueItem {
@@ -544,9 +548,23 @@ function toChanges(v: unknown): ProposedChange[] {
     if (!isRecord(c)) continue
     const field = str(c.field)
     if (!field) continue
-    out.push({ field, from: c.from ?? null, to: c.to ?? null })
+    const change: ProposedChange = {
+      field,
+      from: c.from ?? null,
+      to: c.to ?? null,
+    }
+    if (fableChangedIt(c.asked, change.to)) change.asked = c.asked
+    out.push(change)
   }
   return out
+}
+
+/** True when the flag asked for a value and Fable's review proposes
+ *  another: an empty or missing `asked` means Broom named no value. */
+function fableChangedIt(asked: unknown, to: unknown): boolean {
+  if (asked === undefined || asked === null || asked === '') return false
+  if (Array.isArray(asked) && asked.length === 0) return false
+  return JSON.stringify(asked) !== JSON.stringify(to)
 }
 
 /** What the page shows for a target record beyond the row itself: its
