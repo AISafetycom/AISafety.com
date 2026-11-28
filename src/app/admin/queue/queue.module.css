@@ -3668,3 +3668,11 @@ button.chatFileChip:hover {
   height: 36px;
   resize: none;
 }
+
+/* The saved copy of a source a teammate can't open (queue-source.ts): a
+   long thread or newsletter scrolls inside its box instead of pushing the
+   item down the page. */
+.savedText {
+  max-height: 360px;
+  overflow-y: auto;
+}

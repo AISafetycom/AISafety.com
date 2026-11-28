@@ -21,6 +21,7 @@ export const F = {
   targetRecord: 'fldszXtLdUijgFG4l',
   sourceLink: 'fld4jnmGibDfKUwNx',
   sourceExcerpt: 'fld9VtbNjLpodrtA7',
+  sourceText: 'fldBnX1ohCmWuZFc0',
   proposal: 'fldgl9Ny2jnu8T0Da',
   verdict: 'fld835yJytaSRAuvB',
   reasons: 'fldvEp4bscGNzBcSJ',
@@ -194,6 +195,12 @@ export function seed(now = Date.now()) {
       [F.verdict]: 'Unsure',
       [F.reasons]: '- Could be a private group; the page does not say',
       [F.rejectChips]: CHIPS.join('\n'),
+      // Found in a Slack a teammate may not be in: the post is saved on the
+      // row, and Q shows it to anyone but the owner (queue-source.ts).
+      [F.sourceExcerpt]:
+        'Demo Safety Community (Slack) #events\nhttps://demo-safety.slack.com/archives/C0DEMO0001/p1795550026714199',
+      [F.sourceText]:
+        "the post · #events\nHi all! We're starting a weekly reading group on model evaluations, open to anyone who has done an intro course. First session in nine days, details and sign-up at https://example.org/evals-reading",
       [F.proposal]: JSON.stringify({
         kind: 'add',
         name: readingGroup.Name,
@@ -296,6 +303,33 @@ export function seed(now = Date.now()) {
           name: 'Rob Demo',
           at: iso(now - 2 * 3_600_000),
         },
+      }),
+    }),
+    row('recDEMOQUEUE00008', 3, {
+      [F.title]: 'Demo: Open Alignment Fund: deadline',
+      [F.type]: 'Change',
+      [F.source]: 'Email',
+      [F.status]: 'Pending',
+      [F.page]: '/funding',
+      [F.targetTable]: FUNDING,
+      [F.targetRecord]: 'recDEMOFUNDING001',
+      [F.verdict]: 'Fix',
+      [F.reasons]: "- The fund's page gives the new deadline",
+      [F.rejectChips]: ['The old date is right', 'Not the same round'].join(
+        '\n'
+      ),
+      [F.sourceLink]:
+        'https://mail.google.com/mail/?authuser=bryce.demo@example.org#all/1a2b3c4d5e6f7a8b',
+      [F.sourceExcerpt]: `Alex Demo, ${inDays(-1)}:\nCould you move our deadline back two weeks? Thanks!`,
+      [F.sourceText]: `From: Alex Demo <alex.demo@example.org>\nDate: ${inDays(-1)}\nSubject: Open Alignment Fund deadline\n\nHi Bryce,\n\nCould you move our deadline back two weeks? The new date is on our page.\n\nThanks!\nAlex`,
+      [F.proposal]: JSON.stringify({
+        kind: 'change',
+        table: FUNDING,
+        record: 'recDEMOFUNDING001',
+        page: '/funding',
+        name: 'Demo: Open Alignment Fund',
+        changes: [{ field: 'Deadline', from: inDays(14), to: inDays(28) }],
+        reply: { to: 'alex.demo@example.org', name: 'Alex Demo' },
       }),
     }),
   ])
