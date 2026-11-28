@@ -15,6 +15,13 @@ import {
   wavesLabel,
 } from '@/lib/admin/newsletter-warmup'
 import Icon from '@/components/Icon'
+import {
+  QUEUE_ONLY_LINK,
+  queueItemHref,
+  queueOnlyLead,
+  queueOnlyText,
+  type QueueOnly,
+} from '@/lib/admin/newsletter-queue-only'
 import { webPath } from '@/lib/newsletter-web'
 import adminStyles from '../admin.module.css'
 import { Collapse } from '../Collapse'
@@ -61,6 +68,12 @@ interface ListingAlert {
     status: string
     changes: Array<{ field: string; from: string; to: string }>
     reason: string | null
+    /** The fingerprint of the Queue row these changes were read from; sent
+     *  back with Fix, which is refused when the row has changed since. */
+    shown?: string | null
+    /** Why Fix leaves this item to the Queue (edits saved there, or a
+     *  suggestion or question waiting on it); null when Fix may apply it. */
+    queueOnly?: QueueOnly | null
   }>
   changes: Array<{ name: string; label: string; email: string; site: string }>
   /** The card can be rewritten from the listing line by line. */
@@ -1188,6 +1201,11 @@ export default function NewsletterAdmin({
           campaign: draft.id,
           key: alert.key,
           queue: queueId,
+          // What this page listed for that Broom item (the fingerprint that
+          // came with its changes): the Fix goes on that, or not at all.
+          shown: queueId
+            ? (alert.broom.find(b => b.id === queueId)?.shown ?? undefined)
+            : undefined,
           message: draft.messageId ?? undefined,
         }),
       })
@@ -1200,6 +1218,11 @@ export default function NewsletterAdmin({
         error?: string
         problems?: string[]
       }
+      // Broom's change is no longer the one listed here (412), or the item
+      // is not one to apply from here any more (409: decided meanwhile, or
+      // left to the Queue): nothing was applied, and the listings are read
+      // again so the list says what the row holds now.
+      if (res.status === 412 || res.status === 409) recheckListings(draft.id)
       if (!res.ok || !body.cards || !body.alerts)
         throw new Error(
           body.problems?.join('; ') ?? body.error ?? `HTTP ${res.status}`
@@ -2759,6 +2782,9 @@ function ListingChanges({
           const fix = a.broom.find(b => b.status !== 'Revising') ?? null
           const revising = a.broom.length > 0 && !fix
           const busy = busyKey === a.key
+          // Edits saved on the item in the Queue, or a suggestion or a
+          // question waiting on it: decided there, where all of it shows.
+          const held = fix?.queueOnly ?? null
           return (
             <li key={a.key} className={styles.changeItem}>
               <span className={styles.changeName}>{a.title}</span>
@@ -2793,11 +2819,15 @@ function ListingChanges({
                   <button
                     type="button"
                     className={styles.rowButton}
-                    disabled={disabled || (fix != null && !canQueue)}
+                    disabled={
+                      disabled || (fix != null && !canQueue) || held != null
+                    }
                     title={
-                      fix && !canQueue
-                        ? 'Applying a Broom fix needs Queue access'
-                        : undefined
+                      held
+                        ? queueOnlyText(held)
+                        : fix && !canQueue
+                          ? 'Applying a Broom fix needs Queue access'
+                          : undefined
                     }
                     onClick={() => onFix(a, fix?.id ?? null)}
                   >
@@ -2807,6 +2837,15 @@ function ListingChanges({
                         ? 'Fix listing and email'
                         : 'Update email'}
                   </button>
+                </span>
+              )}
+              {canFix && fix && held && (
+                <span className={`${styles.changeLine} ${styles.muted}`}>
+                  {queueOnlyLead(held)}:{' '}
+                  <a className={styles.changeLink} href={queueItemHref(fix.id)}>
+                    {QUEUE_ONLY_LINK}
+                  </a>
+                  .
                 </span>
               )}
               {revising && (

@@ -35,7 +35,10 @@ export interface PreparedFile {
   type: string | null
 }
 
-const PICTURE_FIELD_RE = /logo|image/i
+/** A field that holds a picture, by its name. The Mac goes by the same
+ *  test (queue_lib.PICTURE_FIELD_RE), and so does the fingerprint of a
+ *  change (queue-shown.ts). */
+export const PICTURE_FIELD_RE = /logo|image/i
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return Boolean(v) && typeof v === 'object' && !Array.isArray(v)

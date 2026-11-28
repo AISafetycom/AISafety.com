@@ -1,8 +1,10 @@
 /*
-  Queue API. GET needs the queue area (canViewQueue); POST needs its edit
-  grant (canReviewQueue).
+  Queue API. GET needs the queue area (canViewQueue); POST needs a grant
+  that writes there (canWorkQueue): 'edit', or 'suggest' ("can edit, Bryce
+  checks first", queue-suggest.ts).
 
-  GET  /api/admin/queue                        → { items, agent }
+  GET  /api/admin/queue                        → { items, agent, chat,
+                                                   teamChat? }
        (the rows only, no logo lookup, so the list lands in about a second;
        the page then asks /api/admin/queue/logos for the pictures)
   GET  /api/admin/queue?sync=1                 → the same, after closing the
@@ -15,7 +17,10 @@
        while a search is typed)
   GET  /api/admin/queue?id=<rec>               → { item } – one row as it is now
        (the page follows a Reopen with it until the Mac is done)
-  GET  /api/admin/queue?target=<tbl>/<rec>     → { fields, attachments, schema } (live)
+  GET  /api/admin/queue?target=<tbl>/<rec>     → { fields, attachments, schema,
+       shown } (live; `shown` is the record's fingerprint, which the page
+       sends back when it publishes an addition – queue-shown.ts; &fresh=1
+       reads the table's field list anew, asked after a refusal)
   GET  /api/admin/queue?listing=<rec>          → { listing } – the listing with
        that record id as it is in Airtable now, whichever resource table
        holds it and whether or not the Queue ever did (null when none has
@@ -55,13 +60,64 @@
        place of the ones the page showed (seen) – savePublicWording,
        queue-rule-public.ts; nothing reaches the public page until Apply.
 
+  Bryce checks first (queue-suggest.ts). With the 'suggest' grant, accept,
+  reject, delete and later are refused (403); the page sends them as
+       suggest  body { did: accept | reject | delete | later, edits?,
+                replyDraft?, keep?, public?, publicSeen?, reason?,
+                rejectReply? } – runs the decision's own checks, keeps the
+                edits and reply draft on the row, and saves the suggestion
+                on For Bryce; nothing is decided
+       withdraw takes back their own suggestion or question (with full
+                edit: dismisses anyone's, e.g. on a row a bot closed)
+       ask      body { question } – on any item, decided ones included
+  and every other action works as with 'edit', except that edit is refused
+  while a suggestion on the item waits (theirs or anyone's). With full edit, accept,
+  reject, delete and later on an item carrying a suggestion also take
+  { suggested: <its at, as the page showed it>, suggestedPrint? } and are
+  refused with 412 when the item changed since (requireSuggestionSeen). The
+  refusal carries recheck { at, print? }: the page reads the item again
+  and sends that print back as suggestedPrint, so the next press goes
+  unless the item changed once more. The decision clears For Bryce and its
+  History line names the suggester too. answer, body { answer }, answers a
+  question (full edit only).
+
   `agent` is { port, token } for the local agent on the owner's Mac (null
   when QUEUE_AGENT_SECRET is not set): the page calls it after an accept so
   a Gmail reply draft lands at once instead of on the worker's next pass.
+  Only an owner gets it (QUEUE_CHAT_OWNERS, a comma list of emails, else
+  the root admins): nobody else's browser can reach his Mac, so for them
+  it would only ping their own computer.
+
+  `chat` says which Fable chat the page mounts (queue-team-chat.ts,
+  chatKind): 'mac' for an owner (the chat on his Mac, as before), 'team'
+  for everyone else who can work the Queue when QUEUE_TEAM_AGENT_SECRET is
+  set (the same chat program on a server, reached through
+  /api/admin/queue/chat), null otherwise. With 'team' comes
+  `teamChat: { online }`: whether that server's agent has asked the site
+  for work in the last minute.
 
   Every action that decides, edits or undoes something (all but edit, flag
   and public) is written onto the row's History with the signed-in admin's
   name, in the same write – queue-history.ts.
+
+  What is applied is what the person saw (queue-shown.ts). Every Change and
+  Rule item carries `shown`, a fingerprint of its proposed changes or its
+  edits as the row held them when it was read. accept, reject, delete,
+  later and suggest on such an item take { shown: <the item's, as the page
+  showed it> } and are refused with 412 when the row's fingerprint is no
+  longer that one (or none was sent): the page reads the item again. The
+  fingerprint that passed is kept on the decision's History entry, where
+  the Mac checks it before it writes an applied rule. Every History entry
+  also carries the signed-in admin's address (`email`), which the page is
+  never sent.
+
+  A flag written from a reply in someone's Fable chat leaves a History
+  line with their name ("Fable changed the verdict in Rob's chat") unless
+  the chat is an owner's own, which leaves none, as before; so does
+  putting the earlier one back.
+
+  A POST must come from the admin's own page (own-page.ts): JSON, and
+  neither from another site nor from another host under the same domain.
 
   Every accept writes to the live base, so the route re-reads the row first
   and refuses anything already decided (409). No fresh-session requirement:
@@ -70,11 +126,24 @@
 */
 
 import { NextRequest } from 'next/server'
-import { canReviewQueue, canViewQueue, currentAdmin } from '@/lib/admin/auth'
+import {
+  canViewQueue,
+  canWorkQueue,
+  currentAdmin,
+  queueMode,
+} from '@/lib/admin/auth'
+import {
+  CHECKER_NAME,
+  parsePrint,
+  SUGGEST_DIDS,
+  type SuggestDid,
+} from '@/lib/admin/queue-suggest'
 import { mapForStrip } from '@/lib/admin/queue-map'
 import {
   acceptItem,
   agentInfo,
+  answerItem,
+  askItem,
   closeHandledRows,
   deleteItem,
   findListing,
@@ -82,8 +151,6 @@ import {
   flagItem,
   getPageOrder,
   getQueueItem,
-  getTableSchema,
-  getTargetFields,
   laterItem,
   listDecided,
   listForListing,
@@ -91,15 +158,30 @@ import {
   QueueError,
   rejectItem,
   reopenItem,
+  readTarget,
+  requireRecordShown,
+  requireShown,
+  requireSuggestionSeen,
   sanitiseEdits,
   saveEdits,
   savePublicWording,
+  suggestItem,
   undoItem,
   unflagItem,
   waitItem,
+  withdrawItem,
 } from '@/lib/admin/queue'
+import { notOwnPageRequest } from '@/lib/admin/own-page'
+import { actingAs } from '@/lib/admin/queue-actor'
 import { parseFlag } from '@/lib/admin/queue-flag'
 import { publicChoiceOf } from '@/lib/admin/queue-rule-instant'
+import { chatKind, chatOwners } from '@/lib/admin/queue-team-chat'
+import {
+  relayErrorText,
+  teamAgentSecret,
+  teamRelay,
+} from '@/lib/admin/queue-team-relay'
+import { ROOT_ADMINS } from '@/lib/admin/users'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -115,7 +197,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 async function ensureAuth(write: boolean): Promise<Response | null> {
-  const allowed = write ? await canReviewQueue() : await canViewQueue()
+  const allowed = write ? await canWorkQueue() : await canViewQueue()
   if (!allowed) return json({ error: 'unauthorized' }, 401)
   return null
 }
@@ -123,13 +205,29 @@ async function ensureAuth(write: boolean): Promise<Response | null> {
 /** A QueueError carries text written for the page; anything else is
  *  logged and answered with a plain summary, never the raw error. */
 function failure(e: unknown): Response {
-  if (e instanceof QueueError) return json({ error: e.detail }, e.status)
+  if (e instanceof QueueError) {
+    return json({ ...(e.extra ?? {}), error: e.detail }, e.status)
+  }
   const msg = e instanceof Error ? e.message : String(e)
   console.error('[admin-queue]', msg)
   return json(
     { error: 'The queue could not do that; details are in the server log.' },
     502
   )
+}
+
+/** Whether the team chat's server has asked for work lately. A relay that
+ *  cannot be read counts as offline: the list must still load. */
+async function teamOnline(): Promise<boolean> {
+  try {
+    return await teamRelay().online()
+  } catch (e) {
+    console.warn(
+      '[admin-queue] could not read whether the team chat is online:',
+      relayErrorText(e)
+    )
+    return false
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -159,27 +257,44 @@ export async function GET(req: NextRequest) {
     const target = req.nextUrl.searchParams.get('target')
     if (target) {
       const [table = '', record = ''] = target.split('/')
-      const [read, schema] = await Promise.all([
-        getTargetFields(table, record),
-        getTableSchema(table),
-      ])
+      const read = await readTarget(
+        table,
+        record,
+        req.nextUrl.searchParams.get('fresh') === '1'
+      )
       if (!read) return json({ error: 'That record no longer exists.' }, 404)
       return json({
         fields: read.fields,
         attachments: read.attachments,
-        schema,
+        schema: read.schema,
+        // What this read shows of the record, for a Publish to be made on.
+        shown: read.shown,
       })
     }
     const me = await currentAdmin()
     let items = await listQueue()
     if (
       req.nextUrl.searchParams.get('sync') === '1' &&
-      (await canReviewQueue())
+      (await canWorkQueue())
     ) {
       const closed = new Set(await closeHandledRows(items))
       if (closed.size) items = items.filter(i => !closed.has(i.id))
     }
-    return json({ items, agent: agentInfo(me?.email ?? '', me?.name ?? null) })
+    // Which Fable chat this person's page mounts. Only an owner's page is
+    // handed the Mac agent: anyone else's would call their own computer.
+    const email = me?.email ?? ''
+    const chat = chatKind({
+      email,
+      owners: owners(),
+      canWork: await canWorkQueue(),
+      teamOn: Boolean(teamAgentSecret()),
+    })
+    return json({
+      items,
+      agent: chat === 'mac' ? agentInfo(email, me?.name ?? null) : null,
+      chat,
+      ...(chat === 'team' ? { teamChat: { online: await teamOnline() } } : {}),
+    })
   } catch (e) {
     return failure(e)
   }
@@ -197,9 +312,36 @@ const ACTIONS = new Set([
   'delete',
   'wait',
   'public',
+  'suggest',
+  'withdraw',
+  'ask',
+  'answer',
 ])
 
+/** The actions that decide an item. With the 'suggest' grant they arrive as
+ *  'suggest' instead; sent as themselves (an old tab), they are refused. */
+const DECISIONS = new Set(['accept', 'reject', 'delete', 'later'])
+
+const strings = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((k): k is string => typeof k === 'string') : []
+
+/** The people whose Fable chat is the one on the owner's Mac. */
+function owners(): Set<string> {
+  return chatOwners(
+    process.env.QUEUE_CHAT_OWNERS,
+    ROOT_ADMINS.map(u => u.email)
+  )
+}
+
 export async function POST(req: NextRequest) {
+  // The session rides on a cookie, which a browser also sends with a form
+  // on another site: only the Queue page's own JSON writes are taken.
+  if (notOwnPageRequest(req, { json: true })) {
+    return json(
+      { error: 'That request did not come from the Queue page.' },
+      403
+    )
+  }
   const auth = await ensureAuth(true)
   if (auth) return auth
   let body: Record<string, unknown> = {}
@@ -214,14 +356,105 @@ export async function POST(req: NextRequest) {
   const id = typeof body.id === 'string' ? body.id : ''
   const action = typeof body.action === 'string' ? body.action : ''
   if (!ACTIONS.has(action)) return json({ error: 'unknown action' }, 400)
+  const me = await currentAdmin()
+  // Every History entry written below carries this person's address beside
+  // their name (queue-actor.ts): the Mac goes by the address.
+  return actingAs(me?.email, () => decide(id, action, body, me))
+}
+
+/** One action on one item, by the signed-in admin. */
+async function decide(
+  id: string,
+  action: string,
+  body: Record<string, unknown>,
+  me: Awaited<ReturnType<typeof currentAdmin>>
+): Promise<Response> {
   try {
     const item = await getQueueItem(id)
     if (!item) return json({ error: 'That item no longer exists.' }, 404)
-    const me = await currentAdmin()
     // The name the row's history keeps for this action.
     const by = me?.name || me?.email || null
+    const checkFirst = (await queueMode()) === 'suggest'
+    if (checkFirst && (DECISIONS.has(action) || action === 'answer')) {
+      return json(
+        {
+          error:
+            action === 'answer'
+              ? `Answers come from ${CHECKER_NAME} or someone else with full Queue edit.`
+              : `${CHECKER_NAME} checks your decisions first, so nothing was decided. Reload the page, then send it as a suggestion.`,
+        },
+        403
+      )
+    }
+    if (!checkFirst && action === 'suggest') {
+      return json(
+        { error: 'You can decide this yourself, with no suggestion.' },
+        400
+      )
+    }
+    if (DECISIONS.has(action)) {
+      requireSuggestionSeen(
+        item,
+        typeof body.suggested === 'string' ? body.suggested : null,
+        parsePrint(body.suggestedPrint)
+      )
+    }
+    // A decision on a change or a rule, or a suggestion of one, is made on
+    // the changes or edits the page showed (queue-shown.ts).
+    if (DECISIONS.has(action) || action === 'suggest') {
+      requireShown(item, body.shown)
+    }
+    // Publishing an addition, or suggesting it, is made on the record the
+    // page showed: what goes on the site is the record as it stands.
+    if (
+      action === 'accept' ||
+      (action === 'suggest' && body.did === 'accept')
+    ) {
+      await requireRecordShown(item, body.shown)
+    }
     let notPutBack: string[] = []
-    if (action === 'accept') {
+    if (action === 'suggest') {
+      const did = body.did as SuggestDid
+      if (!SUGGEST_DIDS.includes(did)) {
+        return json({ error: 'Suggest what?' }, 400)
+      }
+      const choice = publicChoiceOf(body.public)
+      await suggestItem(
+        item,
+        {
+          did,
+          edits: body.edits === undefined ? null : sanitiseEdits(body.edits),
+          replyDraft:
+            typeof body.replyDraft === 'string' ? body.replyDraft : null,
+          keep: strings(body.keep),
+          publicWording: choice
+            ? {
+                choice,
+                seen:
+                  typeof body.publicSeen === 'string' ? body.publicSeen : null,
+              }
+            : null,
+          reason: typeof body.reason === 'string' ? body.reason : '',
+          rejectReply:
+            typeof body.rejectReply === 'string' ? body.rejectReply : null,
+        },
+        by
+      )
+    } else if (action === 'withdraw') {
+      await withdrawItem(item, by, !checkFirst)
+    } else if (action === 'ask') {
+      await askItem(
+        item,
+        typeof body.question === 'string' ? body.question : '',
+        by
+      )
+    } else if (action === 'answer') {
+      await answerItem(
+        item,
+        typeof body.answer === 'string' ? body.answer : '',
+        by
+      )
+    } else if (action === 'accept') {
       const choice = publicChoiceOf(body.public)
       await acceptItem(
         item,
@@ -256,7 +489,8 @@ export async function POST(req: NextRequest) {
         typeof body.replyDraft === 'string' ? body.replyDraft : undefined,
         Array.isArray(body.keys)
           ? body.keys.filter((k): k is string => typeof k === 'string')
-          : undefined
+          : undefined,
+        { by, checkFirst }
       )
       return json({ item: await getQueueItem(id) })
     } else if (action === 'fix') {
@@ -279,12 +513,17 @@ export async function POST(req: NextRequest) {
     } else if (action === 'reopen') {
       await reopenItem(item, by)
     } else if (action === 'flag') {
+      // From a teammate's chat it is on the item's History with their
+      // name; from an owner's own chat it leaves no line, as before.
+      const named = owners().has((me?.email ?? '').toLowerCase())
+        ? undefined
+        : by
       if (body.undo === true) {
-        await unflagItem(item)
+        await unflagItem(item, named)
       } else {
         const parsed = parseFlag(body.flag, item.type)
         if ('error' in parsed) return json({ error: parsed.error }, 400)
-        await flagItem(item, parsed.flag)
+        await flagItem(item, parsed.flag, named)
       }
     } else {
       notPutBack = await undoItem(item, by)

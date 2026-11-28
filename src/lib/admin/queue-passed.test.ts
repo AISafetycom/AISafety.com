@@ -82,6 +82,12 @@ describe('takenOutOf', () => {
 
   it('leaves every other row out', () => {
     expect(takenOutOf(row({ status: 'Pending' }))).toBeNull()
+    // Read whatever its age because it carries a suggestion or a question,
+    // which has its own place on the page.
+    expect(
+      takenOutOf(row({ forBryce: { kind: 'ask', question: 'Why?' } }))
+    ).toBeNull()
+    expect(takenOutOf(row({ forBryce: null }))).not.toBeNull()
     expect(takenOutOf(row({ error: 'Deleted outside the queue' }))).toBeNull()
     expect(takenOutOf(row({ error: null }))).toBeNull()
   })

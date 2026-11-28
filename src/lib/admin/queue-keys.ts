@@ -60,10 +60,12 @@ const NEEDS: Record<string, { view: 'detail' | 'row'; noEditor: boolean }> = {
   '2': { view: 'detail', noEditor: true },
   '3': { view: 'detail', noEditor: true },
   // Open something on its detail: Fable's box, the Position list, the
-  // field picker.
+  // field picker, the answer or Ask box.
   f: { view: 'detail', noEditor: false },
   p: { view: 'detail', noEditor: false },
   e: { view: 'detail', noEditor: false },
+  // The answer box of a question on it, or the Ask box (queue-suggest.ts).
+  z: { view: 'detail', noEditor: false },
   // Bring a declined one back, from its detail or its marked row.
   b: { view: 'row', noEditor: true },
   // Its links, from either.

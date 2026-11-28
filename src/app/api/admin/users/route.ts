@@ -9,7 +9,9 @@
   DELETE /api/admin/users  body { email }                        → 204
 
   `access` is an object keyed by area (src/lib/admin/access.ts), each value
-  false, 'view' or 'edit'.
+  false, 'view' or 'edit', and for the Queue also 'suggest' ("can edit,
+  Bryce checks first"). A change to someone's access is logged with each
+  area's old and new value.
   Names are not entered here: Google supplies them at first sign-in, or with
   the access request when someone unknown tried to sign in. Adding an email
   that has a pending request approves it (its name is kept, the request goes).
@@ -28,7 +30,12 @@ import {
   hasFreshSession,
   SENSITIVE_FRESH_SECONDS,
 } from '@/lib/admin/auth'
-import { canEdit, type AccessFlags } from '@/lib/admin/access'
+import {
+  accessChange,
+  canEdit,
+  summariseAccess as summarise,
+  type AccessFlags,
+} from '@/lib/admin/access'
 import { approvedMail, sendAdminMail } from '@/lib/admin/mail'
 import { publicOrigin } from '@/lib/admin/origin'
 import {
@@ -113,12 +120,6 @@ export async function GET() {
   })
 }
 
-const summarise = (a: AccessFlags) =>
-  Object.entries(a)
-    .filter(([, grant]) => grant)
-    .map(([k, grant]) => `${k}:${grant}`)
-    .join(',')
-
 export async function POST(req: NextRequest) {
   const auth = await ensureAuth(true)
   if (auth) return auth
@@ -186,10 +187,12 @@ export async function PATCH(req: NextRequest) {
     )
   }
   const patch: { access: AccessFlags } = { access: checked.value }
+  const was =
+    (await usersStore.list()).find(u => u.email === email)?.access ?? null
   const user = await usersStore.update(email, patch)
   if (!user) return json({ error: 'No such user.' }, 404)
   console.log(
-    `[admin-users] ${me?.name ?? 'unknown'} changed ${email}: access=${summarise(patch.access)}`
+    `[admin-users] ${me?.name ?? 'unknown'} changed ${email}: ${accessChange(was, patch.access)}`
   )
   return json({ user })
 }

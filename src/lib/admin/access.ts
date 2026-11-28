@@ -10,8 +10,29 @@
 // (Analytics, Site preview, …) stop at 'view'; the ones that can change the
 // live site carry an `edit` note below, and the Admin admin page shows a
 // "can edit" tick next to those.
+//
+// The Queue has one more: `'suggest'`, "can edit, Bryce checks first"
+// (27 November 2026, for a new teammate's first weeks). Everything on the
+// tab works as with 'edit', except that Publish or Apply, Reject, Delete and
+// Review again in a week save a suggestion on the item instead of deciding
+// it, and someone with 'edit' confirms it (queue-suggest.ts). It is a grant
+// value rather than a separate setting so it fails closed: canEdit() is
+// false for it, and code that does not know the value (an older deploy, a
+// rollback) reads it as no Queue at all, never as 'edit'.
 
-export type Grant = false | 'view' | 'edit'
+export type Grant = false | 'view' | 'edit' | QueueCheck
+
+/** The Queue grants that let someone work on items while another person
+ *  checks what they do. Phase 1 has one, 'suggest' (checked before it goes
+ *  live). A later "Bryce checks after" grant joins this list, and
+ *  queueModeOf() below, when it is built. */
+export const QUEUE_CHECKS = ['suggest'] as const
+export type QueueCheck = (typeof QUEUE_CHECKS)[number]
+
+/** How a session works on the Queue: decides items ('edit'), suggests
+ *  decisions for someone with 'edit' to confirm ('suggest'), or only looks
+ *  ('view'). Null: no Queue tab. */
+export type QueueMode = 'edit' | QueueCheck | 'view'
 
 export interface AccessFlags {
   /** /admin/queue — proposed changes and additions to the directory.
@@ -116,9 +137,31 @@ export function canOpen(a: AccessFlags, key: AccessArea): boolean {
   return a[key] !== false
 }
 
-/** The tab's writes are allowed. Never true for a view-only area. */
+/** The tab's writes are allowed. Never true for a view-only area, nor for
+ *  the Queue's 'suggest' (see queueModeOf). */
 export function canEdit(a: AccessFlags, key: AccessArea): boolean {
   return a[key] === 'edit'
+}
+
+/** What the Queue grant lets this person do there. */
+export function queueModeOf(a: AccessFlags): QueueMode | null {
+  switch (a.queue) {
+    case 'edit':
+      return 'edit'
+    case 'suggest':
+      return 'suggest'
+    // A "Bryce checks after" grant would read here.
+    case 'view':
+      return 'view'
+    default:
+      return null
+  }
+}
+
+/** May write to the Queue at all: decide, or suggest decisions. */
+export function canWorkQueue(a: AccessFlags): boolean {
+  const mode = queueModeOf(a)
+  return mode === 'edit' || mode === 'suggest'
 }
 
 /** Flags with the given areas open at 'view' and, of those, `edit` raised to
@@ -157,6 +200,9 @@ export function hasAnyAccess(a: AccessFlags): boolean {
 function parseGrant(key: AccessArea, v: unknown): Grant {
   if (v === true || v === 'edit') return topGrant(key)
   if (v === 'view') return 'view'
+  // Only the Queue knows 'suggest'. Anywhere else, and any value this file
+  // does not know, is no tab at all: never more than was meant.
+  if (key === 'queue' && v === 'suggest') return 'suggest'
   return false
 }
 
@@ -175,9 +221,43 @@ export function parseAccess(input: unknown): AccessFlags | null {
   return out
 }
 
+/** Whose check a 'suggest' grant waits for: the owner, the built-in admin
+ *  in users.ts (that file reads the user store, so the page can't import
+ *  it). */
+export const CHECKER_NAME = 'Bryce'
+
+/** The words for 'suggest' wherever a grant is described. */
+export const SUGGEST_LABEL = `${CHECKER_NAME} checks first`
+
 /** Labels for a set of flags, "Queue (can edit)" style, in tab order. */
 export function describeAccess(a: AccessFlags): string[] {
   return ACCESS_AREAS.filter(x => a[x.key] !== false).map(x =>
-    a[x.key] === 'edit' ? `${x.label} (can edit)` : x.label
+    a[x.key] === 'edit'
+      ? `${x.label} (can edit)`
+      : a[x.key] === 'suggest'
+        ? `${x.label} (can edit, ${SUGGEST_LABEL})`
+        : x.label
   )
+}
+
+/** A set of flags for a log line: "queue:edit,analytics:view". */
+export function summariseAccess(a: AccessFlags): string {
+  return Object.entries(a)
+    .filter(([, grant]) => grant)
+    .map(([k, grant]) => `${k}:${grant}`)
+    .join(',')
+}
+
+/** The areas a change moved, old value to new ("queue:edit→suggest"), for
+ *  the log line when someone's access changes: what they had before as well
+ *  as after. */
+export function accessChange(
+  was: AccessFlags | null,
+  now: AccessFlags
+): string {
+  if (!was) return `access=${summariseAccess(now)}`
+  const moved = ACCESS_KEYS.filter(k => was[k] !== now[k]).map(
+    k => `${k}:${was[k] || 'none'}→${now[k] || 'none'}`
+  )
+  return moved.length ? moved.join(',') : 'no change'
 }

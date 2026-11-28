@@ -25,6 +25,12 @@
     flag            → the verdict, reasons and reject buttons Fable gave in
                       the chat onto the row ("Update flag", queue-flag.ts);
                       its Undo puts back what they replaced
+    suggest         → someone whose Queue grant is "Bryce checks first"
+                      saves a Publish, Reject, Delete or Review again in a
+                      week on the row's For Bryce field instead of deciding;
+                      the usual decision by someone with full edit confirms
+                      it (queue-suggest.ts). withdraw takes one back (or
+                      dismisses it), ask and answer carry a question.
 
   Writes to the resource tables go through the raw admin client (no cache);
   after a publish or a field change the public cache tag is revalidated so
@@ -42,6 +48,15 @@ import {
   type AirtableRow,
 } from './airtable'
 import { sealToken } from './session'
+import { actorEmail } from './queue-actor'
+import { CHAT_SOURCE, chatProposed } from './queue-chat-source'
+import {
+  ruleEditsOf,
+  ruleMarkOf,
+  type RuleEdit,
+  type RuleMark,
+} from './queue-rule-edits'
+import { shownOf, shownOfRecord } from './queue-shown'
 import { parseRejectDrafts } from './queue-decline'
 import { listingState, type FoundListing } from './queue-listing'
 import { isExpiredAttachment } from './attachment-url'
@@ -123,8 +138,28 @@ import {
   withEntry,
   type HistoryDid,
   type HistoryEntry,
+  type Suggested,
   type Undid,
 } from './queue-history'
+import {
+  CHECKER_NAME,
+  editsPrint,
+  firstName,
+  forBryceOf,
+  isWaiting,
+  makePrint,
+  MAX_TEXT as FOR_BRYCE_MAX_TEXT,
+  openSuggestion,
+  partWords,
+  replyPrint,
+  suggestWord,
+  unseenParts,
+  type ForBryce,
+  type Print,
+  type Question,
+  type SuggestDid,
+  type Suggestion,
+} from './queue-suggest'
 
 export const QUEUE_TABLE_ID = 'tblonlKwIFJ7Aa8QN'
 const BROOM_ISSUES_TABLE_ID = 'tblntD3WITPEgjHRK'
@@ -170,6 +205,11 @@ const F = {
   // Who decided, edited or undid the item on the page, and when: a JSON
   // list, one entry per action (queue-history.ts).
   history: 'fldjRsqYJAwR6CXpA',
+  // "For Bryce": a suggested decision or a question from someone whose
+  // Queue grant is "Bryce checks first", as JSON (queue-suggest.ts).
+  // Referenced only by this id, here and in LIST_FORMULA. The field was
+  // "Replaced listing" until 27 Nov 2026, empty in every row and unused.
+  forBryce: 'fldWFnmC0u06GNC6B',
 } as const
 
 export type QueueType = 'Add' | 'Change' | 'Rule'
@@ -180,6 +220,8 @@ export type QueueSource =
   | 'Comb'
   | 'Form'
   | 'Teach'
+  // A change proposed in the team's Fable chat (queue-chat-source.ts).
+  | 'Queue chat'
 export type QueueStatus =
   | 'Pending'
   | 'Revising'
@@ -215,6 +257,9 @@ export interface QueueItem {
    *  should open the original email with the form"). */
   emailLink?: string | null
   sourceExcerpt: string | null
+  /** Source "Queue chat": the teammate who asked the chat, when the row
+   *  names one (the proposal's `chat.by`, written by the Mac). */
+  chatBy?: string | null
   /** The record's logo as the site shows it (from the site's own listing
    *  catalog for published records, else the Add snapshot), for the list. */
   logo: string | null
@@ -250,6 +295,19 @@ export interface QueueItem {
    *  writes it only on "apply". */
   rulePublic: RulePublic | null
   rulePublicChoice: PublicChoice | null
+  /** Rule: it goes in only on the owner's own Apply (proposal
+   *  `bryce_applies`: proposed in a teammate's chat, or drafted from a
+   *  decision a teammate made). Its card is drawn from its edits, below,
+   *  never from the words written about them (queue-rule-edits.ts). */
+  ruleMark?: RuleMark | null
+  /** A marked rule: the edits the worker writes on Apply, to the rulebook
+   *  and to the public listing policy. Null when they cannot be read. */
+  ruleEdits?: RuleEdit[] | null
+  rulePublicEdits?: RuleEdit[] | null
+  /** Change, Rule: the fingerprint of the changes or edits as this read of
+   *  the row found them (queue-shown.ts). The page sends it back with a
+   *  decision, which is refused when the row no longer matches. */
+  shown?: string | null
   verdict: Verdict | null
   reasons: string[]
   rejectChips: string[]
@@ -360,6 +418,13 @@ export interface QueueItem {
    *  (queue-history.ts). Empty for a row nobody has acted on since
    *  18 Nov 2026. */
   history?: HistoryEntry[]
+  /** A suggested decision or a question waiting for someone with full
+   *  Queue edit, or a question answered (queue-suggest.ts); null when the
+   *  row has none. */
+  forBryce?: ForBryce | null
+  /** The row's fingerprint now (queue-suggest.ts, makePrint): only on an
+   *  item read by itself (getQueueItem), for the checks on a suggestion. */
+  print?: Print
 }
 
 export type NoReply = 'no email' | 'no notification'
@@ -383,10 +448,18 @@ type RawFields = Record<string, unknown>
 export class QueueError extends Error {
   status: number
   detail: string
-  constructor(message: string, status = 400) {
+  /** More for the page to act on, answered beside `error` (the check on a
+   *  suggestion: what the item is now, requireSuggestionSeen). */
+  extra: Record<string, unknown> | null
+  constructor(
+    message: string,
+    status = 400,
+    extra: Record<string, unknown> | null = null
+  ) {
     super(message)
     this.status = status
     this.detail = message
+    this.extra = extra
   }
 }
 
@@ -690,6 +763,19 @@ function rowToItem(
 ): QueueItem {
   const f = row.fields
   const proposal = parseJson(f[F.proposal])
+  const inChat = chatProposed(str(f[F.source]), proposal)
+  const kind = str(f[F.type]) ?? 'Add'
+  // What a decision on a change or a rule is made on (queue-shown.ts).
+  const shown = shownOf({
+    type: kind,
+    proposal,
+    targetTable: f[F.targetTable],
+    targetRecord: f[F.targetRecord],
+  })
+  const ruleMark =
+    kind === 'Rule' && isRecord(proposal)
+      ? ruleMarkOf(proposal.bryce_applies)
+      : null
   let fields: Record<string, unknown> | null = null
   let name: string | null = null
   let url: string | null = null
@@ -784,10 +870,16 @@ function rowToItem(
     emailLink = emailLinkOf(proposal)
     if (isRecord(proposal.fields)) {
       fields = proposal.fields
-    } else if (changes.length === 0 && !diff) {
+    } else if (kind !== 'Rule' && changes.length === 0 && !diff) {
+      // An old row: the proposal is the record's fields themselves. Never a
+      // rule, which has none: one the team's chat proposed comes without a
+      // `diff`, and all of it, the address on its mark included, would
+      // have gone to the page as fields.
       const rest: Record<string, unknown> = {}
       for (const [k, v] of Object.entries(proposal)) {
         if (
+          k !== 'chat' &&
+          k !== 'bryce_applies' &&
           k !== 'name' &&
           k !== 'url' &&
           k !== 'no_reply' &&
@@ -848,7 +940,12 @@ function rowToItem(
     createdAt: row.createdTime,
     title: str(f[F.title]) ?? name ?? '(untitled)',
     type: (str(f[F.type]) as QueueType | null) ?? 'Add',
-    source: (str(f[F.source]) as QueueSource | null) ?? 'Comb',
+    // A change proposed in the team's chat reads as that whatever its
+    // Source says: until the field has the choice, the Mac files it under
+    // Comb and marks the proposal (queue-chat-source.ts).
+    source: inChat
+      ? CHAT_SOURCE
+      : ((str(f[F.source]) as QueueSource | null) ?? 'Comb'),
     status: (str(f[F.status]) as QueueStatus | null) ?? 'Pending',
     page: str(f[F.page]),
     targetTable: str(f[F.targetTable]),
@@ -857,6 +954,7 @@ function rowToItem(
     sourceLink: str(f[F.sourceLink]),
     emailLink,
     sourceExcerpt: str(f[F.sourceExcerpt]),
+    ...(inChat ? { chatBy: inChat.by } : {}),
     logo:
       (str(f[F.targetRecord]) && logos.get(str(f[F.targetRecord]) ?? '')) ||
       snapshotLogo(fields),
@@ -874,6 +972,17 @@ function rowToItem(
     ruleInstant,
     rulePublic,
     rulePublicChoice,
+    ...(ruleMark
+      ? {
+          ruleMark,
+          ruleEdits: isRecord(proposal) ? ruleEditsOf(proposal.edits) : null,
+          rulePublicEdits:
+            isRecord(proposal) && isRecord(proposal.public)
+              ? ruleEditsOf(proposal.public.edits)
+              : null,
+        }
+      : {}),
+    ...(shown ? { shown } : {}),
     verdict: str(f[F.verdict]) as Verdict | null,
     reasons: lines(f[F.reasons]),
     rejectChips: lines(f[F.rejectChips]),
@@ -922,7 +1031,31 @@ function rowToItem(
     checked,
     preparedLogos,
     history: historyOf(f[F.history]),
+    forBryce: forBryceIn(row.id, f[F.forBryce]),
   }
+}
+
+/** The row's For Bryce field, read; a value it can't read (typed in by
+ *  hand) is said in the log and shows as none. */
+function forBryceIn(id: string, raw: unknown): ForBryce | null {
+  const fb = forBryceOf(raw)
+  if (!fb && typeof raw === 'string' && raw.trim()) {
+    console.warn(`[admin-queue] ${id}: unreadable For Bryce value, ignored`)
+  }
+  return fb
+}
+
+/** The fingerprint of a row as Airtable holds it (queue-suggest.ts). */
+function printOfRow(f: RawFields): Print {
+  const proposal = parseJson(f[F.proposal])
+  return makePrint({
+    verdict: str(f[F.verdict]),
+    changes: isRecord(proposal) ? proposal.changes : null,
+    table: str(f[F.targetTable]),
+    record: str(f[F.targetRecord]),
+    edits: parseJson(f[F.edits]),
+    reply: f[F.replyDraft],
+  })
 }
 
 // Open rows, plus anything decided in the last day: the "Done today" strip
@@ -930,11 +1063,16 @@ function rowToItem(
 // midnight is at most 24 hours back); the browser trims it to its own
 // calendar day. Also the rows the Mac's daily check took out in the last
 // week, for the line at the top of the list (queue-passed.ts); they have no
-// Decided at, so they show nowhere else.
-const LIST_FORMULA =
+// Decided at, so they show nowhere else. And every row whose For Bryce
+// holds something, whatever its status (queue-suggest.ts): a question about
+// a decided item, a suggestion on a row a bot closed meanwhile (so it can
+// be dismissed), an answer waiting to be read. The field is named by its id
+// (Airtable formulas take `{fld…}`), so renaming it can't break the list.
+export const LIST_FORMULA =
   "OR({Status}='Pending',{Status}='Revising',{Status}='Accepted',{Status}='Failed'," +
   "AND(OR({Status}='Applied',{Status}='Rejected'),IS_AFTER({Decided at},DATEADD(NOW(),-1,'day')))," +
   TAKEN_OUT_FORMULA +
+  `,{${F.forBryce}}!=''` +
   ')'
 
 /** The rows, and nothing else: one paginated read of the Queue table, so
@@ -1042,13 +1180,13 @@ export async function getQueueItem(id: string): Promise<QueueItem | null> {
   }
   // No logo lookup here (it can cost a catalog build): the page keeps the
   // picture it already shows when a decision comes back.
-  return rowToItem(
-    (await res.json()) as {
-      id: string
-      createdTime: string
-      fields: RawFields
-    }
-  )
+  const row = (await res.json()) as {
+    id: string
+    createdTime: string
+    fields: RawFields
+  }
+  // With its fingerprint, for the checks on a suggestion (queue-suggest.ts).
+  return { ...rowToItem(row), print: printOfRow(row.fields) }
 }
 
 // ─── The target record, live ────────────────────────────────────────────────
@@ -1213,6 +1351,46 @@ export async function getTargetFields(
 ): Promise<TargetRead | null> {
   const raw = await readRecord(table, record)
   return raw ? targetRead(raw) : null
+}
+
+/** A record's fingerprint as the page shows it (queue-shown.ts): over the
+ *  fields the page's own rules keep, read with the table's field list. */
+function recordShown(
+  table: string,
+  record: string,
+  raw: RawFields,
+  schema: FieldInfo[]
+): string {
+  return shownOfRecord({
+    table,
+    record,
+    fields: raw,
+    types: new Map(schema.map(f => [f.name, f.type])),
+    never: PROTECTED_FIELDS,
+  })
+}
+
+/** What the page is handed for an item's record: its fields, its
+ *  pictures, the table's field list, and the fingerprint of all that
+ *  (`shown`), which the page sends back when it publishes an addition
+ *  (requireRecordShown). `fresh` reads the field list anew: the page asks
+ *  for that after a refusal, so a list that changed a moment ago cannot
+ *  refuse it twice. Null when the record is not there. */
+export async function readTarget(
+  table: string,
+  record: string,
+  fresh = false
+): Promise<(TargetRead & { schema: FieldInfo[]; shown: string }) | null> {
+  const [raw, schema] = await Promise.all([
+    readRecord(table, record),
+    fresh ? getTableSchema(table, 0) : getTableSchema(table),
+  ])
+  if (!raw) return null
+  return {
+    ...targetRead(raw),
+    schema,
+    shown: recordShown(table, record, raw, schema),
+  }
 }
 
 function targetRead(raw: RawFields): TargetRead {
@@ -2012,9 +2190,16 @@ function refreshCache(): void {
   revalidateTag('airtable-records', 'max')
 }
 
+const DECISIONS: readonly HistoryDid[] = ['accept', 'reject', 'later', 'delete']
+
 /** The History field with one more entry: who did what to the item, for
  *  the same write as the action itself (queue-history.ts). `by` is the
- *  signed-in admin's name; null when the caller has nobody to name. */
+ *  signed-in admin's name; null when the caller has nobody to name.
+ *
+ *  A decision also settles the row's For Bryce (queue-suggest.ts) in that
+ *  same write: the field is cleared, and a suggestion it confirmed or
+ *  overrode, or a question it answered by deciding, is named on the entry,
+ *  so the line keeps both names. */
 function stamped(
   item: QueueItem,
   by: string | null,
@@ -2022,9 +2207,92 @@ function stamped(
   at: string,
   more: { fields?: string[]; undid?: Undid | null } = {}
 ): Record<string, unknown> {
+  const fb = DECISIONS.includes(did) ? (item.forBryce ?? null) : null
+  const suggested: Suggested | null =
+    fb && isWaiting(fb)
+      ? { by: fb.by, did: fb.kind === 'suggest' ? fb.did : 'ask' }
+      : null
   return {
-    [F.history]: withEntry(item.history ?? [], { at, by, did, ...more }),
+    [F.history]: historyWith(item, {
+      at,
+      by,
+      did,
+      ...more,
+      ...(suggested ? { suggested } : {}),
+      // A decision on a change or a rule: what it was made on.
+      ...(DECISIONS.includes(did) && item.shown ? { shown: item.shown } : {}),
+    }),
+    ...(fb ? { [F.forBryce]: null } : {}),
   }
+}
+
+/** The row's History with one more entry, which carries the address of
+ *  whoever this request acts for (queue-actor.ts) beside their name. */
+function historyWith(
+  item: QueueItem,
+  entry: Omit<Parameters<typeof withEntry>[1], 'email'>
+): string {
+  return withEntry(item.history ?? [], { ...entry, email: actorEmail() })
+}
+
+/** A decision on a change or a rule is made on what the page showed: the
+ *  page sends the fingerprint of the item it had on screen (`shown`,
+ *  queue-shown.ts), and a row whose changes or edits read differently by
+ *  now is refused, 412, so the page reads it again. One that sent none (a
+ *  tab from before this check) is refused the same way. */
+export function requireShown(item: QueueItem, sent: unknown): void {
+  if (item.type !== 'Change' && item.type !== 'Rule') return
+  if (typeof sent === 'string' && sent === item.shown) return
+  const what = item.type === 'Rule' ? 'This rule’s edits' : 'The changes'
+  throw new QueueError(
+    typeof sent === 'string'
+      ? `${what} are not what your page showed: they changed after it read them. Here is the item as it is now. Look again, then decide.`
+      : 'Your page has not said what it showed for this item. Reload the page, then decide.',
+    412
+  )
+}
+
+/** An addition is published as its record stands, so Publish is made on
+ *  the record the page showed: the page sends the fingerprint that came
+ *  with its read of the record (readTarget), and a record that reads
+ *  differently by now (a chat rewrote a field, someone edited it in
+ *  Airtable) is refused, 412, so the page reads it again. A page that
+ *  sent none had not read the record yet (or is a tab from before this
+ *  check) and is refused the same way.
+ *
+ *  The fingerprint that passed goes on the item, and from there on the
+ *  decision's History entry (`shown`), as a change's or a rule's does.
+ *
+ *  Nothing to check for an item that is not an open addition with a
+ *  record, or whose record is gone: the accept says so itself. */
+export async function requireRecordShown(
+  item: QueueItem,
+  sent: unknown
+): Promise<void> {
+  if (item.type !== 'Add') return
+  if (item.status !== 'Pending' && item.status !== 'Failed') return
+  const table = item.targetTable ?? ''
+  const record = item.targetRecord ?? ''
+  if (!TABLE_ID_RE.test(table) || !isRecordId(record)) return
+  const raw = await readRecord(table, record)
+  if (!raw) return
+  let now = recordShown(table, record, raw, await getTableSchema(table))
+  if (typeof sent === 'string' && sent !== now) {
+    // The table's field list may have changed since this server last read
+    // it (kept ten minutes): once more with it read anew, which is how the
+    // page's own re-read after a refusal is answered.
+    now = recordShown(table, record, raw, await getTableSchema(table, 0))
+  }
+  if (typeof sent === 'string' && sent === now) {
+    item.shown = now
+    return
+  }
+  throw new QueueError(
+    typeof sent === 'string'
+      ? 'This listing’s record is not what your page showed: it changed after your page read it. Here it is as it is now. Look again, then decide.'
+      : 'Your page had not read this listing’s record yet. It is reading it now: look at it, then decide.',
+    412
+  )
 }
 
 function requireOpen(item: QueueItem): void {
@@ -2335,6 +2603,30 @@ async function currentValues(
   return out
 }
 
+/** A rule that brings wording for the public listing policy goes in only
+ *  with a choice for it, made on the wording the page showed. */
+function requirePublicSeen(
+  item: QueueItem,
+  publicWording: { choice: PublicChoice; seen: string | null } | null
+): void {
+  if (item.type !== 'Rule' || !item.rulePublic) return
+  if (!publicWording) {
+    throw new QueueError(
+      'This rule comes with wording for the public listing policy, which this page had not shown you. Read it on the rule, then apply again.',
+      412
+    )
+  }
+  if (
+    publicWording.choice === 'apply' &&
+    publicWording.seen !== item.rulePublic.wording
+  ) {
+    throw new QueueError(
+      'The wording for the public listing policy has changed since this page loaded it. Read the new wording, then apply again.',
+      412
+    )
+  }
+}
+
 /** Carries out an Accept. Answers with the proposed or edited fields it
  *  left out because their column is no longer in Airtable (GONE_KEY), so a
  *  caller can say so; the row keeps them too. */
@@ -2356,23 +2648,7 @@ export async function acceptItem(
   // what he chose for it, and which wording it showed him. Before the try,
   // so a refusal leaves the rule open, not Failed. 412, not 409: the rule is
   // still open, and the page re-reads it so the wording he must see shows.
-  if (item.type === 'Rule' && item.rulePublic) {
-    if (!publicWording) {
-      throw new QueueError(
-        'This rule comes with wording for the public listing policy, which this page had not shown you. Read it on the rule, then apply again.',
-        412
-      )
-    }
-    if (
-      publicWording.choice === 'apply' &&
-      publicWording.seen !== item.rulePublic.wording
-    ) {
-      throw new QueueError(
-        'The wording for the public listing policy has changed since this page loaded it. Read the new wording, then apply again.',
-        412
-      )
-    }
-  }
+  requirePublicSeen(item, publicWording)
   // The proposed fields left out with the cross come with the page's edits
   // under their own key, which is never a field to write.
   const { [LEFT_OUT_KEY]: left, ...edits } = pageEdits
@@ -2704,30 +2980,8 @@ export async function deleteItem(
   by: string | null = null
 ): Promise<void> {
   requireOpen(item)
-  const table = item.targetTable ?? ''
-  const record = item.targetRecord ?? ''
-  if (
-    item.type === 'Add' &&
-    SUGGESTION_TABLES.has(table) &&
-    isRecordId(record)
-  ) {
-    const res = await airtableRequest(`${table}/${record}`)
-    if (res.ok) {
-      const { fields } = (await res.json()) as { fields: RawFields }
-      if (fields['Publish?']) {
-        throw new QueueError(
-          'It is live on the site, so Delete leaves it alone. Reload the page.',
-          409
-        )
-      }
-      if (!fields['Hide?']) await deleteRecord(table, record)
-    } else if (res.status !== 404 && res.status !== 403) {
-      throw new QueueError(
-        `Airtable read failed: ${res.status} ${await res.text()}`,
-        502
-      )
-    }
-  }
+  const record = await deletableRecord(item)
+  if (record && !record.hidden) await deleteRecord(record.table, record.id)
   if (item.type === 'Change' && item.issueRow && isRecordId(item.issueRow)) {
     await deleteRecord(BROOM_ISSUES_TABLE_ID, item.issueRow)
   }
@@ -2736,6 +2990,41 @@ export async function deleteItem(
     [F.error]: DELETED_NOTE,
     ...stamped(item, by, 'delete', now()),
   })
+}
+
+/** An addition's record as Delete would find it: null when there is none
+ *  to delete (not an addition, or the record is gone already). Refuses a
+ *  live one: Delete never takes a listing off the site. */
+async function deletableRecord(
+  item: QueueItem
+): Promise<{ table: string; id: string; hidden: boolean } | null> {
+  const table = item.targetTable ?? ''
+  const record = item.targetRecord ?? ''
+  if (
+    item.type !== 'Add' ||
+    !SUGGESTION_TABLES.has(table) ||
+    !isRecordId(record)
+  ) {
+    return null
+  }
+  const res = await airtableRequest(`${table}/${record}`)
+  if (res.ok) {
+    const { fields } = (await res.json()) as { fields: RawFields }
+    if (fields['Publish?']) {
+      throw new QueueError(
+        'It is live on the site, so Delete leaves it alone. Reload the page.',
+        409
+      )
+    }
+    return { table, id: record, hidden: Boolean(fields['Hide?']) }
+  }
+  if (res.status !== 404 && res.status !== 403) {
+    throw new QueueError(
+      `Airtable read failed: ${res.status} ${await res.text()}`,
+      502
+    )
+  }
+  return null
 }
 
 /** The row's fields as Airtable holds them, for a write that must keep
@@ -2760,7 +3049,11 @@ async function rawQueueFields(id: string): Promise<RawFields> {
  *  written to the listing. */
 export async function flagItem(
   item: QueueItem,
-  flag: FlagUpdate
+  flag: FlagUpdate,
+  /** Whose chat the flag came from, when it is not the owner's own: kept
+   *  on the row's History (queue-history.ts, `flag`). Left out, no line is
+   *  written, as it always was for the owner. */
+  inChatOf?: string | null
 ): Promise<void> {
   requireOpen(item)
   const f = await rawQueueFields(item.id)
@@ -2796,11 +3089,18 @@ export async function flagItem(
   }
   next[FLAG_BEFORE_KEY] = before
   fields[F.proposal] = JSON.stringify(next, null, 1)
-  await patchQueueRow(item.id, fields)
+  await patchQueueRow(item.id, {
+    ...fields,
+    ...(inChatOf === undefined ? {} : stamped(item, inChatOf, 'flag', now())),
+  })
 }
 
 /** Undo for "Update flag": the row says again what it said before. */
-export async function unflagItem(item: QueueItem): Promise<void> {
+export async function unflagItem(
+  item: QueueItem,
+  /** Who put the earlier flag back, when it is not the owner: see flagItem. */
+  by?: string | null
+): Promise<void> {
   requireOpen(item)
   const f = await rawQueueFields(item.id)
   const proposal = parseJson(f[F.proposal])
@@ -2821,7 +3121,10 @@ export async function unflagItem(item: QueueItem): Promise<void> {
     [F.proposal]: JSON.stringify(next, null, 1),
   }
   if (typeof before.title === 'string') fields[F.title] = before.title
-  await patchQueueRow(item.id, fields)
+  await patchQueueRow(item.id, {
+    ...fields,
+    ...(by === undefined ? {} : stamped(item, by, 'unflag', now())),
+  })
 }
 
 /** His own words for the sentence a rule brings for the public listing
@@ -2902,9 +3205,25 @@ export async function saveEdits(
   item: QueueItem,
   edits: Record<string, unknown>,
   replyDraft?: string,
-  keys?: string[]
+  keys?: string[],
+  /** Who is saving: someone whose decisions are suggestions can't change
+   *  an item while a suggestion on it waits (queue-suggest.ts). Not only
+   *  their own: a name that changed since (a new sign-in card) would
+   *  otherwise free the item, and their edit would change what is being
+   *  confirmed. */
+  who: { by: string | null; checkFirst: boolean } | null = null
 ): Promise<void> {
   requireOpen(item)
+  const open = openSuggestion(item.forBryce)
+  if (open && who?.checkFirst) {
+    const what = suggestWord(open.did, item.type)
+    throw new QueueError(
+      open.by === who.by
+        ? `You suggested ${what} on this. Take it back first to change anything.`
+        : `${firstName(open.by)} suggested ${what} on this, and it waits for ${CHECKER_NAME}, so it can't be changed now.`,
+      409
+    )
+  }
   // The fields left out sit on the row with the edits, under their own key,
   // so a save that does not touch them keeps them.
   const merged = mergeEdits(
@@ -2920,6 +3239,23 @@ export async function saveEdits(
   // draft – the Mac saves it in Gmail or Bryce pastes it, never sends it.
   if (replyDraft !== undefined && item.replyDraft !== null) {
     fields[F.replyDraft] = replyDraft.trim().slice(0, 5000)
+  }
+  // Someone with full edit changing a suggested item before deciding it:
+  // the suggestion follows their own edits, so their Confirm still goes.
+  // Each part only while it is as the suggestion left it: a change from
+  // anywhere else since still stops the next press once
+  // (requireSuggestionSeen), and their page sends what it has read.
+  if (open && who && !who.checkFirst && item.print) {
+    const print: Print = { ...open.print }
+    if (open.print.edits === item.print.edits) {
+      print.edits = editsPrint(Object.keys(merged).length ? merged : null)
+    }
+    if (F.replyDraft in fields && open.print.reply === item.print.reply) {
+      print.reply = replyPrint(fields[F.replyDraft])
+    }
+    if (print.edits !== open.print.edits || print.reply !== open.print.reply) {
+      fields[F.forBryce] = JSON.stringify({ ...open, print })
+    }
   }
   await patchQueueRow(item.id, fields)
 }
@@ -3210,4 +3546,275 @@ export async function undoItem(
     `Nothing to undo: the item is ${item.status.toLowerCase()}.`,
     409
   )
+}
+
+// ─── Bryce checks first (queue-suggest.ts) ──────────────────────────────────
+
+/** A decision by someone with full edit on an item that carries a
+ *  suggestion goes only on what their page has shown: this suggestion
+ *  (`seen`, its time), on the row's verdict, proposed changes, target,
+ *  Edits and Reply draft as they were when it was made. A part that has
+ *  changed since passes once their page has read it as it is now
+ *  (`seenPrint`, the fingerprint an earlier refusal gave the page, which
+ *  then read the item again). Otherwise 412, with `recheck` = { at, print }
+ *  so the page can say it has seen the item as it is now on the next
+ *  press; a Mac duty rewriting the reply draft or a picture link so stops
+ *  one press, never the item for good. */
+export function requireSuggestionSeen(
+  item: QueueItem,
+  seen: string | null,
+  seenPrint: Print | null = null
+): void {
+  const s = openSuggestion(item.forBryce)
+  if (!s) return
+  const who = firstName(s.by)
+  const what = suggestWord(s.did, item.type)
+  if (seen !== s.at) {
+    // No fingerprint here: the next press is checked against the
+    // suggestion's own, so a change since it was made is still said.
+    throw new QueueError(
+      `${who} suggested ${what} on this after your page loaded it. Here it is now. Look again, then decide.`,
+      412,
+      { recheck: { at: s.at } }
+    )
+  }
+  if (!item.print) {
+    throw new QueueError(
+      'The item could not be checked against the suggestion. Reload the page.',
+      412
+    )
+  }
+  const moved = unseenParts(s.print, item.print, seenPrint)
+  if (moved.length > 0) {
+    const words = partWords(moved)
+    const Words = `${words[0].toUpperCase()}${words.slice(1)}`
+    throw new QueueError(
+      seenPrint
+        ? `${Words} changed again since your page read it. Here is the item as it is now. Look again, then decide.`
+        : `${Words} changed after ${who} suggested ${what}. Here is the item as it is now. Look again, then decide.`,
+      412,
+      { recheck: { at: s.at, print: item.print, moved } }
+    )
+  }
+}
+
+/** What a "Suggest …" press sends: the decision it stands for, with what
+ *  that decision would take (the page's edits and reply draft, the reason
+ *  and decline text, a change's kept fields, a rule's public wording). */
+export interface SuggestInput {
+  did: SuggestDid
+  /** The page's edits, as Accept would send them; null keeps the row's. */
+  edits: Record<string, unknown> | null
+  replyDraft: string | null
+  keep: string[]
+  publicWording: { choice: PublicChoice; seen: string | null } | null
+  reason: string
+  rejectReply: string | null
+}
+
+/** A suggested decision: nothing changes on the listing and the row stays
+ *  open (no Decided at, so none of the Mac's decision steps run), but the
+ *  checks the decision itself would make run now, so a problem shows at
+ *  once rather than when it is confirmed. The page's edits and reply draft
+ *  go on the row in the same write, with the suggestion and its History
+ *  line. */
+export async function suggestItem(
+  item: QueueItem,
+  input: SuggestInput,
+  by: string | null
+): Promise<void> {
+  requireOpen(item)
+  const fb = item.forBryce ?? null
+  const open = openSuggestion(fb)
+  if (open) {
+    const what = suggestWord(open.did, item.type)
+    throw new QueueError(
+      open.by === by
+        ? `You suggested ${what} on this already. Take it back first to suggest something else.`
+        : `${firstName(open.by)} suggested ${what} on this already. Reload the page.`,
+      409
+    )
+  }
+  if (fb?.kind === 'ask' && !fb.answer && fb.by !== by) {
+    throw new QueueError(
+      `${firstName(fb.by)} has a question on this waiting. Reload the page.`,
+      409
+    )
+  }
+  // The page's edits without the fields left out, which are no fields.
+  const pageEdits: Record<string, unknown> = { ...(input.edits ?? {}) }
+  delete pageEdits[LEFT_OUT_KEY]
+  // The same checks as the decision.
+  if (input.did === 'accept') {
+    requirePublicSeen(item, input.publicWording)
+    if (item.passed) throw new QueueError(passedBlock(item.passed), 422)
+    if (
+      item.type === 'Add' &&
+      item.targetTable &&
+      isRecordId(item.targetRecord ?? '')
+    ) {
+      await requireReady(
+        item,
+        item.targetTable,
+        item.targetRecord as string,
+        input.edits ? pageEdits : (item.edits ?? {})
+      )
+    }
+  } else if (input.did === 'delete') {
+    await deletableRecord(item)
+  }
+  const nowPrint = item.print ?? (await getQueueItem(item.id))?.print
+  if (!nowPrint) {
+    throw new QueueError('That item no longer exists.', 404)
+  }
+  const at = now()
+  const fields: Record<string, unknown> = {}
+  let print: Print = nowPrint
+  if (input.edits) {
+    const saved = Object.keys(input.edits).length ? input.edits : null
+    fields[F.edits] = saved ? JSON.stringify(saved) : null
+    print = { ...print, edits: editsPrint(saved) }
+  }
+  if (input.replyDraft !== null && item.replyDraft !== null) {
+    const reply = input.replyDraft.trim().slice(0, 5000)
+    fields[F.replyDraft] = reply
+    print = { ...print, reply: replyPrint(reply) }
+  }
+  const text = (v: string | null) =>
+    (v ?? '').trim().slice(0, FOR_BRYCE_MAX_TEXT) || null
+  const suggestion: Suggestion = {
+    kind: 'suggest',
+    by,
+    at,
+    did: input.did,
+    reason: text(input.reason),
+    rejectReply: input.did === 'reject' ? text(input.rejectReply) : null,
+    keep: input.did === 'accept' ? input.keep.slice(0, 50) : [],
+    publicChoice:
+      input.did === 'accept' ? (input.publicWording?.choice ?? null) : null,
+    edited: Object.keys(input.edits ? pageEdits : (item.edits ?? {})).slice(
+      0,
+      50
+    ),
+    print,
+    // Their own question it takes the place of, answered or not.
+    asked:
+      fb?.kind === 'ask'
+        ? { question: fb.question, answer: fb.answer, by: fb.answeredBy }
+        : null,
+  }
+  await patchQueueRow(item.id, {
+    ...fields,
+    [F.forBryce]: JSON.stringify(suggestion),
+    [F.history]: historyWith(item, {
+      at,
+      by,
+      did: 'suggest',
+      suggested: { by, did: input.did },
+    }),
+  })
+}
+
+/** Takes a suggestion or a question off the row: its author taking it back
+ *  while it waits, or someone with full edit dismissing it (a row a bot
+ *  closed after the suggestion, say). An answered question is cleared the
+ *  same way once its author has read the answer, with no History line:
+ *  the answer has one already. */
+export async function withdrawItem(
+  item: QueueItem,
+  by: string | null,
+  fullEdit: boolean
+): Promise<void> {
+  const fb = item.forBryce
+  if (!fb) {
+    throw new QueueError(
+      'Nothing is waiting on it to take back. Reload the page.',
+      409
+    )
+  }
+  if (!fullEdit && fb.by !== by) {
+    throw new QueueError(
+      `That is ${firstName(fb.by)}'s, so only they can take it back.`,
+      403
+    )
+  }
+  const fields: Record<string, unknown> = { [F.forBryce]: null }
+  if (isWaiting(fb)) {
+    fields[F.history] = historyWith(item, {
+      at: now(),
+      by,
+      did: 'withdraw',
+      suggested: { by: fb.by, did: fb.kind === 'suggest' ? fb.did : 'ask' },
+    })
+  }
+  await patchQueueRow(item.id, fields)
+}
+
+/** "Ask Bryce": a question on any item, decided ones included. It waits in
+ *  the From section of everyone with full edit until one of them answers
+ *  it on the card or decides the item. */
+export async function askItem(
+  item: QueueItem,
+  question: string,
+  by: string | null
+): Promise<void> {
+  const q = question.trim().slice(0, FOR_BRYCE_MAX_TEXT)
+  if (!q) throw new QueueError('Write the question first.', 400)
+  const fb = item.forBryce
+  if (fb && isWaiting(fb)) {
+    throw new QueueError(
+      fb.kind === 'suggest'
+        ? `${fb.by === by ? 'Your' : `${firstName(fb.by)}'s`} suggestion on this is waiting already. Take it back first to ask instead.`
+        : 'A question on this is waiting already. Reload the page.',
+      409
+    )
+  }
+  const at = now()
+  const asked: Question = {
+    kind: 'ask',
+    by,
+    at,
+    question: q,
+    answer: null,
+    answeredBy: null,
+    answeredAt: null,
+  }
+  await patchQueueRow(item.id, {
+    [F.forBryce]: JSON.stringify(asked),
+    [F.history]: historyWith(item, { at, by, did: 'ask' }),
+  })
+}
+
+/** The answer to a question, written on the card by someone with full
+ *  edit: the item is the asker's again, with the answer on it. */
+export async function answerItem(
+  item: QueueItem,
+  answer: string,
+  by: string | null
+): Promise<void> {
+  const fb = item.forBryce
+  if (!fb || fb.kind !== 'ask' || fb.answer) {
+    throw new QueueError(
+      'No question on it is waiting for an answer. Reload the page.',
+      409
+    )
+  }
+  const a = answer.trim().slice(0, FOR_BRYCE_MAX_TEXT)
+  if (!a) throw new QueueError('Write the answer first.', 400)
+  const at = now()
+  const answered: Question = {
+    ...fb,
+    answer: a,
+    answeredBy: by,
+    answeredAt: at,
+  }
+  await patchQueueRow(item.id, {
+    [F.forBryce]: JSON.stringify(answered),
+    [F.history]: historyWith(item, {
+      at,
+      by,
+      did: 'answer',
+      suggested: { by: fb.by, did: 'ask' },
+    }),
+  })
 }

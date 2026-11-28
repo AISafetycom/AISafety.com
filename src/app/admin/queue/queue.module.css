@@ -3628,3 +3628,43 @@ button.chatFileChip:hover {
 .putBack:focus-visible {
   color: var(--q-text);
 }
+
+/* ─── Bryce checks first (queue-suggest.ts) ──────────────────────────── */
+
+/* A suggestion or a question on the item, above its fields: the call
+   first, in the accent colour (it is the thing to confirm), then what came
+   with it. */
+.forBryce {
+  border-left: 3px solid var(--q-accent);
+  margin-bottom: 16px;
+  gap: 8px;
+}
+
+.forBryceHead {
+  margin: 0;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--q-text);
+}
+
+.forBryceText {
+  color: var(--q-text-2);
+  white-space: pre-wrap;
+}
+
+/* On a list row: who suggested what, brighter than the rest of the line
+   like Urgent's reason. */
+.forBryceTag {
+  color: var(--q-accent);
+  font-weight: 600;
+}
+
+/* The suggester's note, ahead of the buttons it goes with. */
+.suggestNote {
+  flex: 1 1 220px;
+  max-width: 360px;
+  height: 36px;
+  resize: none;
+}

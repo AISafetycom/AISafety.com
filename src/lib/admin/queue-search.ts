@@ -1,4 +1,5 @@
 import type { QueueItem } from './queue'
+import { CHAT_SOURCE } from './queue-chat-source'
 
 // Search for the /admin Queue (Bryce, 23 Sept 2026: "please add a search
 // feature"). Everything the page has loaded is searched in the browser: the
@@ -163,6 +164,7 @@ export function itemParts(
     add('From', item.saidBy.name)
     add('From', item.saidBy.handle)
   }
+  add('Proposed by', item.chatBy)
   add('Reply to', item.replyTo)
   for (const who of item.replyAlso) add('Reply to', who)
   add(
@@ -174,7 +176,9 @@ export function itemParts(
         ? 'Broom'
         : item.source === 'Comb'
           ? 'Found'
-          : 'Source',
+          : item.source === CHAT_SOURCE
+            ? CHAT_SOURCE
+            : 'Source',
     row.source === undefined ? item.sourceExcerpt : row.source
   )
   add('Fable', item.reasons)

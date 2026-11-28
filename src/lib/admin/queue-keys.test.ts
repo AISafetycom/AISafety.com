@@ -47,7 +47,7 @@ describe('takesTyping', () => {
 describe('shortcutAllowed', () => {
   const detail: KeyScene = { help: false, view: 'detail', editing: false }
   const DECIDE = ['a', 'Enter', 'x', 'w', 'g', 'r', 'c', '1', '2', '3']
-  const OPEN = ['f', 'p', 'e']
+  const OPEN = ['f', 'p', 'e', 'z']
   const LINKS = ['s', 'q', 'd']
   const ELSEWHERE = ['Tab', 'ArrowDown', 'ArrowUp', 't', '/', 'u', 'v']
 

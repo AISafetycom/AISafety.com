@@ -45,9 +45,12 @@ import {
   queueTargets,
   emailLinkOf,
   noReplyOf,
+  readTarget,
   rejectItem,
   rejectReplyOf,
   reopenItem,
+  requireRecordShown,
+  requireShown,
   saveEdits,
   savePublicWording,
   undoItem,
@@ -55,7 +58,9 @@ import {
   waitItem,
   type QueueItem,
 } from './queue'
+import { actingAs } from './queue-actor'
 import { LEFT_OUT_KEY } from './queue-left-out'
+import { shownOf, shownOfRecord } from './queue-shown'
 import { GONE_KEY } from './queue-retired'
 
 const QUEUE = 'tblonlKwIFJ7Aa8QN'
@@ -1418,6 +1423,479 @@ describe('waitItem', () => {
   })
 })
 
+describe('a change proposed in the Queue chat', () => {
+  const ID = rid('chatrow')
+  const proposal = (chat?: unknown) => ({
+    kind: 'change',
+    table: 'tblXbN9swwldwq8f7',
+    record: rid('event'),
+    page: '/events',
+    name: 'Careers Evening',
+    changes: [{ field: 'Deadline', from: null, to: '2026-12-12' }],
+    ...(chat === undefined ? {} : { chat }),
+  })
+  const MARK = {
+    by: 'Rob Grayson',
+    email: 'rob@example.org',
+    row: rid('other'),
+    at: '2026-11-30T03:00:00Z',
+  }
+  let fields: Record<string, unknown> = {}
+
+  beforeEach(() => {
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(async (path: string) =>
+      path.startsWith(`${QUEUE}/${ID}`)
+        ? new Response(
+            JSON.stringify({
+              id: ID,
+              createdTime: '2026-11-30T03:00:00.000Z',
+              fields,
+            }),
+            { status: 200 }
+          )
+        : new Response('not here', { status: 404 })
+    )
+  })
+
+  const row = (source: string, chat?: unknown) => {
+    fields = {
+      fldeRsOE3DM3R2vbX: 'Careers Evening: deadline',
+      fldBc9YIDhjmu58f3: 'Change',
+      flddKkVy62MAZ8M0J: source,
+      fldTXGYOoXcUApaI2: 'Pending',
+      fld45SUjstUZROuXl: 'tblXbN9swwldwq8f7',
+      fldszXtLdUijgFG4l: rid('event'),
+      fld9VtbNjLpodrtA7: 'The page now gives 12 December.',
+      fldgl9Ny2jnu8T0Da: JSON.stringify(proposal(chat)),
+    }
+    return getQueueItem(ID)
+  }
+
+  it('reads as Queue chat, with who asked', async () => {
+    const item = await row('Queue chat', MARK)
+    expect(item?.source).toBe('Queue chat')
+    expect(item?.chatBy).toBe('Rob Grayson')
+    // Its words are kept as the row has them, for the page to show: the
+    // reasons alone, since who asked is in the proposal's `chat`.
+    expect(item?.sourceExcerpt).toBe('The page now gives 12 December.')
+  })
+
+  it('reads the same while the Mac files it under Comb', async () => {
+    const item = await row('Comb', MARK)
+    expect(item?.source).toBe('Queue chat')
+    expect(item?.chatBy).toBe('Rob Grayson')
+  })
+
+  it('names nobody when the row does not', async () => {
+    expect((await row('Queue chat'))?.chatBy).toBeNull()
+    const item = await row('Queue chat', { email: 'rob@example.org' })
+    expect(item?.source).toBe('Queue chat')
+    expect(item?.chatBy).toBeNull()
+  })
+
+  it('leaves every other row as it was', async () => {
+    const comb = await row('Comb')
+    expect(comb?.source).toBe('Comb')
+    expect(comb && 'chatBy' in comb).toBe(false)
+    expect((await row('Email'))?.source).toBe('Email')
+  })
+})
+
+describe('what a decision on a change or a rule is made on', () => {
+  const ID = rid('shownrow')
+  const FLD = {
+    title: 'fldeRsOE3DM3R2vbX',
+    type: 'fldBc9YIDhjmu58f3',
+    source: 'flddKkVy62MAZ8M0J',
+    status: 'fldTXGYOoXcUApaI2',
+    proposal: 'fldgl9Ny2jnu8T0Da',
+    targetTable: 'fld45SUjstUZROuXl',
+    targetRecord: 'fldszXtLdUijgFG4l',
+  }
+  let fields: Record<string, unknown> = {}
+
+  beforeEach(() => {
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(async (path: string) =>
+      path.startsWith(`${QUEUE}/${ID}`)
+        ? new Response(
+            JSON.stringify({
+              id: ID,
+              createdTime: '2026-11-30T03:00:00.000Z',
+              fields,
+            }),
+            { status: 200 }
+          )
+        : new Response('not here', { status: 404 })
+    )
+  })
+
+  const read = async (row: Record<string, unknown>) => {
+    fields = { [FLD.title]: 'An item', [FLD.status]: 'Pending', ...row }
+    const got = await getQueueItem(ID)
+    if (!got) throw new Error('row gone')
+    return got
+  }
+  const changes = [{ field: 'Deadline', from: null, to: '2026-12-12' }]
+  const changeRow = (proposal: object = { kind: 'change', changes }) => ({
+    [FLD.type]: 'Change',
+    [FLD.source]: 'Broom',
+    [FLD.targetTable]: EVENTS,
+    [FLD.targetRecord]: rid('event'),
+    [FLD.proposal]: JSON.stringify(proposal),
+  })
+  const edits = [
+    {
+      file: '~/Queue/chat-lessons.md',
+      find: '## Dates\n',
+      replace: '## Dates\n- New.\n',
+    },
+  ]
+  const ruleRow = (proposal: object = { kind: 'rule', edits }) => ({
+    [FLD.type]: 'Rule',
+    [FLD.source]: 'Teach',
+    [FLD.proposal]: JSON.stringify(proposal),
+  })
+
+  it('rides on a change as the fingerprint of its changes and its listing', async () => {
+    const got = await read(changeRow())
+    expect(got.shown).toBe(
+      shownOf({
+        type: 'Change',
+        proposal: { changes },
+        targetTable: EVENTS,
+        targetRecord: rid('event'),
+      })
+    )
+    expect(got.shown).toMatch(/^[0-9a-f]{64}$/)
+    // Another value, another fingerprint.
+    const other = await read(
+      changeRow({
+        kind: 'change',
+        changes: [{ ...changes[0], to: '2026-12-13' }],
+      })
+    )
+    expect(other.shown).not.toBe(got.shown)
+  })
+
+  it('rides on a rule as the fingerprint of its edits', async () => {
+    const got = await read(ruleRow())
+    expect(got.shown).toBe(shownOf({ type: 'Rule', proposal: { edits } }))
+    // The words about the edits are not part of it.
+    const worded = await read(
+      ruleRow({
+        kind: 'rule',
+        edits,
+        summary: 'Says something else',
+        wording: 'x',
+      })
+    )
+    expect(worded.shown).toBe(got.shown)
+  })
+
+  it('is not on an addition', async () => {
+    const got = await read({
+      [FLD.type]: 'Add',
+      [FLD.source]: 'Comb',
+      [FLD.proposal]: JSON.stringify({ kind: 'add', fields: { Name: 'X' } }),
+    })
+    expect('shown' in got).toBe(false)
+  })
+
+  it('lets a decision through only on the fingerprint the row has now', async () => {
+    const got = await read(changeRow())
+    expect(() => requireShown(got, got.shown)).not.toThrow()
+    // The row changed after the page read it.
+    const now = await read(
+      changeRow({
+        kind: 'change',
+        changes: [{ ...changes[0], to: '2027-01-01' }],
+      })
+    )
+    expect(() => requireShown(now, got.shown)).toThrow(
+      expect.objectContaining({ status: 412 })
+    )
+    // A page that sent none, or something that is not one.
+    for (const none of [undefined, null, '', 7, { shown: got.shown }]) {
+      expect(() => requireShown(got, none)).toThrow(
+        expect.objectContaining({ status: 412 })
+      )
+    }
+    const rule = await read(ruleRow())
+    expect(() => requireShown(rule, rule.shown)).not.toThrow()
+    expect(() => requireShown(rule, got.shown)).toThrow(
+      expect.objectContaining({ status: 412 })
+    )
+  })
+
+  it('asks nothing of an addition', async () => {
+    const add = await read({
+      [FLD.type]: 'Add',
+      [FLD.proposal]: JSON.stringify({ kind: 'add', fields: { Name: 'X' } }),
+    })
+    expect(() => requireShown(add, undefined)).not.toThrow()
+  })
+
+  it('reads a marked rule’s edits for its card, and not the address on the mark', async () => {
+    const got = await read(
+      ruleRow({
+        kind: 'rule',
+        edits,
+        summary: 'A story about the edits',
+        public: {
+          wording: 'said',
+          edits: [
+            { file: '~/Comb/listing-policy.md', find: 'a', replace: 'b' },
+          ],
+        },
+        bryce_applies: {
+          why: 'Proposed in the Queue chat',
+          chat: 'rob@example.org',
+          name: 'Rob Grayson',
+          at: '2026-11-30T03:00:00Z',
+        },
+      })
+    )
+    expect(got.ruleMark).toEqual({ chat: true, name: 'Rob Grayson' })
+    expect(got.ruleEdits).toEqual(edits)
+    expect(got.rulePublicEdits).toEqual([
+      { file: '~/Comb/listing-policy.md', find: 'a', replace: 'b' },
+    ])
+    expect(JSON.stringify(got)).not.toContain('rob@example.org')
+  })
+
+  it('says so when a marked rule’s edits cannot be read', async () => {
+    const got = await read(
+      ruleRow({
+        kind: 'rule',
+        edits: [{ file: 'f', find: 'a' }],
+        bryce_applies: {},
+      })
+    )
+    expect(got.ruleMark).toEqual({ chat: false, name: null })
+    expect(got.ruleEdits).toBeNull()
+    expect(got.rulePublicEdits).toBeNull()
+  })
+
+  it('leaves a rule with no mark as it was', async () => {
+    const got = await read(ruleRow())
+    expect('ruleMark' in got).toBe(false)
+    expect('ruleEdits' in got).toBe(false)
+  })
+})
+
+describe('an addition is published as its record stood on the page', () => {
+  // A table of its own: the field list is kept ten minutes per table, and
+  // other tests here leave theirs behind.
+  const TABLE = 'tblSHOWNRECORD001'
+  const REC = rid('unpublished')
+  const COLUMNS = [
+    { id: 'fldN', name: 'Name', type: 'singleLineText' },
+    { id: 'fldD', name: 'Description', type: 'multilineText' },
+    { id: 'fldL', name: 'Logo', type: 'multipleAttachments' },
+    { id: 'fldF', name: 'Days left', type: 'formula' },
+  ]
+  let columns: typeof COLUMNS
+  let stored: Record<string, unknown> | null
+  let writes: number
+  let schemaReads: number
+
+  beforeEach(() => {
+    columns = COLUMNS
+    stored = {
+      Name: 'Careers Evening',
+      Description: 'Short talks, then questions.',
+      Logo: [
+        {
+          id: 'attLOGO0000000001',
+          url: 'https://v5.airtableusercontent.com/first-link',
+          filename: 'logo.png',
+          size: 1200,
+        },
+      ],
+      'Days left': 12,
+      'Publish?': false,
+    }
+    writes = 0
+    schemaReads = 0
+    process.env.AIRTABLE_TOKEN = 'test-token'
+    process.env.AIRTABLE_BASE_ID = 'appTest'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        schemaReads++
+        return Response.json({
+          tables: [{ id: TABLE, primaryFieldId: 'fldN', fields: columns }],
+        })
+      })
+    )
+    mocks.airtableRequest.mockReset()
+    mocks.airtableRequest.mockImplementation(
+      async (path: string, init?: RequestInit) => {
+        if (init?.method) {
+          writes++
+          return new Response('{}', { status: 200 })
+        }
+        return path.startsWith(`${TABLE}/${REC}`) && stored
+          ? Response.json({ id: REC, fields: stored })
+          : new Response('not here', { status: 404 })
+      }
+    )
+  })
+
+  const addition = (over: Partial<QueueItem> = {}) =>
+    item({ targetTable: TABLE, targetRecord: REC, ...over })
+  /** The page's read of the record, with the field list read anew. */
+  const pageRead = async () => {
+    const read = await readTarget(TABLE, REC, true)
+    if (!read) throw new Error('record gone')
+    return read
+  }
+
+  it('hands the page the record’s fingerprint with its read of it', async () => {
+    const read = await pageRead()
+    expect(read.fields).toMatchObject({
+      Name: 'Careers Evening',
+      Description: 'Short talks, then questions.',
+    })
+    expect(read.schema.map(f => f.name)).toEqual(COLUMNS.map(c => c.name))
+    // Over what the page shows of it: no computed field, no Publish?.
+    expect(read.shown).toBe(
+      shownOfRecord({
+        table: TABLE,
+        record: REC,
+        fields: {
+          Name: 'Careers Evening',
+          Description: 'Short talks, then questions.',
+          Logo: [{ id: 'attLOGO0000000001', url: 'any' }],
+        },
+        types: new Map(),
+      })
+    )
+    expect(await readTarget(TABLE, rid('nosuch'))).toBeNull()
+  })
+
+  it('lets Publish through on the record the page read, and says what it was made on', async () => {
+    const { shown } = await pageRead()
+    const it0 = addition()
+    await expect(requireRecordShown(it0, shown)).resolves.toBeUndefined()
+    // For the decision's History entry.
+    expect(it0.shown).toBe(shown)
+    expect(writes).toBe(0)
+  })
+
+  it('refuses when a field was rewritten after the page read it', async () => {
+    const { shown } = await pageRead()
+    for (const rewrite of [
+      (f: Record<string, unknown>) => (f.Description = 'Put there by a chat.'),
+      (f: Record<string, unknown>) => (f.Name = 'Another name'),
+      (f: Record<string, unknown>) => (f.Link = 'https://example.org/new'),
+      (f: Record<string, unknown>) => delete f.Logo,
+      (f: Record<string, unknown>) =>
+        (f.Logo = [{ id: 'attLOGO0000000002', url: 'https://x/y' }]),
+    ]) {
+      const was = { ...(stored as Record<string, unknown>) }
+      rewrite(stored as Record<string, unknown>)
+      const it0 = addition()
+      await expect(requireRecordShown(it0, shown)).rejects.toMatchObject({
+        status: 412,
+        message: expect.stringContaining('not what your page showed'),
+      })
+      expect(it0.shown ?? null).toBeNull()
+      stored = was
+    }
+    expect(writes).toBe(0)
+    // Read again, the page has the record as it is, and Publish goes.
+    ;(stored as Record<string, unknown>).Description = 'Put there by a chat.'
+    const again = await pageRead()
+    expect(again.shown).not.toBe(shown)
+    expect(again.fields.Description).toBe('Put there by a chat.')
+    await expect(
+      requireRecordShown(addition(), again.shown)
+    ).resolves.toBeUndefined()
+  })
+
+  it('does not refuse for what moves by itself', async () => {
+    const { shown } = await pageRead()
+    const f = stored as Record<string, unknown>
+    // A formula on today's date, a picture's link renewed by Airtable, and
+    // the Publish? box, which the page is never handed.
+    f['Days left'] = 11
+    f.Logo = [
+      {
+        id: 'attLOGO0000000001',
+        url: 'https://v5.airtableusercontent.com/second-link',
+        filename: 'logo.png',
+        size: 1200,
+        type: 'image/png',
+      },
+    ]
+    await expect(requireRecordShown(addition(), shown)).resolves.toBeUndefined()
+  })
+
+  it('refuses a page that had not read the record', async () => {
+    for (const sent of [undefined, null, 42, { shown: 'x' }]) {
+      await expect(requireRecordShown(addition(), sent)).rejects.toMatchObject({
+        status: 412,
+        message: expect.stringContaining('had not read this listing’s record'),
+      })
+    }
+    // A change's or a rule's fingerprint is no record's.
+    await expect(
+      requireRecordShown(addition(), 'a'.repeat(64))
+    ).rejects.toMatchObject({ status: 412 })
+  })
+
+  it('reads the field list anew before refusing, so a list that just changed refuses nothing', async () => {
+    // This server still holds the list from before "Days left" was made a
+    // formula (it read as a number column then, which the page shows).
+    columns = COLUMNS.map(c =>
+      c.name === 'Days left' ? { ...c, type: 'number' } : c
+    )
+    await readTarget(TABLE, REC, true)
+    // The page read it elsewhere, with the list as it is now.
+    columns = COLUMNS
+    const shown = shownOfRecord({
+      table: TABLE,
+      record: REC,
+      fields: stored as Record<string, unknown>,
+      types: new Map(COLUMNS.map(c => [c.name, c.type])),
+      never: new Set(['Publish?', 'Hide?']),
+    })
+    const before = schemaReads
+    await expect(requireRecordShown(addition(), shown)).resolves.toBeUndefined()
+    expect(schemaReads).toBe(before + 1)
+    // And a record that really changed is still refused, after that look.
+    ;(stored as Record<string, unknown>).Name = 'Another name'
+    await expect(requireRecordShown(addition(), shown)).rejects.toMatchObject({
+      status: 412,
+    })
+  })
+
+  it('has nothing to check where no record is about to be published', async () => {
+    const reads = () =>
+      mocks.airtableRequest.mock.calls.filter(c => !c[1]?.method).length
+    for (const one of [
+      addition({ type: 'Change' }),
+      addition({ type: 'Rule', targetTable: null, targetRecord: null }),
+      // Decided already: the accept says so itself.
+      addition({ status: 'Applied' }),
+      addition({ status: 'Rejected' }),
+      addition({ targetRecord: null }),
+      addition({ targetRecord: 'not a record id' }),
+    ]) {
+      await expect(requireRecordShown(one, undefined)).resolves.toBeUndefined()
+    }
+    expect(reads()).toBe(0)
+    // Its record is gone: the accept has its own words for that.
+    stored = null
+    await expect(
+      requireRecordShown(addition(), 'a'.repeat(64))
+    ).resolves.toBeUndefined()
+  })
+})
+
 describe('flagItem / unflagItem', () => {
   const ID = rid('bruin')
   const FLD = {
@@ -1528,6 +2006,52 @@ describe('flagItem / unflagItem', () => {
     })
     expect((await current()).flagUndo).toBe(false)
     expect((await current()).flagWas).toBe(null)
+  })
+
+  it('leaves no History line for the owner’s own chat, as before', async () => {
+    const flag = {
+      verdict: 'Unsure' as const,
+      reasons: ['The domain expired.'],
+      chips: null,
+      title: null,
+      changes: null,
+    }
+    await flagItem(await current(), flag)
+    expect((await current()).history ?? []).toEqual([])
+    await unflagItem(await current())
+    expect((await current()).history ?? []).toEqual([])
+  })
+
+  it('names whose chat changed the flag when it is a teammate’s', async () => {
+    await flagItem(
+      await current(),
+      {
+        verdict: 'Unsure',
+        reasons: ['The domain expired.'],
+        chips: null,
+        title: null,
+        changes: null,
+      },
+      'Rob Grayson'
+    )
+    const flagged = await current()
+    expect(flagged.verdict).toBe('Unsure')
+    expect(flagged.history).toEqual([
+      { at: expect.any(String), by: 'Rob Grayson', did: 'flag' },
+    ])
+    // The same write: the flag and its line land together.
+    const patches = mocks.airtableRequest.mock.calls.filter(
+      ([, init]) => (init as RequestInit | undefined)?.method === 'PATCH'
+    )
+    expect(patches).toHaveLength(1)
+
+    await unflagItem(flagged, 'Rob Grayson')
+    const back = await current()
+    expect(back.verdict).toBe('Dismiss')
+    expect((back.history ?? []).map(e => [e.by, e.did])).toEqual([
+      ['Rob Grayson', 'flag'],
+      ['Rob Grayson', 'unflag'],
+    ])
   })
 
   it('clears the reject buttons when Fable gave none, keeps the rest', async () => {
@@ -2871,6 +3395,99 @@ describe('who did what, on the row’s history', () => {
     expect(entries).toEqual([
       { at: fields[DECIDED], by: 'Rob Example', did: 'accept' },
     ])
+  })
+
+  it('keeps what a decision was made on, and the address of who made it', async () => {
+    const shown = 'ab'.repeat(32)
+    await actingAs(' Bryce@Example.org', () =>
+      acceptItem(
+        item({ type: 'Rule', targetTable: null, targetRecord: null, shown }),
+        {},
+        null,
+        [],
+        null,
+        'Bryce'
+      )
+    )
+    const { fields, entries } = written()
+    expect(entries).toEqual([
+      {
+        at: fields[DECIDED],
+        by: 'Bryce',
+        email: 'bryce@example.org',
+        did: 'accept',
+        shown,
+      },
+    ])
+  })
+
+  it('keeps the record an addition was published on, from the check that let it through', async () => {
+    // requireRecordShown puts the fingerprint that passed on the item.
+    const one = item({
+      page: '/funding',
+      targetTable: FUNDING,
+      targetRecord: rid('fund'),
+    })
+    const { shown } = (await readTarget(FUNDING, rid('fund'), true)) ?? {}
+    await requireRecordShown(one, shown)
+    await actingAs('bryce@example.org', () =>
+      acceptItem(one, {}, null, [], null, 'Bryce')
+    )
+    const { fields, entries } = written()
+    expect(fields[STATUS]).toBe('Applied')
+    expect(entries.at(-1)).toEqual({
+      at: fields[DECIDED],
+      by: 'Bryce',
+      email: 'bryce@example.org',
+      did: 'accept',
+      shown,
+    })
+    expect(shown).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it('keeps it on a reject, a set-aside and a delete of a change too', async () => {
+    const shown = 'cd'.repeat(32)
+    const row = () => change({ shown })
+    await actingAs('rob@example.org', async () => {
+      await rejectItem(row(), 'Out of scope', null, 'Rob Example')
+      expect(written().entries.at(-1)).toMatchObject({
+        did: 'reject',
+        email: 'rob@example.org',
+        shown,
+      })
+      await laterItem(row(), 'Rob Example')
+      expect(written().entries.at(-1)).toMatchObject({ did: 'later', shown })
+    })
+  })
+
+  it('has none on what is not a decision, though the address is there', async () => {
+    await actingAs('rob@example.org', () =>
+      waitItem(change({ shown: 'ef'.repeat(32) }), true, 'Rob Example')
+    )
+    const entry = written().entries.at(-1)
+    expect(entry).toMatchObject({ did: 'wait', email: 'rob@example.org' })
+    expect(entry && 'shown' in entry).toBe(false)
+  })
+
+  it('writes no address when nobody is signed in to the request', async () => {
+    await rejectItem(change(), 'Out of scope', null, 'Rob Example')
+    const entry = written().entries.at(-1)
+    expect(entry && 'email' in entry).toBe(false)
+  })
+
+  it('keeps two requests’ addresses apart, however they overlap', async () => {
+    const seen: unknown[] = []
+    const one = (email: string, pause: number) =>
+      actingAs(email, async () => {
+        await new Promise(r => setTimeout(r, pause))
+        await laterItem(change(), email)
+        seen.push(written().entries.at(-1))
+      })
+    await Promise.all([one('a@example.org', 15), one('b@example.org', 1)])
+    for (const e of seen as { by: string; email: string }[]) {
+      expect(e.email).toBe(e.by)
+    }
+    expect(seen).toHaveLength(2)
   })
 
   it('adds a reject after what the row already holds', async () => {

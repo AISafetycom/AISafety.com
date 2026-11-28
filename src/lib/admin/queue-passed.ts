@@ -67,7 +67,10 @@ export interface TakenOut {
 
 /** Pure: a row the daily check took out, read from its Error line, else
  *  null. Only Closed rows count: a row reopened since keeps no such line
- *  for long, but its status is what decides. */
+ *  for long, but its status is what decides. A row carrying a suggestion
+ *  or a question (For Bryce, queue-suggest.ts) is left out: the list read
+ *  brings those whatever their age, not only for the week this line
+ *  covers, and they have their own place on the page. */
 export function takenOutOf(item: {
   id: string
   title: string
@@ -75,7 +78,9 @@ export function takenOutOf(item: {
   status: string
   error: string | null
   sourceLink: string | null
+  forBryce?: unknown
 }): TakenOut | null {
+  if (item.forBryce) return null
   if (item.status !== 'Closed' || !item.error) return null
   const m = TAKEN_OUT_RE.exec(item.error)
   if (!m) return null

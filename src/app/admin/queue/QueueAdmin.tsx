@@ -2,6 +2,7 @@
 
 import {
   createContext,
+  Fragment,
   useCallback,
   useContext,
   useEffect,
@@ -116,8 +117,49 @@ import {
   decidedBy,
   lineText,
   listingLines,
+  nameList,
+  namesItself,
   type HistoryRow,
 } from '@/lib/admin/queue-history'
+import {
+  CHECKER_NAME,
+  firstName,
+  fromLabel,
+  isWaiting,
+  openSuggestion,
+  publicSeed,
+  rejectSeed,
+  rowNote,
+  staleDrafts,
+  suggestionAt,
+  suggestWord,
+  type ForBryce,
+  type Print,
+  type SuggestDid,
+} from '@/lib/admin/queue-suggest'
+import { CHAT_SOURCE, chatHeading } from '@/lib/admin/queue-chat-source'
+import {
+  REPLY_HOLDS,
+  heldIds,
+  repliesEnded,
+  withPanelWord,
+  type Replying,
+} from '@/lib/admin/queue-chat-replying'
+import {
+  RECORD_NOT_READ,
+  publishWaits,
+  readDue,
+  readStands,
+} from '@/lib/admin/queue-record-read'
+import { COMPUTED_TYPES, HOUSEKEEPING } from '@/lib/admin/queue-fields'
+import {
+  editChanges,
+  shownEdit,
+  type RuleEdit,
+  type RuleMark,
+} from '@/lib/admin/queue-rule-edits'
+import type { ChatKind } from '@/lib/admin/queue-team-chat'
+import type { QueueMode } from '@/lib/admin/access'
 import { STATUS_ICONS as FUNDER_STATUS_ICONS } from '@/app/funding/card'
 import { STATUS_ICONS as MAP_STATUS_ICONS } from '@/app/map/card'
 import { APPLICATIONS_ICONS as ADVISOR_APPLICATIONS_ICONS } from '@/app/advisors/card'
@@ -204,7 +246,17 @@ const REFRESH_MIN_GAP_MS = 5 * 1000
 // top so I can see"). Last, folded, sits what he has asked the submitter a
 // question about and is waiting to hear back on (queue-asked.ts; Bryce,
 // 16 Nov 2026: "what to do with it in queue in the meantime").
+//
+// With "Bryce checks first" (queue-suggest.ts, 27 Nov 2026) there are three
+// more. For anyone with full Queue edit, the first section is every item a
+// check-first teammate suggested a decision on or asked about, whatever its
+// kind or status ("From Rob", labelled with their first names). For the
+// teammate, their own suggestions and questions wait folded at the foot of
+// the list ("With Bryce"), out of their counts, and an answered question
+// heads the list ("Answered") until they press Got it.
 type Section =
+  | 'fromTeam'
+  | 'answered'
   | 'fable'
   | 'urgent'
   | 'requests'
@@ -212,7 +264,10 @@ type Section =
   | 'rules'
   | 'comb'
   | 'waiting'
+  | 'withBryce'
 const SECTIONS: Section[] = [
+  'fromTeam',
+  'answered',
   'fable',
   'urgent',
   'requests',
@@ -220,7 +275,15 @@ const SECTIONS: Section[] = [
   'rules',
   'comb',
   'waiting',
+  'withBryce',
 ]
+/** An empty list for every section. */
+function noSections<T>(): Record<Section, T[]> {
+  return Object.fromEntries(SECTIONS.map(s => [s, []])) as unknown as Record<
+    Section,
+    T[]
+  >
+}
 type Kind = 'additions' | 'changes' | 'rules'
 const KINDS: { key: Kind; label: string; title: string }[] = [
   {
@@ -247,6 +310,10 @@ const URGENT_WHY: Record<Kind, string> = {
   rules: '',
 }
 const SECTION_LABEL: Record<Section, string> = {
+  // Labelled with who is in it when shown (fromLabel).
+  fromTeam: 'From the team',
+  answered: 'Answered',
+  withBryce: `With ${CHECKER_NAME}`,
   fable: 'Fable chats',
   urgent: 'Urgent',
   requests: 'Requests',
@@ -384,6 +451,7 @@ const ICON = {
   trash: '/images/icons/trash.svg',
   policy: '/images/icons/document.svg',
   writing: '/images/icons/pencil.svg',
+  person: '/images/icons/person.svg',
 } as const
 
 // What a rule changes, read off the rulebook name its title starts with
@@ -439,6 +507,9 @@ function rowIcon(item: QueueItem): string {
 // for the verdicts, and a teal Comb or amber Requests icon read as Publish
 // and Unsure (Bryce, 24 Sept 2026).
 const SECTION_ICON: Record<Section, string> = {
+  fromTeam: ICON.person,
+  answered: ICON.question,
+  withBryce: ICON.person,
   fable: ICON.stars,
   urgent: ICON.clock,
   requests: ICON.requests,
@@ -451,6 +522,9 @@ const SECTION_ICON: Record<Section, string> = {
 function sourceIcon(item: QueueItem): string {
   if (item.type === 'Rule' || item.source === 'Teach') return ICON.rule
   switch (item.source) {
+    // Proposed in the Fable chat: the chat's own icon.
+    case CHAT_SOURCE:
+      return ICON.stars
     case 'Email':
       return ICON.mail
     case 'Discord':
@@ -1125,15 +1199,68 @@ function editsAsText(edits: Record<string, unknown>): Record<string, string> {
 }
 
 /** The draft an item starts from: its saved edits and the fields it left
- *  out, when it is still open. */
+ *  out, when it is still open. It notes the suggestion waiting on the row
+ *  (queue-suggest.ts), so a draft made before that one is made again. */
 function draftOfRow(items: QueueItem[] | null | undefined, id: string): Draft {
   const item = items?.find(i => i.id === id)
-  if (!item || (!item.edits && !item.leftOut)) return FRESH
-  if (!isOpen(item) && !setAsideUntil(item)) return FRESH
+  if (!item) return FRESH
+  const at = suggestionAt(item.forBryce)
+  if (!isOpen(item) && !setAsideUntil(item)) {
+    return at ? { ...FRESH, seed: at } : FRESH
+  }
+  // A suggestion confirms as it was made: a suggested Reject's reason and
+  // decline text are filled in, so R and Enter confirm it as suggested,
+  // and a suggested Apply keeps the choice made for a rule's public
+  // wording.
+  const reject = rejectSeed(item.forBryce, item.rejectChips)
+  const internal = publicSeed(item.forBryce)
+  if (!item.edits && !item.leftOut && !reject && internal === null && !at) {
+    return FRESH
+  }
   return {
     ...FRESH,
     edits: editsAsText(item.edits ?? {}),
     leftOut: item.leftOut ?? [],
+    ...(reject ?? {}),
+    ...(internal !== null ? { keepInternal: internal } : {}),
+    seed: at,
+  }
+}
+
+/** A draft made again from its row (`row`, draftOfRow) after the item
+ *  changed under it (queue-suggest.ts, staleDrafts). The edits and the
+ *  reply draft are the row's, except a field changed on this page whose
+ *  save has not gone yet (`unsaved`) and a reply still being typed or
+ *  saved (`replyUnsaved`). What the page has open stays open. For a new
+ *  suggestion (another seed) the call it was made with comes along too: a
+ *  suggested Reject's reason unless a reject is already under way here,
+ *  and a rule's public wording choice; for the same one (read again after
+ *  a refusal) the choices made on this page stay. */
+function remadeDraft(
+  was: Draft,
+  row: Draft,
+  unsaved: ReadonlySet<string>,
+  replyUnsaved: boolean
+): Draft {
+  const edits = { ...row.edits }
+  let leftOut = row.leftOut
+  for (const k of unsaved) {
+    if (k === LEFT_OUT_KEY) leftOut = was.leftOut
+    else if (k in was.edits) edits[k] = was.edits[k]
+    else delete edits[k]
+  }
+  const fresh = was.seed !== row.seed
+  const rejecting = was.mode === 'reject'
+  return {
+    ...was,
+    edits,
+    leftOut,
+    reply: was.editingReply || replyUnsaved ? was.reply : row.reply,
+    chip: fresh && !rejecting ? row.chip : was.chip,
+    other: fresh && !rejecting ? row.other : was.other,
+    decline: fresh && !rejecting ? row.decline : was.decline,
+    keepInternal: fresh ? row.keepInternal : was.keepInternal,
+    seed: row.seed,
   }
 }
 
@@ -1524,7 +1651,13 @@ const COPIED_NOTE = 'Reply copied · paste it in Discord'
  *  up until Discord is opened, it is closed, or the next decision, so the
  *  paste is not forgotten (Bryce, 15 Oct 2026). */
 function toastReply(toast: Toast): string | null {
-  if (toast.item.source !== 'Discord' || toast.later || toast.reopen)
+  // A suggestion has no reply to send yet: that follows the decision.
+  if (
+    toast.item.source !== 'Discord' ||
+    toast.later ||
+    toast.reopen ||
+    toast.suggested
+  )
     return null
   if (toast.state === 'failed' || toast.state === 'undoing' || toast.undone)
     return null
@@ -1696,6 +1829,14 @@ interface Draft {
    *  save, and never goes while one is refused. */
   publicText: string | null
   publicError: string | null
+  /** "Bryce checks first": a note to go with a suggested Publish, Delete or
+   *  Review again in a week (a suggested Reject carries its reason). */
+  note: string
+  /** The time of the suggestion waiting on the row when this draft was made
+   *  from it, or null (queue-suggest.ts, suggestionAt). A draft made before
+   *  a suggestion arrived holds the edits the page had then, so the page
+   *  makes it again from the row (staleDrafts). */
+  seed: string | null
   busy: boolean
   error: string | null
 }
@@ -1716,6 +1857,8 @@ const FRESH: Draft = {
   editingPublic: false,
   publicText: null,
   publicError: null,
+  note: '',
+  seed: null,
   busy: false,
   error: null,
 }
@@ -1756,6 +1899,9 @@ interface Toast {
   undone?: boolean
   /** Stays up until closed: something left for the admin to fix by hand. */
   stay?: boolean
+  /** A suggestion (queue-suggest.ts), not a decision: its button takes it
+   *  back instead of undoing anything. */
+  suggested?: boolean
 }
 
 /** What the page tells the Mac agent to do after a decision: save the
@@ -1935,18 +2081,106 @@ async function fetchRuleStates(
 
 const WORKER_NOTE = 'the Mac saves the reply draft within five minutes'
 const OFFLINE_SUB = `Mac agent not reachable · ${WORKER_NOTE}`
+// For someone whose page has no Mac agent to reach (anyone but the owner,
+// queue-team-chat.ts): the plain note, with nothing said to be unreachable.
+const WORKER_SUB = 'The Mac saves the reply draft within five minutes'
+const WORKER_REJECT_SUB = 'The Mac writes the reply within five minutes'
+
+/** The fingerprint of an item's changes or edits as the page holds the item
+ *  now (queue-shown.ts): what is on screen, sent with a decision. */
+function shownNow(items: QueueItem[] | null, item: QueueItem): string | null {
+  return (items?.find(i => i.id === item.id) ?? item).shown ?? null
+}
+
+/** An item's record as the page last read it: its fields, the table's
+ *  field list, and the fingerprint that came with the read (queue-shown.ts)
+ *  – null from a server that sent none. `stale`: this page has written to
+ *  the record since, so the fingerprint is out of date until the next
+ *  read lands. */
+type LiveRecord = {
+  fields: Record<string, unknown>
+  schema: FieldInfo[]
+  shown?: string | null
+  stale?: boolean
+}
+
+/** Publishing an addition (or suggesting it) goes on its record as this
+ *  page read it, so it needs that read. */
+function wantsRecordShown(item: QueueItem, action: string): boolean {
+  return (
+    action === 'accept' &&
+    item.type === 'Add' &&
+    Boolean(item.targetTable && item.targetRecord)
+  )
+}
+
+/** What a decision says it was made on: for publishing an addition, the
+ *  fingerprint of its record as this page read it (null while it has no
+ *  read that still holds); otherwise the item's own, of its changes or
+ *  edits. */
+function shownFor(
+  items: QueueItem[] | null,
+  live: Record<string, LiveRecord>,
+  item: QueueItem,
+  action: string
+): string | null {
+  if (wantsRecordShown(item, action)) {
+    const read = live[item.id]
+    return read && !read.stale ? (read.shown ?? null) : null
+  }
+  return shownNow(items, item)
+}
+
+/** How the page reads the list: `sync` closes rows handled in Airtable
+ *  itself first; `remake` makes these items' drafts again from the rows
+ *  read (after a refused decision on a suggested item, queue-suggest.ts). */
+type LoadOpts = { sync?: boolean; remake?: string[] }
 
 type Decision = 'accept' | 'reject' | 'later' | 'delete'
 type Action = Decision | 'undo' | 'reopen'
 
+function isDecision(a: Action): a is Decision {
+  return a === 'accept' || a === 'reject' || a === 'later' || a === 'delete'
+}
+
+/** How the signed-in person works on the Queue (access.ts): 'suggest' sends
+ *  every decision as a suggestion (queue-suggest.ts). */
+const ModeContext = createContext<QueueMode>('view')
+
+/** A suggestion waits on the item and the person looking can only
+ *  suggest: nothing on it is theirs to change until someone acts. Their
+ *  own takes Take back; anyone else's (or their own under a name that has
+ *  changed since) only waits, as the site refuses their edits to it too. */
+function suggestionLocks(item: QueueItem, mode: QueueMode): boolean {
+  return mode === 'suggest' && item.forBryce?.kind === 'suggest'
+}
+
+/** A decision's button words for someone whose decisions are suggestions:
+ *  "Suggest publish", "Suggest reject". */
+function suggestLabel(mode: QueueMode, label: string): string {
+  return mode === 'suggest'
+    ? `Suggest ${label.charAt(0).toLowerCase()}${label.slice(1)}`
+    : label
+}
+
+/** Under a reply or decline draft, for someone whose decisions are
+ *  suggestions: their click makes no draft, Bryce's confirm does. */
+function suggestReplyNote(item: QueueItem): string {
+  return item.source === 'Discord'
+    ? 'Once Bryce confirms, this is copied for him to paste in Discord. Nothing is sent.'
+    : 'Once Bryce confirms, this is saved as a Gmail draft. Nothing is sent.'
+}
+
 export default function QueueAdmin({
-  canEdit,
+  mode,
   canMoveMap = false,
   me = null,
 }: {
-  /** False for a view-only grant: the same queue with nothing to click that
-   *  would decide anything. The API refuses those writes regardless. */
-  canEdit: boolean
+  /** 'view': the same queue with nothing to click that would decide
+   *  anything. 'suggest': everything works, and a decision is saved as a
+   *  suggestion for someone with 'edit' to confirm. The API refuses what
+   *  each may not do regardless. */
+  mode: QueueMode
   /** The map editor's edit grant: the map strip's other listings drag and
    *  save. The map API checks the grant again on every write. */
   canMoveMap?: boolean
@@ -1955,16 +2189,27 @@ export default function QueueAdmin({
    *  does not (queue-history.ts). */
   me?: string | null
 }) {
+  const canEdit = mode === 'edit' || mode === 'suggest'
   return (
     <MeContext.Provider value={me}>
-      <MoveOthersContext.Provider value={canEdit && canMoveMap}>
-        <QueueInbox canEdit={canEdit} />
-      </MoveOthersContext.Provider>
+      <ModeContext.Provider value={mode}>
+        <MoveOthersContext.Provider value={canEdit && canMoveMap}>
+          <QueueInbox canEdit={canEdit} mode={mode} me={me} />
+        </MoveOthersContext.Provider>
+      </ModeContext.Provider>
     </MeContext.Provider>
   )
 }
 
-function QueueInbox({ canEdit }: { canEdit: boolean }) {
+function QueueInbox({
+  canEdit,
+  mode,
+  me,
+}: {
+  canEdit: boolean
+  mode: QueueMode
+  me: string | null
+}) {
   const [items, setItems] = useState<QueueItem[] | null>(null)
   // The list as it is now, for callbacks that must not go stale.
   const itemsRef = useRef(items)
@@ -1972,6 +2217,18 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
+  // "Bryce checks first" (queue-suggest.ts). The fingerprint a refused
+  // decision gave the page, by item: the item as the page then read it
+  // again, sent back with the next press on it (requireSuggestionSeen).
+  const seenPrints = useRef<Record<string, { at: string; print: Print }>>({})
+  // Reply drafts typed on this page whose save has not landed yet.
+  const replyUnsaved = useRef(new Set<string>())
+  // Makes the page's drafts again from a list just read: the ones made on
+  // another suggestion than the one now on their row, and `forced` (set
+  // below, beside the drafts' own refs).
+  const remakeRef = useRef<(list: QueueItem[], forced?: string[]) => void>(
+    () => {}
+  )
   const [toast, setToast] = useState<Toast | null>(null)
   // True for the last moments of a toast, while it slides back down.
   const [toastLeaving, setToastLeaving] = useState(false)
@@ -2051,12 +2308,27 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
   const [agentChat, setAgentChat] = useState(false)
   // The Mac can turn speech into text: the chat's Cmd+D and mic.
   const [agentDictate, setAgentDictate] = useState(false)
+  // Which Fable chat this person gets (queue-team-chat.ts, chatKind): the
+  // one on the owner's Mac, or for everyone else the team's, the same chat
+  // program on a server that the site relays to. And whether that server's
+  // agent has been heard from in the last minute.
+  const [chatKindNow, setChatKind] = useState<ChatKind | null>(null)
+  const [teamOnline, setTeamOnline] = useState(false)
+  // Moves with each read of the list: a team chat thread that could not
+  // load tries again then.
+  const [teamTick, setTeamTick] = useState(0)
   // The chat threads on the Mac, and per row the newest reply already seen
   // in this browser (null until read), for the rows' teal bars.
   const [chatRows, setChatRows] = useState<ChatRows>({})
   const [chatSeen, setChatSeen] = useState<Record<string, string> | null>(null)
   // Bumped by the F key so the chat box takes focus.
   const [chatFocus, setChatFocus] = useState(0)
+  // Bumped by Z: the answer box of a question in From Rob takes the focus
+  // (queue-suggest.ts).
+  const [askFocus, setAskFocus] = useState(0)
+  // The item whose Ask box is open (someone whose decisions are
+  // suggestions): the Ask button or Z opens it.
+  const [askingFor, setAskingFor] = useState<string | null>(null)
   const [placeFocus, setPlaceFocus] = useState(0)
   const [fieldFocus, setFieldFocus] = useState(0)
   // A /map addition's suggested spot on the map, by item, as its map strip
@@ -2079,9 +2351,26 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
   const wantedRef = useRef<string | null>(null)
   // The focused item's record as it is in Airtable now, plus the table's
   // field list, so empty fields (a missing logo) show as empty. By item id.
-  const [live, setLive] = useState<
-    Record<string, { fields: Record<string, unknown>; schema: FieldInfo[] }>
-  >({})
+  const [live, setLive] = useState<Record<string, LiveRecord>>({})
+  // The same, for a decision pressed now to say what it was made on.
+  const liveRef = useRef(live)
+  liveRef.current = live
+  // Items whose next read asks for the table's field list anew: a Publish
+  // was refused because the record is not what this page showed.
+  const freshTargets = useRef<Set<string>>(new Set())
+  // Items whose last read of the record failed (it is gone, the site did
+  // not answer, or it sent no fingerprint): Publish is not held for a read
+  // that may never come, and the site says what is wrong.
+  const liveFailed = useRef<Set<string>>(new Set())
+  // One read at a time per record (queue-record-read.ts). Each thing that
+  // may have moved a record bumps its number; a read belongs to the number
+  // it began in, and `liveReads` holds the one on its way.
+  const liveGen = useRef<Map<string, number>>(new Map())
+  const liveReads = useRef<Map<string, number>>(new Map())
+  // The addition Publish was pressed on in the moment its record was still
+  // being read: a line under its buttons says so, until it is decided or
+  // he moves on. Not an error: the item is not tagged as failed.
+  const [recordWait, setRecordWait] = useState<string | null>(null)
   // A published event's or training's start date and deadline, by record,
   // so a Change on one that is about to happen counts as urgent.
   const [listingDates, setListingDates] = useState<
@@ -2153,6 +2442,11 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
   const [helpShown, helpClosing] = useClosing(showHelp)
   const [kind, setKind] = useState<Kind>('additions')
   const [collapsed, setCollapsed] = useState<Record<Section, boolean>>({
+    fromTeam: false,
+    answered: false,
+    // Nothing in it is theirs to do until it comes back, so it starts
+    // folded, like Waiting on them.
+    withBryce: true,
     fable: false,
     urgent: false,
     requests: false,
@@ -2307,7 +2601,7 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
    *  was deleted, published or hidden in Airtable itself (a moment slower,
    *  so the first read skips it). Once a list is on screen, a read that
    *  fails leaves it be. */
-  const load = useCallback(async (opts: { sync?: boolean } = {}) => {
+  const load = useCallback(async (opts: LoadOpts = {}) => {
     const seq = ++loadSeq.current
     if (opts.sync) lastRefreshRef.current = Date.now()
     setLoadError(null)
@@ -2318,6 +2612,8 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
       const data = (await res.json()) as {
         items?: QueueItem[]
         agent?: AgentInfo | null
+        chat?: ChatKind | null
+        teamChat?: { online?: boolean }
         error?: string
       }
       if (!res.ok || !data.items) {
@@ -2350,7 +2646,14 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
         if (keptRef.current.has(i.id) && !listed.has(i.id)) next.push(i)
       }
       setItems(next)
+      // A draft made before a suggestion arrived (or on another one) holds
+      // the edits the page had then: made again from the row, so a confirm
+      // sends what the card shows (queue-suggest.ts).
+      remakeRef.current(next, opts.remake)
       setAgent(data.agent ?? null)
+      setChatKind(data.chat ?? null)
+      setTeamOnline(data.teamChat?.online === true)
+      setTeamTick(n => n + 1)
       // The list is on screen now; the pictures, the links and the cards
       // follow in the background, each filled in as it arrives. A refresh
       // asks only for what is new to it.
@@ -2542,6 +2845,23 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
     }
   }, [chatOn, agent])
 
+  // The items a chat reply is under way on (queue-chat-replying.ts): as
+  // this page's chat panels say, and, for the owner, as the Mac says of
+  // the items Fable is answering. Decisions on them wait for the reply,
+  // and each is read again when its reply ends (further down).
+  const [replying, setReplying] = useState<Replying>({})
+  const onReplying = useCallback(
+    (id: string, on: boolean | null) =>
+      setReplying(prev => withPanelWord(prev, id, on)),
+    []
+  )
+  const held = useMemo(
+    () => heldIds(replying, chatOn ? chatRows : {}),
+    [replying, chatOn, chatRows]
+  )
+  const heldRef = useRef(held)
+  heldRef.current = held
+
   // A rule being drafted from one of his decisions: ask the Mac every few
   // seconds, and read the list again the moment it is written, so the card
   // comes up a minute or two after the decision rather than on the next
@@ -2723,15 +3043,7 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
   }
 
   const ordered = useMemo(() => {
-    const groups: Record<Section, QueueItem[]> = {
-      fable: [],
-      urgent: [],
-      requests: [],
-      broom: [],
-      rules: [],
-      comb: [],
-      waiting: [],
-    }
+    const groups = noSections<QueueItem>()
     const done: QueueItem[] = []
     const perKind: Record<Kind, number> = {
       additions: 0,
@@ -2765,6 +3077,39 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
       const doc = search ? searchDocs.get(item.id) : undefined
       const hit = search && doc ? matchDoc(doc, search) : null
       if (hit) hits.set(item.id, hit)
+      // Bryce checks first (queue-suggest.ts): a suggestion or a question
+      // has its own section, whatever the item's kind or status, and an
+      // answer heads the asker's list until they have read it.
+      const fb = search ? null : (item.forBryce ?? null)
+      const placed: Section | null = !fb
+        ? null
+        : isWaiting(fb)
+          ? mode === 'edit'
+            ? 'fromTeam'
+            : mode === 'suggest'
+              ? 'withBryce'
+              : null
+          : mode === 'suggest' && fb.by === me
+            ? 'answered'
+            : null
+      if (placed) {
+        groups[placed].push(item)
+        if (placed === 'withBryce' || !isOpen(item)) continue
+        // Theirs to do: in the counts, and urgent first in its section.
+        const k = kindOf(item)
+        open++
+        openPerKind[k]++
+        perKind[k]++
+        const urgency = item.passed
+          ? null
+          : urgencyOf(
+              item,
+              item.targetRecord ? listingDates[item.targetRecord] : undefined,
+              today
+            )
+        if (urgency) urgencies.set(item.id, urgency)
+        continue
+      }
       if (!isOpen(item)) {
         const decidedToday = decidedSince(item, dayStart)
         if (decidedToday) donePerKind[kindOf(item)]++
@@ -2839,6 +3184,17 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
         Number(heard(b) === 1) - Number(heard(a) === 1) ||
         fableTop.indexOf(a.id) - fableTop.indexOf(b.id)
     )
+    // Urgent first, then the one waiting longest for an answer.
+    const fbAt = (i: QueueItem) => i.forBryce?.at ?? ''
+    const fromOrder = (a: QueueItem, b: QueueItem) =>
+      Number(urgencies.has(b.id)) - Number(urgencies.has(a.id)) ||
+      (urgencies.has(a.id) && urgencies.has(b.id)
+        ? byUrgency(urgentAt(a), urgentAt(b))
+        : 0) ||
+      (fbAt(a) < fbAt(b) ? -1 : 1)
+    groups.fromTeam.sort(fromOrder)
+    groups.withBryce.sort(fromOrder)
+    groups.answered.sort(fromOrder)
     // Longest wait first: the next to come back on its own.
     groups.waiting.sort((a, b) =>
       (a.asked?.sentAt ?? '') < (b.asked?.sentAt ?? '') ? -1 : 1
@@ -2853,19 +3209,19 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
     const doneHits = search ? done.filter(i => hits.has(i.id)) : done
     // Sub-heads only where a section spans more than one page; a section on
     // a single page lists its items as they are.
-    const pages: Record<Section, PageGroup[]> = {
-      fable: [],
-      urgent: [],
-      requests: [],
-      broom: [],
-      rules: [],
-      comb: [],
-      waiting: [],
-    }
+    const pages = noSections<PageGroup>()
     for (const s of SECTIONS) {
-      // Fable, Urgent and Waiting keep their own order; their rows name
-      // their page.
-      if (s === 'fable' || s === 'urgent' || s === 'waiting') continue
+      // Fable, Urgent, Waiting and the check-first sections keep their own
+      // order; their rows name their page.
+      if (
+        s === 'fable' ||
+        s === 'urgent' ||
+        s === 'waiting' ||
+        s === 'fromTeam' ||
+        s === 'answered' ||
+        s === 'withBryce'
+      )
+        continue
       const split = splitByPage(groups[s])
       pages[s] = split.length > 1 ? split : []
     }
@@ -2976,9 +3332,14 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
     listingDates,
     fableTop,
     visitorsOf,
+    mode,
+    me,
   ])
 
   selectedIdRef.current = selectedId
+  // The line about a Publish pressed too soon belongs to the item it was
+  // pressed on: it goes when he moves to another.
+  if (recordWait && recordWait !== selectedId) setRecordWait(null)
 
   // The record id in the search box to look up as a listing: the first one
   // no open item holds (that item is the listing, in the results already)
@@ -3117,60 +3478,133 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
     if (!selected.targetTable || !selected.targetRecord) return
     // A read whose picture links have run out (the page was left open for
     // hours) is made again, or its pictures could not show.
+    // And so is one this page has written to since (a picture dropped in
+    // a slot): the record's fingerprint is no longer the one it holds.
     const had = live[selected.id]
-    if (had && !hasExpiredPicture(had.fields)) return
     const id = selected.id
+    const gen = liveGen.current.get(id) ?? 0
+    // One read at a time: this runs again whenever the list or the row is
+    // read again, which says nothing about the record, and the read it
+    // wants may be on its way already (queue-record-read.ts).
+    if (
+      !readDue(
+        had
+          ? { stale: had.stale, expired: hasExpiredPicture(had.fields) }
+          : null,
+        liveReads.current.get(id),
+        gen
+      )
+    ) {
+      return
+    }
+    liveReads.current.set(id, gen)
     const target = `${selected.targetTable}/${selected.targetRecord}`
-    let cancelled = false
+    const fresh = freshTargets.current.has(id)
     void (async () => {
       try {
-        const res = await fetch(`${API}?target=${encodeURIComponent(target)}`, {
-          cache: 'no-store',
-        })
+        const res = await fetch(
+          `${API}?target=${encodeURIComponent(target)}${fresh ? '&fresh=1' : ''}`,
+          { cache: 'no-store' }
+        )
         const data = (await res.json()) as {
           fields?: Record<string, unknown>
           attachments?: Record<string, AttachmentInfo[]>
           schema?: FieldInfo[]
+          shown?: string
         }
-        if (!cancelled && res.ok && data.fields) {
+        // Something may have moved the record while this read was on its
+        // way: it is not the record as it is now.
+        if (!readStands(gen, liveGen.current.get(id) ?? 0)) return
+        if (res.ok && data.fields) {
           const fields = data.fields
           const schema = data.schema ?? []
+          const shown = typeof data.shown === 'string' ? data.shown : null
           rememberAttachments(data.attachments)
-          setLive(prev => ({ ...prev, [id]: { fields, schema } }))
+          freshTargets.current.delete(id)
+          if (shown) liveFailed.current.delete(id)
+          else liveFailed.current.add(id)
+          setLive(prev => ({ ...prev, [id]: { fields, schema, shown } }))
+        } else {
+          liveFailed.current.add(id)
         }
       } catch {
         // the snapshot stays
+        if (readStands(gen, liveGen.current.get(id) ?? 0)) {
+          liveFailed.current.add(id)
+        }
+      } finally {
+        if (liveReads.current.get(id) === gen) liveReads.current.delete(id)
+        // Thrown away, with no newer read begun meanwhile: this runs
+        // again, and begins it.
+        if (
+          !readStands(gen, liveGen.current.get(id) ?? 0) &&
+          !liveReads.current.has(id)
+        ) {
+          setLive(prev => ({ ...prev }))
+        }
       }
     })()
-    return () => {
-      cancelled = true
-    }
   }, [selected, live, fableIds])
+
+  /** Something may have moved this item's record: a read of it that is on
+   *  its way no longer counts (queue-record-read.ts). */
+  const movedLive = useCallback((id: string) => {
+    liveGen.current.set(id, (liveGen.current.get(id) ?? 0) + 1)
+  }, [])
 
   const setLiveField = useCallback(
     (id: string, field: string, value: unknown) => {
+      movedLive(id)
       setLive(prev => {
         const cur = prev[id]
         if (!cur) return prev
+        // The page has just written this to the record itself: what it
+        // shows is right at once, and the record is read again for its
+        // new fingerprint (the read above).
         return {
           ...prev,
-          [id]: { ...cur, fields: { ...cur.fields, [field]: value } },
+          [id]: {
+            ...cur,
+            fields: { ...cur.fields, [field]: value },
+            stale: true,
+          },
         }
       })
     },
-    []
+    [movedLive]
+  )
+
+  // A chat reply on the item has ended, and may have changed its record:
+  // what the page shows of it stays up while the effect above reads it
+  // again (no jump back to the snapshot for a moment), but it no longer
+  // counts as read, so a Publish waits for the new read.
+  const staleLive = useCallback(
+    (id: string) => {
+      movedLive(id)
+      setLive(prev => {
+        const cur = prev[id]
+        // With none held yet, the read on its way is thrown away as it
+        // lands, and made again.
+        return cur ? { ...prev, [id]: { ...cur, stale: true } } : prev
+      })
+    },
+    [movedLive]
   )
 
   // Fable changed the record from the chat on the Mac: drop the live read
   // so the effect above fetches it again.
-  const forgetLive = useCallback((id: string) => {
-    setLive(prev => {
-      if (!prev[id]) return prev
-      const next = { ...prev }
-      delete next[id]
-      return next
-    })
-  }, [])
+  const forgetLive = useCallback(
+    (id: string) => {
+      movedLive(id)
+      setLive(prev => {
+        if (!prev[id]) return prev
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
+    },
+    [movedLive]
+  )
 
   // A row's picture link has stopped working (Airtable links last a few
   // hours): show the plain box and ask for a fresh link.
@@ -3289,6 +3723,7 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
       if (patch.reply !== undefined && row?.replyDraft !== null) {
         // Back to "as it came" means the row's own draft is saved again.
         body.replyDraft = merged.reply ?? row?.replyDraft ?? ''
+        replyUnsaved.current.add(id)
       }
       clearTimeout(saveTimers.current[id])
       saveTimers.current[id] = setTimeout(() => {
@@ -3315,6 +3750,28 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
         })
           .then(async res => {
             if (res.ok) {
+              const replied = 'replyDraft' in body
+              if (replied) replyUnsaved.current.delete(id)
+              // This page's own edits are seen ones: a fingerprint a refusal
+              // gave it follows them, so the next press still goes
+              // (queue-suggest.ts).
+              const ack = seenPrints.current[id]
+              if (ack) {
+                const data = (await res.json().catch(() => ({}))) as {
+                  item?: QueueItem
+                }
+                const now = data.item?.print
+                if (now) {
+                  seenPrints.current[id] = {
+                    ...ack,
+                    print: {
+                      ...ack.print,
+                      edits: now.edits,
+                      ...(replied ? { reply: now.reply } : {}),
+                    },
+                  }
+                }
+              }
               setDrafts(prev =>
                 prev[id]?.error?.startsWith('The edits were not saved')
                   ? { ...prev, [id]: { ...prev[id], error: null } }
@@ -3332,6 +3789,27 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
     },
     []
   )
+
+  remakeRef.current = (list, forced = []) => {
+    const ids = new Set([...staleDrafts(draftsRef.current, list), ...forced])
+    if (ids.size === 0) return
+    const remake = (all: Record<string, Draft>): Record<string, Draft> => {
+      const out = { ...all }
+      for (const id of ids) {
+        const was = all[id]
+        if (!was || was.busy || !list.some(i => i.id === id)) continue
+        out[id] = remadeDraft(
+          was,
+          draftOfRow(list, id),
+          touchedKeys.current[id] ?? new Set(),
+          replyUnsaved.current.has(id)
+        )
+      }
+      return out
+    }
+    draftsRef.current = remake(draftsRef.current)
+    setDrafts(prev => remake(prev))
+  }
 
   const select = useCallback((id: string) => {
     setSelectedId(id)
@@ -3465,7 +3943,9 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
       const sub = res.ok
         ? res.detail || 'Draft saved in Gmail'
         : res.offline
-          ? OFFLINE_SUB
+          ? agent || chatKindNow === 'mac'
+            ? OFFLINE_SUB
+            : WORKER_SUB
           : `Reply draft failed: ${res.detail}`
       const already = res.alreadyReplied
       if (already) {
@@ -3497,7 +3977,7 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
         prev && prev.item.id === item.id ? { ...prev, sub } : prev
       )
     },
-    [agent]
+    [agent, chatKindNow]
   )
 
   // After a reject: the Mac agent has Fable write the reply from the reason
@@ -3527,7 +4007,9 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
             ? 'Reply ready · copy it and send it yourself on Discord'
             : 'Reply draft saved in Gmail')
         : res.offline
-          ? `Mac agent not reachable · the Mac writes the reply within five minutes`
+          ? agent || chatKindNow === 'mac'
+            ? `Mac agent not reachable · the Mac writes the reply within five minutes`
+            : WORKER_REJECT_SUB
           : `${discord ? 'Reply' : 'Reply draft'} failed: ${res.detail}`
       const already = res.alreadyReplied ?? null
       const reply: RejectReply | null =
@@ -3569,7 +4051,7 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
           : prev
       )
     },
-    [agent]
+    [agent, chatKindNow]
   )
 
   // "Update flag" from the chat (queue-flag.ts): the new verdict, reasons
@@ -3680,10 +4162,204 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
       setItems(prev =>
         prev ? prev.map(i => (i.id === fresh.id ? fresh : i)) : prev
       )
+      remakeRef.current([fresh])
     } catch {
       // the next refresh of the list has it
     }
   }, [])
+
+  // A chat reply on an item has ended: the chat may have changed what the
+  // item is about (its record, its proposed changes, its flag), so the row
+  // and the record are read again, and what is decided next is decided on
+  // what the reply left. The note that said decisions were waiting goes.
+  const heldBefore = useRef(held)
+  useEffect(() => {
+    const ended = repliesEnded(heldBefore.current, held)
+    heldBefore.current = held
+    for (const id of ended) {
+      const item = itemsRef.current?.find(i => i.id === id)
+      if (!item) continue
+      staleLive(id)
+      forgetCard(item)
+      void refreshRow(item)
+      if (draftsRef.current[id]?.error === REPLY_HOLDS) {
+        setDraft(id, { error: null })
+      }
+    }
+  }, [held, staleLive, refreshRow, setDraft])
+
+  /** "Bryce checks first" (queue-suggest.ts): a decision pressed by someone
+   *  whose decisions are suggestions. Its own path, not act's: nothing a
+   *  real decision sets off follows it (no reply or decline draft, no rule
+   *  pop-up, no form email marked read, no Discord reply copied, no
+   *  fireworks). The edits and reply draft as the page has them go with
+   *  it, the item moves to With Bryce, and the page moves on. */
+  const suggestDecision = useCallback(
+    async (item: QueueItem, did: Decision, extra: Record<string, unknown>) => {
+      if (mode !== 'suggest' || !isOpen(item)) return
+      // An edit still waiting to be saved goes with the suggestion instead:
+      // a save landing after it would be refused.
+      clearTimeout(saveTimers.current[item.id])
+      delete touchedKeys.current[item.id]
+      const d =
+        draftsRef.current[item.id] ?? draftOfRow(itemsRef.current, item.id)
+      const internal = d.keepInternal ?? item.rulePublicChoice === 'internal'
+      const word = suggestWord(did as SuggestDid, item.type)
+      setDraft(item.id, { busy: true, error: null })
+      setToast({
+        item,
+        no: did === 'reject' || did === 'delete',
+        later: did === 'later',
+        suggested: true,
+        state: 'working',
+        text: `Suggesting ${word.toLowerCase()}…`,
+      })
+      const walk = ordered.walk
+      const i = walk.findIndex(x => x.id === item.id)
+      const free = (x: QueueItem) =>
+        x.id !== item.id && !pendingRef.current[x.id]
+      const next =
+        selectedIdRef.current === item.id
+          ? fableFirst(
+              item.id,
+              walk.slice(i + 1).find(free) ??
+                walk.slice(0, Math.max(0, i)).reverse().find(free),
+              free
+            )
+          : undefined
+      let status = 0
+      try {
+        const res = await fetch(API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: item.id,
+            action: 'suggest',
+            did,
+            // The draft as the row keeps it; Publish sends its own, as Accept
+            // would write them.
+            edits: withLeftOut(d.edits, d.leftOut),
+            ...(d.reply !== null ? { replyDraft: d.reply } : {}),
+            ...(did === 'accept' && item.type === 'Rule' && item.rulePublic
+              ? {
+                  public: internal ? 'internal' : 'apply',
+                  publicSeen: item.rulePublic.wording,
+                }
+              : {}),
+            reason: d.note,
+            ...extra,
+            // What this page showed: a change's changes, a rule's edits,
+            // or the record of an addition it would publish
+            // (queue-shown.ts).
+            ...(shownFor(itemsRef.current, liveRef.current, item, did)
+              ? {
+                  shown: shownFor(itemsRef.current, liveRef.current, item, did),
+                }
+              : {}),
+          }),
+        })
+        status = res.status
+        const data = (await res.json()) as { item?: QueueItem; error?: string }
+        if (!res.ok || !data.item) {
+          throw new Error(data.error ?? `HTTP ${res.status}`)
+        }
+        loadSeq.current++
+        const updated = { ...data.item, logo: data.item.logo ?? item.logo }
+        forgetCard(updated)
+        setItems(prev =>
+          prev ? prev.map(x => (x.id === updated.id ? updated : x)) : prev
+        )
+        setDrafts(prev => {
+          const rest = { ...prev }
+          delete rest[item.id]
+          return rest
+        })
+        setToast(prev =>
+          prev && prev.item.id === item.id
+            ? {
+                item: updated,
+                no: did === 'reject' || did === 'delete',
+                later: did === 'later',
+                suggested: true,
+                state: 'done',
+                text: `Suggested ${word}`,
+                sub: `Waiting for ${CHECKER_NAME} · nothing has changed on the site`,
+              }
+            : prev
+        )
+        if (next && selectedIdRef.current === item.id) reveal(next)
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        // Refused for a reason a retry can't change (it is decided, or
+        // changed since): the list is read again.
+        const stale = status === 403 || status === 409 || status === 412
+        setDraft(item.id, { busy: false, error: message })
+        // 412: the record too, with the table's field list read anew.
+        if (status === 412) {
+          freshTargets.current.add(item.id)
+          forgetLive(item.id)
+        }
+        if (stale) await load()
+        setToast({
+          item,
+          no: false,
+          suggested: true,
+          state: 'failed',
+          text: `${suggestLabel('suggest', word)} failed · ${message}`,
+          sub: 'Nothing was suggested',
+          retry: stale ? undefined : { action: did, extra },
+        })
+      }
+    },
+    [mode, setDraft, ordered.walk, fableFirst, reveal, load, forgetLive]
+  )
+
+  /** Take back or dismiss a suggestion or question, ask one, or answer one
+   *  (queue-suggest.ts). Resolves to an error to show, or null. */
+  const forBryceAct = useCallback(
+    async (
+      item: QueueItem,
+      action: 'withdraw' | 'ask' | 'answer',
+      extra: Record<string, unknown> = {}
+    ): Promise<string | null> => {
+      if (!canEdit) return 'View only: nothing changed.'
+      try {
+        const res = await fetch(API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: item.id, action, ...extra }),
+        })
+        const data = (await res.json()) as { item?: QueueItem; error?: string }
+        if (!res.ok || !data.item) {
+          if (res.status === 409 || res.status === 403) {
+            void refreshRow(item)
+          }
+          return data.error ?? `HTTP ${res.status}`
+        }
+        loadSeq.current++
+        const updated = { ...data.item, logo: data.item.logo ?? item.logo }
+        setItems(prev =>
+          prev ? prev.map(x => (x.id === updated.id ? updated : x)) : prev
+        )
+        // Their own suggestion taken back: the item starts again from the
+        // edits on its row. A suggestion dismissed: the draft made on it is
+        // made again from the row.
+        if (action === 'withdraw' && mode === 'suggest') {
+          setDrafts(prev => {
+            const rest = { ...prev }
+            delete rest[item.id]
+            return rest
+          })
+        } else {
+          remakeRef.current([updated])
+        }
+        return null
+      } catch {
+        return 'No answer from the site; nothing changed.'
+      }
+    },
+    [canEdit, mode, refreshRow]
+  )
 
   // The rule's public wording as he retyped it, on its way to the row: Apply
   // waits for it, so the words that go public are the ones on the card.
@@ -3955,17 +4631,73 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
       opts: { inPlace?: boolean } = {}
     ) => {
       if (!canEdit) return
+      // A chat reply for this item is still being written on this page: a
+      // decision waits for it, since the reply may change what the item is
+      // about (queue-chat-replying.ts). The page reads the item again when
+      // the reply ends.
+      if (isDecision(action) && isOpen(item) && heldRef.current.has(item.id)) {
+        // The item in focus says so under its buttons already: that note
+        // flashes. Any other (the rule pop-up, a Retry) gets it as its
+        // error.
+        if (selectedIdRef.current === item.id) setBlockedFlash(n => n + 1)
+        else setDraft(item.id, { busy: false, error: REPLY_HOLDS })
+        return
+      }
+      // An addition is published as its record stands, so Publish (or the
+      // suggestion of it) goes on this page's read of the record. With none
+      // yet (pressed in the moment after the item opened), or one this page
+      // has written over since (a picture just dropped in), it waits for
+      // the read that is on its way. Only on the item in focus, whose
+      // record is being read, and not after a read that failed: then the
+      // site is asked, and says what is wrong.
+      // Said in a line under the buttons, not as an error: nothing failed,
+      // and the item stays where it is.
+      if (
+        publishWaits({
+          publishes: wantsRecordShown(item, action) && isOpen(item),
+          inFocus: selectedIdRef.current === item.id,
+          readFailed: liveFailed.current.has(item.id),
+          shown: shownFor(itemsRef.current, liveRef.current, item, action),
+        })
+      ) {
+        setRecordWait(item.id)
+        setBlockedFlash(n => n + 1)
+        return
+      }
+      if (isDecision(action)) {
+        setRecordWait(was => (was === item.id ? null : was))
+      }
+      // Bryce checks first: a decision is a suggestion, on its own path.
+      if (mode === 'suggest' && isDecision(action)) {
+        await suggestDecision(item, action, extra)
+        return
+      }
       setDraft(item.id, { busy: true, error: null })
       // A rule whose public wording he has just retyped: Apply waits for
       // that save and goes with the words as saved. Words still in the box,
       // or refused, keep the rule open: the old words never go out in
       // their place.
       let pub = item.rulePublic
+      // What this page shows of the item's changes or edits, sent with a
+      // decision (queue-shown.ts). Saving new public wording rewrites the
+      // rule's edits, so the item that save hands back says it anew.
+      // Read off the item as the page holds it now, which is what is on
+      // screen, rather than the copy this call was handed.
+      // For an addition it publishes, that is the record as this page read
+      // it.
+      let shown = shownFor(itemsRef.current, liveRef.current, item, action)
+      // The draft the page shows, made from the row when there is none yet
+      // (a suggested Apply brings its choice for the wording).
       const internal =
-        drafts[item.id]?.keepInternal ?? item.rulePublicChoice === 'internal'
+        (draftsRef.current[item.id] ?? draftOfRow(itemsRef.current, item.id))
+          .keepInternal ?? item.rulePublicChoice === 'internal'
       if (action === 'accept' && item.type === 'Rule' && pub) {
         const saving = publicSaves.current[item.id]
-        if (saving) pub = (await saving)?.rulePublic ?? pub
+        if (saving) {
+          const saved = await saving
+          pub = saved?.rulePublic ?? pub
+          shown = saved?.shown ?? shown
+        }
         const d = draftsRef.current[item.id]
         if (!internal && (d?.editingPublic || d?.publicText != null)) {
           setDraft(item.id, {
@@ -4091,7 +4823,17 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
         pendingRef.current = rest
         setPending(rest)
       }
+      // Deciding an item someone suggested a decision on confirms or
+      // overrides it: the site checks the suggestion is the one this page
+      // shows, on the item as it was then or as this page last read it
+      // after a refusal (queue-suggest.ts).
+      const suggestion = decision ? openSuggestion(item.forBryce) : null
+      const seenPrint =
+        suggestion && seenPrints.current[item.id]?.at === suggestion.at
+          ? seenPrints.current[item.id].print
+          : null
       let status = 0
+      let recheck: { at?: string; print?: Print } | null = null
       try {
         const res = await fetch(API, {
           method: 'POST',
@@ -4102,6 +4844,12 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
             ...replyDraft,
             ...publicWording,
             ...extra,
+            ...(suggestion ? { suggested: suggestion.at } : {}),
+            ...(seenPrint ? { suggestedPrint: seenPrint } : {}),
+            // A change or a rule: the changes or edits this page showed
+            // (queue-shown.ts). The site refuses the decision when the
+            // row no longer holds them, and the page reads it again.
+            ...(decision && shown ? { shown } : {}),
           }),
         })
         status = res.status
@@ -4109,8 +4857,10 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
           item?: QueueItem
           error?: string
           notPutBack?: string[]
+          recheck?: { at?: string; print?: Print }
         }
         if (!res.ok || !data.item) {
+          recheck = data.recheck ?? null
           throw new Error(data.error ?? `HTTP ${res.status}`)
         }
         // A read of the list that began before this landed would show the
@@ -4140,6 +4890,8 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
           delete next[item.id]
           return next
         })
+        delete seenPrints.current[item.id]
+        replyUnsaved.current.delete(item.id)
         // A form item with nobody to reply to: its email in Gmail is read
         // once he has dealt with the item in any way, and unread again
         // after an Undo (Bryce, 18 Nov 2026). The Mac re-reads the row and
@@ -4300,12 +5052,33 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
         // the list is read again so the wording he must see is on the card,
         // and there is no Retry, which would apply it unread.
         const reread = decision && status === 412
+        // And so is the record: an addition's may be what changed under
+        // the page. Its next read asks for the table's field list anew.
+        if (reread) {
+          freshTargets.current.add(item.id)
+          forgetLive(item.id)
+        }
         // It did not go out: its place is free again.
         if (wantsSpot(item)) forgetMap(item.targetRecord)
         setDraft(item.id, { busy: false, error: closed ? null : message })
-        if (closed || reread) await load()
+        // Or the item changed since someone suggested a decision on it
+        // (queue-suggest.ts). The page reads it again and makes its draft
+        // again from the row, so what it shows is what the next press
+        // sends, and that press says it has seen the item as it is now.
+        if (reread && recheck?.at && recheck.print) {
+          seenPrints.current[item.id] = {
+            at: recheck.at,
+            print: recheck.print,
+          }
+        }
+        // Not on its way any more, before the list is read again: a read
+        // keeps the page's own version of an item whose decision is on its
+        // way, so the fresh row would not show.
+        if (decision) forget()
+        if (closed || reread) {
+          await load(recheck ? { remake: [item.id] } : {})
+        }
         if (decision) {
-          forget()
           undoAfterRef.current.delete(item.id)
           setCheer(c => (c?.id === item.id ? null : c))
           // A failure takes the toast whatever it shows, and keeps it up
@@ -4370,6 +5143,8 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
       kind,
       searching,
       followReopen,
+      mode,
+      suggestDecision,
     ]
   )
   actRef.current = act
@@ -4608,6 +5383,16 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
       ) {
         return
       }
+      // A suggestion waits on the item: the keys that decide or change it
+      // wait until it is decided or taken back (queue-suggest.ts).
+      if (
+        item &&
+        isOpen(item) &&
+        suggestionLocks(item, mode) &&
+        ['a', 'r', 'x', 'w', 'c', 'Enter'].includes(e.key)
+      ) {
+        return
+      }
       switch (e.key) {
         case 'Tab':
           // Tab and Shift+Tab step through the list, in place of W and Q
@@ -4785,11 +5570,25 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
           }
           break
         case 'f':
-          if (canEdit && item && agentChat) {
+          // Whichever chat is on the item: the Mac's, or the team's.
+          if (canEdit && item && (agentChat || chatKindNow === 'team')) {
             e.preventDefault()
             setChatFocus(n => n + 1)
           }
           break
+        case 'z': {
+          // A question in From Rob: write the answer. With "Bryce checks
+          // first": ask Bryce about the item (queue-suggest.ts).
+          const fb = item?.forBryce ?? null
+          if (item && mode === 'edit' && fb?.kind === 'ask' && !fb.answer) {
+            e.preventDefault()
+            setAskFocus(n => n + 1)
+          } else if (item && mode === 'suggest' && !isWaiting(fb)) {
+            e.preventDefault()
+            setAskingFor(item.id)
+          }
+          break
+        }
         case 'c': {
           // Use the fields Fable would change, all at once (Bryce, 16 Nov
           // 2026). They go into the edits, like anything typed by hand.
@@ -5014,6 +5813,7 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
     setDraft,
     live,
     agentChat,
+    chatKindNow,
     items,
     select,
     searching,
@@ -5089,6 +5889,11 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
       ordered.groups[section].length > 0 ||
       (section === 'requests' && kind !== 'rules')
   )
+  // "From Rob": named after whoever is waiting in it.
+  const sectionLabel = (section: Section): string =>
+    section === 'fromTeam'
+      ? fromLabel(ordered.groups.fromTeam.map(i => i.forBryce?.by ?? null))
+      : SECTION_LABEL[section]
 
   return (
     <div ref={rootRef} className={styles.queue}>
@@ -5441,7 +6246,7 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
                         <span className={styles.groupIcon}>
                           <Icon src={SECTION_ICON[section]} size={16} />
                         </span>
-                        {SECTION_LABEL[section]}
+                        {sectionLabel(section)}
                         <span className={styles.groupCount}>{list.length}</span>
                         {collapsed[section] && (
                           <FableDot mark={markAmong(list)} />
@@ -5527,7 +6332,10 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
                               }
                               fable={fableMarks[item.id]}
                               urgency={
-                                section === 'fable' || section === 'urgent'
+                                section === 'fable' ||
+                                section === 'urgent' ||
+                                section === 'fromTeam' ||
+                                section === 'answered'
                                   ? ordered.urgencies.get(item.id)
                                   : undefined
                               }
@@ -5611,9 +6419,20 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
                 onWait={on => void setWaiting(selected, on)}
                 onSavePublic={text => savePublic(selected, text)}
                 onRowChanged={() => void refreshRow(selected)}
+                replyHolds={isOpen(selected) && held.has(selected.id)}
+                recordWaits={recordWait === selected.id}
+                onReplying={on => onReplying(selected.id, on)}
                 chatAgent={canEdit && agentChat ? agent : null}
+                chatTeam={
+                  canEdit && chatKindNow === 'team'
+                    ? { online: teamOnline, tick: teamTick }
+                    : null
+                }
                 chatDictate={agentDictate}
                 chatFocus={chatFocus}
+                askFocus={askFocus}
+                askingFor={askingFor}
+                onAskingFor={setAskingFor}
                 placeFocus={placeFocus}
                 fieldFocus={fieldFocus}
                 spot={spots[selected.id] ?? null}
@@ -5623,7 +6442,13 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
                 blockedFlash={blockedFlash}
                 readOnly={
                   !canEdit ||
-                  !(isOpen(selected) || Boolean(setAsideUntil(selected)))
+                  !(isOpen(selected) || Boolean(setAsideUntil(selected))) ||
+                  // A suggestion waits on it: nothing changes until it is
+                  // decided or taken back.
+                  suggestionLocks(selected, mode)
+                }
+                onForBryce={(action, extra) =>
+                  forBryceAct(selected, action, extra)
                 }
               />
             ) : !searching && ordered.openPerKind[kind] === 0 ? (
@@ -5730,8 +6555,34 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
               )}
             </>
           )}
-          {toast.state === 'failed' || toast.undone ? (
+          {toast.state === 'failed' || toast.undone || toast.suggested ? (
             <>
+              {toast.suggested && toast.state === 'done' && (
+                <button
+                  className={styles.toastUndo}
+                  onClick={() => {
+                    const was = toast.item
+                    void forBryceAct(was, 'withdraw').then(error =>
+                      setToast(prev =>
+                        prev?.item.id === was.id
+                          ? error
+                            ? {
+                                ...prev,
+                                state: 'failed',
+                                text: `Take back failed · ${error}`,
+                                sub: 'The suggestion still waits',
+                                retry: undefined,
+                              }
+                            : null
+                          : prev
+                      )
+                    )
+                  }}
+                >
+                  <Icon src={ICON.undo} size={12} className={styles.undoIcon} />
+                  Take back
+                </button>
+              )}
               {toast.state === 'failed' && toastRetry && (
                 <button
                   className={styles.toastUndo}
@@ -5902,6 +6753,28 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
                 <kbd>F</kbd>
               </dt>
               <dd>talk to Fable about the item, or tell it what to change</dd>
+              {mode === 'edit' && (
+                <>
+                  <dt>
+                    <kbd>Z</kbd>
+                  </dt>
+                  <dd>
+                    on a question waiting for an answer, write the answer;{' '}
+                    <kbd>⌘</kbd> <kbd>Enter</kbd> sends it
+                  </dd>
+                </>
+              )}
+              {mode === 'suggest' && (
+                <>
+                  <dt>
+                    <kbd>Z</kbd>
+                  </dt>
+                  <dd>
+                    ask {CHECKER_NAME} about the item; <kbd>⌘</kbd>{' '}
+                    <kbd>Enter</kbd> sends it, and the answer comes back here
+                  </dd>
+                </>
+              )}
               <dt>
                 <kbd>C</kbd>
               </dt>
@@ -5994,6 +6867,24 @@ function QueueInbox({ canEdit }: { canEdit: boolean }) {
         </div>
       )}
     </div>
+  )
+}
+
+/** "Rob suggests Publish", "Rob asked", "Bryce answered" on a list row
+ *  (queue-suggest.ts); "You …" on the suggester's own rows. */
+function ForBryceTag({ fb, item }: { fb: ForBryce; item: QueueItem }) {
+  const me = useContext(MeContext)
+  const mine = fb.by !== null && fb.by === me
+  const text = rowNote(fb, item.type)
+  return (
+    <span className={`${styles.withIcon} ${styles.forBryceTag}`}>
+      <Icon src={fb.kind === 'ask' ? ICON.question : ICON.person} size={12} />
+      {mine && fb.kind === 'suggest'
+        ? `You suggest ${suggestWord(fb.did, item.type)}`
+        : mine && fb.kind === 'ask' && !fb.answer
+          ? `You asked ${CHECKER_NAME}`
+          : text}
+    </span>
   )
 }
 
@@ -6232,6 +7123,7 @@ function Row({
             )
           )}
           <AskedTag item={item} told={urgency === ANSWERED} />
+          {item.forBryce && <ForBryceTag fb={item.forBryce} item={item} />}
           <BackTag item={item} />
           <PassedTag item={item} />
           {showKind && <span>{KIND_WORD[item.type]}</span>}
@@ -6587,8 +7479,9 @@ function History({
           const body = (
             <>
               <span className={styles.historyWhat}>{lineText(l)}</span>
-              {/* Fable's own change names whoever asked for it in the chat. */}
-              {l.by && (
+              {/* Fable's own change names whoever asked for it in the chat;
+                  a suggestion or a question names its author in its words. */}
+              {l.by && !namesItself(l) && (
                 <span>
                   {l.did === 'fable' ? 'asked by' : 'by'} {l.by}
                 </span>
@@ -6682,6 +7575,272 @@ function verdictClass(item: { verdict: Verdict | null }): string {
   return styles.no
 }
 
+/** How someone with full edit confirms a suggestion: the usual key. */
+const CONFIRM_HINT: Record<SuggestDid, string> = {
+  accept: 'A confirms it.',
+  reject:
+    'R opens Reject with the reason and decline text filled in, and Enter confirms it.',
+  delete: 'X, then X again, confirms it.',
+  later: 'W confirms it.',
+}
+
+/** A suggestion or a question on the item (queue-suggest.ts), above its
+ *  fields: the call and the reason first, then what came with it. For
+ *  someone with full edit it says how to confirm, and takes an answer; for
+ *  its author it offers Take back, or Got it once answered. Also the box a
+ *  check-first person writes a question in. Nothing when there is neither. */
+function ForBryceCard({
+  item,
+  asking,
+  onAsking,
+  onForBryce,
+  focusTick,
+}: {
+  item: QueueItem
+  /** The Ask box is open. */
+  asking: boolean
+  onAsking: (on: boolean) => void
+  onForBryce: (
+    action: 'withdraw' | 'ask' | 'answer',
+    extra?: Record<string, unknown>
+  ) => Promise<string | null>
+  /** Bumped by Z: the answer box takes the focus. */
+  focusTick: number
+}) {
+  const mode = useContext(ModeContext)
+  const me = useContext(MeContext)
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const answerRef = useRef<HTMLTextAreaElement>(null)
+  const seenTick = useRef(focusTick)
+  useEffect(() => {
+    if (focusTick === seenTick.current) return
+    seenTick.current = focusTick
+    answerRef.current?.focus()
+  }, [focusTick])
+  const fb = item.forBryce ?? null
+  const send = async (
+    action: 'withdraw' | 'ask' | 'answer',
+    extra: Record<string, unknown> = {}
+  ) => {
+    setBusy(true)
+    setError(null)
+    const failed = await onForBryce(action, extra)
+    setBusy(false)
+    if (failed) {
+      setError(failed)
+      return
+    }
+    setText('')
+    onAsking(false)
+  }
+  const box = (label: string, button: string, action: 'ask' | 'answer') => (
+    <>
+      <textarea
+        ref={action === 'answer' ? answerRef : undefined}
+        className={styles.input}
+        rows={3}
+        value={text}
+        disabled={busy}
+        aria-label={label}
+        placeholder={label}
+        autoFocus={action === 'ask'}
+        onChange={e => setText(e.target.value)}
+        onKeyDown={e => {
+          // Cmd+Enter sends, as in the chat box's long replies.
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && text.trim()) {
+            e.preventDefault()
+            void send(action, {
+              [action === 'ask' ? 'question' : 'answer']: text,
+            })
+          }
+          if (e.key === 'Escape' && action === 'ask') {
+            e.stopPropagation()
+            onAsking(false)
+          }
+        }}
+      />
+      <div className={styles.buttons}>
+        <button
+          className={`${styles.button} ${styles.primary}`}
+          disabled={busy || !text.trim()}
+          onClick={() =>
+            void send(action, {
+              [action === 'ask' ? 'question' : 'answer']: text,
+            })
+          }
+        >
+          {busy ? 'Sending…' : button}
+        </button>
+        {action === 'ask' && (
+          <button
+            className={styles.ghost}
+            disabled={busy}
+            onClick={() => onAsking(false)}
+          >
+            Cancel
+          </button>
+        )}
+      </div>
+    </>
+  )
+  if (!fb) {
+    if (!asking || mode !== 'suggest') return null
+    return (
+      <section className={`${styles.panel} ${styles.forBryce}`}>
+        <h3 className={`${styles.forBryceHead} ${styles.withIcon}`}>
+          <Icon src={ICON.question} size={12} />
+          Ask {CHECKER_NAME}
+        </h3>
+        <p className={styles.note}>
+          It waits in {CHECKER_NAME}&apos;s list until it is answered, and the
+          answer comes back here.
+        </p>
+        {box(`Your question for ${CHECKER_NAME}`, 'Ask', 'ask')}
+        {error && <p className={`${styles.note} ${styles.no}`}>{error}</p>}
+      </section>
+    )
+  }
+  const mine = fb.by !== null && fb.by === me
+  const who = mine ? 'You' : firstName(fb.by)
+  const closed = !isOpen(item)
+  let body: React.ReactNode
+  if (fb.kind === 'suggest') {
+    const what = suggestWord(fb.did, item.type)
+    body = (
+      <>
+        <h3 className={`${styles.forBryceHead} ${styles.withIcon}`}>
+          <Icon src={ICON.person} size={12} />
+          {who} {mine ? 'suggested' : 'suggests'} {what}
+          <span className={styles.when}>{ago(fb.at)}</span>
+        </h3>
+        {fb.reason && <p className={styles.quote}>{fb.reason}</p>}
+        {fb.did === 'reject' && fb.rejectReply && (
+          <>
+            <p className={styles.note}>With this decline text</p>
+            <p className={`${styles.quote} ${styles.forBryceText}`}>
+              {fb.rejectReply}
+            </p>
+          </>
+        )}
+        {fb.edited.length > 0 && (
+          <p className={styles.note}>
+            {who} edited {nameList(fb.edited)}
+            {item.replyDraft
+              ? ' · the reply draft below is as it was suggested'
+              : ''}
+          </p>
+        )}
+        {fb.did === 'accept' && fb.publicChoice && item.rulePublic && (
+          <p className={styles.note}>
+            {fb.publicChoice === 'internal'
+              ? `${who} chose to keep the wording internal, so the public listing policy stays as it is`
+              : `${who} chose to put the wording on the public listing policy`}
+          </p>
+        )}
+        {fb.asked && (
+          <p className={styles.note}>
+            {who} asked first &ldquo;{fb.asked.question}&rdquo;
+            {fb.asked.answer
+              ? ` · ${firstName(fb.asked.by)} answered \u201c${fb.asked.answer}\u201d`
+              : ''}
+          </p>
+        )}
+        {closed ? (
+          <p className={styles.note}>
+            It was {item.status.toLowerCase()} after the suggestion
+            {item.error ? ` (${item.error})` : ''}, so there is nothing left to
+            confirm.
+          </p>
+        ) : mode === 'edit' ? (
+          <p className={styles.note}>
+            {CONFIRM_HINT[fb.did]} You can change anything first, or decide
+            differently.
+          </p>
+        ) : (
+          <p className={styles.note}>
+            Waiting for {CHECKER_NAME}. Nothing has changed on the site.
+          </p>
+        )}
+      </>
+    )
+  } else if (!fb.answer) {
+    body = (
+      <>
+        <h3 className={`${styles.forBryceHead} ${styles.withIcon}`}>
+          <Icon src={ICON.question} size={12} />
+          {who} asked {mine ? CHECKER_NAME : ''}
+          <span className={styles.when}>{ago(fb.at)}</span>
+        </h3>
+        <p className={styles.quote}>{fb.question}</p>
+        {mode === 'edit' ? (
+          <>
+            {box('Your answer', 'Answer', 'answer')}
+            {!closed && (
+              <p className={styles.note}>
+                Or decide the item: a decision answers it too.
+              </p>
+            )}
+          </>
+        ) : (
+          <p className={styles.note}>Waiting for an answer.</p>
+        )}
+      </>
+    )
+  } else {
+    body = (
+      <>
+        <h3 className={`${styles.forBryceHead} ${styles.withIcon}`}>
+          <Icon src={ICON.question} size={12} />
+          {firstName(fb.answeredBy)} answered
+          {fb.answeredAt && (
+            <span className={styles.when}>{ago(fb.answeredAt)}</span>
+          )}
+        </h3>
+        <p className={styles.note}>
+          {mine ? 'You' : firstName(fb.by)} asked &ldquo;{fb.question}&rdquo;
+        </p>
+        <p className={styles.quote}>{fb.answer}</p>
+      </>
+    )
+  }
+  // Take back while it waits (its author), Got it once answered (its
+  // author). Dismiss for anyone with full edit: on a row closed meanwhile,
+  // and on an open one's suggestion, which then leaves the item open as it
+  // is, so it can always be dealt with.
+  const button =
+    mode === 'suggest' && mine
+      ? isWaiting(fb)
+        ? 'Take back'
+        : 'Got it'
+      : mode === 'edit' && isWaiting(fb) && (closed || fb.kind === 'suggest')
+        ? 'Dismiss'
+        : null
+  return (
+    <section className={`${styles.panel} ${styles.forBryce}`}>
+      {body}
+      {button && (
+        <div className={styles.buttons}>
+          <button
+            className={styles.ghost}
+            disabled={busy}
+            title={
+              button === 'Dismiss' && !closed
+                ? `Takes ${firstName(fb.by)}'s suggestion off the item, with nothing decided. The item stays open as it is.`
+                : undefined
+            }
+            onClick={() => void send('withdraw')}
+          >
+            {busy ? 'Sending…' : button}
+          </button>
+        </div>
+      )}
+      {error && <p className={`${styles.note} ${styles.no}`}>{error}</p>}
+    </section>
+  )
+}
+
 function Detail({
   item,
   live,
@@ -6693,9 +7852,16 @@ function Detail({
   onWait,
   onSavePublic,
   onRowChanged,
+  replyHolds = false,
+  recordWaits = false,
+  onReplying,
   chatAgent,
+  chatTeam,
   chatDictate,
   chatFocus,
+  askFocus,
+  askingFor,
+  onAskingFor: setAskingFor,
   placeFocus,
   fieldFocus,
   spot,
@@ -6712,9 +7878,16 @@ function Detail({
   onReopen,
   onFix,
   undoing = false,
+  onForBryce,
 }: {
   item: QueueItem
   live: { fields: Record<string, unknown>; schema: FieldInfo[] } | null
+  /** Take back or dismiss a suggestion or question, ask one, or answer one
+   *  (queue-suggest.ts); resolves to an error to show, or null. */
+  onForBryce: (
+    action: 'withdraw' | 'ask' | 'answer',
+    extra?: Record<string, unknown>
+  ) => Promise<string | null>
   onImage: (field: string, urls: string[]) => void
   /** Fable changed the record from the chat: re-read it. */
   onWrote: () => void
@@ -6747,11 +7920,29 @@ function Detail({
   /** The chat moved the item into or out of Waiting on them: read the row
    *  again. */
   onRowChanged: () => void
+  /** A chat reply for this item is still being written: its decisions
+   *  wait (queue-chat-replying.ts). */
+  replyHolds?: boolean
+  /** Publish was pressed while the item's record was still being read:
+   *  a line under the buttons says so (queue-record-read.ts). */
+  recordWaits?: boolean
+  /** The item's chat panel says whether a reply is under way in it (null:
+   *  it has no word on it any more). */
+  onReplying?: (on: boolean | null) => void
   /** The Mac agent, when it is up and can chat; null hides the panel. */
   chatAgent: AgentInfo | null
+  /** Not the owner: the team's chat instead (queue-team-chat.ts), with
+   *  whether its server is online. Null: this person has no team chat. */
+  chatTeam: { online: boolean; tick: number } | null
   /** The Mac can turn speech into text (Cmd+D in the chat). */
   chatDictate: boolean
   chatFocus: number
+  /** Bumped by Z: the answer box of a question waiting on the item takes
+   *  the focus (queue-suggest.ts). */
+  askFocus: number
+  /** The item whose Ask box is open, and a way to open or close it. */
+  askingFor: string | null
+  onAskingFor: (id: string | null) => void
   /** Bumped by P: open the Position list on an addition. */
   placeFocus: number
   /** Bumped by E: open the field list on a change. */
@@ -6775,6 +7966,25 @@ function Detail({
   // Nothing on the item can be touched while Claude is revising it, and a
   // view-only session can never touch it.
   const revising = item.status === 'Revising' || readOnly
+  // Bryce checks first (queue-suggest.ts): decisions here are suggestions,
+  // and an item whose suggestion from this person waits is theirs to take
+  // back, not to change.
+  const mode = useContext(ModeContext)
+  const me = useContext(MeContext)
+  const locked = isOpen(item) && suggestionLocks(item, mode)
+  const lockedFb = locked ? openSuggestion(item.forBryce) : null
+  const lockedMine = lockedFb !== null && lockedFb.by === me
+  const canAsk = mode === 'suggest' && !isWaiting(item.forBryce)
+  const askButton = canAsk ? (
+    <button
+      className={styles.ghost}
+      onClick={() => setAskingFor(item.id)}
+      title={`A question for ${CHECKER_NAME} about this item. It waits in ${CHECKER_NAME}'s list until it is answered.`}
+    >
+      <Icon src={ICON.question} size={12} />
+      Ask {CHECKER_NAME}
+    </button>
+  ) : null
   // Set aside with "Review again in a week": when it comes back. Until
   // then its fields edit into the draft, as an open item's do.
   const later = setAsideUntil(item)
@@ -7122,7 +8332,11 @@ function Detail({
   const excerptBlock = excerpt ? (
     <section className={styles.block}>
       <h3 className={styles.h3}>
-        {item.source === 'Broom' ? 'What Broom found' : 'What they wrote'}
+        {item.source === 'Broom'
+          ? 'What Broom found'
+          : item.source === CHAT_SOURCE
+            ? chatHeading(item.chatBy)
+            : 'What they wrote'}
       </h3>
       {item.source === 'Broom' ? (
         <div className={styles.finding}>
@@ -7285,12 +8499,18 @@ function Detail({
       )}
       {!declineFromReason && (
         <p className={styles.note}>
-          {d.decline !== null || !declineChip
-            ? 'Reject'
-            : `Reject for “${declineChip}”`}
-          {item.source === 'Discord'
-            ? ' copies this, ready to paste in Discord. Nothing is sent.'
-            : ' saves this as a Gmail draft. Nothing is sent.'}
+          {mode === 'suggest' ? (
+            suggestReplyNote(item)
+          ) : (
+            <>
+              {d.decline !== null || !declineChip
+                ? 'Reject'
+                : `Reject for “${declineChip}”`}
+              {item.source === 'Discord'
+                ? ' copies this, ready to paste in Discord. Nothing is sent.'
+                : ' saves this as a Gmail draft. Nothing is sent.'}
+            </>
+          )}
         </p>
       )}
     </section>
@@ -7350,8 +8570,14 @@ function Detail({
         {item.source === 'Discord' ? (
           isOpen(item) && (
             <p className={styles.note}>
-              {acceptLabel(item, activeEdits(d), d.leftOut)} copies this, ready
-              to paste in Discord. Nothing is sent.
+              {mode === 'suggest' ? (
+                suggestReplyNote(item)
+              ) : (
+                <>
+                  {acceptLabel(item, activeEdits(d), d.leftOut)} copies this,
+                  ready to paste in Discord. Nothing is sent.
+                </>
+              )}
             </p>
           )
         ) : (
@@ -7372,7 +8598,11 @@ function Detail({
             ) : item.replyStatus === 'Failed' ? (
               `The draft could not be saved${item.error ? `: ${item.error}` : '.'}`
             ) : isOpen(item) ? (
-              `${acceptLabel(item, activeEdits(d), d.leftOut)} saves this as a Gmail draft. Nothing is sent.`
+              mode === 'suggest' ? (
+                suggestReplyNote(item)
+              ) : (
+                `${acceptLabel(item, activeEdits(d), d.leftOut)} saves this as a Gmail draft. Nothing is sent.`
+              )
             ) : (
               replyLabel(item)
             )}
@@ -7472,7 +8702,16 @@ function Detail({
   // review should be at the top"). Null for a review the Mac kept no
   // pair for: that one is still the panel's head, as before.
   const answered = answeredReview(item)
-  const answeredWhere = chatAgent
+  // A chat panel on this item: the Mac's, or else the team's.
+  const teamChat = chatAgent === null ? chatTeam : null
+  const chatShown = chatAgent !== null || teamChat !== null
+  // With no chat panel on this item (the Mac went away, say), no panel can
+  // say its reply ended: nothing is being written here, as far as this
+  // page can tell.
+  useEffect(() => {
+    if (!chatShown) onReplying?.(null)
+  }, [chatShown, item.id, onReplying])
+  const answeredWhere = chatShown
     ? 'at the bottom of the chat'
     : 'under the first one'
   const askedBlock =
@@ -7619,7 +8858,7 @@ function Detail({
   // What Fable checked on public pages before its verdict on a requested
   // change (queue-checked.ts). A rule has none.
   const checked = item.type === 'Rule' ? [] : (item.checked ?? [])
-  const showAside = hasVerdict || checked.length > 0 || chatAgent !== null
+  const showAside = hasVerdict || checked.length > 0 || chatShown
   // Where Comb found the listing: the "Source:" line of its own Airtable
   // comment, read here as it is in Airtable (Bryce, 17 Sept 2026).
   const found =
@@ -7758,6 +8997,19 @@ function Detail({
         </div>
 
         {returnBlock}
+
+        {/* Keyed by the item so its state starts afresh on another one.
+            The field picker further down is keyed the same way and sits
+            beside this card, so each says what it is: two children of one
+            parent must not share a key. */}
+        <ForBryceCard
+          key={`for-bryce:${item.id}`}
+          item={item}
+          asking={askingFor === item.id}
+          onAsking={on => setAskingFor(on ? item.id : null)}
+          onForBryce={onForBryce}
+          focusTick={askFocus}
+        />
         {askedBlock}
         {item.passed && isOpen(item) && (
           <p
@@ -8123,7 +9375,7 @@ function Detail({
         {/* A correction no listing matched has no fields to pick from. */}
         {item.type === 'Change' && Boolean(item.targetRecord) && (
           <FieldPicker
-            key={item.id}
+            key={`field-picker:${item.id}`}
             fields={pickable}
             canEdit={!revising || canFix}
             focusTick={fieldFocus}
@@ -8284,7 +9536,7 @@ function Detail({
           )}
           {/* With the Mac off there is no chat: the review with their
               answer goes under the first one instead. */}
-          {answered && !chatAgent && (
+          {answered && !chatShown && (
             <AnsweredReviewCard
               review={answered.after}
               item={item}
@@ -8292,11 +9544,17 @@ function Detail({
               onFlag={onFlag}
             />
           )}
-          {chatAgent && (
+          {chatShown && (
             <Chat
               key={item.id}
               item={item}
               agent={chatAgent}
+              team={teamChat}
+              // Bryce checks first (queue-suggest.ts): what the chat puts
+              // on the page goes with their suggestion, and while one of
+              // theirs waits on the item nothing on it changes.
+              checkFirst={mode === 'suggest'}
+              locked={locked}
               edits={d.edits}
               reply={d.reply ?? item.replyDraft}
               decline={
@@ -8310,16 +9568,18 @@ function Detail({
               }
               decided={decidedOf(item)}
               onSetEdits={edits => {
-                if (isOpen(item)) setD({ edits })
+                if (isOpen(item) && !locked) setD({ edits })
               }}
               onSetReply={text => {
-                if (isOpen(item)) setD({ reply: text })
+                if (isOpen(item) && !locked) setD({ reply: text })
               }}
               onSetDecline={text => {
-                if (isOpen(item)) setD({ decline: text, editingDecline: false })
+                if (isOpen(item) && !locked)
+                  setD({ decline: text, editingDecline: false })
               }}
               onWrote={onWrote}
               onRowChanged={onRowChanged}
+              onReplying={onReplying}
               onFlag={onFlag}
               onFableChanges={list => {
                 // The same list again (every history load sends one) keeps
@@ -8333,7 +9593,7 @@ function Detail({
                 onFable?.(list.map(c => c.field))
               }}
               focusTick={chatFocus}
-              dictate={chatDictate}
+              dictate={chatAgent !== null && chatDictate}
             />
           )}
         </aside>
@@ -8361,6 +9621,7 @@ function Detail({
               <DecidedBy item={item} lead=" · " />
             </span>
             {item.reopening && <ReopeningTag reopening={item.reopening} />}
+            {askButton}
             {onReopen && takeBack(item) === 'reopen' ? (
               <button
                 className={styles.ghost}
@@ -8385,6 +9646,29 @@ function Detail({
               )
             )}
           </div>
+        ) : lockedFb && !lockedMine ? (
+          <p className={styles.note}>
+            {`${firstName(lockedFb.by)} suggested ${suggestWord(lockedFb.did, item.type)} · waiting for ${CHECKER_NAME}. It can’t be changed until ${CHECKER_NAME} decides it.`}
+          </p>
+        ) : lockedFb ? (
+          <div className={styles.buttons}>
+            <span className={styles.note}>
+              You suggested {suggestWord(lockedFb.did, item.type)} · waiting for{' '}
+              {CHECKER_NAME}. Take it back to change anything.
+            </span>
+            <button
+              className={styles.ghost}
+              disabled={d.busy}
+              onClick={() =>
+                void onForBryce('withdraw').then(
+                  error => error && setD({ error })
+                )
+              }
+            >
+              <Icon src={ICON.undo} size={12} />
+              Take back
+            </button>
+          </div>
         ) : readOnly ? (
           <p className={styles.note}>
             View only: accepting, rejecting and editing stay with people who can
@@ -8397,16 +9681,28 @@ function Detail({
           </p>
         ) : d.mode === 'delete' ? (
           <div className={`${styles.panel} ${motion.fade}`}>
-            <p className={styles.note}>{deleteAsk(item)}</p>
+            <p className={styles.note}>
+              {mode === 'suggest'
+                ? `Suggest deleting it? Nothing is deleted until ${CHECKER_NAME} confirms.`
+                : deleteAsk(item)}
+            </p>
             <div className={styles.buttons}>
               <button
                 autoFocus
                 className={`${styles.button} ${styles.danger}`}
-                disabled={d.busy}
+                disabled={d.busy || replyHolds}
+                title={replyHolds ? REPLY_HOLDS : undefined}
                 onClick={() => act('delete')}
               >
                 <Icon src={ICON.trash} size={12} />
-                {d.busy ? 'Deleting…' : 'Delete for good'} <kbd>↵</kbd>
+                {d.busy
+                  ? mode === 'suggest'
+                    ? 'Suggesting…'
+                    : 'Deleting…'
+                  : mode === 'suggest'
+                    ? 'Suggest delete'
+                    : 'Delete for good'}{' '}
+                <kbd>↵</kbd>
               </button>
               <button
                 className={styles.ghost}
@@ -8415,6 +9711,7 @@ function Detail({
               >
                 Cancel <kbd>Esc</kbd>
               </button>
+              {replyHolds && !d.busy && blockedNote('reply', REPLY_HOLDS)}
             </div>
           </div>
         ) : d.mode === 'reject' ? (
@@ -8427,7 +9724,7 @@ function Detail({
                 <button
                   key={chip}
                   className={`${styles.chip} ${d.chip === chip ? styles.chipOn : ''}`}
-                  disabled={d.busy}
+                  disabled={d.busy || replyHolds}
                   onMouseEnter={() => setD({ focusChip: chip })}
                   onMouseLeave={() => setD({ focusChip: null })}
                   onFocus={() => setD({ focusChip: chip })}
@@ -8463,7 +9760,8 @@ function Detail({
             <div className={styles.buttons}>
               <button
                 className={`${styles.button} ${styles.danger}`}
-                disabled={d.busy}
+                disabled={d.busy || replyHolds}
+                title={replyHolds ? REPLY_HOLDS : undefined}
                 // While the reason box listens, its words go in first.
                 onClick={() =>
                   reasonRef.current
@@ -8472,7 +9770,14 @@ function Detail({
                 }
               >
                 <Icon src={ICON.x} size={12} />
-                {d.busy ? 'Rejecting…' : 'Confirm reject'} <kbd>↵</kbd>
+                {d.busy
+                  ? mode === 'suggest'
+                    ? 'Suggesting…'
+                    : 'Rejecting…'
+                  : mode === 'suggest'
+                    ? 'Suggest reject'
+                    : 'Confirm reject'}{' '}
+                <kbd>↵</kbd>
               </button>
               <button
                 className={styles.ghost}
@@ -8481,26 +9786,40 @@ function Detail({
               >
                 Cancel <kbd>Esc</kbd>
               </button>
+              {replyHolds && !d.busy && blockedNote('reply', REPLY_HOLDS)}
             </div>
           </div>
         ) : (
           <div className={styles.buttons}>
+            {mode === 'suggest' && (
+              <input
+                className={`${styles.input} ${styles.suggestNote}`}
+                value={d.note}
+                disabled={d.busy}
+                placeholder={`Note for ${CHECKER_NAME}, optional`}
+                aria-label={`Note for ${CHECKER_NAME}`}
+                onChange={e => setD({ note: e.target.value })}
+              />
+            )}
             <button
               className={`${styles.button} ${styles.primary}`}
               disabled={
                 d.busy ||
+                replyHolds ||
                 Boolean(item.passed) ||
                 unplaced ||
                 unfilled.length > 0
               }
               title={
-                item.passed
-                  ? passedBlock(item.passed)
-                  : unplaced
-                    ? NO_PLACE
-                    : unfilled.length > 0
-                      ? fillFirst(unfilled)
-                      : undefined
+                replyHolds
+                  ? REPLY_HOLDS
+                  : item.passed
+                    ? passedBlock(item.passed)
+                    : unplaced
+                      ? NO_PLACE
+                      : unfilled.length > 0
+                        ? fillFirst(unfilled)
+                        : undefined
               }
               onClick={() =>
                 act('accept', {
@@ -8517,26 +9836,36 @@ function Detail({
                 size={12}
               />
               {d.busy
-                ? 'Applying…'
-                : acceptLabel(item, activeEdits(d), d.leftOut)}{' '}
+                ? mode === 'suggest'
+                  ? 'Suggesting…'
+                  : 'Applying…'
+                : suggestLabel(
+                    mode,
+                    acceptLabel(item, activeEdits(d), d.leftOut)
+                  )}{' '}
               <kbd>A</kbd>
             </button>
             <button
               className={`${styles.button} ${styles.danger}`}
-              disabled={d.busy}
+              disabled={d.busy || replyHolds}
+              title={replyHolds ? REPLY_HOLDS : undefined}
               onClick={() => setD({ mode: 'reject' })}
             >
               <Icon src={ICON.x} size={12} />
-              Reject <kbd>R</kbd>
+              {suggestLabel(mode, 'Reject')} <kbd>R</kbd>
             </button>
             <button
               className={styles.ghost}
-              disabled={d.busy}
-              title="Out of the list for a week, then back for another look"
+              disabled={d.busy || replyHolds}
+              title={
+                replyHolds
+                  ? REPLY_HOLDS
+                  : 'Out of the list for a week, then back for another look'
+              }
               onClick={() => act('later')}
             >
               <Icon src={ICON.clock} size={12} />
-              Review again in a week <kbd>W</kbd>
+              {suggestLabel(mode, 'Review again in a week')} <kbd>W</kbd>
             </button>
             {waitChoice(item) && (
               <button
@@ -8558,13 +9887,23 @@ function Detail({
             )}
             <button
               className={styles.ghost}
-              disabled={d.busy}
-              title="Gone for good, as if deleted in Airtable: no reply, nothing for Fable to learn, no Undo"
+              disabled={d.busy || replyHolds}
+              title={
+                replyHolds
+                  ? REPLY_HOLDS
+                  : 'Gone for good, as if deleted in Airtable: no reply, nothing for Fable to learn, no Undo'
+              }
               onClick={() => setD({ mode: 'delete' })}
             >
               <Icon src={ICON.trash} size={12} />
-              Delete <kbd>X</kbd>
+              {suggestLabel(mode, 'Delete')} <kbd>X</kbd>
             </button>
+            {askButton}
+            {replyHolds && !d.busy && blockedNote('reply', REPLY_HOLDS)}
+            {recordWaits &&
+              !replyHolds &&
+              !d.busy &&
+              blockedNote('record', RECORD_NOT_READ)}
             {item.passed &&
               !d.busy &&
               blockedNote('passed', passedBlock(item.passed))}
@@ -8611,27 +9950,12 @@ function isImageList(v: unknown): v is string[] {
   )
 }
 
-// Fields nobody edits from here: Airtable's own bookkeeping by name, and
-// any column Airtable computes (formulas, lookups, counts, timestamps) by
-// type. Left out of the list (Bryce, 11 Sept 2026: "only the fields I may
-// plausibly want to edit").
-const HOUSEKEEPING =
-  /^(created|date added|last modified|created time|record id|submitter's email)$/i
+// Fields nobody edits from here (HOUSEKEEPING, COMPUTED_TYPES: Airtable's
+// own bookkeeping by name, and any column Airtable computes by type) are
+// left out of the list. The two rules are in queue-fields.ts, which the
+// site reads too when it works out what this page showed of a record.
 /** Accept and Undo set these; a fix after the decision leaves them be. */
 const LISTING_SWITCHES = new Set(['Publish?', 'Hide?'])
-const COMPUTED_TYPES = new Set([
-  'formula',
-  'rollup',
-  'lookup',
-  'multipleLookupValues',
-  'count',
-  'autoNumber',
-  'createdTime',
-  'lastModifiedTime',
-  'createdBy',
-  'lastModifiedBy',
-  'button',
-])
 
 // The icon the site's own card draws beside a field's value, so the grid
 // reads the way the card does (Bryce, 17 Sept 2026: "where we have icons
@@ -10078,6 +11402,35 @@ function RuleCard({
       Boolean(item.appliesTo) ||
       Boolean(item.ruleWording))
   const wording = <RuleWording item={item} />
+  // A rule that came by way of a teammate: drawn from its edits, the thing
+  // Apply writes, with the words written about them kept apart
+  // (queue-rule-edits.ts).
+  if (item.ruleMark) {
+    return (
+      <section className={styles.block}>
+        <p className={styles.note}>{ruleMarkLine(item.ruleMark)}</p>
+        <RuleEdits edits={item.ruleEdits} />
+        {!policy &&
+          (test ? (
+            <RuleTestStat test={test} />
+          ) : (
+            <p className={styles.note}>Not tested on your past decisions.</p>
+          ))}
+        <RuleNeedsYou test={test} />
+        {item.rulePublic && (
+          <PublicWording
+            wording={item.rulePublic}
+            internal={internal}
+            onInternal={onInternal}
+            disabled={disabled}
+            edit={publicEdit}
+          />
+        )}
+        <RulePublicEdits edits={item.rulePublicEdits} />
+        <RuleDescribed item={item} />
+      </section>
+    )
+  }
   return (
     <section className={styles.block}>
       {from?.listing && (
@@ -10133,6 +11486,113 @@ function RuleCard({
         </details>
       )}
     </section>
+  )
+}
+
+/** Where a marked rule came from, in a line over its edits. */
+function ruleMarkLine(mark: RuleMark): string {
+  const whose = mark.name ? `${firstName(mark.name)}’s` : 'a teammate’s'
+  return mark.chat
+    ? `Proposed in ${whose} Fable chat. This is what Apply writes, read from the rule’s own edits.`
+    : `Drafted from ${mark.name ? `a decision ${firstName(mark.name)} made` : 'a teammate’s decision'}. This is what Apply writes, read from the rule’s own edits.`
+}
+
+/** What Apply writes for a rule, read off its edits (queue-rule-edits.ts):
+ *  for each, the file, the words that go in and the words they replace.
+ *  Laid out like the wording of any rule. */
+function RuleEdits({ edits }: { edits: RuleEdit[] | null | undefined }) {
+  if (!edits) {
+    return (
+      <p className={styles.error}>
+        This rule’s edits could not be read, so there is nothing to show of what
+        Apply would write. Reject it, or ask in the chat for it to be written
+        again.
+      </p>
+    )
+  }
+  return (
+    <>
+      {edits.map((edit, i) => {
+        const shown = shownEdit(edit)
+        return (
+          <Fragment key={i}>
+            <h3 className={styles.h3}>Exact wording</h3>
+            <p className={styles.note}>In {shown.file}</p>
+            {!editChanges(edit) ? (
+              <p className={styles.note}>This edit changes nothing.</p>
+            ) : shown.in ? (
+              <blockquote className={styles.quote}>{shown.in}</blockquote>
+            ) : (
+              <p className={styles.note}>
+                Nothing is added: it only takes words out.
+              </p>
+            )}
+            {shown.out && (
+              <>
+                <h3 className={styles.h3}>Replaces</h3>
+                <blockquote className={`${styles.quote} ${styles.from}`}>
+                  {shown.out}
+                </blockquote>
+              </>
+            )}
+          </Fragment>
+        )
+      })}
+    </>
+  )
+}
+
+/** A marked rule's edits to the public listing policy, as they would be
+ *  written there (only when it is applied with that choice). */
+function RulePublicEdits({ edits }: { edits: RuleEdit[] | null | undefined }) {
+  if (!edits || edits.length === 0) return null
+  return (
+    <>
+      <p className={styles.note}>
+        On the public listing policy, Apply would write exactly this:
+      </p>
+      <RuleEdits edits={edits} />
+    </>
+  )
+}
+
+/** What the row says about a marked rule, in its own words: never what
+ *  Apply writes, so it is folded away and says whose words they are. */
+function RuleDescribed({ item }: { item: QueueItem }) {
+  if (!item.summary && !item.ruleWording && !item.ruleWas && !item.appliesTo) {
+    return null
+  }
+  return (
+    <details className={styles.findingMore}>
+      <summary>
+        {item.ruleMark?.chat
+          ? 'The chat’s own description'
+          : 'The row’s own description'}
+      </summary>
+      <div className={styles.block}>
+        <p className={styles.note}>
+          Written about the rule, not by it: Apply writes only the edits above.
+        </p>
+        {item.summary && <p className={styles.ruleMore}>{item.summary}</p>}
+        {item.appliesTo && (
+          <p className={styles.note}>Applies to {item.appliesTo}</p>
+        )}
+        {item.ruleWording && (
+          <>
+            <h3 className={styles.h3}>Described wording</h3>
+            <blockquote className={styles.quote}>{item.ruleWording}</blockquote>
+          </>
+        )}
+        {item.ruleWas && (
+          <>
+            <h3 className={styles.h3}>Described as replacing</h3>
+            <blockquote className={`${styles.quote} ${styles.from}`}>
+              {item.ruleWas}
+            </blockquote>
+          </>
+        )}
+      </div>
+    </details>
   )
 }
 
@@ -10259,10 +11719,21 @@ function RulePopUp({
           buttons out of reach. */}
       <div className={styles.rulePopBody}>
         <p className={styles.rulePopLead}>{item.title}</p>
-        {item.summary && <p className={styles.rulePopWhy}>{lead}</p>}
-        {/* The words that go into the rulebook, on the card itself, so
-            Apply never needs V first (Bryce, 19 Nov 2026). */}
-        <RuleWording item={item} />
+        {item.ruleMark ? (
+          // A rule that came by way of a teammate: what Apply writes, read
+          // off its edits, never the words written about them.
+          <>
+            <p className={styles.note}>{ruleMarkLine(item.ruleMark)}</p>
+            <RuleEdits edits={item.ruleEdits} />
+          </>
+        ) : (
+          <>
+            {item.summary && <p className={styles.rulePopWhy}>{lead}</p>}
+            {/* The words that go into the rulebook, on the card itself, so
+                Apply never needs V first (Bryce, 19 Nov 2026). */}
+            <RuleWording item={item} />
+          </>
+        )}
         {/* A listing-policy row is only its wording: no test runs on it. */}
         {!item.rulePublicPolicy &&
           (test ? (
@@ -10282,6 +11753,7 @@ function RulePopUp({
             edit={publicEdit}
           />
         )}
+        {item.ruleMark && <RulePublicEdits edits={item.rulePublicEdits} />}
         {draft.error && <p className={styles.error}>{draft.error}</p>}
       </div>
       {rejecting ? (

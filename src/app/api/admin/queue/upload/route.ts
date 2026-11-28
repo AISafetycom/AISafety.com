@@ -1,5 +1,7 @@
 /*
-  Queue image upload (sessions with the queue area's edit grant only).
+  Queue image upload (sessions whose Queue grant writes: 'edit', or
+  'suggest', "can edit, Bryce checks first", for whom it works the same:
+  a picture on an open addition is part of working on the item).
 
   POST /api/admin/queue/upload
        body { id, field, filename, contentType, data }   data = base64
@@ -22,7 +24,7 @@
 */
 
 import { NextRequest } from 'next/server'
-import { canReviewQueue, currentAdmin } from '@/lib/admin/auth'
+import { canWorkQueue, currentAdmin } from '@/lib/admin/auth'
 import {
   clearImage,
   forgetRowEdit,
@@ -47,7 +49,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 export async function POST(req: NextRequest) {
-  if (!(await canReviewQueue())) return json({ error: 'unauthorized' }, 401)
+  if (!(await canWorkQueue())) return json({ error: 'unauthorized' }, 401)
   let body: Record<string, unknown> = {}
   try {
     const parsed: unknown = await req.json()
